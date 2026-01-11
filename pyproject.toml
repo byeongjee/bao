@@ -1,0 +1,19 @@
+[project]
+name = "checkpoint-insertion"
+version = "0.1.0"
+description = "MILP-based checkpoint insertion for intermittent computing"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "llvmlite>=0.41.0",
+    "gurobipy>=10.0.0",
+    "networkx>=3.0",
+]
+
+[project.scripts]
+checkpoint-insert = "src.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
