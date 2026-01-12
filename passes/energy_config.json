@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "energy_parameters": {
+    "capacity": 100.0,
+    "instruction_costs": {
+      "simple_arithmetic": 1,
+      "complex_arithmetic": 5,
+      "floating_point": 8,
+      "load": 4,
+      "store": 5,
+      "control_flow": 1,
+      "comparison": 1,
+      "conversion": 2,
+      "call": 10,
+      "phi_select": 1,
+      "gep": 2,
+      "alloca": 1,
+      "atomic": 10,
+      "default": 1
+    }
+  }
+}

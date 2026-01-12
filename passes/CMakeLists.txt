@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(CheckpointPass)
 
+# Fetch nlohmann/json (header-only JSON library)
+include(FetchContent)
+FetchContent_Declare(json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+FetchContent_MakeAvailable(json)
+
 # Find LLVM
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
@@ -38,6 +44,7 @@ include_directories(
 
 # Build as a shared module (not using add_llvm_pass_plugin to avoid linking LLVM)
 add_library(CheckpointPass MODULE
+    src/EnergyConfig.cpp
     src/EnergyModel.cpp
     src/CFGAnalysis.cpp
     src/CheckpointOptimizer.cpp
@@ -68,4 +75,5 @@ endif()
 target_link_libraries(CheckpointPass PRIVATE
     ${GUROBI_CXX_LIBRARY}
     ${GUROBI_LIBRARY}
+    nlohmann_json::nlohmann_json
 )

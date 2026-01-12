@@ -1,10 +1,9 @@
 #include "EnergyModel.h"
+#include "EnergyConfig.h"
 
 #include "llvm/IR/Instructions.h"
 
 namespace checkpoint {
-
-int EnergyModel::CallCost = 10;
 
 int EnergyModel::getCost(const llvm::Instruction &I) {
     return getCost(I.getOpcode());
@@ -14,7 +13,7 @@ int EnergyModel::getCost(unsigned Opcode) {
     using namespace llvm;
 
     switch (Opcode) {
-    // Simple arithmetic: cost 1
+    // Simple arithmetic
     case Instruction::Add:
     case Instruction::Sub:
     case Instruction::And:
@@ -23,43 +22,43 @@ int EnergyModel::getCost(unsigned Opcode) {
     case Instruction::Shl:
     case Instruction::LShr:
     case Instruction::AShr:
-        return 1;
+        return EnergyConfig::getInstructionCost("simple_arithmetic");
 
-    // Complex arithmetic: cost 5
+    // Complex arithmetic
     case Instruction::Mul:
     case Instruction::SDiv:
     case Instruction::UDiv:
     case Instruction::SRem:
     case Instruction::URem:
-        return 5;
+        return EnergyConfig::getInstructionCost("complex_arithmetic");
 
-    // Floating point: cost 8
+    // Floating point
     case Instruction::FAdd:
     case Instruction::FSub:
     case Instruction::FMul:
     case Instruction::FDiv:
     case Instruction::FRem:
-        return 8;
+        return EnergyConfig::getInstructionCost("floating_point");
 
     // Memory operations
     case Instruction::Load:
-        return 4;
+        return EnergyConfig::getInstructionCost("load");
     case Instruction::Store:
-        return 5;
+        return EnergyConfig::getInstructionCost("store");
 
-    // Control flow: cost 1
+    // Control flow
     case Instruction::Br:
     case Instruction::Switch:
     case Instruction::Ret:
     case Instruction::IndirectBr:
-        return 1;
+        return EnergyConfig::getInstructionCost("control_flow");
 
-    // Comparison: cost 1
+    // Comparison
     case Instruction::ICmp:
     case Instruction::FCmp:
-        return 1;
+        return EnergyConfig::getInstructionCost("comparison");
 
-    // Conversions: cost 2
+    // Conversions
     case Instruction::Trunc:
     case Instruction::ZExt:
     case Instruction::SExt:
@@ -73,44 +72,36 @@ int EnergyModel::getCost(unsigned Opcode) {
     case Instruction::IntToPtr:
     case Instruction::BitCast:
     case Instruction::AddrSpaceCast:
-        return 2;
+        return EnergyConfig::getInstructionCost("conversion");
 
-    // Function call: configurable
+    // Function call
     case Instruction::Call:
     case Instruction::Invoke:
-        return CallCost;
+        return EnergyConfig::getInstructionCost("call");
 
-    // PHI and Select: cost 1
+    // PHI and Select
     case Instruction::PHI:
     case Instruction::Select:
-        return 1;
+        return EnergyConfig::getInstructionCost("phi_select");
 
-    // GEP: cost 2
+    // GEP
     case Instruction::GetElementPtr:
-        return 2;
+        return EnergyConfig::getInstructionCost("gep");
 
-    // Alloca: cost 1 (stack allocation)
+    // Alloca
     case Instruction::Alloca:
-        return 1;
+        return EnergyConfig::getInstructionCost("alloca");
 
-    // Atomics: cost 10 (memory barriers are expensive)
+    // Atomics
     case Instruction::AtomicRMW:
     case Instruction::AtomicCmpXchg:
     case Instruction::Fence:
-        return 10;
+        return EnergyConfig::getInstructionCost("atomic");
 
-    // Default: cost 1
+    // Default
     default:
-        return 1;
+        return EnergyConfig::getInstructionCost("default");
     }
-}
-
-void EnergyModel::setCallCost(int cost) {
-    CallCost = cost;
-}
-
-int EnergyModel::getCallCost() {
-    return CallCost;
 }
 
 } // namespace checkpoint

@@ -1,6 +1,7 @@
 #include "CheckpointPass.h"
 #include "CFGAnalysis.h"
 #include "CheckpointOptimizer.h"
+#include "EnergyConfig.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Constants.h"
@@ -15,10 +16,11 @@ using namespace llvm;
 namespace {
 
 // Command line options
-static cl::opt<double> CapacityOpt(
-    "checkpoint-capacity",
-    cl::desc("Energy capacity between checkpoints"),
-    cl::init(100.0));
+static cl::opt<std::string> EnergyConfigOpt(
+    "energy-config",
+    cl::desc("Path to JSON energy configuration file (required)"),
+    cl::value_desc("filename"),
+    cl::Required);
 
 static cl::opt<std::string> CheckpointFnOpt(
     "checkpoint-function",
@@ -31,12 +33,17 @@ namespace checkpoint {
 
 PreservedAnalyses CheckpointPass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
+    // Load configuration on first invocation
+    if (!EnergyConfig::isLoaded()) {
+        EnergyConfig::loadFromFile(EnergyConfigOpt);
+    }
+
     // Skip declarations
     if (F.isDeclaration()) {
         return PreservedAnalyses::all();
     }
 
-    double capacity = CapacityOpt;
+    double capacity = EnergyConfig::getCapacity();
     std::string checkpointFnName = CheckpointFnOpt;
 
 
