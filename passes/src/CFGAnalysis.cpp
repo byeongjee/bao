@@ -55,7 +55,9 @@ void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI) {
         }
 
         // Add edges to successors
+        bool hasSuccessors = false;
         for (llvm::BasicBlock *Succ : llvm::successors(&BB)) {
+            hasSuccessors = true;
             std::string succName = Succ->getName().str();
             if (succName.empty()) {
                 // Find the index of the successor block
@@ -69,6 +71,11 @@ void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI) {
                 }
             }
             edges_.emplace_back(name, succName);
+        }
+
+        // Track exit blocks (no successors)
+        if (!hasSuccessors) {
+            exitBlocks_.push_back(name);
         }
     }
 }

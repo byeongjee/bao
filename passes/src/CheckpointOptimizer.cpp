@@ -135,6 +135,15 @@ void CheckpointOptimizer::addConstraints() {
     if (!entry.empty() && y_.count(entry)) {
         model_.addConstr(y_[entry] == 0, "entry_energy");
     }
+
+    // Constraint 4: Exit block completion
+    // y[b] + Cost(b) <= capacity for all exit blocks
+    for (const auto &exitBlock : cfg_.getExitBlocks()) {
+        const BlockInfo &info = cfg_.getBlockInfo(exitBlock);
+        model_.addConstr(
+            y_[exitBlock] + info.energyCost <= capacity_,
+            "exit_" + exitBlock);
+    }
 }
 
 } // namespace checkpoint

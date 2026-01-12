@@ -40,11 +40,15 @@ public:
     /// Get the entry block name.
     const std::string &getEntryBlock() const { return entryBlock_; }
 
+    /// Get exit blocks (blocks with no successors).
+    const std::vector<std::string> &getExitBlocks() const { return exitBlocks_; }
+
 private:
     std::vector<std::string> blocks_;
     std::map<std::string, BlockInfo> blockInfo_;
     std::vector<std::pair<std::string, std::string>> edges_;
     std::string entryBlock_;
+    std::vector<std::string> exitBlocks_;
 
     void analyze(llvm::Function &F, llvm::LoopInfo &LI);
 };
