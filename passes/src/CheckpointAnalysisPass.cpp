@@ -29,6 +29,12 @@ namespace checkpoint {
 
 PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
                                                FunctionAnalysisManager &AM) {
+    // Validate required config
+    if (EnergyConfigOpt.getValue().empty()) {
+        errs() << "Error: -energy-config is required for checkpoint-analysis pass\n";
+        return PreservedAnalyses::all();
+    }
+
     // Create energy estimator from config
     auto estimator = EnergyEstimatorFactory::instance().createFromConfig(
         EnergyConfigOpt.getValue());

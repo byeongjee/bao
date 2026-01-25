@@ -80,3 +80,6 @@ target_link_libraries(CheckpointPass PRIVATE
     ${GUROBI_LIBRARY}
     nlohmann_json::nlohmann_json
 )
+
+# Build BB debug info pass as separate plugin (no Gurobi dependency)
+add_subdirectory(bb-debuginfo)

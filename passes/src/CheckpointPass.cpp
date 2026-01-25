@@ -17,9 +17,9 @@ using namespace llvm;
 // Command line options (visible to other translation units)
 cl::opt<std::string> EnergyConfigOpt(
     "energy-config",
-    cl::desc("Path to JSON energy configuration file (required)"),
+    cl::desc("Path to JSON energy configuration file (required for checkpoint passes)"),
     cl::value_desc("filename"),
-    cl::Required);
+    cl::init(""));
 
 namespace {
 
@@ -34,6 +34,12 @@ namespace checkpoint {
 
 PreservedAnalyses CheckpointPass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
+    // Validate required config
+    if (EnergyConfigOpt.getValue().empty()) {
+        errs() << "Error: -energy-config is required for checkpoint pass\n";
+        return PreservedAnalyses::all();
+    }
+
     // Create energy estimator from config
     auto estimator = EnergyEstimatorFactory::instance().createFromConfig(
         EnergyConfigOpt.getValue());
