@@ -1,5 +1,7 @@
 #pragma once
 
+#include "EnergyEstimator.h"
+
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"
 
@@ -12,19 +14,20 @@ namespace checkpoint {
 /// Information about a basic block in the CFG.
 struct BlockInfo {
     std::string name;
-    int energyCost;    // Sum of instruction costs in the block
-    double freq;       // Estimated execution frequency
-    int loopDepth;     // Nesting depth (0 = not in loop)
+    double energyCost;  // Energy cost from estimator
+    double freq;        // Estimated execution frequency
+    int loopDepth;      // Nesting depth (0 = not in loop)
 };
 
 /// CFG analysis using LLVM's infrastructure.
 /// Extracts block information, edges, and loop depths.
 class CFGAnalysis {
 public:
-    /// Construct CFG analysis for a function.
+    /// Construct CFG analysis for a function with an energy estimator.
     /// @param F The function to analyze.
     /// @param LI Loop information from LLVM's LoopAnalysis.
-    CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI);
+    /// @param estimator Energy estimator to compute block costs.
+    CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI, EnergyEstimator &estimator);
 
     /// Get all block names in order.
     const std::vector<std::string> &getBlocks() const { return blocks_; }
@@ -50,7 +53,7 @@ private:
     std::string entryBlock_;
     std::vector<std::string> exitBlocks_;
 
-    void analyze(llvm::Function &F, llvm::LoopInfo &LI);
+    void analyze(llvm::Function &F, llvm::LoopInfo &LI, EnergyEstimator &estimator);
 };
 
 } // namespace checkpoint

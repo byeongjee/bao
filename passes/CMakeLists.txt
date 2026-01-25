@@ -44,8 +44,8 @@ include_directories(
 
 # Build as a shared module (not using add_llvm_pass_plugin to avoid linking LLVM)
 add_library(CheckpointPass MODULE
-    src/EnergyConfig.cpp
-    src/EnergyModel.cpp
+    src/IRBasedEstimator.cpp
+    src/EnergyEstimatorFactory.cpp
     src/CFGAnalysis.cpp
     src/CheckpointOptimizer.cpp
     src/CheckpointPass.cpp

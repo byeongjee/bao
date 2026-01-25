@@ -1,7 +1,7 @@
 #include "CheckpointAnalysisPass.h"
 #include "CFGAnalysis.h"
 #include "CheckpointOptimizer.h"
-#include "EnergyConfig.h"
+#include "EnergyEstimatorFactory.h"
 #include "LoopTripCount.h"
 #include "MaxCheckpointCounter.h"
 
@@ -29,9 +29,12 @@ namespace checkpoint {
 
 PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
                                                FunctionAnalysisManager &AM) {
-    // Load configuration if not already loaded
-    if (!EnergyConfig::isLoaded()) {
-        EnergyConfig::loadFromFile(EnergyConfigOpt);
+    // Create energy estimator from config
+    auto estimator = EnergyEstimatorFactory::instance().createFromConfig(
+        EnergyConfigOpt.getValue());
+    if (!estimator) {
+        errs() << "Failed to create energy estimator\n";
+        return PreservedAnalyses::all();
     }
 
     // Skip declarations
@@ -39,13 +42,13 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
         return PreservedAnalyses::all();
     }
 
-    double capacity = EnergyConfig::getCapacity();
+    double capacity = estimator->getCapacity();
 
     // Step 1: Get loop info from LLVM
     auto &LI = AM.getResult<LoopAnalysis>(F);
 
     // Step 2: Analyze CFG and run checkpoint optimizer
-    CFGAnalysis cfg(F, LI);
+    CFGAnalysis cfg(F, LI, *estimator);
 
     // Check feasibility
     CheckpointOptimizer optimizer(cfg, capacity);

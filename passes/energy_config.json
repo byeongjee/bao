@@ -1,5 +1,6 @@
 {
   "version": "1.0",
+  "estimator_type": "ir",
   "energy_parameters": {
     "capacity": 100.0,
     "instruction_costs": {

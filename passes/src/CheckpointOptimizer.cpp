@@ -106,7 +106,7 @@ void CheckpointOptimizer::addObjective() {
 
 void CheckpointOptimizer::addConstraints() {
     // Compute Big-M constant
-    int maxEnergy = 0;
+    double maxEnergy = 0.0;
     for (const auto &blockName : cfg_.getBlocks()) {
         const BlockInfo &info = cfg_.getBlockInfo(blockName);
         maxEnergy = std::max(maxEnergy, info.energyCost);

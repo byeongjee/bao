@@ -1,5 +1,4 @@
 #include "CFGAnalysis.h"
-#include "EnergyModel.h"
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -8,20 +7,22 @@
 
 namespace checkpoint {
 
-CFGAnalysis::CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI) {
-    analyze(F, LI);
+CFGAnalysis::CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI,
+                         EnergyEstimator &estimator) {
+    analyze(F, LI, estimator);
 }
 
 const BlockInfo &CFGAnalysis::getBlockInfo(const std::string &name) const {
     auto it = blockInfo_.find(name);
     if (it == blockInfo_.end()) {
-        static BlockInfo empty{"", 0, 1.0, 0};
+        static BlockInfo empty{"", 0.0, 1.0, 0};
         return empty;
     }
     return it->second;
 }
 
-void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI) {
+void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI,
+                          EnergyEstimator &estimator) {
     // Process each basic block
     for (llvm::BasicBlock &BB : F) {
         std::string name = BB.getName().str();
@@ -33,11 +34,9 @@ void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI) {
 
         blocks_.push_back(name);
 
-        // Calculate energy cost
-        int energyCost = 0;
-        for (llvm::Instruction &I : BB) {
-            energyCost += EnergyModel::getCost(I);
-        }
+        // Calculate energy cost using estimator
+        EnergyEstimate estimate = estimator.estimate(BB);
+        double energyCost = estimate.cost;
 
         // Get loop depth
         int loopDepth = LI.getLoopDepth(&BB);
