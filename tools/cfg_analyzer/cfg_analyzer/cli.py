@@ -6,6 +6,16 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+
+def _get_default_output_dir() -> str:
+    """Get default output directory (tmp/cfg_output under project root)."""
+    # Try to find project root by looking for pyproject.toml or .git
+    current = Path.cwd()
+    for parent in [current] + list(current.parents):
+        if (parent / ".git").exists() or (parent / "passes").exists():
+            return str(parent / "tmp" / "cfg_output")
+    return "./tmp/cfg_output"
+
 from .annotations import get_all_loop_bounds, parse_loop_bounds_from_source
 from .cfg import FunctionCFG
 from .compiler import compile_to_ir, find_llvm_tools, generate_dot_files
@@ -31,8 +41,8 @@ def main():
     "--output-dir",
     "-o",
     type=click.Path(path_type=Path),
-    default="./cfg_output",
-    help="Output directory for generated files",
+    default=None,
+    help="Output directory for generated files (default: tmp/cfg_output)",
 )
 @click.option(
     "--visualize/--no-visualize",
@@ -96,7 +106,10 @@ def analyze(
     per_loop_bounds: bool,
 ):
     """Analyze CFG of a C file."""
-    output_dir = Path(output_dir)
+    if output_dir is None:
+        output_dir = Path(_get_default_output_dir())
+    else:
+        output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Map string to enum

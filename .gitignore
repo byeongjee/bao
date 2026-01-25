@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Temporary/output files
+tmp/
+!tmp/.gitkeep
+
+# Environment configuration (user-specific)
+.env

@@ -7,12 +7,27 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+TMP_DIR="$PROJECT_DIR/tmp"
 
-# Paths (adjust these if needed)
-CLANG="${CLANG:-/Users/byeongjee/llvm-project/build/bin/clang}"
-OPT="${OPT:-/Users/byeongjee/llvm-project/build/bin/opt}"
+# Load environment variables from .env if it exists
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+    source "$PROJECT_DIR/.env"
+fi
+
+# LLVM tools (use LLVM_DIR from .env, env vars, or fall back to PATH)
+if [[ -n "${LLVM_DIR}" ]]; then
+    CLANG="${CLANG:-${LLVM_DIR}/bin/clang}"
+    OPT="${OPT:-${LLVM_DIR}/bin/opt}"
+else
+    CLANG="${CLANG:-clang}"
+    OPT="${OPT:-opt}"
+fi
+
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 CONFIG="$SCRIPT_DIR/simple_config.json"
+
+# Ensure tmp directory exists
+mkdir -p "$TMP_DIR"
 
 # Colors for output
 RED='\033[0;31m'
@@ -55,7 +70,7 @@ TESTS=(
 for test_entry in "${TESTS[@]}"; do
     IFS=':' read -r test_name description <<< "$test_entry"
     test_file="$SCRIPT_DIR/${test_name}.c"
-    ll_file="$SCRIPT_DIR/${test_name}.ll"
+    ll_file="$TMP_DIR/${test_name}.ll"
 
     echo "----------------------------------------"
     echo -e "${YELLOW}Test: $test_name${NC}"

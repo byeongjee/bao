@@ -1,5 +1,6 @@
 """Handle C to LLVM IR compilation and CFG DOT file generation."""
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -24,17 +25,27 @@ class LLVMTools:
 
 
 def find_llvm_tools() -> LLVMTools:
-    """Locate LLVM tools (clang, opt) in system PATH or common locations."""
+    """Locate LLVM tools (clang, opt) from LLVM_DIR env var or system PATH."""
+    # Check LLVM_DIR environment variable first
+    llvm_dir = os.environ.get("LLVM_DIR")
+    if llvm_dir:
+        llvm_bin = Path(llvm_dir) / "bin"
+        clang_path = llvm_bin / "clang"
+        opt_path = llvm_bin / "opt"
+        if clang_path.exists() and opt_path.exists():
+            return LLVMTools(clang=clang_path, opt=opt_path)
+
+    # Fall back to system PATH
     clang = shutil.which("clang")
     opt = shutil.which("opt")
 
     if not clang:
         raise RuntimeError(
-            "clang not found. Please install LLVM and ensure clang is in PATH."
+            "clang not found. Set LLVM_DIR env var or ensure clang is in PATH."
         )
     if not opt:
         raise RuntimeError(
-            "opt not found. Please install LLVM and ensure opt is in PATH."
+            "opt not found. Set LLVM_DIR env var or ensure opt is in PATH."
         )
 
     return LLVMTools(clang=Path(clang), opt=Path(opt))
