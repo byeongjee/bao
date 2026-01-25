@@ -67,9 +67,9 @@ for test_entry in "${TESTS[@]}"; do
         continue
     fi
 
-    # Compile C to LLVM IR (use -O1 for better basic block structure)
+    # Compile C to LLVM IR (use -O3 for aggressive optimization)
     echo "  Compiling to IR..."
-    "$CLANG" -S -emit-llvm -O1 "$test_file" -o "$ll_file" 2>/dev/null
+    "$CLANG" -S -emit-llvm -O3 "$test_file" -o "$ll_file" 2>/dev/null
 
     # Run checkpoint pass
     echo "  Running checkpoint pass..."
