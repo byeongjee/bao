@@ -1,0 +1,31 @@
+Private-Key: (256 bit)
+modulus:
+    00:c0:19:76:e6:9d:f5:ae:61:c0:f9:7b:bb:85:93:
+    29:7b:d3:f5:c1:16:65:8b:bc:92:3c:9b:43:3e:d9:
+    fb:de:a1
+publicExponent: 3 (0x3)
+privateExponent:
+    00:80:10:f9:ef:13:f9:1e:eb:d5:fb:a7:d2:59:0c:
+    c6:51:64:9d:89:53:8a:93:7e:aa:f6:d0:ef:db:56:
+    de:e5:83
+prime1:
+    00:f0:e0:40:a6:b8:05:86:08:01:e5:c5:69:be:f4:
+    24:0f
+prime2:
+    00:cc:29:32:72:5d:a8:f8:89:c8:7c:16:0c:18:b9:
+    62:4f
+exponent1:
+    00:a0:95:80:6f:25:59:04:05:56:99:2e:46:7f:4d:
+    6d:5f
+exponent2:
+    00:88:1b:76:f6:e9:1b:50:5b:da:fd:64:08:10:7b:
+    96:df
+coefficient:
+    00:d6:f5:2a:99:0e:6c:45:ea:fa:c1:32:14:03:35:
+    13:d3
+-----BEGIN RSA PRIVATE KEY-----
+MIGrAgEAAiEAwBl25p31rmHA+Xu7hZMpe9P1wRZli7ySPJtDPtn73qECAQMCIQCA
+EPnvE/ke69X7p9JZDMZRZJ2JU4qTfqr20O/bVt7lgwIRAPDgQKa4BYYIAeXFab70
+JA8CEQDMKTJyXaj4ich8FgwYuWJPAhEAoJWAbyVZBAVWmS5Gf01tXwIRAIgbdvbp
+G1Bb2v1kCBB7lt8CEQDW9SqZDmxF6vrBMhQDNRPT
+-----END RSA PRIVATE KEY-----

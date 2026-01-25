@@ -1,0 +1,23 @@
+Private-Key: (128 bit)
+modulus:
+    00:ea:52:24:65:d7:5d:b7:a9:81:a9:2e:a3:ac:bc:
+    a1:41
+publicExponent: 3 (0x3)
+privateExponent:
+    00:9c:36:c2:ee:8f:93:cf:c5:0f:bd:83:7c:a5:2b:
+    cd:e3
+prime1:
+    00:fc:2e:84:b5:16:31:ba:eb
+prime2:
+    00:ed:de:64:b3:9e:c9:31:83
+exponent1:
+    00:a8:1f:03:23:64:21:27:47
+exponent2:
+    00:9e:94:43:22:69:db:76:57
+coefficient:
+    00:f1:68:e2:03:55:de:72:41
+-----BEGIN RSA PRIVATE KEY-----
+MGMCAQACEQDqUiRl1123qYGpLqOsvKFBAgEDAhEAnDbC7o+Tz8UPvYN8pSvN4wIJ
+APwuhLUWMbrrAgkA7d5ks57JMYMCCQCoHwMjZCEnRwIJAJ6UQyJp23ZXAgkA8Wji
+A1XeckE=
+-----END RSA PRIVATE KEY-----
