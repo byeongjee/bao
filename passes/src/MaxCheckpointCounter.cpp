@@ -1,6 +1,7 @@
 #include "MaxCheckpointCounter.h"
 
 #include "llvm/IR/CFG.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <functional>
@@ -60,6 +61,16 @@ unsigned MaxCheckpointCounter::getLoopBound(llvm::Loop *L) const {
     auto it = loopBounds_.find(L);
     if (it != loopBounds_.end()) {
         return it->second;
+    }
+    // Warn once per loop about using the default bound
+    if (L && warnedLoops_.insert(L).second) {
+        llvm::BasicBlock *Header = L->getHeader();
+        llvm::errs() << "Warning: Loop";
+        if (Header && Header->hasName()) {
+            llvm::errs() << " @ " << Header->getName();
+        }
+        llvm::errs() << " has no __loop_tripcount annotation, using default bound ("
+                     << defaultBound_ << ")\n";
     }
     return defaultBound_;
 }

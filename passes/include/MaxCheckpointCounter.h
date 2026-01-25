@@ -56,6 +56,9 @@ private:
     /// Memoization cache: (BasicBlock*, edgeCounts) -> max checkpoints from that state.
     std::map<std::pair<llvm::BasicBlock*, std::vector<int>>, int> memo_;
 
+    /// Loops that have already been warned about using the default bound.
+    mutable std::set<const llvm::Loop*> warnedLoops_;
+
     /// Find all back-edges in the CFG using DFS.
     void findBackEdges();
 
