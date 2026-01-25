@@ -19,7 +19,7 @@ This tool analyzes LLVM IR, builds a control flow graph with energy cost estimat
 checkpoint-insertion/
 ├── passes/                    # C++ LLVM pass implementation
 │   ├── CMakeLists.txt
-│   ├── energy_config.json     # Energy model configuration
+│   └── include/
 │   ├── include/
 │   │   ├── EnergyEstimator.h       # Abstract energy estimation interface
 │   │   ├── IRBasedEstimator.h      # IR-based energy estimator
@@ -85,7 +85,7 @@ clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
 ```bash
 opt -load-pass-plugin=./CheckpointPass.so \
     -passes=checkpoint \
-    -energy-config=./energy_config.json \
+    -energy-config=./benchmarks/sample_ir_energy_config.json \
     -checkpoint-function=__checkpoint \
     -S input.ll -o instrumented.ll
 ```
@@ -138,7 +138,7 @@ clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone test.c -o test.ll
 # Run checkpoint insertion
 opt -load-pass-plugin=./passes/build/CheckpointPass.so \
     -passes=checkpoint \
-    -energy-config=./passes/energy_config.json \
+    -energy-config=./benchmarks/sample_ir_energy_config.json \
     -S test.ll -o instrumented.ll
 
 # View inserted checkpoints

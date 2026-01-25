@@ -24,7 +24,7 @@ else
 fi
 
 PASS_LIB="${SCRIPT_DIR}/passes/build/CheckpointPass.so"
-DEFAULT_CONFIG="${SCRIPT_DIR}/passes/energy_config.json"
+DEFAULT_CONFIG="${SCRIPT_DIR}/benchmarks/sample_ir_energy_config.json"
 TMP_DIR="${SCRIPT_DIR}/tmp"
 
 # Colors for output
@@ -41,7 +41,7 @@ Compile a C file and insert checkpoints using MILP optimization.
 
 OPTIONS:
     -o, --output <file>     Output file (default: tmp/<input>_checkpointed.ll)
-    -c, --config <file>     Energy config JSON file (default: passes/energy_config.json)
+    -c, --config <file>     Energy config JSON file (default: benchmarks/sample_ir_energy_config.json)
     -O, --opt-level <N>     Optimization level: 0, 1, 2, 3 (default: 3)
     -u, --unroll            Enable aggressive loop unrolling before checkpoint insertion
     -I, --include <dir>     Add include directory for compilation
