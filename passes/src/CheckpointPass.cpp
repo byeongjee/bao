@@ -1,4 +1,5 @@
 #include "CheckpointPass.h"
+#include "CheckpointAnalysisPass.h"
 #include "CFGAnalysis.h"
 #include "CheckpointOptimizer.h"
 #include "EnergyConfig.h"
@@ -13,14 +14,14 @@
 
 using namespace llvm;
 
-namespace {
-
-// Command line options
-static cl::opt<std::string> EnergyConfigOpt(
+// Command line options (visible to other translation units)
+cl::opt<std::string> EnergyConfigOpt(
     "energy-config",
     cl::desc("Path to JSON energy configuration file (required)"),
     cl::value_desc("filename"),
     cl::Required);
+
+namespace {
 
 static cl::opt<std::string> CheckpointFnOpt(
     "checkpoint-function",
@@ -141,7 +142,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
     return {
         LLVM_PLUGIN_API_VERSION,
-        "CheckpointPass",
+        "CheckpointPasses",
         LLVM_VERSION_STRING,
         [](PassBuilder &PB) {
             PB.registerPipelineParsingCallback(
@@ -149,6 +150,10 @@ llvmGetPassPluginInfo() {
                    ArrayRef<PassBuilder::PipelineElement>) {
                     if (Name == "checkpoint") {
                         FPM.addPass(checkpoint::CheckpointPass());
+                        return true;
+                    }
+                    if (Name == "checkpoint-analysis") {
+                        FPM.addPass(checkpoint::CheckpointAnalysisPass());
                         return true;
                     }
                     return false;

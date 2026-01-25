@@ -49,6 +49,9 @@ add_library(CheckpointPass MODULE
     src/CFGAnalysis.cpp
     src/CheckpointOptimizer.cpp
     src/CheckpointPass.cpp
+    src/LoopTripCount.cpp
+    src/MaxCheckpointCounter.cpp
+    src/CheckpointAnalysisPass.cpp
 )
 
 # Use C++17 and disable RTTI/exceptions to match LLVM
