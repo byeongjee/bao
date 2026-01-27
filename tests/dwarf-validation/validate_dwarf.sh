@@ -115,31 +115,15 @@ generate_annotated_disasm() {
     local obj_file="$1"
     local output_file="$2"
 
-    # Get DWARF line table
-    local line_table=$("$MSP430_OBJDUMP" --dwarf=decodedline "$obj_file" 2>/dev/null)
+    # Get resolved address->BB mapping using bb-energy-analyzer
+    # This applies heuristics to resolve line 0 (unmapped) entries
+    local addr_map=$(mktemp)
+    "$BB_ANALYZER" --dump-line-map "$obj_file" > "$addr_map" 2>/dev/null
 
     # Get disassembly
     local disasm=$("$MSP430_OBJDUMP" -d "$obj_file" 2>/dev/null)
 
-    # Create a temporary file to store address -> BB mapping
-    local addr_map=$(mktemp)
-
-    # Parse line table: extract (address, line) pairs
-    # Format: filename   line_number   starting_address   view   stmt
-    echo "$line_table" | while IFS= read -r line; do
-        if [[ "$line" =~ ^[^[:space:]]+[[:space:]]+([0-9]+)[[:space:]]+0x([0-9a-fA-F]+) ]]; then
-            local bb_num="${BASH_REMATCH[1]}"
-            local addr="${BASH_REMATCH[2]}"
-            # Convert to lowercase and pad to consistent width
-            addr=$(printf "%08x" "0x$addr")
-            echo "$addr $bb_num" >> "$addr_map"
-        fi
-    done
-
-    # Sort address map by address
-    sort -u "$addr_map" -o "$addr_map"
-
-    # Now annotate disassembly
+    # Annotate disassembly with BB markers
     {
         local current_bb=""
         local current_func=""

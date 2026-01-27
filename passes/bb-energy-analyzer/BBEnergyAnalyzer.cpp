@@ -3,6 +3,7 @@
 #include "MSP430Disassembler.h"
 
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <fstream>
@@ -18,11 +19,14 @@ static cl::opt<std::string> InputELF(cl::Positional, cl::Required,
                                       cl::desc("<input.elf>"));
 
 static cl::opt<std::string>
-    EnergyConfig("energy-config", cl::Required,
+    EnergyConfig("energy-config",
                  cl::desc("Path to assembly energy config JSON"));
 
 static cl::opt<std::string> OutputFile("o", cl::init("-"),
                                         cl::desc("Output JSON file (default: stdout)"));
+
+static cl::opt<bool> DumpLineMap("dump-line-map", cl::init(false),
+                                  cl::desc("Dump resolved address->BB line map and exit"));
 
 int main(int argc, char **argv) {
     cl::ParseCommandLineOptions(
@@ -32,7 +36,35 @@ int main(int argc, char **argv) {
         "\n"
         "This tool parses DWARF debug information from an MSP430 ELF file\n"
         "to extract basic block to address mappings, then disassembles\n"
-        "the code and computes energy costs using an assembly-level model.\n");
+        "the code and computes energy costs using an assembly-level model.\n"
+        "\n"
+        "Use --dump-line-map to output resolved address->BB mappings.\n");
+
+    // Handle --dump-line-map mode
+    if (DumpLineMap) {
+        auto lineMaps = DWARFParser::parseLineMap(InputELF);
+        if (lineMaps.empty()) {
+            errs() << "error: no line mappings found\n";
+            return 1;
+        }
+
+        // Output format: address BB (hex address, decimal BB)
+        // Sorted by address within each function
+        for (const auto &[funcName, funcLineMap] : lineMaps) {
+            for (const auto &entry : funcLineMap.entries) {
+                // Output: 8-digit hex address, space, BB index
+                outs() << format("%08x", entry.address) << " " << entry.line << "\n";
+            }
+        }
+        return 0;
+    }
+
+    // Energy analysis mode requires config
+    if (EnergyConfig.empty()) {
+        errs() << "error: --energy-config is required for energy analysis\n";
+        errs() << "Use --dump-line-map for line map output without energy config\n";
+        return 1;
+    }
 
     // 1. Parse DWARF to get BB->address mappings
     errs() << "Parsing DWARF from " << InputELF << "...\n";

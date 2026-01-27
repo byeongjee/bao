@@ -92,9 +92,8 @@ std::vector<LineEntry> parseLineTableWithObjdump(const std::string &objectPath) 
     // Format: filename   line_number   starting_address   view   stmt
     // Example: test.c      5            0xa                1      x
     // Note: Address can be "0" or "0xNNN" depending on objdump version
-    // Note: objdump may prefix lines with warnings like "<over large file table index...>"
-    // so we look for <corrupt> anywhere in the line, not just at the start
-    std::regex linePattern(R"(<corrupt>\s+(\d+)\s+(?:0x)?([0-9a-fA-F]+))");
+    // Match any filename (including <corrupt>) followed by line number and address
+    std::regex linePattern(R"(^\S+\s+(\d+)\s+(?:0x)?([0-9a-fA-F]+))");
     std::istringstream stream(output);
     std::string line;
 
@@ -291,6 +290,55 @@ std::map<std::string, FunctionBBMap> DWARFParser::parse(const std::string &objec
         result[func.name] = funcMap;
         errs() << "Parsed function '" << func.name << "' with "
                << funcMap.bbToAddresses.size() << " basic blocks\n";
+    }
+
+    return result;
+}
+
+std::map<std::string, FunctionLineMap> DWARFParser::parseLineMap(const std::string &objectPath) {
+    std::map<std::string, FunctionLineMap> result;
+
+    // Get line table entries using objdump
+    std::vector<LineEntry> lineEntries = parseLineTableWithObjdump(objectPath);
+
+    if (lineEntries.empty()) {
+        return result;
+    }
+
+    // Get function ranges from disassembly
+    std::vector<FuncRange> functions = parseFunctionRanges(objectPath);
+
+    if (functions.empty()) {
+        return result;
+    }
+
+    // Sort line entries by address
+    std::sort(lineEntries.begin(), lineEntries.end(),
+              [](const LineEntry &a, const LineEntry &b) { return a.address < b.address; });
+
+    // Assign line entries to functions and resolve
+    for (const auto &func : functions) {
+        FunctionLineMap funcLineMap;
+        funcLineMap.functionName = func.name;
+
+        // Find line entries within this function
+        std::vector<LineEntry> funcLines;
+        for (const auto &entry : lineEntries) {
+            if (entry.address >= func.start && entry.address < func.end) {
+                funcLines.push_back(entry);
+            }
+        }
+
+        if (funcLines.empty()) {
+            continue;
+        }
+
+        // Resolve unmapped (line 0) entries using heuristics
+        HeuristicLineResolver resolver;
+        resolveUnmappedLines(funcLines, func.start, func.end, resolver);
+
+        funcLineMap.entries = std::move(funcLines);
+        result[func.name] = funcLineMap;
     }
 
     return result;
