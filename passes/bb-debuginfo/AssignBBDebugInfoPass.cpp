@@ -166,8 +166,9 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
     DIB.finalize();
 
     // Set module flags for DWARF - required for LLC to emit valid debug info
-    // Use Max behavior to avoid conflicts with existing flags
-    M.addModuleFlag(Module::Max, "Dwarf Version", 5);
+    // Use DWARF v4 for compatibility with older toolchains (MSP430 GCC objdump
+    // doesn't support DWARF v5 string/address index forms like DW_FORM_strx1)
+    M.addModuleFlag(Module::Max, "Dwarf Version", 4);
     M.addModuleFlag(Module::Max, "Debug Info Version", 3);
 
     if (!QuietMode) {
