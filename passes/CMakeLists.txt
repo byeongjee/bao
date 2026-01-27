@@ -48,6 +48,7 @@ add_library(CheckpointPass MODULE
     src/EnergyEstimatorFactory.cpp
     src/CFGAnalysis.cpp
     src/CheckpointOptimizer.cpp
+    src/CheckpointInstrumenter.cpp
     src/CheckpointPass.cpp
     src/LoopTripCount.cpp
     src/MaxCheckpointCounter.cpp

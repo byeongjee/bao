@@ -1,14 +1,12 @@
 #include "CheckpointPass.h"
 #include "CheckpointAnalysisPass.h"
-#include "BlockUtils.h"
 #include "CFGAnalysis.h"
 #include "CheckpointContext.h"
+#include "CheckpointInstrumenter.h"
 #include "CheckpointOptimizer.h"
 #include "EnergyEstimatorFactory.h"
 
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
@@ -82,39 +80,9 @@ PreservedAnalyses CheckpointPass::run(Function &F,
         errs() << "  " << cp << "\n";
     }
 
-    // Step 5: Instrument - insert checkpoint calls
-    Module *M = F.getParent();
-    LLVMContext &Ctx = M->getContext();
-
-    // Get or declare: void __checkpoint(const char*)
-    FunctionCallee CheckpointCallee = M->getOrInsertFunction(
-        checkpointFnName,
-        Type::getVoidTy(Ctx),
-        PointerType::get(Ctx, 0)  // ptr (opaque pointer)
-    );
-
     // Insert checkpoint calls
-    for (BasicBlock &BB : F) {
-        std::string blockName = getBlockName(BB, F);
-
-        if (checkpoints.count(blockName)) {
-            // Insert after PHI nodes using iterator
-            BasicBlock::iterator InsertPt = BB.getFirstNonPHIIt();
-            IRBuilder<> Builder(&*InsertPt);
-
-            // Create global string using new API (CreateGlobalString returns GlobalVariable*)
-            // We need to cast it to ptr using a constant GEP expression
-            GlobalVariable *StrGV = Builder.CreateGlobalString(blockName, "checkpoint_name");
-
-            // Get pointer to first element using constant expression GEP
-            Constant *Zero = ConstantInt::get(Type::getInt32Ty(Ctx), 0);
-            Constant *Indices[] = {Zero, Zero};
-            Constant *StrPtr = ConstantExpr::getInBoundsGetElementPtr(
-                StrGV->getValueType(), StrGV, Indices);
-
-            Builder.CreateCall(CheckpointCallee, {StrPtr});
-        }
-    }
+    CheckpointInstrumenter instrumenter(*F.getParent(), checkpointFnName);
+    instrumenter.instrumentFunction(F, checkpoints);
 
     // We modified the IR
     return PreservedAnalyses::none();
