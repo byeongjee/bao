@@ -1,5 +1,6 @@
 #include "CheckpointPass.h"
 #include "CheckpointAnalysisPass.h"
+#include "BlockUtils.h"
 #include "CFGAnalysis.h"
 #include "CheckpointOptimizer.h"
 #include "EnergyEstimatorFactory.h"
@@ -108,18 +109,7 @@ PreservedAnalyses CheckpointPass::run(Function &F,
 
     // Insert checkpoint calls
     for (BasicBlock &BB : F) {
-        std::string blockName = BB.getName().str();
-        if (blockName.empty()) {
-            // Handle unnamed blocks
-            size_t idx = 0;
-            for (BasicBlock &B : F) {
-                if (&B == &BB) {
-                    blockName = "bb" + std::to_string(idx);
-                    break;
-                }
-                idx++;
-            }
-        }
+        std::string blockName = getBlockName(BB, F);
 
         if (checkpoints.count(blockName)) {
             // Insert after PHI nodes using iterator

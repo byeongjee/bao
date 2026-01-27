@@ -1,4 +1,5 @@
 #include "CFGAnalysis.h"
+#include "BlockUtils.h"
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -25,12 +26,7 @@ void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI,
                           EnergyEstimator &estimator) {
     // Process each basic block
     for (llvm::BasicBlock &BB : F) {
-        std::string name = BB.getName().str();
-
-        // Handle unnamed blocks (entry block often has no name)
-        if (name.empty()) {
-            name = "bb" + std::to_string(blocks_.size());
-        }
+        std::string name = getBlockName(BB, F);
 
         blocks_.push_back(name);
 
@@ -57,18 +53,7 @@ void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI,
         bool hasSuccessors = false;
         for (llvm::BasicBlock *Succ : llvm::successors(&BB)) {
             hasSuccessors = true;
-            std::string succName = Succ->getName().str();
-            if (succName.empty()) {
-                // Find the index of the successor block
-                size_t idx = 0;
-                for (llvm::BasicBlock &B : F) {
-                    if (&B == Succ) {
-                        succName = "bb" + std::to_string(idx);
-                        break;
-                    }
-                    idx++;
-                }
-            }
+            std::string succName = getBlockName(Succ, F);
             edges_.emplace_back(name, succName);
         }
 

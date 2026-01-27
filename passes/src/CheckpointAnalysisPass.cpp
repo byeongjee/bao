@@ -1,4 +1,5 @@
 #include "CheckpointAnalysisPass.h"
+#include "BlockUtils.h"
 #include "CFGAnalysis.h"
 #include "CheckpointOptimizer.h"
 #include "EnergyEstimatorFactory.h"
@@ -83,18 +84,7 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
     // Convert names to BasicBlock pointers
     std::set<BasicBlock*> checkpoints;
     for (BasicBlock &BB : F) {
-        std::string blockName = BB.getName().str();
-        if (blockName.empty()) {
-            // Handle unnamed blocks
-            size_t idx = 0;
-            for (BasicBlock &B : F) {
-                if (&B == &BB) {
-                    blockName = "bb" + std::to_string(idx);
-                    break;
-                }
-                idx++;
-            }
-        }
+        std::string blockName = getBlockName(BB, F);
         if (checkpointNames.count(blockName)) {
             checkpoints.insert(&BB);
         }
