@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include "loop_tripcount.h"
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
@@ -37,8 +38,10 @@ FORCE_INLINE uint16_t simple_rand(void) {
 FORCE_INLINE hash_t djb_hash(uint8_t *data, unsigned len) {
   uint32_t hash = 5381;
   unsigned int i;
-  for (i = 0; i < len; data++, i++)
+  for (i = 0; i < len; data++, i++) {
+    __loop_tripcount(2);  // sizeof(uint16_t)
     hash = ((hash << 5) + hash) + (*data);
+  }
   return hash & 0xFFFF;
 }
 
@@ -98,6 +101,7 @@ FORCE_INLINE bool insert(fingerprint_t *filter, value_t key) {
 
   // Relocation Loop (The "Cuckoo" part)
   do {
+    __loop_tripcount(MAX_RELOCATIONS);  // max 8 iterations
     // Calculate the "other" address for the victim
     fp_hash_victim = hash_fp_to_index(fp_victim);
     index_victim = index_victim ^ fp_hash_victim;
@@ -138,14 +142,17 @@ __attribute__((noinline)) int main() {
   lfsr_state = 0xACE1u;
 
   // Clear Filter
-  for (int i = 0; i < NUM_BUCKETS; i++)
+  for (int i = 0; i < NUM_BUCKETS; i++) {
+    __loop_tripcount(NUM_BUCKETS);  // 256 iterations
     filter[i] = 0;
+  }
 
   value_t key = INIT_KEY;
   volatile unsigned inserts = 0;
 
   // 1. Insertion Phase
   for (int i = 0; i < NUM_KEYS; ++i) {
+    __loop_tripcount(NUM_KEYS);  // 128 iterations
     key = generate_key(key);
     bool success = insert(filter, key);
 
@@ -158,6 +165,7 @@ __attribute__((noinline)) int main() {
   volatile unsigned found = 0;
 
   for (int i = 0; i < NUM_KEYS; ++i) {
+    __loop_tripcount(NUM_KEYS);  // 128 iterations
     key = generate_key(key);
     bool member = lookup(filter, key);
 
