@@ -16,8 +16,12 @@ public:
     /// Creator function type: takes config path, returns estimator.
     using CreatorFn = std::function<EnergyEstimatorPtr(const std::string &configPath)>;
 
-    /// Get singleton instance.
-    static EnergyEstimatorFactory &instance();
+    /// Default constructor. Does not register any types.
+    EnergyEstimatorFactory() = default;
+
+    /// Create a factory with built-in estimator types registered.
+    /// Currently registers: "ir" (IRBasedEstimator)
+    static EnergyEstimatorFactory createDefault();
 
     /// Register an estimator type.
     /// @param name Type identifier (e.g., "ir", "assembly").
@@ -41,12 +45,7 @@ public:
     std::vector<std::string> getRegisteredTypes() const;
 
 private:
-    EnergyEstimatorFactory();
     std::unordered_map<std::string, CreatorFn> creators_;
-
-    // Prevent copying
-    EnergyEstimatorFactory(const EnergyEstimatorFactory &) = delete;
-    EnergyEstimatorFactory &operator=(const EnergyEstimatorFactory &) = delete;
 };
 
 } // namespace checkpoint

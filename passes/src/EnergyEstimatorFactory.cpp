@@ -10,16 +10,13 @@
 
 namespace checkpoint {
 
-EnergyEstimatorFactory &EnergyEstimatorFactory::instance() {
-    static EnergyEstimatorFactory factory;
-    return factory;
-}
-
-EnergyEstimatorFactory::EnergyEstimatorFactory() {
+EnergyEstimatorFactory EnergyEstimatorFactory::createDefault() {
+    EnergyEstimatorFactory factory;
     // Register built-in IR-based estimator
-    registerType("ir", [](const std::string &configPath) {
+    factory.registerType("ir", [](const std::string &configPath) {
         return std::make_unique<IRBasedEstimator>(configPath);
     });
+    return factory;
 }
 
 void EnergyEstimatorFactory::registerType(const std::string &name, CreatorFn creator) {

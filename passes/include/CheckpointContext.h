@@ -84,9 +84,9 @@ inline ContextResult createCheckpointContext(
             ("Error: -energy-config is required for " + passName + "\n").str());
     }
 
-    // Create energy estimator from config
-    auto estimator = EnergyEstimatorFactory::instance().createFromConfig(
-        configPath.str());
+    // Create energy estimator from config using default factory
+    auto factory = EnergyEstimatorFactory::createDefault();
+    auto estimator = factory.createFromConfig(configPath.str());
     if (!estimator) {
         return ContextResult::error(
             ContextResult::Status::EstimatorFailed,

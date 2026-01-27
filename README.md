@@ -244,19 +244,20 @@ private:
 
 ### Step 2: Register with the Factory
 
-Add auto-registration at the bottom of your implementation file:
+Add your estimator type to `EnergyEstimatorFactory::createDefault()` in `passes/src/EnergyEstimatorFactory.cpp`:
 
 ```cpp
-namespace {
-struct Registrar {
-    Registrar() {
-        checkpoint::EnergyEstimatorFactory::instance().registerType(
-            "assembly",
-            [](const std::string &configPath) {
-                return std::make_unique<checkpoint::AssemblyBasedEstimator>(configPath);
-            });
-    }
-} registrar;
+EnergyEstimatorFactory EnergyEstimatorFactory::createDefault() {
+    EnergyEstimatorFactory factory;
+    // Built-in IR-based estimator
+    factory.registerType("ir", [](const std::string &configPath) {
+        return std::make_unique<IRBasedEstimator>(configPath);
+    });
+    // Add your custom estimator
+    factory.registerType("assembly", [](const std::string &configPath) {
+        return std::make_unique<AssemblyBasedEstimator>(configPath);
+    });
+    return factory;
 }
 ```
 
