@@ -2,6 +2,7 @@
 #include "CheckpointAnalysisPass.h"
 #include "BlockUtils.h"
 #include "CFGAnalysis.h"
+#include "CheckpointContext.h"
 #include "CheckpointOptimizer.h"
 #include "EnergyEstimatorFactory.h"
 
@@ -35,44 +36,29 @@ namespace checkpoint {
 
 PreservedAnalyses CheckpointPass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
-    // Validate required config
-    if (EnergyConfigOpt.getValue().empty()) {
-        errs() << "Error: -energy-config is required for checkpoint pass\n";
+    // Create checkpoint context (validates config, creates estimator and CFG)
+    auto &LI = AM.getResult<LoopAnalysis>(F);
+    auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(),
+                                             "checkpoint pass");
+    if (!ctxResult.success()) {
+        if (!ctxResult.shouldSkip()) {
+            errs() << ctxResult.errorMessage;
+        }
         return PreservedAnalyses::all();
     }
 
-    // Create energy estimator from config
-    auto estimator = EnergyEstimatorFactory::instance().createFromConfig(
-        EnergyConfigOpt.getValue());
-    if (!estimator) {
-        errs() << "Failed to create energy estimator\n";
-        return PreservedAnalyses::all();
-    }
-
-    // Skip declarations
-    if (F.isDeclaration()) {
-        return PreservedAnalyses::all();
-    }
-
-    double capacity = estimator->getCapacity();
+    auto &ctx = *ctxResult.context;
     std::string checkpointFnName = CheckpointFnOpt;
 
-
-    // Step 1: Get loop info from LLVM
-    auto &LI = AM.getResult<LoopAnalysis>(F);
-
-    // Step 2: Analyze CFG
-    CFGAnalysis cfg(F, LI, *estimator);
-
-    // Step 3: Check feasibility
-    CheckpointOptimizer optimizer(cfg, capacity);
+    // Check feasibility
+    CheckpointOptimizer optimizer(*ctx.cfg, ctx.capacity);
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
         errs() << "Error: The following blocks exceed energy capacity:\n";
         for (const auto &block : infeasible) {
             errs() << "  " << block << " (cost: "
-                   << cfg.getBlockInfo(block).energyCost
-                   << ", capacity: " << capacity << ")\n";
+                   << ctx.cfg->getBlockInfo(block).energyCost
+                   << ", capacity: " << ctx.capacity << ")\n";
         }
         return PreservedAnalyses::all();
     }

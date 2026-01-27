@@ -1,6 +1,7 @@
 #include "CheckpointAnalysisPass.h"
 #include "BlockUtils.h"
 #include "CFGAnalysis.h"
+#include "CheckpointContext.h"
 #include "CheckpointOptimizer.h"
 #include "EnergyEstimatorFactory.h"
 #include "LoopTripCount.h"
@@ -30,43 +31,29 @@ namespace checkpoint {
 
 PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
                                                FunctionAnalysisManager &AM) {
-    // Validate required config
-    if (EnergyConfigOpt.getValue().empty()) {
-        errs() << "Error: -energy-config is required for checkpoint-analysis pass\n";
-        return PreservedAnalyses::all();
-    }
-
-    // Create energy estimator from config
-    auto estimator = EnergyEstimatorFactory::instance().createFromConfig(
-        EnergyConfigOpt.getValue());
-    if (!estimator) {
-        errs() << "Failed to create energy estimator\n";
-        return PreservedAnalyses::all();
-    }
-
-    // Skip declarations
-    if (F.isDeclaration()) {
-        return PreservedAnalyses::all();
-    }
-
-    double capacity = estimator->getCapacity();
-
-    // Step 1: Get loop info from LLVM
+    // Create checkpoint context (validates config, creates estimator and CFG)
     auto &LI = AM.getResult<LoopAnalysis>(F);
+    auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(),
+                                             "checkpoint-analysis pass");
+    if (!ctxResult.success()) {
+        if (!ctxResult.shouldSkip()) {
+            errs() << ctxResult.errorMessage;
+        }
+        return PreservedAnalyses::all();
+    }
 
-    // Step 2: Analyze CFG and run checkpoint optimizer
-    CFGAnalysis cfg(F, LI, *estimator);
+    auto &ctx = *ctxResult.context;
 
     // Check feasibility
-    CheckpointOptimizer optimizer(cfg, capacity);
+    CheckpointOptimizer optimizer(*ctx.cfg, ctx.capacity);
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
         errs() << "=== Checkpoint Analysis: " << F.getName() << " ===\n";
         errs() << "Error: The following blocks exceed energy capacity:\n";
         for (const auto &block : infeasible) {
             errs() << "  " << block << " (cost: "
-                   << cfg.getBlockInfo(block).energyCost
-                   << ", capacity: " << capacity << ")\n";
+                   << ctx.cfg->getBlockInfo(block).energyCost
+                   << ", capacity: " << ctx.capacity << ")\n";
         }
         return PreservedAnalyses::all();
     }
@@ -91,10 +78,10 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
     }
 
     // Step 3: Extract loop bounds from __loop_tripcount markers
-    auto loopBounds = LoopTripCount::extractBounds(F, LI);
+    auto loopBounds = LoopTripCount::extractBounds(F, *ctx.loopInfo);
 
     // Step 4: Count max checkpoints using DP
-    MaxCheckpointCounter counter(F, LI, checkpoints);
+    MaxCheckpointCounter counter(F, *ctx.loopInfo, checkpoints);
     counter.setLoopBounds(loopBounds);
     counter.setDefaultBound(DefaultBoundOpt);
     CountResult result = counter.compute();
@@ -102,7 +89,7 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
     // Step 5: Output results
     errs() << "=== Checkpoint Analysis: " << F.getName() << " ===\n";
     errs() << "Configuration:\n";
-    errs() << "  Energy capacity: " << capacity << "\n";
+    errs() << "  Energy capacity: " << ctx.capacity << "\n";
     errs() << "  Default loop bound: " << DefaultBoundOpt << "\n";
     errs() << "\n";
 
