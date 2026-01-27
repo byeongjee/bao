@@ -13,11 +13,32 @@ namespace checkpoint {
 /// Result of the maximum checkpoint counting analysis.
 struct CountResult {
     int maxCheckpoints;                              ///< Max checkpoints on any path
-    std::vector<llvm::BasicBlock*> criticalPath;     ///< Path with max checkpoints
+    std::vector<llvm::BasicBlock*> criticalPath;     ///< Blocks with checkpoints
 };
 
 /// Counts the maximum number of checkpoints on any execution path.
-/// Uses dynamic programming with bounded loop iterations.
+///
+/// Algorithm: Closed-form computation
+/// ----------------------------------
+/// For each checkpoint block B, compute how many times it can execute:
+///   multiplier = product of bounds for all loops containing B
+/// Sum across all checkpoints to get the maximum.
+///
+/// Complexity: O(checkpoints × max_loop_depth) ≈ linear
+///
+/// Trade-off:
+/// ----------
+/// This closed-form approach may OVER-COUNT if checkpoints are in mutually
+/// exclusive branches (e.g., if-then-else where only one branch executes).
+/// In such cases, the result is a conservative UPPER BOUND, not the exact max.
+///
+/// This is acceptable for worst-case analysis (e.g., estimating max checkpoint
+/// overhead) but would be incorrect if exact path counting is required.
+///
+/// The previous path-enumeration algorithm was exact but had exponential
+/// complexity O(bound₁ × bound₂ × ... × boundₙ), making it infeasible for
+/// loops with high iteration counts (e.g., 128 × 128 × 8 = 131K states/block).
+///
 class MaxCheckpointCounter {
 public:
     /// Construct a counter for the given function.
@@ -37,7 +58,7 @@ public:
     void setDefaultBound(unsigned bound) { defaultBound_ = bound; }
 
     /// Count maximum checkpoints on any path from entry to exit.
-    /// @return Result containing max count and critical path.
+    /// @return Result containing max count and list of checkpoint blocks.
     CountResult compute();
 
 private:
@@ -47,35 +68,11 @@ private:
     unsigned defaultBound_ = 2;
     std::map<const llvm::Loop*, unsigned> loopBounds_;
 
-    /// Back-edges detected in the CFG (latch -> header).
-    std::vector<std::pair<llvm::BasicBlock*, llvm::BasicBlock*>> backEdges_;
-
-    /// Index of each back-edge for the iteration count vector.
-    std::map<std::pair<llvm::BasicBlock*, llvm::BasicBlock*>, int> backEdgeIndex_;
-
-    /// Memoization cache: (BasicBlock*, edgeCounts) -> max checkpoints from that state.
-    std::map<std::pair<llvm::BasicBlock*, std::vector<int>>, int> memo_;
-
     /// Loops that have already been warned about using the default bound.
     mutable std::set<const llvm::Loop*> warnedLoops_;
 
-    /// Find all back-edges in the CFG using DFS.
-    void findBackEdges();
-
-    /// Check if an edge is a back-edge.
-    bool isBackEdge(llvm::BasicBlock *From, llvm::BasicBlock *To) const;
-
     /// Get the trip count bound for a loop.
     unsigned getLoopBound(llvm::Loop *L) const;
-
-    /// Recursive DP function to count max checkpoints.
-    /// @param BB Current basic block.
-    /// @param edgeCounts Current iteration counts for each back-edge.
-    /// @param path Current path (for tracking critical path).
-    /// @return Maximum checkpoints from BB to any exit.
-    int countFromBlock(llvm::BasicBlock *BB,
-                       std::vector<int> &edgeCounts,
-                       std::vector<llvm::BasicBlock*> &path);
 };
 
 } // namespace checkpoint
