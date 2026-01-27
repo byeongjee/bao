@@ -1,8 +1,7 @@
 #include "IRBasedEstimator.h"
 
 #include "llvm/IR/Instructions.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/ADT/Twine.h"
+#include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
 #include <nlohmann/json.hpp>
@@ -10,37 +9,46 @@
 
 namespace checkpoint {
 
-IRBasedEstimator::IRBasedEstimator(const std::string &configPath) {
-    loadConfig(configPath);
+std::unique_ptr<IRBasedEstimator> IRBasedEstimator::create(const std::string &configPath) {
+    auto estimator = std::unique_ptr<IRBasedEstimator>(new IRBasedEstimator());
+    if (!estimator->loadConfig(configPath)) {
+        return nullptr;
+    }
+    return estimator;
 }
 
-void IRBasedEstimator::loadConfig(const std::string &path) {
+bool IRBasedEstimator::loadConfig(const std::string &path) {
     std::ifstream file(path);
     if (!file.is_open()) {
-        llvm::report_fatal_error(llvm::Twine("Cannot open energy config file: ") + path);
+        llvm::errs() << "Error: Cannot open energy config file: " << path << "\n";
+        return false;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::report_fatal_error(llvm::Twine("JSON parse error in: ") + path);
+        llvm::errs() << "Error: JSON parse error in: " << path << "\n";
+        return false;
     }
 
     // Validate required fields
     if (!config.contains("energy_parameters")) {
-        llvm::report_fatal_error(llvm::Twine("Missing 'energy_parameters' in config: ") + path);
+        llvm::errs() << "Error: Missing 'energy_parameters' in config: " << path << "\n";
+        return false;
     }
 
     auto &params = config["energy_parameters"];
 
     // Load capacity (required)
     if (!params.contains("capacity")) {
-        llvm::report_fatal_error(llvm::Twine("Missing 'capacity' in config: ") + path);
+        llvm::errs() << "Error: Missing 'capacity' in config: " << path << "\n";
+        return false;
     }
     capacity_ = params["capacity"].get<double>();
 
     // Load instruction costs (required)
     if (!params.contains("instruction_costs")) {
-        llvm::report_fatal_error(llvm::Twine("Missing 'instruction_costs' in config: ") + path);
+        llvm::errs() << "Error: Missing 'instruction_costs' in config: " << path << "\n";
+        return false;
     }
 
     auto &costs = params["instruction_costs"];
@@ -54,11 +62,14 @@ void IRBasedEstimator::loadConfig(const std::string &path) {
 
     for (const auto &cat : requiredCategories) {
         if (!costs.contains(cat)) {
-            llvm::report_fatal_error(llvm::Twine("Missing instruction cost category '") +
-                                     cat + "' in config: " + path);
+            llvm::errs() << "Error: Missing instruction cost category '" << cat
+                         << "' in config: " << path << "\n";
+            return false;
         }
         instructionCosts_[cat] = costs[cat].get<int>();
     }
+
+    return true;
 }
 
 double IRBasedEstimator::getCapacity() const {

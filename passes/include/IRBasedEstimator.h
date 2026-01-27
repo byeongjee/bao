@@ -12,21 +12,25 @@ namespace checkpoint {
 /// costs to estimate energy for each basic block.
 class IRBasedEstimator : public EnergyEstimator {
 public:
-    /// Construct estimator from configuration file.
+    /// Create estimator from configuration file.
     /// @param configPath Path to JSON configuration file.
-    /// @throws llvm::report_fatal_error if file not found or invalid.
-    explicit IRBasedEstimator(const std::string &configPath);
+    /// @return Estimator instance, or nullptr on error (with message to errs()).
+    static std::unique_ptr<IRBasedEstimator> create(const std::string &configPath);
 
     EnergyEstimate estimate(const llvm::BasicBlock &BB) override;
     double getCapacity() const override;
     std::string getName() const override;
 
 private:
-    double capacity_;
+    /// Private constructor - use create() factory method.
+    IRBasedEstimator() = default;
+
+    double capacity_ = 0.0;
     std::unordered_map<std::string, int> instructionCosts_;
 
     /// Load configuration from JSON file.
-    void loadConfig(const std::string &path);
+    /// @return true on success, false on error (with message to errs()).
+    bool loadConfig(const std::string &path);
 
     /// Get cost for an LLVM opcode.
     int getInstructionCost(unsigned Opcode) const;

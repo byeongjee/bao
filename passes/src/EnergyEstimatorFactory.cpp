@@ -1,8 +1,7 @@
 #include "EnergyEstimatorFactory.h"
 #include "IRBasedEstimator.h"
 
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/ADT/Twine.h"
+#include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
 #include <nlohmann/json.hpp>
@@ -14,7 +13,7 @@ EnergyEstimatorFactory EnergyEstimatorFactory::createDefault() {
     EnergyEstimatorFactory factory;
     // Register built-in IR-based estimator
     factory.registerType("ir", [](const std::string &configPath) {
-        return std::make_unique<IRBasedEstimator>(configPath);
+        return IRBasedEstimator::create(configPath);
     });
     return factory;
 }
@@ -36,26 +35,30 @@ EnergyEstimatorPtr EnergyEstimatorFactory::createFromConfig(const std::string &c
     // Read config to determine estimator type
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        llvm::report_fatal_error(llvm::Twine("Cannot open energy config file: ") + configPath);
+        llvm::errs() << "Error: Cannot open energy config file: " << configPath << "\n";
+        return nullptr;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::report_fatal_error(llvm::Twine("JSON parse error in: ") + configPath);
+        llvm::errs() << "Error: JSON parse error in: " << configPath << "\n";
+        return nullptr;
     }
 
     // Get estimator type (required field)
     if (!config.contains("estimator_type")) {
-        llvm::report_fatal_error(llvm::Twine("Missing required 'estimator_type' field in config: ") +
-                                 configPath + "\nValid types: ir");
+        llvm::errs() << "Error: Missing required 'estimator_type' field in config: "
+                     << configPath << "\nValid types: ir\n";
+        return nullptr;
     }
     std::string estimatorType = config["estimator_type"].get<std::string>();
 
     // Create the estimator
     auto estimator = create(estimatorType, configPath);
     if (!estimator) {
-        llvm::report_fatal_error(llvm::Twine("Unknown estimator type '") +
-                                 estimatorType + "' in config: " + configPath);
+        llvm::errs() << "Error: Unknown or failed estimator type '" << estimatorType
+                     << "' in config: " << configPath << "\n";
+        return nullptr;
     }
 
     return estimator;
