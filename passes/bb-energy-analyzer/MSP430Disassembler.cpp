@@ -124,6 +124,15 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
                            instr.mnemonic.begin(),
                            [](unsigned char c) { return std::tolower(c); });
 
+            // Skip padding/data bytes that objdump displays as hex values
+            // (e.g., "00", "ff", etc. are not valid MSP430 mnemonics)
+            bool isHexOnly = !instr.mnemonic.empty() &&
+                std::all_of(instr.mnemonic.begin(), instr.mnemonic.end(),
+                            [](char c) { return std::isxdigit(c); });
+            if (isHexOnly) {
+                continue;
+            }
+
             // Parse operands (trim whitespace)
             instr.operands = match[4].str();
             if (!instr.operands.empty()) {
