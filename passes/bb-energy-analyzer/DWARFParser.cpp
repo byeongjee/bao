@@ -1,4 +1,5 @@
 #include "DWARFParser.h"
+#include "DWARFLineResolver.h"
 
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFDie.h"
@@ -49,11 +50,6 @@ std::string findObjdump() {
 }
 
 /// Parse line table using msp430-elf-objdump (works around LLVM's MSP430 relocation issues)
-struct LineEntry {
-    uint64_t address;
-    unsigned line;
-};
-
 std::vector<LineEntry> parseLineTableWithObjdump(const std::string &objectPath) {
     std::vector<LineEntry> entries;
 
@@ -95,7 +91,10 @@ std::vector<LineEntry> parseLineTableWithObjdump(const std::string &objectPath) 
     // Parse output
     // Format: filename   line_number   starting_address   view   stmt
     // Example: test.c      5            0xa                1      x
-    std::regex linePattern(R"(^\S+\s+(\d+)\s+0x([0-9a-fA-F]+)\s+)");
+    // Note: Address can be "0" or "0xNNN" depending on objdump version
+    // Note: objdump may prefix lines with warnings like "<over large file table index...>"
+    // so we look for <corrupt> anywhere in the line, not just at the start
+    std::regex linePattern(R"(<corrupt>\s+(\d+)\s+(?:0x)?([0-9a-fA-F]+))");
     std::istringstream stream(output);
     std::string line;
 
@@ -176,8 +175,10 @@ std::vector<FuncRange> parseFunctionRanges(const std::string &objectPath) {
         std::regex instrPattern(R"(^\s*([0-9a-fA-F]+):)");
         if (std::regex_search(line, match, instrPattern)) {
             uint64_t addr = std::stoull(match[1].str(), nullptr, 16);
-            if (addr > maxAddr)
-                maxAddr = addr + 4; // Estimate end
+            // Estimate instruction end (assume max 4 bytes per instruction)
+            uint64_t instrEnd = addr + 4;
+            if (instrEnd > maxAddr)
+                maxAddr = instrEnd;
         }
     }
 
@@ -252,6 +253,10 @@ std::map<std::string, FunctionBBMap> DWARFParser::parse(const std::string &objec
             errs() << "warning: function '" << func.name << "' has no line entries\n";
             continue;
         }
+
+        // Resolve unmapped (line 0) entries using heuristics
+        HeuristicLineResolver resolver;
+        resolveUnmappedLines(funcLines, func.start, func.end, resolver);
 
         // Build BB ranges
         for (size_t i = 0; i < funcLines.size(); ++i) {

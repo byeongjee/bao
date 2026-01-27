@@ -5,6 +5,7 @@
 add_executable(bb-energy-analyzer
     BBEnergyAnalyzer.cpp
     DWARFParser.cpp
+    DWARFLineResolver.cpp
     MSP430Disassembler.cpp
     EnergyModel.cpp
 )
