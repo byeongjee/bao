@@ -8,6 +8,8 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
+#include <nlohmann/json.hpp>
+#include <fstream>
 
 using namespace llvm;
 
@@ -17,6 +19,11 @@ static cl::opt<bool> QuietMode(
     "assign-bb-quiet",
     cl::desc("Suppress informational messages from assign-bb-debuginfo pass"),
     cl::init(false));
+
+static cl::opt<std::string> MappingOutput(
+    "bb-mapping",
+    cl::desc("Output path for BB index-to-name mapping JSON"),
+    cl::init(""));
 
 } // anonymous namespace
 
@@ -83,6 +90,9 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
     unsigned totalBBs = 0;
     unsigned totalInstructions = 0;
 
+    // Mapping from function name -> BB index -> BB name
+    nlohmann::json bbMapping;
+
     for (Function &F : M) {
         // Skip declarations (external functions)
         if (F.isDeclaration()) {
@@ -111,6 +121,9 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
         unsigned BBCount = 0;
         unsigned funcLabeled = 0;
 
+        // Collect BB mapping for this function
+        nlohmann::json funcMapping;
+
         for (BasicBlock &BB : F) {
             // Create unique debug location: line = BBIndex, column = 0
             DILocation *Loc = DILocation::get(Ctx,
@@ -118,6 +131,16 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
                                                /*Column=*/0,
                                                /*Scope=*/SP);
             DebugLoc DL(Loc);
+
+            // Store BB name mapping
+            std::string bbName;
+            if (BB.hasName()) {
+                bbName = BB.getName().str();
+            } else {
+                // Use 0-based index for unnamed BBs to match BlockUtils.h pattern
+                bbName = "bb" + std::to_string(BBIndex - 1);
+            }
+            funcMapping[std::to_string(BBIndex)] = bbName;
 
             unsigned labeledInBB = 0;
             bool hasNonPHI = false;
@@ -157,6 +180,9 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
                    << BBCount << " basic blocks in '" << F.getName() << "'\n";
         }
 
+        // Store function mapping
+        bbMapping[F.getName().str()] = funcMapping;
+
         totalFunctions++;
         totalBBs += BBCount;
         totalInstructions += funcLabeled;
@@ -175,6 +201,19 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
         errs() << "Total: " << totalFunctions << " functions, "
                << totalBBs << " basic blocks, "
                << totalInstructions << " instructions labeled\n";
+    }
+
+    // Write BB mapping to file if requested
+    if (!MappingOutput.empty()) {
+        std::ofstream outFile(MappingOutput.getValue());
+        if (outFile.is_open()) {
+            outFile << bbMapping.dump(2) << "\n";
+            if (!QuietMode) {
+                errs() << "Wrote BB mapping to " << MappingOutput << "\n";
+            }
+        } else {
+            errs() << "Warning: Could not write BB mapping to " << MappingOutput << "\n";
+        }
     }
 
     // We modified IR metadata

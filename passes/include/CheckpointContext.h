@@ -100,6 +100,9 @@ inline ContextResult createCheckpointContext(
 
     double capacity = estimator->getCapacity();
 
+    // Prepare estimator for this function (needed by AssemblyBasedEstimator)
+    estimator->prepareForFunction(F);
+
     // Create CFG analysis
     auto cfg = std::make_unique<CFGAnalysis>(F, LI, *estimator);
 

@@ -1,4 +1,5 @@
 #include "EnergyEstimatorFactory.h"
+#include "AssemblyBasedEstimator.h"
 #include "IRBasedEstimator.h"
 
 #include "llvm/Support/raw_ostream.h"
@@ -14,6 +15,10 @@ EnergyEstimatorFactory EnergyEstimatorFactory::createDefault() {
     // Register built-in IR-based estimator
     factory.registerType("ir", [](const std::string &configPath) {
         return IRBasedEstimator::create(configPath);
+    });
+    // Register assembly-based estimator
+    factory.registerType("assembly", [](const std::string &configPath) {
+        return AssemblyBasedEstimator::create(configPath);
     });
     return factory;
 }
@@ -48,7 +53,7 @@ EnergyEstimatorPtr EnergyEstimatorFactory::createFromConfig(const std::string &c
     // Get estimator type (required field)
     if (!config.contains("estimator_type")) {
         llvm::errs() << "Error: Missing required 'estimator_type' field in config: "
-                     << configPath << "\nValid types: ir\n";
+                     << configPath << "\nValid types: ir, assembly\n";
         return nullptr;
     }
     std::string estimatorType = config["estimator_type"].get<std::string>();

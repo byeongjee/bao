@@ -9,9 +9,15 @@ set_target_properties(BBDebugInfoPass PROPERTIES
     PREFIX ""
 )
 
+# Enable exceptions for nlohmann/json compatibility
+# Unlike the main CheckpointPass, this plugin needs exceptions for JSON library
 target_compile_options(BBDebugInfoPass PRIVATE
-    -fno-exceptions
     -fno-rtti
+)
+
+# Link nlohmann_json for JSON output
+target_link_libraries(BBDebugInfoPass PRIVATE
+    nlohmann_json::nlohmann_json
 )
 
 if(APPLE)

@@ -14,13 +14,38 @@ using namespace llvm;
 using namespace bbanalyzer;
 using json = nlohmann::json;
 
+// Load BB mapping from JSON file (function -> BB index -> BB name)
+std::map<std::string, std::map<std::string, std::string>> loadBBMapping(const std::string &path) {
+    std::map<std::string, std::map<std::string, std::string>> result;
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        errs() << "error: cannot open BB mapping file: " << path << "\n";
+        return result;
+    }
+    json mapping = json::parse(file, nullptr, false);
+    if (mapping.is_discarded()) {
+        errs() << "error: JSON parse error in BB mapping file: " << path << "\n";
+        return result;
+    }
+    for (auto& [funcName, funcMapping] : mapping.items()) {
+        for (auto& [idx, bbName] : funcMapping.items()) {
+            result[funcName][idx] = bbName.get<std::string>();
+        }
+    }
+    return result;
+}
+
 // Command line options
 static cl::opt<std::string> InputELF(cl::Positional, cl::Required,
                                       cl::desc("<input.elf>"));
 
 static cl::opt<std::string>
-    EnergyConfig("energy-config",
-                 cl::desc("Path to assembly energy config JSON"));
+    EnergyParams("energy-params",
+                 cl::desc("Path to assembly energy parameters JSON"));
+
+static cl::opt<std::string>
+    BBMappingFile("bb-mapping",
+                  cl::desc("Path to BB index-to-name mapping JSON (from bb-debuginfo pass)"));
 
 static cl::opt<std::string> OutputFile("o", cl::init("-"),
                                         cl::desc("Output JSON file (default: stdout)"));
@@ -59,10 +84,15 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    // Energy analysis mode requires config
-    if (EnergyConfig.empty()) {
-        errs() << "error: --energy-config is required for energy analysis\n";
-        errs() << "Use --dump-line-map for line map output without energy config\n";
+    // Energy analysis mode requires config and BB mapping
+    if (EnergyParams.empty()) {
+        errs() << "error: --energy-params is required for energy analysis\n";
+        errs() << "Use --dump-line-map for line map output without energy params\n";
+        return 1;
+    }
+
+    if (BBMappingFile.empty()) {
+        errs() << "error: --bb-mapping is required for energy analysis\n";
         return 1;
     }
 
@@ -88,8 +118,15 @@ int main(int argc, char **argv) {
     }
 
     // 3. Load energy model
-    errs() << "Loading energy model from " << EnergyConfig << "...\n";
-    EnergyModel model(EnergyConfig);
+    errs() << "Loading energy model from " << EnergyParams << "...\n";
+    EnergyModel model(EnergyParams);
+
+    // 3.5. Load BB mapping
+    errs() << "Loading BB mapping from " << BBMappingFile << "...\n";
+    auto bbMapping = loadBBMapping(BBMappingFile);
+    if (bbMapping.empty()) {
+        return 1;  // Error already printed
+    }
 
     // 4. Compute per-BB energy
     json output;
@@ -123,12 +160,28 @@ int main(int argc, char **argv) {
                 }
             }
 
+            // Lookup BB name from mapping
+            std::string bbName;
+            auto funcIt = bbMapping.find(funcName);
+            if (funcIt != bbMapping.end()) {
+                auto bbIt = funcIt->second.find(std::to_string(bbIndex));
+                if (bbIt != funcIt->second.end()) {
+                    bbName = bbIt->second;
+                } else {
+                    bbName = "bb" + std::to_string(bbIndex - 1);  // fallback
+                    errs() << "warning: BB " << bbIndex << " not found in mapping for '" << funcName << "'\n";
+                }
+            } else {
+                bbName = "bb" + std::to_string(bbIndex - 1);  // fallback
+                errs() << "warning: function '" << funcName << "' not found in BB mapping\n";
+            }
+
             if (instrCount == 0) {
-                errs() << "warning: BB " << bbIndex << " in '" << funcName
+                errs() << "warning: BB '" << bbName << "' in '" << funcName
                        << "' has no instructions\n";
             }
 
-            funcOutput["bb_energy"][std::to_string(bbIndex)] = {
+            funcOutput["bb_energy"][bbName] = {
                 {"energy", bbEnergy}, {"instruction_count", instrCount}};
         }
 

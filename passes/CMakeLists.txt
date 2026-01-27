@@ -44,6 +44,7 @@ include_directories(
 
 # Build as a shared module (not using add_llvm_pass_plugin to avoid linking LLVM)
 add_library(CheckpointPass MODULE
+    src/AssemblyBasedEstimator.cpp
     src/IRBasedEstimator.cpp
     src/EnergyEstimatorFactory.cpp
     src/CFGAnalysis.cpp

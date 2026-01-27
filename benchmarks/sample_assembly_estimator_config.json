@@ -1,0 +1,7 @@
+{
+  "estimator_type": "assembly",
+  "energy_parameters": {
+    "capacity": 100.0,
+    "energy_data_path": "./energy_data.json"
+  }
+}
