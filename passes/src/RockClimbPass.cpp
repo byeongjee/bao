@@ -39,6 +39,11 @@ static cl::opt<std::string> SaveRegFnOpt(
     cl::desc("Name of register save function to insert"),
     cl::init("__rockclimb_save_reg"));
 
+static cl::opt<bool> MemoryCkptOpt(
+    "rockclimb-memory-ckpt",
+    cl::desc("Enable memory checkpointing (allocas and globals) in addition to registers"),
+    cl::init(false));
+
 } // anonymous namespace
 
 namespace checkpoint {
@@ -90,6 +95,9 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     if (auto v = rcParams->getBoolean("distributed_checkpointing")) {
         params.distributedCheckpointing = *v;
     }
+    if (auto v = rcParams->getBoolean("memory_checkpointing")) {
+        params.memoryCheckpointing = *v;
+    }
 
     return true;
 }
@@ -123,6 +131,12 @@ PreservedAnalyses RockClimbPass::run(Function &F,
         useDistributedCkpt = DistributedCkptOpt;
     }
 
+    // Override memory checkpointing from command line if specified
+    bool useMemoryCkpt = ctx.params.memoryCheckpointing;
+    if (MemoryCkptOpt.getNumOccurrences() > 0) {
+        useMemoryCkpt = MemoryCkptOpt;
+    }
+
     errs() << "=== RockClimb Pass on " << F.getName() << " ===\n";
     errs() << "  E_safe: " << ctx.E_safe << "\n";
     errs() << "  Capacity (from config): " << ctx.capacity << "\n";
@@ -131,6 +145,8 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     errs() << "  C_buf: " << ctx.params.C_buf_uF << " uF\n";
     errs() << "  Distributed checkpointing: "
            << (useDistributedCkpt ? "enabled" : "disabled") << "\n";
+    errs() << "  Memory checkpointing: "
+           << (useMemoryCkpt ? "enabled" : "disabled") << "\n";
 
     // Check feasibility - blocks that exceed E_safe individually
     RockClimbOptimizer optimizer(*ctx.cfg, ctx.E_safe, LI);
@@ -164,13 +180,16 @@ PreservedAnalyses RockClimbPass::run(Function &F,
                << ", blocks: " << region.blocks.size() << ")\n";
     }
 
-    // Distributed checkpointing analysis
+    // Distributed checkpointing analysis (registers and optionally memory)
     std::vector<CheckpointPoint> checkpointPoints;
+    MemoryCheckpointResult memCheckpoints;
+
+    DistributedCheckpointing distCkpt(F, result.regions, result.regionBoundaries);
+
     if (useDistributedCkpt) {
-        DistributedCheckpointing distCkpt(F, result.regions);
         checkpointPoints = distCkpt.analyze();
 
-        errs() << "\nDistributed checkpoints (" << checkpointPoints.size() << "):\n";
+        errs() << "\nDistributed register checkpoints (" << checkpointPoints.size() << "):\n";
         for (const auto &ckpt : checkpointPoints) {
             errs() << "  Reg " << ckpt.regId << " in region " << ckpt.regionName;
             if (ckpt.afterInst) {
@@ -178,6 +197,16 @@ PreservedAnalyses RockClimbPass::run(Function &F,
                 ckpt.afterInst->print(errs());
             }
             errs() << "\n";
+        }
+    }
+
+    if (useMemoryCkpt) {
+        memCheckpoints = distCkpt.analyzeMemory();
+
+        errs() << "\nMemory checkpoints (" << memCheckpoints.checkpoints.size() << "):\n";
+        for (const auto &ckpt : memCheckpoints.checkpoints) {
+            errs() << "  " << ckpt.nvmSlotName << " at boundary " << ckpt.boundaryId
+                   << " in region " << ckpt.regionName << "\n";
         }
     }
 
@@ -196,13 +225,56 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     unsigned count = instrumenter.instrumentFunction(
         F, boundarySet, checkpointPoints, useDistributedCkpt);
 
+    // Memory checkpointing instrumentation
+    unsigned memCkptCount = 0;
+    if (useMemoryCkpt && !memCheckpoints.checkpoints.empty()) {
+        // Instrument memory saves at boundaries
+        memCkptCount = instrumenter.instrumentMemoryCheckpoints(
+            F, memCheckpoints, result.regionBoundaries);
+
+        // Build boundary block map for recovery targets
+        std::map<unsigned, BasicBlock*> boundaryBlocks;
+        for (size_t i = 0; i < result.regionBoundaries.size(); ++i) {
+            for (BasicBlock &BB : F) {
+                std::string blockName = BB.getName().str();
+                if (blockName.empty()) {
+                    // Unnamed block - compute name
+                    size_t idx = 0;
+                    for (BasicBlock &B : F) {
+                        if (&B == &BB) {
+                            blockName = "bb" + std::to_string(idx);
+                            break;
+                        }
+                        ++idx;
+                    }
+                }
+                if (blockName == result.regionBoundaries[i]) {
+                    boundaryBlocks[static_cast<unsigned>(i)] = &BB;
+                    break;
+                }
+            }
+        }
+
+        // Insert recovery dispatcher at function entry (restore logic is inlined)
+        std::map<unsigned, Function*> emptyRestoreFns;  // Not used anymore
+        instrumenter.insertRecoveryDispatcher(F, emptyRestoreFns, boundaryBlocks);
+
+        errs() << "\nMemory checkpoint instrumentation:\n";
+        errs() << "  Memory saves: " << memCkptCount << "\n";
+        errs() << "  Recovery boundaries: " << boundaryBlocks.size() << "\n";
+    }
+
     errs() << "\nInserted " << count << " instrumentation point(s)\n";
+    if (memCkptCount > 0) {
+        errs() << "Inserted " << memCkptCount << " memory checkpoint(s)\n";
+    }
 
     // Print comparison metrics
     errs() << "\n=== RockClimb Metrics ===\n";
     errs() << "  Regions: " << result.regions.size() << "\n";
     errs() << "  Boundary checks: " << boundarySet.size() << "\n";
     errs() << "  Register checkpoints: " << checkpointPoints.size() << "\n";
+    errs() << "  Memory checkpoints: " << memCheckpoints.checkpoints.size() << "\n";
 
     double totalRegionEnergy = 0;
     double maxRegionEnergy = 0;

@@ -21,7 +21,8 @@ struct RockClimbParams {
     double C_buf_uF = 10.0;       // Buffer capacitance (microfarads)
     unsigned N_reg = 16;          // Number of registers
     double E_restore_per_reg = 0.5;  // Energy to restore one register
-    bool distributedCheckpointing = true;  // Enable distributed checkpointing
+    bool distributedCheckpointing = true;  // Enable distributed register checkpointing
+    bool memoryCheckpointing = false;      // Enable memory (alloca/global) checkpointing
 
     /// Calculate E_safe from physical parameters.
     /// E_safe = E_input - E_restore
@@ -125,6 +126,11 @@ inline RockClimbContextResult createRockClimbContext(
 
     // Skip declarations
     if (F.isDeclaration()) {
+        return RockClimbContextResult::skip();
+    }
+
+    // Skip generated restore functions (from memory checkpointing)
+    if (F.getName().starts_with("__restore_boundary_")) {
         return RockClimbContextResult::skip();
     }
 

@@ -3,6 +3,7 @@
 #include "RockClimbOptimizer.h"
 
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 
 #include <map>
@@ -20,6 +21,23 @@ struct CheckpointPoint {
     std::string regionName;        // Name of the region this belongs to
 };
 
+/// Checkpoint point for a memory location (alloca or global).
+struct MemoryCheckpointPoint {
+    llvm::Value *memLoc;          // AllocaInst* or GlobalVariable*
+    llvm::Type *valueType;        // Type of the stored value
+    std::string nvmSlotName;      // Name of NVM global to store to
+    unsigned boundaryId;          // Which boundary this belongs to
+    std::string regionName;       // Region name for debugging
+};
+
+/// Result of memory checkpoint analysis.
+struct MemoryCheckpointResult {
+    std::vector<MemoryCheckpointPoint> checkpoints;
+
+    // Map: boundaryId -> list of memory locations to save
+    std::map<unsigned, std::vector<MemoryCheckpointPoint>> byBoundary;
+};
+
 /// Distributed checkpointing analysis.
 /// Implements RockClimb's register checkpointing strategy:
 /// Save registers at their last definition point in each region.
@@ -29,8 +47,10 @@ public:
     /// Construct analyzer for a function and its regions.
     /// @param F The function being analyzed.
     /// @param regions Region information from RockClimbOptimizer.
+    /// @param boundaries Region boundary block names (for memory checkpointing).
     DistributedCheckpointing(llvm::Function &F,
-                             const std::vector<RegionInfo> &regions);
+                             const std::vector<RegionInfo> &regions,
+                             const std::vector<std::string> &boundaries = {});
 
     /// Analyze and compute checkpoint points for distributed checkpointing.
     /// For each region r:
@@ -40,12 +60,20 @@ public:
     /// @return Vector of checkpoint points with instruction and register info.
     std::vector<CheckpointPoint> analyze();
 
+    /// Analyze memory locations (allocas and globals) that need checkpointing.
+    /// For each region boundary, finds memory locations that are:
+    /// - Modified within the region (written to)
+    /// - Read after the boundary (live-out)
+    /// @return MemoryCheckpointResult with checkpoints organized by boundary.
+    MemoryCheckpointResult analyzeMemory();
+
     /// Get the number of registers that need checkpointing.
     unsigned getCheckpointedRegisterCount() const { return nextRegId_; }
 
 private:
     llvm::Function &F_;
     const std::vector<RegionInfo> &regions_;
+    const std::vector<std::string> boundaries_;
     unsigned nextRegId_ = 0;
 
     /// Map from block name to BasicBlock*.
@@ -69,6 +97,30 @@ private:
 
     /// Map from Value* to assigned register ID.
     std::map<llvm::Value*, unsigned> regIdMap_;
+
+    // === Memory checkpointing analysis ===
+
+    /// Find allocas that are live at region boundary.
+    /// An alloca is live-out if it is stored to in the region and
+    /// loaded from after the region.
+    std::set<llvm::AllocaInst*> computeLiveAllocas(const RegionInfo &region);
+
+    /// Find globals that are live at region boundary.
+    /// A global is live-out if it is stored to in the region and
+    /// loaded from after the region.
+    std::set<llvm::GlobalVariable*> computeLiveGlobals(const RegionInfo &region);
+
+    /// Check if an alloca is modified within the region.
+    bool isModifiedInRegion(llvm::AllocaInst *alloca, const RegionInfo &region);
+
+    /// Check if a global is modified within the region.
+    bool isModifiedInRegion(llvm::GlobalVariable *global, const RegionInfo &region);
+
+    /// Check if a memory location (alloca or global) is read after the region.
+    bool isReadAfterRegion(llvm::Value *memLoc, const RegionInfo &region);
+
+    /// Generate NVM slot name for a memory checkpoint.
+    std::string generateNVMSlotName(unsigned boundaryId, llvm::Value *memLoc);
 };
 
 } // namespace checkpoint
