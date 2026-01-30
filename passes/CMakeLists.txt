@@ -54,6 +54,10 @@ add_library(CheckpointPass MODULE
     src/LoopTripCount.cpp
     src/MaxCheckpointCounter.cpp
     src/CheckpointAnalysisPass.cpp
+    src/RockClimbOptimizer.cpp
+    src/RockClimbInstrumenter.cpp
+    src/DistributedCheckpointing.cpp
+    src/RockClimbPass.cpp
 )
 
 # Use C++17 and disable RTTI/exceptions to match LLVM

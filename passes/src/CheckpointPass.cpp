@@ -1,5 +1,6 @@
 #include "CheckpointPass.h"
 #include "CheckpointAnalysisPass.h"
+#include "RockClimbPass.h"
 #include "CFGAnalysis.h"
 #include "CheckpointContext.h"
 #include "CheckpointInstrumenter.h"
@@ -107,6 +108,10 @@ llvmGetPassPluginInfo() {
                     }
                     if (Name == "checkpoint-analysis") {
                         FPM.addPass(checkpoint::CheckpointAnalysisPass());
+                        return true;
+                    }
+                    if (Name == "rockclimb") {
+                        FPM.addPass(checkpoint::RockClimbPass());
                         return true;
                     }
                     return false;
