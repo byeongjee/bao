@@ -6,8 +6,15 @@
  * 2. Restoring registers from NVM on recovery
  * 3. Jumping to the saved program counter
  *
- * This code should be placed in the .init section to execute
- * before main() during startup.
+ * This code is placed in .crt_0250 section to execute after data
+ * initialization but before main() during MSP430 GCC startup.
+ *
+ * MSP430 GCC CRT sections:
+ *   .crt_0000-.crt_0099: Before BSS clear
+ *   .crt_0100-.crt_0199: Before data init
+ *   .crt_0200-.crt_0299: After data init, before constructors
+ *   .crt_0300-.crt_0399: Constructors
+ *   .crt_0400-.crt_0499: After constructors, before main
  */
 
     .file   "rockclimb_boot.S"
@@ -27,7 +34,7 @@
  * It checks if we're recovering from a power failure and
  * restores state if necessary.
  */
-    .section .init, "ax", @progbits
+    .section .crt_0250, "ax", @progbits
     .global _rockclimb_boot
     .type   _rockclimb_boot, @function
 
