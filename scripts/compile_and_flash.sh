@@ -8,6 +8,8 @@
 # Options:
 #   --mode <mode>    Checkpoint mode: none, rockclimb (default: none)
 #   --memory         Enable memory checkpointing (for rockclimb)
+#   --stubs          Use stub runtime for testing under constant power
+#                    (Default: uses real runtime with power failure recovery)
 #   --debug          Enable DEBUG output via UART
 #   --compile-only   Compile but don't flash
 #   --flash-only     Flash existing binary
@@ -47,6 +49,7 @@ OBJDUMP="msp430-elf-objdump"
 # Defaults
 MODE="none"
 MEMORY_CKPT="false"
+USE_STUBS="false"
 DEBUG_MODE="false"
 COMPILE_ONLY="false"
 FLASH_ONLY="false"
@@ -61,9 +64,12 @@ BUILD_DIR="$PROJECT_DIR/build"
 
 ROCKCLIMB_PASS="$PROJECT_DIR/passes/build/CheckpointPass.so"
 ROCKCLIMB_CONFIG="$PROJECT_DIR/tests/rockclimb_config.json"
+ROCKCLIMB_RUNTIME="$PROJECT_DIR/passes/runtime/rockclimb_runtime.c"
+ROCKCLIMB_BOOT="$PROJECT_DIR/passes/runtime/rockclimb_boot.S"
 ROCKCLIMB_STUBS="$PROJECT_DIR/passes/runtime/rockclimb_stubs.c"
+ROCKCLIMB_LINKER="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
 
-usage() { sed -n '2,23p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,25p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
 
@@ -72,6 +78,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode) MODE="$2"; shift 2 ;;
         --memory) MEMORY_CKPT="true"; shift ;;
+        --stubs) USE_STUBS="true"; shift ;;
         --debug) DEBUG_MODE="true"; shift ;;
         --compile-only) COMPILE_ONLY="true"; shift ;;
         --flash-only) FLASH_ONLY="true"; shift ;;
@@ -104,7 +111,8 @@ TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 echo "=========================================="
-echo "Mode: $MODE | Debug: $DEBUG_MODE | Output: $OUTPUT"
+echo "Mode: $MODE | Stubs: $USE_STUBS | Debug: $DEBUG_MODE"
+echo "Output: $OUTPUT"
 echo "=========================================="
 
 if [[ "$FLASH_ONLY" != "true" ]]; then
@@ -163,13 +171,30 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
                 -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
 
-            # Compile stubs
-            $GCC -mmcu=$DEVICE -O2 -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
-                -c "$ROCKCLIMB_STUBS" -o "$TMP_DIR/stubs.o"
+            if [[ "$USE_STUBS" == "true" ]]; then
+                # Debug mode: use stubs (no real recovery)
+                info "Using stub runtime (no power failure recovery)"
+                $GCC -mmcu=$DEVICE -O2 -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
+                    -c "$ROCKCLIMB_STUBS" -o "$TMP_DIR/stubs.o"
 
-            # Link
-            $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
-                "$TMP_DIR/ckpt.o" "$TMP_DIR/stubs.o" -o "${OUTPUT}.elf"
+                $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
+                    "$TMP_DIR/ckpt.o" "$TMP_DIR/stubs.o" -o "${OUTPUT}.elf"
+            else
+                # Default: real runtime with recovery
+                info "Using real runtime (with power failure recovery)"
+                $GCC -mmcu=$DEVICE -O2 -msmall \
+                    -I"$MSP430GCC_SUPPORT_PATH/include" \
+                    -I"$PROJECT_DIR/passes/runtime" \
+                    -c "$ROCKCLIMB_RUNTIME" -o "$TMP_DIR/runtime.o"
+
+                $GCC -mmcu=$DEVICE -msmall \
+                    -c "$ROCKCLIMB_BOOT" -o "$TMP_DIR/boot.o"
+
+                $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
+                    -T "$ROCKCLIMB_LINKER" \
+                    "$TMP_DIR/ckpt.o" "$TMP_DIR/runtime.o" "$TMP_DIR/boot.o" \
+                    -o "${OUTPUT}.elf"
+            fi
 
             cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
 

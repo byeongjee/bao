@@ -1,16 +1,12 @@
 /*
- * RockClimb Runtime Library Implementation for MSP430
+ * RockClimb Runtime Library Implementation for MSP430FR5994
  *
  * Implements PFI (Proactive Failure Immunity) from the RockClimb paper.
  * This file is intended to be compiled with MSP430 toolchain.
  */
 
 #include "rockclimb_runtime.h"
-
-/* Include MSP430 headers when compiling for that target */
-#ifdef __MSP430__
 #include <msp430.h>
-#endif
 
 /* ============================================================================
  * NVM Storage Definitions
@@ -40,10 +36,8 @@ volatile uint16_t __rockclimb_vmax_threshold = ROCKCLIMB_DEFAULT_VMAX_THRESHOLD;
  * ============================================================================ */
 
 void __rockclimb_check(void) {
-#ifdef __MSP430__
     /*
-     * MSP430 voltage check implementation using Comparator_A or ADC.
-     * This implementation assumes Comparator_A module is available.
+     * Voltage check implementation using Comp_E module.
      *
      * PFI Algorithm:
      * 1. Configure comparator to check V_cap against V_max threshold
@@ -52,45 +46,32 @@ void __rockclimb_check(void) {
      * 4. Increment region ID and continue
      */
 
-    /* Enable comparator with internal reference */
-    CACTL1 = CAON | CAREF_2 | CARSEL;  /* Enable, use 0.5*Vcc ref, select minus input */
-    CACTL2 = P2CA0;                     /* Select CA0 as positive input (external capacitor) */
+    /* Setup: Configure Comp_E to compare external input against internal reference */
+    CECTL0 = CEIPEN | CEIPSEL_0;         /* Enable input on CE0 (P1.2) */
+    CECTL1 = CEPWRMD_1;                  /* Normal power mode */
+    CECTL2 = CEREFL_2 | CERS_2 | CERSEL; /* Vref=2.0V, to minus terminal */
+    CECTL3 = CEPD0;                      /* Disable input buffer on CE0 */
 
-    /* Wait for comparator to settle */
-    __delay_cycles(100);
+    CECTL1 |= CEON;                      /* Enable comparator */
+    __delay_cycles(400);                 /* Wait for reference to settle */
 
     /* Check if voltage is below threshold */
-    if (!(CACTL2 & CAOUT)) {
-        /* Voltage too low - enter LPM4 and wait for charge */
-
-        /* Configure comparator interrupt for rising edge (voltage increasing) */
-        CACTL1 |= CAIE;  /* Enable interrupt */
-        CACTL1 &= ~CAIES; /* Rising edge */
-
-        /* Clear any pending interrupt */
-        CACTL1 &= ~CAIFG;
+    if (!(CECTL1 & CEOUT)) {
+        /* Voltage too low - wait for charge */
+        CECTL1 |= CEIE;                  /* Enable interrupt */
+        CECTL1 &= ~CEIES;                /* Rising edge */
+        CEINT &= ~CEIFG;                 /* Clear flag */
 
         /* Enter LPM4 with interrupts enabled */
-        /* CPU will wake when voltage comparator triggers */
         __bis_SR_register(LPM4_bits | GIE);
 
-        /* Disable comparator interrupt after waking */
-        CACTL1 &= ~CAIE;
+        CECTL1 &= ~CEIE;                 /* Disable interrupt */
     }
 
-    /* Disable comparator to save power */
-    CACTL1 = 0;
+    CECTL1 &= ~CEON;                     /* Disable comparator to save power */
 
     /* Increment region ID */
     __nvm_region_id++;
-
-#else
-    /*
-     * Non-MSP430 stub for testing/simulation.
-     * In simulation, we just increment the region ID.
-     */
-    __nvm_region_id++;
-#endif
 }
 
 void __rockclimb_save_reg(uint8_t reg_id, uint16_t value) {
@@ -100,13 +81,12 @@ void __rockclimb_save_reg(uint8_t reg_id, uint16_t value) {
 }
 
 void __rockclimb_init(void) {
-#ifdef __MSP430__
     /* Stop watchdog timer */
     WDTCTL = WDTPW | WDTHOLD;
 
     /* Check if this is a fresh boot or recovery */
     if (__nvm_region_id == 0xFFFF) {
-        /* Fresh boot - FRAM/Flash erased state is typically 0xFFFF */
+        /* Fresh boot - FRAM erased state is 0xFFFF */
         __nvm_region_id = 0;
         __nvm_pc = 0;
         __nvm_sp = 0;
@@ -119,18 +99,6 @@ void __rockclimb_init(void) {
 
     /* Configure unused GPIO to reduce power consumption */
     /* (Specific configuration depends on hardware) */
-
-#else
-    /* Non-MSP430 initialization */
-    if (__nvm_region_id == 0xFFFF || __nvm_region_id == 0) {
-        __nvm_region_id = 0;
-        __nvm_pc = 0;
-        __nvm_sp = 0;
-        for (uint8_t i = 0; i < ROCKCLIMB_MAX_REGS; i++) {
-            __nvm_regs[i] = 0;
-        }
-    }
-#endif
 }
 
 uint16_t __rockclimb_is_recovery(void) {
@@ -139,7 +107,6 @@ uint16_t __rockclimb_is_recovery(void) {
 }
 
 void __rockclimb_recover(void) {
-#ifdef __MSP430__
     /*
      * Recovery sequence:
      * 1. Restore stack pointer
@@ -197,27 +164,21 @@ void __rockclimb_recover(void) {
 
     /* Should never reach here */
     while(1);
-#else
-    /* Non-MSP430 stub - just loop forever */
-    while(1);
-#endif
 }
 
 /* ============================================================================
  * Interrupt Service Routines
  * ============================================================================ */
 
-#ifdef __MSP430__
 /*
- * Comparator_A interrupt handler.
+ * Comp_E interrupt handler.
  * Wakes CPU from LPM when voltage rises above threshold.
  */
-#pragma vector=COMPARATORA_VECTOR
+#pragma vector=COMP_E_VECTOR
 __interrupt void comparator_isr(void) {
     /* Clear interrupt flag */
-    CACTL1 &= ~CAIFG;
+    CEINT &= ~CEIFG;
 
     /* Exit LPM4 on return from interrupt */
     __bic_SR_register_on_exit(LPM4_bits);
 }
-#endif
