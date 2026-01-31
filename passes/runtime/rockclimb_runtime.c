@@ -47,7 +47,7 @@ void __rockclimb_check(void) {
      */
 
     /* Setup: Configure Comp_E to compare external input against internal reference */
-    CECTL0 = CEIPEN | CEIPSEL_0;         /* Enable input on CE0 (P1.2) */
+    CECTL0 = CEIPEN | CEIPSEL_0;         /* Enable input on CE0 (P1.0) */
     CECTL1 = CEPWRMD_1;                  /* Normal power mode */
     CECTL2 = CEREFL_2 | CERS_2 | CERSEL; /* Vref=2.0V, to minus terminal */
     CECTL3 = CEPD0;                      /* Disable input buffer on CE0 */
