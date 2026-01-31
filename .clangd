@@ -6,3 +6,17 @@ CompileFlags:
   Remove:
     # Remove flags that clangd doesn't understand
     - "-fno-lifetime-dse"
+
+---
+# Suppress false-positive errors in MSP430 cross-compiled files
+# (macOS clang doesn't have MSP430 support)
+If:
+  PathMatch: passes/runtime/rockclimb_.*\.c
+Diagnostics:
+  Suppress: ['*']
+
+---
+If:
+  PathMatch: passes/runtime/rockclimb_.*\.h
+Diagnostics:
+  Suppress: ['*']
