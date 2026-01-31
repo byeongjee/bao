@@ -11,7 +11,12 @@
 #   --debug          Enable DEBUG output via UART
 #   --compile-only   Compile but don't flash
 #   --flash-only     Flash existing binary
-#   -o <output>      Output base name (default: input filename)
+#   -o <output>      Output base name (default: build/<input>)
+#   -c <config>      RockClimb config JSON (default: tests/rockclimb_config.json)
+#   -O <level>       LLC optimization level (default: 2 for none, 0 for rockclimb)
+#   -I <dir>         Add include directory (can be repeated)
+#   --analyze        Show NVM symbols and section analysis
+#   --verbose        Show detailed pass output
 #   -h, --help       Show this help message
 #
 
@@ -36,6 +41,7 @@ LLC="${LLVM_DIR:+$LLVM_DIR/bin/}llc"
 # GCC tools
 GCC="msp430-elf-gcc"
 SIZE="msp430-elf-size"
+OBJDUMP="msp430-elf-objdump"
 
 # Defaults
 MODE="none"
@@ -43,7 +49,11 @@ MEMORY_CKPT="false"
 DEBUG_MODE="false"
 COMPILE_ONLY="false"
 FLASH_ONLY="false"
+VERBOSE="false"
+ANALYZE="false"
 OUTPUT=""
+OPT_LEVEL=""
+EXTRA_INCLUDES=""
 DEVICE="MSP430FR5994"
 BUILD_DIR="$PROJECT_DIR/build"
 
@@ -51,7 +61,7 @@ ROCKCLIMB_PASS="$PROJECT_DIR/passes/build/CheckpointPass.so"
 ROCKCLIMB_CONFIG="$PROJECT_DIR/tests/rockclimb_config.json"
 ROCKCLIMB_STUBS="$PROJECT_DIR/passes/runtime/rockclimb_stubs.c"
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
 
@@ -63,7 +73,12 @@ while [[ $# -gt 0 ]]; do
         --debug) DEBUG_MODE="true"; shift ;;
         --compile-only) COMPILE_ONLY="true"; shift ;;
         --flash-only) FLASH_ONLY="true"; shift ;;
+        --verbose) VERBOSE="true"; shift ;;
+        --analyze) ANALYZE="true"; shift ;;
         -o) OUTPUT="$2"; shift 2 ;;
+        -c) ROCKCLIMB_CONFIG="$2"; shift 2 ;;
+        -O) OPT_LEVEL="$2"; shift 2 ;;
+        -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) error "Unknown option: $1" ;;
         *) INPUT="$1"; shift ;;
@@ -76,7 +91,10 @@ done
 
 # Output name
 [[ -z "$OUTPUT" ]] && OUTPUT="$BUILD_DIR/$(basename "${INPUT:-.}" .c)"
-mkdir -p "$BUILD_DIR"
+mkdir -p "$(dirname "$OUTPUT")"
+
+# Default optimization levels
+[[ -z "$OPT_LEVEL" ]] && { [[ "$MODE" == "none" ]] && OPT_LEVEL="2" || OPT_LEVEL="0"; }
 
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
@@ -93,11 +111,12 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             # C to LLVM IR
             CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O2 -D__MSP430FR5994__"
             CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
+            CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
             [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"
             $CLANG $CLANG_FLAGS "$INPUT" -o "$TMP_DIR/input.ll"
 
             # LLVM IR to assembly
-            $LLC -march=msp430 -O2 "$TMP_DIR/input.ll" -o "$TMP_DIR/output.s"
+            $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/input.ll" -o "$TMP_DIR/output.s"
 
             # Assemble and link with GCC
             $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
@@ -110,23 +129,30 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
         rockclimb)
             info "Compiling with RockClimb..."
             [[ ! -f "$ROCKCLIMB_PASS" ]] && error "Pass not found: $ROCKCLIMB_PASS"
+            [[ ! -f "$ROCKCLIMB_CONFIG" ]] && error "Config not found: $ROCKCLIMB_CONFIG"
 
             # C to LLVM IR
             CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O0 -Xclang -disable-O0-optnone -D__MSP430FR5994__"
             CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
+            CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
             [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"
             $CLANG $CLANG_FLAGS "$INPUT" -o "$TMP_DIR/input.ll"
 
             # RockClimb pass
-            $OPT -load-pass-plugin="$ROCKCLIMB_PASS" \
+            PASS_OUTPUT=$($OPT -load-pass-plugin="$ROCKCLIMB_PASS" \
                 -passes=rockclimb \
                 -rockclimb-config="$ROCKCLIMB_CONFIG" \
                 -rockclimb-memory-ckpt="$MEMORY_CKPT" \
-                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" 2>&1 | \
-                grep -E "^(Region|Memory|Inserted|===)" | head -10
+                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" 2>&1)
+
+            if [[ "$VERBOSE" == "true" ]]; then
+                echo "$PASS_OUTPUT"
+            else
+                echo "$PASS_OUTPUT" | grep -E "^(Region|Memory|Inserted|===)" | head -10
+            fi
 
             # LLVM IR to assembly
-            $LLC -march=msp430 -O0 "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
+            $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
 
             # Assemble with GCC
             $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
@@ -141,10 +167,23 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 "$TMP_DIR/ckpt.o" "$TMP_DIR/stubs.o" -o "${OUTPUT}.elf"
 
             cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+
+            # Analysis
+            if [[ "$ANALYZE" == "true" ]]; then
+                echo ""
+                info "=== Analysis ==="
+                echo "NVM Symbols:"
+                $OBJDUMP -t "$TMP_DIR/ckpt.o" 2>/dev/null | grep -E "__nvm" | while read line; do
+                    echo "  $line"
+                done
+                echo ""
+                echo "External Dependencies:"
+                $OBJDUMP -t "$TMP_DIR/ckpt.o" 2>/dev/null | grep "\*UND\*" | awk '{print "  " $NF}'
+            fi
             ;;
 
         *)
-            error "Unknown mode: $MODE"
+            error "Unknown mode: $MODE (use: none, rockclimb)"
             ;;
     esac
 
