@@ -13,7 +13,8 @@
 #   --flash-only     Flash existing binary
 #   -o <output>      Output base name (default: build/<input>)
 #   -c <config>      RockClimb config JSON (default: tests/rockclimb_config.json)
-#   -O <level>       LLC optimization level (default: 2 for none, 0 for rockclimb)
+#   -O <level>       LLC optimization level (default: 2)
+#   -Oc <level>      Clang optimization level (default: 2)
 #   -I <dir>         Add include directory (can be repeated)
 #   --analyze        Show NVM symbols and section analysis
 #   --verbose        Show detailed pass output
@@ -53,6 +54,7 @@ VERBOSE="false"
 ANALYZE="false"
 OUTPUT=""
 OPT_LEVEL=""
+CLANG_OPT_LEVEL=""
 EXTRA_INCLUDES=""
 DEVICE="MSP430FR5994"
 BUILD_DIR="$PROJECT_DIR/build"
@@ -61,7 +63,7 @@ ROCKCLIMB_PASS="$PROJECT_DIR/passes/build/CheckpointPass.so"
 ROCKCLIMB_CONFIG="$PROJECT_DIR/tests/rockclimb_config.json"
 ROCKCLIMB_STUBS="$PROJECT_DIR/passes/runtime/rockclimb_stubs.c"
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,23p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
 
@@ -78,6 +80,7 @@ while [[ $# -gt 0 ]]; do
         -o) OUTPUT="$2"; shift 2 ;;
         -c) ROCKCLIMB_CONFIG="$2"; shift 2 ;;
         -O) OPT_LEVEL="$2"; shift 2 ;;
+        -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) error "Unknown option: $1" ;;
@@ -94,7 +97,8 @@ done
 mkdir -p "$(dirname "$OUTPUT")"
 
 # Default optimization levels
-[[ -z "$OPT_LEVEL" ]] && { [[ "$MODE" == "none" ]] && OPT_LEVEL="2" || OPT_LEVEL="0"; }
+[[ -z "$OPT_LEVEL" ]] && OPT_LEVEL="2"
+[[ -z "$CLANG_OPT_LEVEL" ]] && CLANG_OPT_LEVEL="2"
 
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
@@ -109,7 +113,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             info "Compiling without checkpointing (via LLVM)..."
 
             # C to LLVM IR
-            CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O2 -D__MSP430FR5994__"
+            CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
             CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
             CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
             [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"
@@ -132,7 +136,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             [[ ! -f "$ROCKCLIMB_CONFIG" ]] && error "Config not found: $ROCKCLIMB_CONFIG"
 
             # C to LLVM IR
-            CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O0 -Xclang -disable-O0-optnone -D__MSP430FR5994__"
+            CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
+            [[ "$CLANG_OPT_LEVEL" == "0" ]] && CLANG_FLAGS="$CLANG_FLAGS -Xclang -disable-O0-optnone"
             CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
             CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
             [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"

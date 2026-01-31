@@ -14,3 +14,10 @@ uint32_t __nvm_region_id = 0;
 void __rockclimb_check(void) {
     /* Under constant power, just return immediately */
 }
+
+/* Register save stub - does nothing under constant power */
+void __rockclimb_save_reg(int reg_id, int value) {
+    /* Under constant power, skip register checkpointing */
+    (void)reg_id;
+    (void)value;
+}
