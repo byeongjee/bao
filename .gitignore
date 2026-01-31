@@ -18,3 +18,11 @@ tmp/
 
 # Test output directories
 tests/dwarf-validation/output/
+
+# Editor/IDE
+.vscode/
+
+# Claude Code / OMC
+.claude/
+.omc/
+.envrc
