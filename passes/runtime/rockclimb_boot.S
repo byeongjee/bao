@@ -112,8 +112,7 @@ _normal_boot:
     mov.w   #0, &__nvm_pc
     mov.w   #0, &__nvm_sp
 
-    /* Return to continue normal startup sequence */
-    ret
+    /* Fall through to next CRT section (do NOT use ret here) */
 
     .size   _rockclimb_boot, .-_rockclimb_boot
 
