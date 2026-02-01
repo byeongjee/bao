@@ -106,6 +106,10 @@ llvmGetPassPluginInfo() {
                         FPM.addPass(checkpoint::CheckpointPass());
                         return true;
                     }
+                    if (Name == "milp") {
+                        FPM.addPass(checkpoint::CheckpointPass());
+                        return true;
+                    }
                     if (Name == "checkpoint-analysis") {
                         FPM.addPass(checkpoint::CheckpointAnalysisPass());
                         return true;
