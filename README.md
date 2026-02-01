@@ -84,11 +84,13 @@ clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
 
 ```bash
 opt -load-pass-plugin=./CheckpointPass.so \
-    -passes=checkpoint \
+    -passes=milp \
     -energy-config=./benchmarks/sample_ir_energy_config.json \
-    -checkpoint-function=__checkpoint \
+    -checkpoint-function=__milp_checkpoint \
     -S input.ll -o instrumented.ll
 ```
+
+> **Note:** `-passes=checkpoint` is still supported; `-passes=milp` is a clearer alias for the MILP-based pass.
 
 ### Command-line Options
 
@@ -99,13 +101,17 @@ opt -load-pass-plugin=./CheckpointPass.so \
 
 ### 3. Link with checkpoint implementation
 
-The pass inserts calls to `void __checkpoint(const char* block_name)`. Provide your own implementation:
+The pass inserts calls to a checkpoint function with signature `void fn(const char* block_name)`.
+
+For MILP mode, the recommended symbol name is `__milp_checkpoint` (and the repo also provides embedded runtime stubs under `passes/runtime/`).
+
+Provide your own implementation:
 
 ```c
 // checkpoint_impl.c
 #include <stdio.h>
 
-void __checkpoint(const char* block_name) {
+void __milp_checkpoint(const char* block_name) {
     // Save program state here
     printf("Checkpoint at: %s\n", block_name);
 }
@@ -137,12 +143,13 @@ clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone test.c -o test.ll
 
 # Run checkpoint insertion
 opt -load-pass-plugin=./passes/build/CheckpointPass.so \
-    -passes=checkpoint \
+    -passes=milp \
     -energy-config=./benchmarks/sample_ir_energy_config.json \
+    -checkpoint-function=__milp_checkpoint \
     -S test.ll -o instrumented.ll
 
 # View inserted checkpoints
-grep "__checkpoint" instrumented.ll
+grep "__milp_checkpoint" instrumented.ll
 ```
 
 ## Energy Model
