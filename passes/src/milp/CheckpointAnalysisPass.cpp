@@ -148,5 +148,4 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
 } // namespace checkpoint
 
 // Plugin registration - extends the existing registration
-// Note: This file should be compiled together with CheckpointPass.cpp
-// The plugin registration in CheckpointPass.cpp will be updated to include both passes
+// Note: Plugin registration is in src/common/PassRegistry.cpp

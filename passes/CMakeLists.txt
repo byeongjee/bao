@@ -53,7 +53,7 @@ add_library(CheckpointPass MODULE
     src/estimator/IRBasedEstimator.cpp
     src/estimator/EnergyEstimatorFactory.cpp
     # MILP checkpoint insertion
-    src/milp/CheckpointPass.cpp
+    src/milp/MILPCheckpointPass.cpp
     src/milp/CheckpointOptimizer.cpp
     src/milp/CheckpointInstrumenter.cpp
     src/milp/CheckpointAnalysisPass.cpp

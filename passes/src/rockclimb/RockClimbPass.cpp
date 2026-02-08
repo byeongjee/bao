@@ -294,5 +294,5 @@ PreservedAnalyses RockClimbPass::run(Function &F,
 
 } // namespace checkpoint
 
-// Note: Plugin registration is done in CheckpointPass.cpp
+// Note: Plugin registration is in src/common/PassRegistry.cpp
 // This file just provides the pass implementation

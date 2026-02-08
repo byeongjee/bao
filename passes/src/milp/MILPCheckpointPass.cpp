@@ -1,4 +1,4 @@
-#include "milp/CheckpointPass.h"
+#include "milp/MILPCheckpointPass.h"
 #include "common/CFGAnalysis.h"
 #include "milp/CheckpointContext.h"
 #include "milp/CheckpointInstrumenter.h"
@@ -23,7 +23,7 @@ static cl::opt<std::string> CheckpointFnOpt(
 
 namespace checkpoint {
 
-PreservedAnalyses CheckpointPass::run(Function &F,
+PreservedAnalyses MILPCheckpointPass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
     // Create checkpoint context (validates config, creates estimator and CFG)
     auto &LI = AM.getResult<LoopAnalysis>(F);
