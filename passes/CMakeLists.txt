@@ -47,6 +47,7 @@ add_library(CheckpointPass MODULE
     # Common utilities
     src/common/CFGAnalysis.cpp
     src/common/LoopTripCount.cpp
+    src/common/PassRegistry.cpp
     # Energy estimators
     src/estimator/AssemblyBasedEstimator.cpp
     src/estimator/IRBasedEstimator.cpp

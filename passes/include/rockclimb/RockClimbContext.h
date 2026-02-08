@@ -1,16 +1,9 @@
 #ifndef ROCKCLIMB_CONTEXT_H
 #define ROCKCLIMB_CONTEXT_H
 
-#include "common/CFGAnalysis.h"
-#include "estimator/EnergyEstimator.h"
-#include "estimator/EnergyEstimatorFactory.h"
+#include "common/BaseContext.h"
 
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/IR/Function.h"
 #include "llvm/Support/raw_ostream.h"
-
-#include <memory>
-#include <string>
 
 namespace checkpoint {
 
@@ -38,12 +31,8 @@ struct RockClimbParams {
 };
 
 /// Context for RockClimb pass.
-/// Encapsulates energy estimator, CFG analysis, and RockClimb parameters.
-struct RockClimbContext {
-    std::unique_ptr<EnergyEstimator> estimator;
-    std::unique_ptr<CFGAnalysis> cfg;
-    llvm::LoopInfo *loopInfo;
-    double capacity;           // From energy config (same as MILP)
+/// Extends BaseContext with RockClimb-specific parameters.
+struct RockClimbContext : public BaseContext {
     RockClimbParams params;    // RockClimb-specific parameters
     double E_safe;             // Calculated safe energy
 
@@ -52,10 +41,7 @@ struct RockClimbContext {
                      llvm::LoopInfo *li,
                      double cap,
                      const RockClimbParams &p)
-        : estimator(std::move(est)),
-          cfg(std::move(cfgAnalysis)),
-          loopInfo(li),
-          capacity(cap),
+        : BaseContext(std::move(est), std::move(cfgAnalysis), li, cap),
           params(p),
           E_safe(p.calculateESafe()) {}
 
@@ -67,34 +53,7 @@ struct RockClimbContext {
 };
 
 /// Result type for RockClimb context creation.
-struct RockClimbContextResult {
-    enum class Status {
-        Success,
-        MissingConfig,
-        EstimatorFailed,
-        InvalidParams,
-        IsDeclaration
-    };
-
-    Status status;
-    std::unique_ptr<RockClimbContext> context;
-    std::string errorMessage;
-
-    bool success() const { return status == Status::Success; }
-    bool shouldSkip() const { return status == Status::IsDeclaration; }
-
-    static RockClimbContextResult ok(std::unique_ptr<RockClimbContext> ctx) {
-        return {Status::Success, std::move(ctx), ""};
-    }
-
-    static RockClimbContextResult error(Status s, const std::string &msg) {
-        return {s, nullptr, msg};
-    }
-
-    static RockClimbContextResult skip() {
-        return {Status::IsDeclaration, nullptr, ""};
-    }
-};
+using RockClimbContextResult = ContextResult<RockClimbContext>;
 
 /// Parse RockClimb parameters from JSON config file.
 /// @param configPath Path to JSON config file.
@@ -108,26 +67,31 @@ inline RockClimbContextResult createRockClimbContext(
     llvm::LoopInfo &LI,
     llvm::StringRef configPath) {
 
-    // Validate required config
-    if (configPath.empty()) {
-        return RockClimbContextResult::error(
-            RockClimbContextResult::Status::MissingConfig,
-            "Error: -rockclimb-config is required for rockclimb pass\n");
+    // Use createBaseContext for common setup
+    auto baseResult = createBaseContext(F, LI, configPath, "rockclimb pass");
+
+    if (!baseResult.success()) {
+        // Propagate error/skip with matching status
+        if (baseResult.shouldSkip()) {
+            return RockClimbContextResult::skip();
+        }
+        // Map BaseContext status to RockClimbContext status
+        RockClimbContextResult::Status s;
+        switch (baseResult.status) {
+        case ContextResult<BaseContext>::Status::MissingConfig:
+            s = RockClimbContextResult::Status::MissingConfig;
+            break;
+        case ContextResult<BaseContext>::Status::EstimatorFailed:
+            s = RockClimbContextResult::Status::EstimatorFailed;
+            break;
+        default:
+            s = RockClimbContextResult::Status::EstimatorFailed;
+            break;
+        }
+        return RockClimbContextResult::error(s, baseResult.errorMessage);
     }
 
-    // Create energy estimator from config using default factory
-    auto factory = EnergyEstimatorFactory::createDefault();
-    auto estimator = factory.createFromConfig(configPath.str());
-    if (!estimator) {
-        return RockClimbContextResult::error(
-            RockClimbContextResult::Status::EstimatorFailed,
-            "Failed to create energy estimator\n");
-    }
-
-    // Skip declarations
-    if (F.isDeclaration()) {
-        return RockClimbContextResult::skip();
-    }
+    auto &base = *baseResult.context;
 
     // Skip generated restore functions (from memory checkpointing)
     if (F.getName().starts_with("__restore_boundary_")) {
@@ -138,20 +102,12 @@ inline RockClimbContextResult createRockClimbContext(
     RockClimbParams params;
     if (!parseRockClimbParams(configPath, params)) {
         // Use defaults if no rockclimb_parameters section
-        // This allows using existing configs with default RockClimb params
         llvm::errs() << "Warning: No rockclimb_parameters in config, using defaults\n";
     }
 
-    double capacity = estimator->getCapacity();
-
-    // Prepare estimator for this function
-    estimator->prepareForFunction(F);
-
-    // Create CFG analysis
-    auto cfg = std::make_unique<CFGAnalysis>(F, LI, *estimator);
-
     return RockClimbContextResult::ok(std::make_unique<RockClimbContext>(
-        std::move(estimator), std::move(cfg), &LI, capacity, params));
+        std::move(base.estimator), std::move(base.cfg),
+        base.loopInfo, base.capacity, params));
 }
 
 } // namespace checkpoint

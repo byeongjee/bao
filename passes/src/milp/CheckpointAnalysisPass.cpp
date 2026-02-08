@@ -14,7 +14,7 @@
 
 using namespace llvm;
 
-// Reference the energy config option from CheckpointPass.cpp
+// Defined in src/common/PassRegistry.cpp
 extern cl::opt<std::string> EnergyConfigOpt;
 
 namespace {
