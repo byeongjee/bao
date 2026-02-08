@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Checkpoint Insertion Script
-# Compiles C files and runs the MILP-based checkpoint insertion pass
+# Compiles C files and runs the MILP checkpoint insertion pipeline
 #
 
 set -e
@@ -25,6 +25,7 @@ fi
 
 PASS_LIB="${SCRIPT_DIR}/passes/build/CheckpointPass.so"
 DEFAULT_CONFIG="${SCRIPT_DIR}/benchmarks/sample_ir_energy_config.json"
+DEFAULT_MILP_CONFIG="${SCRIPT_DIR}/benchmarks/sample_milp_config.json"
 TMP_DIR="${SCRIPT_DIR}/tmp"
 
 # Colors for output
@@ -37,11 +38,12 @@ usage() {
     cat << EOF
 Usage: $(basename "$0") [OPTIONS] <input.c>
 
-Compile a C file and insert checkpoints using MILP optimization.
+Compile a C file and run checkpoint insertion using the MILP algorithm.
 
 OPTIONS:
     -o, --output <file>     Output file (default: tmp/<input>_checkpointed.ll)
     -c, --config <file>     Energy config JSON file (default: benchmarks/sample_ir_energy_config.json)
+    -m, --milp-config <file> MILP config JSON file (default: benchmarks/sample_milp_config.json)
     -O, --opt-level <N>     Optimization level: 0, 1, 2, 3 (default: 3)
     -u, --unroll            Enable aggressive loop unrolling before checkpoint insertion
     -I, --include <dir>     Add include directory for compilation
@@ -52,7 +54,7 @@ OPTIONS:
 EXAMPLES:
     $(basename "$0") test.c
     $(basename "$0") -O3 -u -o output.ll test.c
-    $(basename "$0") -c custom_config.json -I ./include test.c
+    $(basename "$0") -c custom_energy.json -m custom_milp.json -I ./include test.c
 
 EOF
     exit 1
@@ -74,6 +76,7 @@ error() {
 # Default values
 OUTPUT=""
 CONFIG="${DEFAULT_CONFIG}"
+MILP_CONFIG="${DEFAULT_MILP_CONFIG}"
 OPT_LEVEL="3"
 UNROLL=false
 INCLUDES=()
@@ -89,6 +92,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -c|--config)
             CONFIG="$2"
+            shift 2
+            ;;
+        -m|--milp-config)
+            MILP_CONFIG="$2"
             shift 2
             ;;
         -O|--opt-level)
@@ -141,6 +148,10 @@ if [[ ! -f "${CONFIG}" ]]; then
     error "Energy config not found: ${CONFIG}"
 fi
 
+if [[ ! -f "${MILP_CONFIG}" ]]; then
+    error "MILP config not found: ${MILP_CONFIG}"
+fi
+
 # Ensure tmp directory exists
 mkdir -p "${TMP_DIR}"
 
@@ -177,7 +188,7 @@ fi
 "${CLANG}" "${CLANG_FLAGS[@]}" "${INPUT}" -o "${IR_FILE}" 2>&1
 
 if [[ "${VERBOSE}" == true ]]; then
-    BLOCK_COUNT=$(grep -c '^[0-9a-zA-Z_]*:' "${IR_FILE}" 2>/dev/null || echo "0")
+    BLOCK_COUNT=$(grep -c '^[0-9a-zA-Z_]*:' "${IR_FILE}" 2>/dev/null || true)
     log "Generated IR with ${BLOCK_COUNT} basic blocks"
 fi
 
@@ -185,30 +196,33 @@ fi
 log "Running checkpoint insertion pass"
 if [[ "${VERBOSE}" == true ]]; then
     echo "  Using config: ${CONFIG}"
+    echo "  Using MILP config: ${MILP_CONFIG}"
 fi
 
 "${OPT}" \
     -load-pass-plugin="${PASS_LIB}" \
-    -passes=checkpoint \
+    -passes=checkpoint-insert,milp-validate \
+    -checkpoint-algorithm=milp \
     --energy-config="${CONFIG}" \
+    --milp-config="${MILP_CONFIG}" \
     -S "${IR_FILE}" -o "${OUTPUT}" 2>&1
 
 # Count results
-CHECKPOINT_COUNT=$(grep -c 'call void @__checkpoint' "${OUTPUT}" 2>/dev/null || echo "0")
-BLOCK_COUNT=$(grep -c '^[0-9a-zA-Z_]*:' "${OUTPUT}" 2>/dev/null || echo "0")
+BLOCK_COUNT=$(grep -c '^[0-9a-zA-Z_]*:' "${OUTPUT}" 2>/dev/null || true)
+REGION_METADATA_COUNT=$(grep -c 'milp.region.starts' "${OUTPUT}" 2>/dev/null || true)
 
-log "Done! Inserted ${CHECKPOINT_COUNT} checkpoint(s)"
+log "Done! MILP pipeline completed (with validation)"
 log "Output: ${OUTPUT}"
 
 if [[ "${VERBOSE}" == true ]]; then
     echo ""
     echo "=== Summary ==="
     echo "  Basic blocks:  ${BLOCK_COUNT}"
-    echo "  Checkpoints:   ${CHECKPOINT_COUNT}"
+    echo "  Region metadata entries: ${REGION_METADATA_COUNT}"
     echo "  File size:     $(wc -c < "${OUTPUT}" | tr -d ' ') bytes"
     echo ""
-    echo "=== Checkpoint locations ==="
-    grep "checkpoint_name" "${OUTPUT}" | grep "constant" | sed 's/.*c"\([^\\]*\).*/  \1/'
+    echo "=== Region metadata ==="
+    grep "milp.region.starts" "${OUTPUT}" || true
 fi
 
 # Cleanup intermediate files

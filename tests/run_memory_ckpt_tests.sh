@@ -25,6 +25,7 @@ fi
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 CONFIG="$SCRIPT_DIR/rockclimb_config.json"
+INCLUDE_DIR="$PROJECT_DIR/passes/include"
 
 # Ensure tmp directory exists
 mkdir -p "$TMP_DIR"
@@ -81,7 +82,8 @@ for test_entry in "${TESTS[@]}"; do
 
     # Compile C to LLVM IR
     echo "  Compiling to IR..."
-    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone "$test_file" -o "$ll_file" 2>/dev/null
+    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+        -I"$INCLUDE_DIR" "$test_file" -o "$ll_file" 2>/dev/null
 
     # Run RockClimb pass with memory checkpointing enabled
     echo "  Running RockClimb pass with memory checkpointing..."
@@ -146,7 +148,8 @@ if [ -f "$test_file" ]; then
     echo ""
 
     # Compile
-    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone "$test_file" -o "$ll_file" 2>/dev/null
+    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+        -I"$INCLUDE_DIR" "$test_file" -o "$ll_file" 2>/dev/null
 
     echo -e "${CYAN}--- Without Memory Checkpointing ---${NC}"
     "$OPT" -load-pass-plugin="$PASS_LIB" \

@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "milp_parameters": {
+    "energy_budget_nJ": 500000.0,
+    "region_prologue_overhead_nJ": 2000.0,
+    "region_epilogue_overhead_nJ": 2000.0,
+    "vm_capacity_bytes": 2048,
+    "save_register_to_nvm_nJ": 800.0,
+    "restore_register_from_nvm_nJ": 700.0,
+    "save_object_to_nvm_per_byte_nJ": 20.0,
+    "restore_object_from_nvm_per_byte_nJ": 20.0,
+    "nvm_load_penalty_per_byte_nJ": 5.0,
+    "nvm_store_penalty_per_byte_nJ": 10.0,
+    "boundary_reboot_probability": 1.0,
+    "default_loop_bound": 2,
+    "solver_time_limit_sec": 30,
+    "solver_mip_gap": 0.01,
+    "forbidden_boundary_blocks": []
+  }
+}

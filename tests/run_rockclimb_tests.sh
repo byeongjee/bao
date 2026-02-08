@@ -25,6 +25,7 @@ fi
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 CONFIG="$SCRIPT_DIR/rockclimb_config.json"
+MILP_CONFIG="$PROJECT_DIR/benchmarks/sample_milp_config.json"
 
 # Ensure tmp directory exists
 mkdir -p "$TMP_DIR"
@@ -128,8 +129,9 @@ if [ -f "$test_file" ]; then
 
     echo -e "${CYAN}--- MILP Pass ---${NC}"
     "$OPT" -load-pass-plugin="$PASS_LIB" \
-          -passes=checkpoint \
+          -passes=milp \
           -energy-config="$SCRIPT_DIR/simple_config.json" \
+          -milp-config="$MILP_CONFIG" \
           "$ll_file" -S -o /dev/null 2>&1 || true
 
     echo ""

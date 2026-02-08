@@ -48,15 +48,18 @@ add_library(CheckpointPass MODULE
     src/IRBasedEstimator.cpp
     src/EnergyEstimatorFactory.cpp
     src/CFGAnalysis.cpp
-    src/CheckpointOptimizer.cpp
-    src/CheckpointInstrumenter.cpp
-    src/CheckpointPass.cpp
-    src/LoopTripCount.cpp
-    src/MaxCheckpointCounter.cpp
-    src/CheckpointAnalysisPass.cpp
+    src/CheckpointInsertionAlgorithm.cpp
+    src/CheckpointInsertPass.cpp
+    src/MILPPipeline.cpp
+    src/MILPParameters.cpp
+    src/MILPContext.cpp
+    src/MILPModelTypes.cpp
+    src/MILPObjectAnalysis.cpp
+    src/MILPNextPass.cpp
+    src/MILPValidatePass.cpp
     src/RockClimbOptimizer.cpp
-    src/RockClimbInstrumenter.cpp
     src/DistributedCheckpointing.cpp
+    src/RockClimbInstrumenter.cpp
     src/RockClimbPass.cpp
 )
 

@@ -215,8 +215,6 @@ llvm::GlobalVariable* RockClimbInstrumenter::getOrCreateNVMSlot(
         return it->second;
     }
 
-    llvm::LLVMContext &Ctx = M_.getContext();
-
     // Create NVM global variable for this slot
     // Type matches the original memory location's type
     llvm::GlobalVariable *nvmSlot = new llvm::GlobalVariable(

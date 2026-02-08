@@ -1,15 +1,15 @@
 #include "RockClimbPass.h"
 #include "DistributedCheckpointing.h"
+#include "MILPOptions.h"
 #include "RockClimbContext.h"
 #include "RockClimbInstrumenter.h"
 #include "RockClimbOptimizer.h"
 
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Passes/PassBuilder.h"
-#include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/JSON.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -104,12 +104,10 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
 
 PreservedAnalyses RockClimbPass::run(Function &F,
                                       FunctionAnalysisManager &AM) {
-    // Determine config path - try rockclimb-config first, fall back to energy-config
+    // Try rockclimb-specific config first, then the shared energy config.
     std::string configPath = RockClimbConfigOpt;
     if (configPath.empty()) {
-        // Try to use the common energy-config option
-        // This requires declaring it as extern
-        configPath = "";  // Will trigger error in createRockClimbContext
+        configPath = EnergyConfigOpt.getValue();
     }
 
     // Create RockClimb context
@@ -294,5 +292,5 @@ PreservedAnalyses RockClimbPass::run(Function &F,
 
 } // namespace checkpoint
 
-// Note: Plugin registration is done in CheckpointPass.cpp
+// Note: Plugin registration is done in MILPPipeline.cpp
 // This file just provides the pass implementation

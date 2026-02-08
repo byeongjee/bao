@@ -1,11 +1,12 @@
 /**
- * Test case for checkpoint analysis pass.
+ * Test case for loop-bound annotations consumed by checkpoint insertion flows.
  * Compile with: clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
  *               -I../passes/include test_analysis.c -o test_analysis.ll
  * Run with: opt -load-pass-plugin=../passes/build/CheckpointPass.so \
- *               -passes=checkpoint-analysis \
+ *               -passes=checkpoint-insert,milp-validate \
+ *               -checkpoint-algorithm=milp \
  *               -energy-config=simple_config.json \
- *               -analysis-default-bound=2 \
+ *               -milp-config=../benchmarks/sample_milp_config.json \
  *               -S test_analysis.ll -o /dev/null
  */
 

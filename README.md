@@ -1,10 +1,13 @@
-# MILP-based Checkpoint Insertion for LLVM IR
+# Checkpoint Insertion for LLVM IR
 
-An LLVM pass that automatically inserts checkpoints into programs for intermittent computing. The pass uses Mixed-Integer Linear Programming (MILP) to find optimal checkpoint placements that minimize runtime overhead while guaranteeing energy constraints are satisfied.
+This repository provides an LLVM pass plugin for checkpoint insertion under intermittent-power constraints.
 
-## Overview
+The top-level hierarchy is:
+- checkpoint insertion interface pass (`checkpoint-insert`),
+- multiple algorithms under that interface (`milp`, `rockclimb`, and future additions).
 
-This tool analyzes LLVM IR, builds a control flow graph with energy cost estimates, solves an optimization problem to determine where checkpoints should be placed, and instruments the IR with checkpoint function calls.
+`milp` is our main algorithm and uses a separate MILP parameter config.
+`rockclimb` is kept as the baseline implementation.
 
 ## Requirements
 
@@ -20,25 +23,18 @@ checkpoint-insertion/
 ├── passes/                    # C++ LLVM pass implementation
 │   ├── CMakeLists.txt
 │   └── include/
-│   ├── include/
-│   │   ├── EnergyEstimator.h       # Abstract energy estimation interface
-│   │   ├── IRBasedEstimator.h      # IR-based energy estimator
-│   │   ├── EnergyEstimatorFactory.h # Factory for creating estimators
-│   │   ├── CFGAnalysis.h           # CFG construction with loop info
-│   │   ├── CheckpointOptimizer.h   # Gurobi MILP solver
-│   │   ├── CheckpointPass.h        # Main LLVM pass
-│   │   ├── CheckpointAnalysisPass.h # Analysis pass
-│   │   ├── LoopTripCount.h         # Loop bound extraction
-│   │   └── MaxCheckpointCounter.h  # Path checkpoint counting
+│       ├── CheckpointInsertPass.h      # Interface/dispatcher pass
+│       ├── CheckpointInsertionAlgorithm.h
+│       ├── MILPNextPass.h              # `milp` algorithm pass
+│       ├── MILPValidatePass.h          # Post-pass energy validator
+│       └── RockClimbPass.h             # `rockclimb` baseline pass
 │   └── src/
-│       ├── IRBasedEstimator.cpp
-│       ├── EnergyEstimatorFactory.cpp
-│       ├── CFGAnalysis.cpp
-│       ├── CheckpointOptimizer.cpp
-│       ├── CheckpointPass.cpp
-│       ├── CheckpointAnalysisPass.cpp
-│       ├── LoopTripCount.cpp
-│       └── MaxCheckpointCounter.cpp
+│       ├── MILPPipeline.cpp            # pass registration
+│       ├── CheckpointInsertPass.cpp
+│       ├── CheckpointInsertionAlgorithm.cpp
+│       ├── MILPNextPass.cpp
+│       ├── MILPValidatePass.cpp
+│       └── RockClimbPass.cpp
 ├── tests/                     # Test suite
 │   ├── run_tests.sh
 │   └── *.c                    # Test cases
@@ -80,48 +76,57 @@ clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
 
 > **Note:** The `-Xclang -disable-O0-optnone` flag is required to allow optimization passes to run on `-O0` compiled code.
 
-### 2. Run the checkpoint pass
+### 2. Run via Interface Dispatcher
 
 ```bash
-opt -load-pass-plugin=./CheckpointPass.so \
-    -passes=milp \
+opt -load-pass-plugin=./passes/build/CheckpointPass.so \
+    -passes=checkpoint-insert \
+    -checkpoint-algorithm=milp \
     -energy-config=./benchmarks/sample_ir_energy_config.json \
-    -checkpoint-function=__milp_checkpoint \
+    -milp-config=./benchmarks/sample_milp_config.json \
     -S input.ll -o instrumented.ll
 ```
 
-> **Note:** `-passes=checkpoint` is still supported; `-passes=milp` is a clearer alias for the MILP-based pass.
+### 3. Run Algorithm Directly
 
-### Command-line Options
+MILP:
+```bash
+opt -load-pass-plugin=./passes/build/CheckpointPass.so \
+    -passes=milp \
+    -energy-config=./benchmarks/sample_ir_energy_config.json \
+    -milp-config=./benchmarks/sample_milp_config.json \
+    -S input.ll -o instrumented.ll
+```
+
+RockClimb:
+```bash
+opt -load-pass-plugin=./passes/build/CheckpointPass.so \
+    -passes=rockclimb \
+    -energy-config=./tests/rockclimb_config.json \
+    -S input.ll -o instrumented.ll
+```
+
+### 4. Run Post-pass Validation (MILP)
+
+```bash
+opt -load-pass-plugin=./passes/build/CheckpointPass.so \
+    -passes=milp,milp-validate \
+    -energy-config=./benchmarks/sample_ir_energy_config.json \
+    -milp-config=./benchmarks/sample_milp_config.json \
+    -S input.ll -o /dev/null
+```
+
+### Command-line Options (Core)
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-energy-config=<path>` | Path to JSON energy configuration file | (required) |
-| `-checkpoint-function=<name>` | Name of checkpoint function to call | `__checkpoint` |
-
-### 3. Link with checkpoint implementation
-
-The pass inserts calls to a checkpoint function with signature `void fn(const char* block_name)`.
-
-For MILP mode, the recommended symbol name is `__milp_checkpoint` (and the repo also provides embedded runtime stubs under `passes/runtime/`).
-
-Provide your own implementation:
-
-```c
-// checkpoint_impl.c
-#include <stdio.h>
-
-void __milp_checkpoint(const char* block_name) {
-    // Save program state here
-    printf("Checkpoint at: %s\n", block_name);
-}
-```
-
-Compile and link:
-
-```bash
-clang instrumented.ll checkpoint_impl.c -o program
-```
+| `-passes=checkpoint-insert` | Interface dispatcher pass | n/a |
+| `-checkpoint-algorithm=<name>` | Algorithm for dispatcher (`milp` or `rockclimb`) | `milp` |
+| `-passes=milp` | Run MILP algorithm directly | n/a |
+| `-passes=rockclimb` | Run RockClimb algorithm directly | n/a |
+| `-passes=milp-validate` | Validate MILP region energy safety metadata | n/a |
+| `-energy-config=<path>` | Energy-estimator config path | required for all algorithms |
+| `-milp-config=<path>` | MILP+validator config path | required for `milp` and `milp-validate` |
 
 ## Example
 
@@ -141,15 +146,13 @@ EOF
 # Compile to IR
 clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone test.c -o test.ll
 
-# Run checkpoint insertion
+# Run dispatcher + milp
 opt -load-pass-plugin=./passes/build/CheckpointPass.so \
-    -passes=milp \
+    -passes=checkpoint-insert,milp-validate \
+    -checkpoint-algorithm=milp \
     -energy-config=./benchmarks/sample_ir_energy_config.json \
-    -checkpoint-function=__milp_checkpoint \
-    -S test.ll -o instrumented.ll
-
-# View inserted checkpoints
-grep "__milp_checkpoint" instrumented.ll
+    -milp-config=./benchmarks/sample_milp_config.json \
+    -S test.ll -o /dev/null
 ```
 
 ## Energy Model
@@ -324,6 +327,31 @@ public:
 
 ```bash
 ./tests/run_tests.sh
+```
+
+Interface dispatcher smoke tests:
+
+```bash
+./tests/run_checkpoint_insert_smoke_tests.sh
+```
+
+MILP smoke tests:
+
+```bash
+./tests/run_milp_next_smoke_tests.sh
+```
+
+MILP validation smoke tests:
+
+```bash
+./tests/run_milp_validate_smoke_tests.sh
+```
+
+RockClimb baseline tests:
+
+```bash
+./tests/run_rockclimb_tests.sh
+./tests/run_memory_ckpt_tests.sh
 ```
 
 ## License

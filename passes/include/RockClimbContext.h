@@ -112,7 +112,7 @@ inline RockClimbContextResult createRockClimbContext(
     if (configPath.empty()) {
         return RockClimbContextResult::error(
             RockClimbContextResult::Status::MissingConfig,
-            "Error: -rockclimb-config is required for rockclimb pass\n");
+            "Error: -rockclimb-config or -energy-config is required for rockclimb pass\n");
     }
 
     // Create energy estimator from config using default factory
