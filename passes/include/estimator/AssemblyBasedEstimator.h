@@ -1,6 +1,6 @@
 #pragma once
 
-#include "EnergyEstimator.h"
+#include "estimator/EnergyEstimator.h"
 
 #include <map>
 #include <string>

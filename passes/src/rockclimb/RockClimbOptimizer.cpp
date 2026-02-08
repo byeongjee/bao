@@ -1,5 +1,5 @@
-#include "RockClimbOptimizer.h"
-#include "BlockUtils.h"
+#include "rockclimb/RockClimbOptimizer.h"
+#include "common/BlockUtils.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PostOrderIterator.h"

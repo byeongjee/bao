@@ -44,20 +44,24 @@ include_directories(
 
 # Build as a shared module (not using add_llvm_pass_plugin to avoid linking LLVM)
 add_library(CheckpointPass MODULE
-    src/AssemblyBasedEstimator.cpp
-    src/IRBasedEstimator.cpp
-    src/EnergyEstimatorFactory.cpp
-    src/CFGAnalysis.cpp
-    src/CheckpointOptimizer.cpp
-    src/CheckpointInstrumenter.cpp
-    src/CheckpointPass.cpp
-    src/LoopTripCount.cpp
-    src/MaxCheckpointCounter.cpp
-    src/CheckpointAnalysisPass.cpp
-    src/RockClimbOptimizer.cpp
-    src/RockClimbInstrumenter.cpp
-    src/DistributedCheckpointing.cpp
-    src/RockClimbPass.cpp
+    # Common utilities
+    src/common/CFGAnalysis.cpp
+    src/common/LoopTripCount.cpp
+    # Energy estimators
+    src/estimator/AssemblyBasedEstimator.cpp
+    src/estimator/IRBasedEstimator.cpp
+    src/estimator/EnergyEstimatorFactory.cpp
+    # MILP checkpoint insertion
+    src/milp/CheckpointPass.cpp
+    src/milp/CheckpointOptimizer.cpp
+    src/milp/CheckpointInstrumenter.cpp
+    src/milp/CheckpointAnalysisPass.cpp
+    src/milp/MaxCheckpointCounter.cpp
+    # RockClimb (PFI baseline)
+    src/rockclimb/RockClimbPass.cpp
+    src/rockclimb/RockClimbOptimizer.cpp
+    src/rockclimb/RockClimbInstrumenter.cpp
+    src/rockclimb/DistributedCheckpointing.cpp
 )
 
 # Use C++17 and disable RTTI/exceptions to match LLVM

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RockClimbOptimizer.h"
+#include "rockclimb/RockClimbOptimizer.h"
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"

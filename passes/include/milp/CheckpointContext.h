@@ -1,9 +1,9 @@
 #ifndef CHECKPOINT_CONTEXT_H
 #define CHECKPOINT_CONTEXT_H
 
-#include "CFGAnalysis.h"
-#include "EnergyEstimator.h"
-#include "EnergyEstimatorFactory.h"
+#include "common/CFGAnalysis.h"
+#include "estimator/EnergyEstimator.h"
+#include "estimator/EnergyEstimatorFactory.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CFGAnalysis.h"
+#include "common/CFGAnalysis.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"

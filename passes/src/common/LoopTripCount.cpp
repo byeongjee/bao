@@ -1,4 +1,4 @@
-#include "LoopTripCount.h"
+#include "common/LoopTripCount.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"

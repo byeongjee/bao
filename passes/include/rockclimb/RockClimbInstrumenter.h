@@ -1,6 +1,6 @@
 #pragma once
 
-#include "DistributedCheckpointing.h"
+#include "rockclimb/DistributedCheckpointing.h"
 
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"

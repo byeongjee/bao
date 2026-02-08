@@ -1,8 +1,8 @@
-#include "RockClimbPass.h"
-#include "DistributedCheckpointing.h"
-#include "RockClimbContext.h"
-#include "RockClimbInstrumenter.h"
-#include "RockClimbOptimizer.h"
+#include "rockclimb/RockClimbPass.h"
+#include "rockclimb/DistributedCheckpointing.h"
+#include "rockclimb/RockClimbContext.h"
+#include "rockclimb/RockClimbInstrumenter.h"
+#include "rockclimb/RockClimbOptimizer.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Passes/PassBuilder.h"

@@ -1,5 +1,5 @@
-#include "CFGAnalysis.h"
-#include "BlockUtils.h"
+#include "common/CFGAnalysis.h"
+#include "common/BlockUtils.h"
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"

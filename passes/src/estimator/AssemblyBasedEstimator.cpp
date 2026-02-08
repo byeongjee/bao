@@ -1,5 +1,5 @@
-#include "AssemblyBasedEstimator.h"
-#include "BlockUtils.h"
+#include "estimator/AssemblyBasedEstimator.h"
+#include "common/BlockUtils.h"
 
 #include "llvm/Support/raw_ostream.h"
 

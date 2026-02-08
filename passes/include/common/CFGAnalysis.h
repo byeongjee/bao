@@ -1,6 +1,6 @@
 #pragma once
 
-#include "EnergyEstimator.h"
+#include "estimator/EnergyEstimator.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"

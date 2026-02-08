@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CFGAnalysis.h"
+#include "common/CFGAnalysis.h"
 
 #include "gurobi_c++.h"
 

@@ -1,6 +1,6 @@
-#include "EnergyEstimatorFactory.h"
-#include "AssemblyBasedEstimator.h"
-#include "IRBasedEstimator.h"
+#include "estimator/EnergyEstimatorFactory.h"
+#include "estimator/AssemblyBasedEstimator.h"
+#include "estimator/IRBasedEstimator.h"
 
 #include "llvm/Support/raw_ostream.h"
 

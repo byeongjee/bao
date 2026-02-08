@@ -1,5 +1,5 @@
-#include "DistributedCheckpointing.h"
-#include "BlockUtils.h"
+#include "rockclimb/DistributedCheckpointing.h"
+#include "common/BlockUtils.h"
 
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
