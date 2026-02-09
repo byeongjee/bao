@@ -4,8 +4,6 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 
-#include <cmath>
-
 namespace checkpoint {
 
 CFGAnalysis::CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI,
@@ -16,7 +14,7 @@ CFGAnalysis::CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI,
 const BlockInfo &CFGAnalysis::getBlockInfo(const std::string &name) const {
     auto it = blockInfo_.find(name);
     if (it == blockInfo_.end()) {
-        static BlockInfo empty{"", 0.0, 1.0, 0};
+        static BlockInfo empty{"", 0.0};
         return empty;
     }
     return it->second;
@@ -34,14 +32,7 @@ void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI,
         EnergyEstimate estimate = estimator.estimate(BB);
         double energyCost = estimate.cost;
 
-        // Get loop depth
-        int loopDepth = LI.getLoopDepth(&BB);
-
-        // Estimate frequency based on loop depth
-        // freq = 10^loopDepth (heuristic)
-        double freq = std::pow(10.0, static_cast<double>(loopDepth));
-
-        BlockInfo info{name, energyCost, freq, loopDepth};
+        BlockInfo info{name, energyCost};
         blockInfo_[name] = info;
 
         // Set entry block
