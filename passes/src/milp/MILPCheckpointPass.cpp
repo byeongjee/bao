@@ -15,6 +15,7 @@ using namespace llvm;
 
 // Defined in src/common/PassRegistry.cpp
 extern cl::opt<std::string> EnergyConfigOpt;
+extern cl::opt<bool> AcceptFeasibleOpt;
 
 namespace checkpoint {
 
@@ -51,6 +52,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     // Step 5: Build MILP input and check feasibility (Pass E)
     MILPInput milpInput{*ctx.cfg, *ctx.stateAnalysis, *ctx.energyModel};
     CheckpointOptimizer optimizer(milpInput);
+    optimizer.setAcceptFeasible(AcceptFeasibleOpt);
 
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
@@ -96,6 +98,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     }
     errs() << vmCount << " / " << solution.vmPlacement.size() << "\n";
     errs() << "  Objective value: " << solution.objectiveValue << "\n";
+    if (solution.solverStatus == SolverStatus::Feasible) {
+        errs() << "  Solver status: FEASIBLE (MIP gap: " << solution.mipGap
+               << ")\n";
+    }
 
     // Step 7: Instrument IR (Pass F)
     CheckpointInstrumenter instrumenter(*F.getParent());
