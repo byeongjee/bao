@@ -74,7 +74,7 @@ ROCKCLIMB_LINKER="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
 MILP_ENERGY_CONFIG="$PROJECT_DIR/tests/simple_config.json"
 MILP_RUNTIME="$PROJECT_DIR/passes/runtime/milp_runtime.c"
 MILP_BOOT="$PROJECT_DIR/passes/runtime/milp_boot.S"
-MILP_STUBS="$PROJECT_DIR/passes/runtime/milp_stubs.c"
+MILP_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/milp_mock_ckpt_counter.c"
 MILP_LINKER="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
 
 usage() { sed -n '2,25p' "$0" | sed 's/^# \?//'; exit 0; }
@@ -240,7 +240,6 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             PASS_OUTPUT=$($OPT -load-pass-plugin="$PASS_LIB" \
                 -passes=milp \
                 -energy-config="$MILP_ENERGY_CONFIG" \
-                -checkpoint-function=__milp_checkpoint \
                 -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" 2>&1)
 
             if [[ "$VERBOSE" == "true" ]]; then
@@ -260,11 +259,11 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             [[ "$DEBUG_MODE" == "true" ]] && GCC_DEBUG_FLAGS="-DDEBUG"
 
             if [[ "$USE_STUBS" == "true" ]]; then
-                info "Using stub runtime (no power failure recovery)"
+                info "Using mock counter runtime (no power failure recovery)"
                 $GCC -mmcu=$DEVICE -O2 -msmall $GCC_DEBUG_FLAGS \
                     -I"$MSP430GCC_SUPPORT_PATH/include" \
                     -I"$PROJECT_DIR/passes/runtime" \
-                    -c "$MILP_STUBS" -o "$TMP_DIR/stubs.o"
+                    -c "$MILP_MOCK_CKPT_COUNTER" -o "$TMP_DIR/stubs.o"
 
                 $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
                     "$TMP_DIR/ckpt.o" "$TMP_DIR/stubs.o" -o "${OUTPUT}.elf"
