@@ -1,15 +1,16 @@
 #include "milp/CheckpointAnalysisPass.h"
 #include "common/BlockUtils.h"
-#include "common/CFGAnalysis.h"
 #include "milp/CheckpointContext.h"
 #include "milp/CheckpointOptimizer.h"
-#include "estimator/EnergyEstimatorFactory.h"
+#include "milp/EnergyModel.h"
+#include "milp/StateAnalysis.h"
 #include "common/LoopTripCount.h"
 #include "milp/MaxCheckpointCounter.h"
 
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Passes/PassBuilder.h"
-#include "llvm/Plugins/PassPlugin.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
@@ -19,7 +20,6 @@ extern cl::opt<std::string> EnergyConfigOpt;
 
 namespace {
 
-// Command line options for analysis pass
 static cl::opt<unsigned> DefaultBoundOpt(
     "analysis-default-bound",
     cl::desc("Default loop trip count for unannotated loops"),
@@ -31,8 +31,13 @@ namespace checkpoint {
 
 PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
                                                FunctionAnalysisManager &AM) {
-    // Create checkpoint context (validates config, creates estimator and CFG)
+    // Step 1: Obtain LLVM analyses
     auto &LI = AM.getResult<LoopAnalysis>(F);
+    auto &AA = AM.getResult<AAManager>(F);
+    auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
+    auto &BFI = AM.getResult<BlockFrequencyAnalysis>(F);
+
+    // Step 2: Create base checkpoint context
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(),
                                              "checkpoint-analysis pass");
     if (!ctxResult.success()) {
@@ -44,8 +49,20 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
 
     auto &ctx = *ctxResult.context;
 
-    // Check feasibility
-    CheckpointOptimizer optimizer(*ctx.cfg, ctx.capacity);
+    // Step 3: Run StateAnalysis
+    ctx.stateAnalysis =
+        std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
+
+    // Step 4: Build EnergyModel
+    ctx.milpParams = parseMILPEnergyParams(EnergyConfigOpt.getValue());
+    ctx.milpParams.capacity = ctx.capacity;
+    ctx.energyModel = std::make_unique<EnergyModel>(
+        *ctx.cfg, *ctx.stateAnalysis, BFI, F, ctx.milpParams);
+
+    // Step 5: Solve MILP
+    MILPInput milpInput{*ctx.cfg, *ctx.stateAnalysis, *ctx.energyModel};
+    CheckpointOptimizer optimizer(milpInput);
+
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
         errs() << "=== Checkpoint Analysis: " << F.getName() << " ===\n";
@@ -58,15 +75,15 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
         return PreservedAnalyses::all();
     }
 
-    // Solve MILP
     if (!optimizer.solve()) {
         errs() << "=== Checkpoint Analysis: " << F.getName() << " ===\n";
         errs() << "Error: Optimization failed\n";
         return PreservedAnalyses::all();
     }
 
-    // Get checkpoint block names
-    auto checkpointNames = optimizer.getCheckpoints();
+    // Extract region starts from solution
+    const auto &solution = optimizer.getSolution();
+    auto checkpointNames = solution.regionStarts;
 
     // Convert names to BasicBlock pointers
     std::set<BasicBlock*> checkpoints;
@@ -77,23 +94,23 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
         }
     }
 
-    // Step 3: Extract loop bounds from __loop_tripcount markers
+    // Extract loop bounds from __loop_tripcount markers
     auto loopBounds = LoopTripCount::extractBounds(F, *ctx.loopInfo);
 
-    // Step 4: Count max checkpoints using DP
+    // Count max checkpoints using DP
     MaxCheckpointCounter counter(F, *ctx.loopInfo, checkpoints);
     counter.setLoopBounds(loopBounds);
     counter.setDefaultBound(DefaultBoundOpt);
     CountResult result = counter.compute();
 
-    // Step 5: Output results
+    // Output results
     errs() << "=== Checkpoint Analysis: " << F.getName() << " ===\n";
     errs() << "Configuration:\n";
     errs() << "  Energy capacity: " << ctx.capacity << "\n";
     errs() << "  Default loop bound: " << DefaultBoundOpt << "\n";
     errs() << "\n";
 
-    errs() << "Checkpoints placed (from MILP): " << checkpointNames.size()
+    errs() << "Region starts (from MILP): " << checkpointNames.size()
            << " block(s)\n";
     if (!checkpointNames.empty()) {
         errs() << "  ";
@@ -105,6 +122,10 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
         }
         errs() << "\n";
     }
+    errs() << "\n";
+
+    errs() << "Enabled checkpoint stores: "
+           << solution.enabledDefStores.size() << "\n";
     errs() << "\n";
 
     errs() << "Loop bounds:\n";
@@ -146,6 +167,3 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
 }
 
 } // namespace checkpoint
-
-// Plugin registration - extends the existing registration
-// Note: Plugin registration is in src/common/PassRegistry.cpp

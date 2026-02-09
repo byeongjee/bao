@@ -1,10 +1,14 @@
 #include "milp/MILPCheckpointPass.h"
-#include "common/CFGAnalysis.h"
 #include "milp/CheckpointContext.h"
 #include "milp/CheckpointInstrumenter.h"
 #include "milp/CheckpointOptimizer.h"
+#include "milp/EnergyModel.h"
+#include "milp/StateAnalysis.h"
 
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
@@ -12,21 +16,17 @@ using namespace llvm;
 // Defined in src/common/PassRegistry.cpp
 extern cl::opt<std::string> EnergyConfigOpt;
 
-namespace {
-
-static cl::opt<std::string> CheckpointFnOpt(
-    "checkpoint-function",
-    cl::desc("Name of checkpoint function to insert"),
-    cl::init("__checkpoint"));
-
-} // anonymous namespace
-
 namespace checkpoint {
 
 PreservedAnalyses MILPCheckpointPass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
-    // Create checkpoint context (validates config, creates estimator and CFG)
+    // Step 1: Obtain LLVM analyses
     auto &LI = AM.getResult<LoopAnalysis>(F);
+    auto &AA = AM.getResult<AAManager>(F);
+    auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
+    auto &BFI = AM.getResult<BlockFrequencyAnalysis>(F);
+
+    // Step 2: Create base checkpoint context (estimator + CFG)
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(),
                                              "checkpoint pass");
     if (!ctxResult.success()) {
@@ -37,10 +37,21 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     }
 
     auto &ctx = *ctxResult.context;
-    std::string checkpointFnName = CheckpointFnOpt;
 
-    // Check feasibility
-    CheckpointOptimizer optimizer(*ctx.cfg, ctx.capacity);
+    // Step 3: Run StateAnalysis (Pass B)
+    ctx.stateAnalysis =
+        std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
+
+    // Step 4: Parse MILP energy params and build EnergyModel (Pass C/D)
+    ctx.milpParams = parseMILPEnergyParams(EnergyConfigOpt.getValue());
+    ctx.milpParams.capacity = ctx.capacity;  // Use estimator's capacity
+    ctx.energyModel = std::make_unique<EnergyModel>(
+        *ctx.cfg, *ctx.stateAnalysis, BFI, F, ctx.milpParams);
+
+    // Step 5: Build MILP input and check feasibility (Pass E)
+    MILPInput milpInput{*ctx.cfg, *ctx.stateAnalysis, *ctx.energyModel};
+    CheckpointOptimizer optimizer(milpInput);
+
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
         errs() << "Error: The following blocks exceed energy capacity:\n";
@@ -52,30 +63,44 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         return PreservedAnalyses::all();
     }
 
-    // Step 4: Solve MILP
+    // Step 6: Solve MILP
     if (!optimizer.solve()) {
         errs() << "Optimization failed\n";
         return PreservedAnalyses::all();
     }
 
-    auto checkpoints = optimizer.getCheckpoints();
+    const auto &solution = optimizer.getSolution();
 
-    if (checkpoints.empty()) {
-        errs() << "No checkpoints needed for function " << F.getName() << "\n";
+    if (solution.regionStarts.empty()) {
+        errs() << "No region boundaries needed for function " << F.getName()
+               << "\n";
         return PreservedAnalyses::all();
     }
 
-    errs() << "Inserting " << checkpoints.size() << " checkpoint(s) in "
-           << F.getName() << ":\n";
-    for (const auto &cp : checkpoints) {
-        errs() << "  " << cp << "\n";
+    // Report solution
+    errs() << "MILP solution for " << F.getName() << ":\n";
+    errs() << "  Region starts (" << solution.regionStarts.size() << "): ";
+    bool first = true;
+    for (const auto &rs : solution.regionStarts) {
+        if (!first) errs() << ", ";
+        errs() << rs;
+        first = false;
     }
+    errs() << "\n";
+    errs() << "  Enabled checkpoint stores: "
+           << solution.enabledDefStores.size() << "\n";
+    errs() << "  VM-placed globals: ";
+    unsigned vmCount = 0;
+    for (const auto &[gv, inVm] : solution.vmPlacement) {
+        if (inVm) vmCount++;
+    }
+    errs() << vmCount << " / " << solution.vmPlacement.size() << "\n";
+    errs() << "  Objective value: " << solution.objectiveValue << "\n";
 
-    // Insert checkpoint calls
-    CheckpointInstrumenter instrumenter(*F.getParent(), checkpointFnName);
-    instrumenter.instrumentFunction(F, checkpoints);
+    // Step 7: Instrument IR (Pass F)
+    CheckpointInstrumenter instrumenter(*F.getParent());
+    instrumenter.instrumentFunction(F, solution, *ctx.stateAnalysis);
 
-    // We modified the IR
     return PreservedAnalyses::none();
 }
 

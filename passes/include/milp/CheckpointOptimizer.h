@@ -1,6 +1,8 @@
 #pragma once
 
 #include "common/CFGAnalysis.h"
+#include "milp/EnergyModel.h"
+#include "milp/StateAnalysis.h"
 
 #include "gurobi_c++.h"
 
@@ -11,47 +13,104 @@
 
 namespace checkpoint {
 
+/// Input data for the MILP optimizer (aggregates all analysis results).
+struct MILPInput {
+    const CFGAnalysis &cfg;
+    const StateAnalysis &state;
+    const EnergyModel &energy;
+};
+
+/// Solution from the MILP optimizer.
+struct MILPSolution {
+    /// Blocks where is_region_start = 1.
+    std::set<std::string> regionStarts;
+
+    /// DefSite IDs where store_enabled = 1.
+    std::set<unsigned> enabledDefStores;
+
+    /// VMObj placement: true = VM (SRAM), false = NVM (FRAM).
+    std::map<llvm::GlobalVariable *, bool> vmPlacement;
+
+    /// needs_vol_restore[b,v] = true: VMObj v needs volatile restore at block b.
+    std::map<std::pair<std::string, unsigned>, bool> needVolRestore;
+
+    /// energy_accumulated[b] values.
+    std::map<std::string, double> energyAccumulated;
+
+    /// Objective function value.
+    double objectiveValue = 0.0;
+};
+
 /// MILP optimizer for checkpoint placement using Gurobi.
-/// Minimizes frequency-weighted checkpoint count while ensuring
-/// energy between checkpoints never exceeds capacity.
+///
+/// Implements the spec formulation with:
+/// - Distributed checkpoint stores at definition sites
+/// - VM/NVM memory placement for globals
+/// - NeedVol linearization linking placement and boundary decisions
+/// - Richer energy objective minimizing expected energy overhead
+/// - Constraints C1, C3-C9
 class CheckpointOptimizer {
 public:
-    /// Construct optimizer for a CFG.
-    /// @param cfg The CFG analysis results.
-    /// @param capacity Maximum energy capacity between checkpoints.
-    CheckpointOptimizer(const CFGAnalysis &cfg, double capacity);
+    /// Construct optimizer from analysis results.
+    CheckpointOptimizer(const MILPInput &input);
 
     /// Build and solve the MILP model.
     /// @return true if optimization succeeded, false otherwise.
     bool solve();
 
-    /// Get the set of blocks where checkpoints should be placed.
-    std::set<std::string> getCheckpoints() const;
+    /// Get the full MILP solution.
+    const MILPSolution &getSolution() const { return solution_; }
 
-    /// Get the objective value (total frequency-weighted checkpoint cost).
-    double getObjectiveValue() const;
+    /// Get blocks where region starts are placed (convenience, same as
+    /// solution.regionStarts).
+    std::set<std::string> getCheckpoints() const {
+        return solution_.regionStarts;
+    }
 
-    /// Get the accumulated energy at the start of each block.
-    std::map<std::string, double> getEnergyLevels() const;
+    /// Get the objective value.
+    double getObjectiveValue() const { return solution_.objectiveValue; }
 
-    /// Check feasibility - returns blocks that exceed capacity.
+    /// Check feasibility - returns blocks whose base energy exceeds capacity.
     std::vector<std::string> getInfeasibleBlocks() const;
 
 private:
+    const MILPInput &input_;
     const CFGAnalysis &cfg_;
-    double capacity_;
+    const StateAnalysis &state_;
+    const EnergyModel &energy_;
+    const MILPEnergyParams &params_;
 
     GRBEnv env_;
     GRBModel model_;
-    std::map<std::string, GRBVar> x_;  // Binary: checkpoint at block
-    std::map<std::string, GRBVar> y_;  // Continuous: energy level
-
+    MILPSolution solution_;
     bool solved_ = false;
+
+    // MILP variables
+    std::map<std::string, GRBVar> isRegionStart_;     // x[b] binary
+    std::map<unsigned, GRBVar> storeEnabled_;          // z[d] binary
+    std::map<llvm::GlobalVariable *, GRBVar> placedInVm_; // p[v] binary
+    // y[b,stateElemId] binary (only for VMObjs live-in at b)
+    std::map<std::pair<std::string, unsigned>, GRBVar> needsVolRestore_;
+    std::map<std::string, GRBVar> energyAccumulated_;  // eaccum[b] continuous
 
     void buildModel();
     void addVariables();
     void addObjective();
     void addConstraints();
+    void extractSolution();
+
+    // Constraint helpers
+    void addC1_EntryRegionStart();
+    void addC3_VMCapacity();
+    void addC4_NeedVolLinearization();
+    void addC5_CheckpointAvailability();
+    void addC6_EnergyInit();
+    void addC7_EnergyPropagation();
+    void addC8_BufferSafety();
+
+    // Expression builders for E_blk and E_start (linear in decision variables)
+    GRBLinExpr buildEBlk(const std::string &block);
+    GRBLinExpr buildEStart(const std::string &block);
 };
 
 } // namespace checkpoint

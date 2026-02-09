@@ -1,41 +1,55 @@
-#ifndef CHECKPOINT_INSTRUMENTER_H
-#define CHECKPOINT_INSTRUMENTER_H
+#pragma once
+
+#include "milp/CheckpointOptimizer.h"
+#include "milp/StateAnalysis.h"
 
 #include "llvm/IR/Module.h"
-#include "llvm/ADT/StringRef.h"
 
 #include <set>
 #include <string>
 
 namespace checkpoint {
 
-/// Inserts checkpoint function calls into basic blocks.
-/// Handles function declaration and call site generation.
+/// Instruments LLVM IR based on MILP solution.
+///
+/// Handles:
+/// - Region boundaries: prologue/epilogue calls
+/// - Distributed checkpoint stores at definition sites
+/// - Memory placement: setting globals to NVM section
+/// - Restore calls at region prologues
 class CheckpointInstrumenter {
 public:
-    /// Construct instrumenter for a module.
-    /// @param M The module to instrument.
-    /// @param checkpointFnName Name of the checkpoint function to call.
-    CheckpointInstrumenter(llvm::Module &M, llvm::StringRef checkpointFnName);
+    CheckpointInstrumenter(llvm::Module &M);
 
-    /// Insert checkpoint call at the beginning of a basic block.
-    /// The call is inserted after any PHI nodes.
-    /// @param BB The basic block to instrument.
-    /// @param blockName Name to pass to the checkpoint function.
-    void insertCheckpoint(llvm::BasicBlock &BB, llvm::StringRef blockName);
-
-    /// Instrument a function by inserting checkpoints at specified blocks.
+    /// Instrument a function using the MILP solution and state analysis.
     /// @param F The function to instrument.
-    /// @param checkpointBlocks Set of block names to checkpoint.
-    /// @return Number of checkpoints inserted.
+    /// @param solution The MILP solution.
+    /// @param state The state analysis results.
+    /// @return Number of instrumentation points inserted.
     unsigned instrumentFunction(llvm::Function &F,
-                                const std::set<std::string> &checkpointBlocks);
+                                const MILPSolution &solution,
+                                const StateAnalysis &state);
 
 private:
     llvm::Module &M_;
-    llvm::FunctionCallee checkpointCallee_;
+
+    // Runtime function callees (lazily declared)
+    llvm::FunctionCallee prologueFn_;
+    llvm::FunctionCallee epilogueFn_;
+    llvm::FunctionCallee storeRegFn_;
+    llvm::FunctionCallee storeMemFn_;
+    llvm::FunctionCallee restoreRegFn_;
+    llvm::FunctionCallee restoreMemFn_;
+
+    void declareRuntimeFunctions();
+
+    void insertRegionBoundaries(llvm::Function &F,
+                                const MILPSolution &solution,
+                                const StateAnalysis &state);
+    void insertDistributedStores(llvm::Function &F,
+                                 const MILPSolution &solution,
+                                 const StateAnalysis &state);
+    void applyMemoryPlacement(const MILPSolution &solution);
 };
 
 } // namespace checkpoint
-
-#endif // CHECKPOINT_INSTRUMENTER_H
