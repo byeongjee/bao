@@ -43,42 +43,56 @@ bool CheckpointOptimizer::solve() {
     solved_ = true;
 
     int status = model_.get(GRB_IntAttr_Status);
-    if (status != GRB_OPTIMAL) {
-        llvm::errs() << "Optimization failed: no optimal solution found\n";
-        LLVM_DEBUG(llvm::dbgs() << "Gurobi status: " << status << "\n");
 
-        // Compute IIS to identify conflicting constraints
-        if (status == GRB_INFEASIBLE) {
-            LLVM_DEBUG({
-                llvm::dbgs() << "Computing IIS...\n";
-                model_.computeIIS();
-                auto constrs = model_.getConstrs();
-                for (int i = 0; i < model_.get(GRB_IntAttr_NumConstrs); i++) {
-                    if (constrs[i].get(GRB_IntAttr_IISConstr)) {
-                        llvm::dbgs() << "  IIS constr: "
-                                     << constrs[i].get(GRB_StringAttr_ConstrName)
-                                     << "\n";
-                    }
-                }
-                auto vars = model_.getVars();
-                for (int i = 0; i < model_.get(GRB_IntAttr_NumVars); i++) {
-                    if (vars[i].get(GRB_IntAttr_IISLB) ||
-                        vars[i].get(GRB_IntAttr_IISUB)) {
-                        llvm::dbgs() << "  IIS var bound: "
-                                     << vars[i].get(GRB_StringAttr_VarName)
-                                     << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
-                                     << " UB=" << vars[i].get(GRB_IntAttr_IISUB)
-                                     << "\n";
-                    }
-                }
-            });
-        }
-
-        return false;
+    if (status == GRB_OPTIMAL) {
+        extractSolution();
+        solution_.solverStatus = SolverStatus::Optimal;
+        return true;
     }
 
-    extractSolution();
-    return true;
+    // Check if we have a feasible (but non-optimal) solution
+    if (acceptFeasible_ && model_.get(GRB_IntAttr_SolCount) > 0) {
+        double gap = model_.get(GRB_DoubleAttr_MIPGap);
+        llvm::errs() << "Warning: Using feasible but non-optimal solution"
+                     << " (Gurobi status=" << status
+                     << ", MIP gap=" << gap << ")\n";
+        extractSolution();
+        solution_.solverStatus = SolverStatus::Feasible;
+        solution_.mipGap = gap;
+        return true;
+    }
+
+    llvm::errs() << "Optimization failed: no optimal solution found\n";
+    LLVM_DEBUG(llvm::dbgs() << "Gurobi status: " << status << "\n");
+
+    // Compute IIS to identify conflicting constraints
+    if (status == GRB_INFEASIBLE) {
+        LLVM_DEBUG({
+            llvm::dbgs() << "Computing IIS...\n";
+            model_.computeIIS();
+            auto constrs = model_.getConstrs();
+            for (int i = 0; i < model_.get(GRB_IntAttr_NumConstrs); i++) {
+                if (constrs[i].get(GRB_IntAttr_IISConstr)) {
+                    llvm::dbgs() << "  IIS constr: "
+                                 << constrs[i].get(GRB_StringAttr_ConstrName)
+                                 << "\n";
+                }
+            }
+            auto vars = model_.getVars();
+            for (int i = 0; i < model_.get(GRB_IntAttr_NumVars); i++) {
+                if (vars[i].get(GRB_IntAttr_IISLB) ||
+                    vars[i].get(GRB_IntAttr_IISUB)) {
+                    llvm::dbgs() << "  IIS var bound: "
+                                 << vars[i].get(GRB_StringAttr_VarName)
+                                 << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
+                                 << " UB=" << vars[i].get(GRB_IntAttr_IISUB)
+                                 << "\n";
+                }
+            }
+        });
+    }
+
+    return false;
 }
 
 void CheckpointOptimizer::buildModel() {

@@ -20,6 +20,12 @@ struct MILPInput {
     const EnergyModel &energy;
 };
 
+/// Solver optimality status.
+enum class SolverStatus {
+    Optimal,  ///< Proven optimal solution.
+    Feasible, ///< Feasible but not proven optimal (e.g., time limit).
+};
+
 /// Solution from the MILP optimizer.
 struct MILPSolution {
     /// Blocks where is_region_start = 1.
@@ -39,6 +45,12 @@ struct MILPSolution {
 
     /// Objective function value.
     double objectiveValue = 0.0;
+
+    /// Solver optimality status.
+    SolverStatus solverStatus = SolverStatus::Optimal;
+
+    /// MIP optimality gap (0.0 for optimal, >0 for feasible).
+    double mipGap = 0.0;
 };
 
 /// MILP optimizer for checkpoint placement using Gurobi.
@@ -57,6 +69,11 @@ public:
     /// Build and solve the MILP model.
     /// @return true if optimization succeeded, false otherwise.
     bool solve();
+
+    /// Allow accepting feasible (non-optimal) solutions.
+    /// When true, solutions from time/node/solution limits are accepted
+    /// if Gurobi found at least one feasible solution.
+    void setAcceptFeasible(bool accept) { acceptFeasible_ = accept; }
 
     /// Get the full MILP solution.
     const MILPSolution &getSolution() const { return solution_; }
@@ -84,6 +101,7 @@ private:
     GRBModel model_;
     MILPSolution solution_;
     bool solved_ = false;
+    bool acceptFeasible_ = false;
 
     // MILP variables
     std::map<std::string, GRBVar> isRegionStart_;     // x[b] binary

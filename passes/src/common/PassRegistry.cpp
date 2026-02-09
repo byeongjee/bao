@@ -16,6 +16,11 @@ cl::opt<std::string> EnergyConfigOpt(
     cl::value_desc("filename"),
     cl::init(""));
 
+cl::opt<bool> AcceptFeasibleOpt(
+    "milp-accept-feasible",
+    cl::desc("Accept feasible (non-optimal) MILP solutions (e.g., from time limit)"),
+    cl::init(false));
+
 // Plugin registration for new pass manager
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
