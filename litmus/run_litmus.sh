@@ -50,7 +50,7 @@ LITMUS_TESTS=(
     "litmus_store_reg:litmus_config.json"
     "litmus_store_global:litmus_config.json"
     "litmus_vm_hot:litmus_config.json"
-    "litmus_vm_overflow:litmus_config.json"
+    "litmus_vm_overflow:litmus_vm_overflow_config.json"
     "litmus_needvol:litmus_config.json"
     "litmus_tight:litmus_tight_config.json"
     "litmus_infeasible:litmus_config.json"

@@ -1,8 +1,11 @@
 #include "milp/CheckpointOptimizer.h"
 
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
+
+#define DEBUG_TYPE "checkpoint-optimizer"
 
 namespace checkpoint {
 
@@ -39,8 +42,38 @@ bool CheckpointOptimizer::solve() {
     model_.optimize();
     solved_ = true;
 
-    if (model_.get(GRB_IntAttr_Status) != GRB_OPTIMAL) {
+    int status = model_.get(GRB_IntAttr_Status);
+    if (status != GRB_OPTIMAL) {
         llvm::errs() << "Optimization failed: no optimal solution found\n";
+        LLVM_DEBUG(llvm::dbgs() << "Gurobi status: " << status << "\n");
+
+        // Compute IIS to identify conflicting constraints
+        if (status == GRB_INFEASIBLE) {
+            LLVM_DEBUG({
+                llvm::dbgs() << "Computing IIS...\n";
+                model_.computeIIS();
+                auto constrs = model_.getConstrs();
+                for (int i = 0; i < model_.get(GRB_IntAttr_NumConstrs); i++) {
+                    if (constrs[i].get(GRB_IntAttr_IISConstr)) {
+                        llvm::dbgs() << "  IIS constr: "
+                                     << constrs[i].get(GRB_StringAttr_ConstrName)
+                                     << "\n";
+                    }
+                }
+                auto vars = model_.getVars();
+                for (int i = 0; i < model_.get(GRB_IntAttr_NumVars); i++) {
+                    if (vars[i].get(GRB_IntAttr_IISLB) ||
+                        vars[i].get(GRB_IntAttr_IISUB)) {
+                        llvm::dbgs() << "  IIS var bound: "
+                                     << vars[i].get(GRB_StringAttr_VarName)
+                                     << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
+                                     << " UB=" << vars[i].get(GRB_IntAttr_IISUB)
+                                     << "\n";
+                    }
+                }
+            });
+        }
+
         return false;
     }
 
@@ -58,11 +91,16 @@ void CheckpointOptimizer::buildModel() {
 void CheckpointOptimizer::addVariables() {
     double Ebuf = params_.capacity;
 
+    LLVM_DEBUG(llvm::dbgs() << "=== MILP Variables ===\n");
+    LLVM_DEBUG(llvm::dbgs() << "  capacity (E_buf) = " << Ebuf << "\n");
+
     // is_region_start[b]: binary for each block
     for (const auto &blockName : cfg_.getBlocks()) {
         isRegionStart_[blockName] = model_.addVar(
             0.0, 1.0, 0.0, GRB_BINARY, "is_region_start_" + blockName);
     }
+    LLVM_DEBUG(llvm::dbgs() << "  is_region_start: "
+                            << isRegionStart_.size() << " blocks\n");
 
     // store_enabled[d]: binary for each def site
     for (const auto &ds : state_.getDefSites()) {
@@ -70,6 +108,17 @@ void CheckpointOptimizer::addVariables() {
             0.0, 1.0, 0.0, GRB_BINARY,
             "store_enabled_" + std::to_string(ds.id));
     }
+    LLVM_DEBUG({
+        llvm::dbgs() << "  store_enabled: " << storeEnabled_.size()
+                     << " def sites\n";
+        for (const auto &ds : state_.getDefSites()) {
+            llvm::dbgs() << "    ds" << ds.id << " in " << ds.blockName
+                         << " kind=" << (ds.kind == DefSite::SSAReg ? "SSAReg" : "MemDef");
+            if (ds.globalVar)
+                llvm::dbgs() << " gv=" << ds.globalVar->getName();
+            llvm::dbgs() << " eStore=" << energy_.getEStore(ds.id) << "\n";
+        }
+    });
 
     // placed_in_vm[v]: binary for each VMObj
     for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
@@ -77,6 +126,16 @@ void CheckpointOptimizer::addVariables() {
             0.0, 1.0, 0.0, GRB_BINARY,
             "placed_in_vm_" + GV->getName().str());
     }
+    LLVM_DEBUG({
+        llvm::dbgs() << "  placed_in_vm: " << placedInVm_.size() << " VMObjs\n";
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            int elemId = state_.getVMObjStateElemId(GV);
+            unsigned sz = (elemId >= 0)
+                ? state_.getStateElement(static_cast<unsigned>(elemId)).sizeBytes
+                : 0;
+            llvm::dbgs() << "    " << GV->getName() << " size=" << sz << "B\n";
+        }
+    });
 
     // needs_vol_restore[b,v]: binary for each (block, VMObj) where VMObj is
     // live-in
@@ -91,6 +150,8 @@ void CheckpointOptimizer::addVariables() {
                 0.0, 1.0, 0.0, GRB_BINARY,
                 "needs_vol_restore_" + blockName + "_" +
                     GV->getName().str());
+            LLVM_DEBUG(llvm::dbgs() << "  needs_vol_restore[" << blockName
+                                    << ", " << GV->getName() << "]\n");
         }
     }
 
@@ -100,6 +161,41 @@ void CheckpointOptimizer::addVariables() {
             0.0, Ebuf, 0.0, GRB_CONTINUOUS,
             "energy_accumulated_" + blockName);
     }
+
+    LLVM_DEBUG({
+        llvm::dbgs() << "\n=== Block info ===\n";
+        for (const auto &blockName : cfg_.getBlocks()) {
+            const auto &info = cfg_.getBlockInfo(blockName);
+            llvm::dbgs() << "  " << blockName << ": E_base=" << info.energyCost;
+            // NVM penalties
+            for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+                double nvm = energy_.getENvm(blockName, GV);
+                if (nvm > 0)
+                    llvm::dbgs() << " E_nvm(" << GV->getName() << ")=" << nvm;
+            }
+            // Def sites
+            const auto &defs = state_.getBlockDefSites(blockName);
+            if (!defs.empty())
+                llvm::dbgs() << " defs=" << defs.size();
+            // SSA reg live-in
+            const auto &regLI = state_.getRegLiveIn(blockName);
+            if (!regLI.empty())
+                llvm::dbgs() << " regLiveIn=" << regLI.size();
+            // VMObj live-in
+            const auto &vmLI = state_.getVMObjLiveIn(blockName);
+            if (!vmLI.empty()) {
+                llvm::dbgs() << " vmObjLiveIn={";
+                bool first = true;
+                for (auto *GV : vmLI) {
+                    if (!first) llvm::dbgs() << ",";
+                    llvm::dbgs() << GV->getName();
+                    first = false;
+                }
+                llvm::dbgs() << "}";
+            }
+            llvm::dbgs() << "\n";
+        }
+    });
 
     model_.update();
 }
@@ -196,6 +292,7 @@ void CheckpointOptimizer::addObjective() {
 }
 
 void CheckpointOptimizer::addConstraints() {
+    LLVM_DEBUG(llvm::dbgs() << "\n=== Adding constraints ===\n");
     addC1_EntryRegionStart();
     addC3_VMCapacity();
     addC4_NeedVolLinearization();
@@ -203,6 +300,7 @@ void CheckpointOptimizer::addConstraints() {
     addC6_EnergyInit();
     addC7_EnergyPropagation();
     addC8_BufferSafety();
+    LLVM_DEBUG(llvm::dbgs() << "=== Constraints done ===\n\n");
 }
 
 // C1: Entry is always a region start
@@ -266,6 +364,8 @@ void CheckpointOptimizer::addC4_NeedVolLinearization() {
 void CheckpointOptimizer::addC5_CheckpointAvailability() {
     unsigned constrIdx = 0;
 
+    LLVM_DEBUG(llvm::dbgs() << "  C5: Checkpoint availability\n");
+
     for (const auto &blockName : cfg_.getBlocks()) {
         // SSA regs live-in at b
         const auto &regLiveIn = state_.getRegLiveIn(blockName);
@@ -276,11 +376,16 @@ void CheckpointOptimizer::addC5_CheckpointAvailability() {
             unsigned eid = static_cast<unsigned>(elemId);
             const auto &reaching =
                 state_.getReachingDefs(blockName, eid);
+            LLVM_DEBUG(llvm::dbgs() << "    C5 reg at " << blockName
+                                    << " elem=" << eid
+                                    << " reachingDefs=" << reaching.size() << "\n");
             for (unsigned dsId : reaching) {
                 if (storeEnabled_.count(dsId)) {
                     model_.addConstr(
                         storeEnabled_[dsId] >= isRegionStart_[blockName],
                         "C5_reg_" + std::to_string(constrIdx++));
+                    LLVM_DEBUG(llvm::dbgs() << "      store_enabled[" << dsId
+                                            << "] >= is_region_start[" << blockName << "]\n");
                 }
             }
         }
@@ -299,11 +404,17 @@ void CheckpointOptimizer::addC5_CheckpointAvailability() {
 
             const auto &reaching =
                 state_.getReachingDefs(blockName, eid);
+            LLVM_DEBUG(llvm::dbgs() << "    C5 vmobj " << GV->getName()
+                                    << " at " << blockName
+                                    << " reachingDefs=" << reaching.size() << "\n");
             for (unsigned dsId : reaching) {
                 if (storeEnabled_.count(dsId)) {
                     model_.addConstr(
                         storeEnabled_[dsId] >= nvrIt->second,
                         "C5_vmobj_" + std::to_string(constrIdx++));
+                    LLVM_DEBUG(llvm::dbgs() << "      store_enabled[" << dsId
+                                            << "] >= needs_vol_restore[" << blockName
+                                            << "," << GV->getName() << "]\n");
                 }
             }
         }
@@ -316,6 +427,9 @@ void CheckpointOptimizer::addC5_CheckpointAvailability() {
 void CheckpointOptimizer::addC6_EnergyInit() {
     double M = params_.capacity;
 
+    LLVM_DEBUG(llvm::dbgs() << "  C6: Energy init (M=" << M
+                            << ", E_pro=" << params_.E_pro << ")\n");
+
     for (const auto &blockName : cfg_.getBlocks()) {
         GRBLinExpr eStart = buildEStart(blockName);
 
@@ -327,6 +441,33 @@ void CheckpointOptimizer::addC6_EnergyInit() {
             energyAccumulated_[blockName] <=
                 eStart + M * (1 - isRegionStart_[blockName]),
             "C6b_einit_ub_" + blockName);
+
+        LLVM_DEBUG({
+            // Compute constant part of E_start for display
+            double regRestoreSum = params_.E_pro;
+            const auto &regLI = state_.getRegLiveIn(blockName);
+            for (llvm::Value *V : regLI) {
+                int eid = state_.getRegStateElemId(V);
+                if (eid >= 0)
+                    regRestoreSum += energy_.getERst(static_cast<unsigned>(eid));
+            }
+            const auto &vmLI = state_.getVMObjLiveIn(blockName);
+            unsigned nvrCount = 0;
+            for (llvm::GlobalVariable *GV : vmLI) {
+                int eid = state_.getVMObjStateElemId(GV);
+                if (eid >= 0) {
+                    auto key = std::make_pair(blockName, static_cast<unsigned>(eid));
+                    if (needsVolRestore_.count(key))
+                        nvrCount++;
+                }
+            }
+            llvm::dbgs() << "    " << blockName
+                         << ": E_start = " << regRestoreSum << "*x["
+                         << blockName << "]";
+            if (nvrCount > 0)
+                llvm::dbgs() << " + " << nvrCount << " nvr terms";
+            llvm::dbgs() << "\n";
+        });
     }
 }
 
@@ -356,6 +497,9 @@ void CheckpointOptimizer::addC8_BufferSafety() {
     double Ebuf = params_.capacity;
     unsigned edgeIdx = 0;
 
+    LLVM_DEBUG(llvm::dbgs() << "  C8: Buffer safety (E_buf=" << Ebuf
+                            << ", E_epi=" << params_.E_epi << ")\n");
+
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
 
@@ -363,7 +507,12 @@ void CheckpointOptimizer::addC8_BufferSafety() {
             energyAccumulated_[src] + eBlkSrc +
                     params_.E_epi * isRegionStart_[dst] <=
                 Ebuf,
-            "C8_edge_" + std::to_string(edgeIdx++));
+            "C8_edge_" + std::to_string(edgeIdx));
+        LLVM_DEBUG(llvm::dbgs() << "    C8_edge_" << edgeIdx << ": eacc["
+                                << src << "] + E_blk[" << src << "] + "
+                                << params_.E_epi << "*x[" << dst
+                                << "] <= " << Ebuf << "\n");
+        edgeIdx++;
     }
 
     // Exit blocks
@@ -372,6 +521,9 @@ void CheckpointOptimizer::addC8_BufferSafety() {
 
         model_.addConstr(energyAccumulated_[exitBlock] + eBlkExit <= Ebuf,
                          "C8_exit_" + exitBlock);
+        LLVM_DEBUG(llvm::dbgs() << "    C8_exit_" << exitBlock
+                                << ": eacc[" << exitBlock << "] + E_blk["
+                                << exitBlock << "] <= " << Ebuf << "\n");
     }
 }
 
