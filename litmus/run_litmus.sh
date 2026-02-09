@@ -38,8 +38,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All litmus tests: name:config_file
+# All litmus tests: name:config_file[:source_name]
 # config_file is relative to SCRIPT_DIR
+# source_name is optional; if provided, uses ${source_name}.c instead of ${name}.c
 LITMUS_TESTS=(
     "litmus_no_ckpt:litmus_config.json"
     "litmus_forced_ckpt:litmus_config.json"
@@ -54,13 +55,15 @@ LITMUS_TESTS=(
     "litmus_needvol:litmus_config.json"
     "litmus_tight:litmus_tight_config.json"
     "litmus_infeasible:litmus_config.json"
+    "litmus_nvm_efficient:litmus_config.json"
+    "litmus_nvm_efficient_vm:litmus_nvm_efficient_vm_config.json:litmus_nvm_efficient"
 )
 
 list_tests() {
     echo "Available litmus tests:"
     for entry in "${LITMUS_TESTS[@]}"; do
-        IFS=':' read -r name config <<< "$entry"
-        local src="$SCRIPT_DIR/${name}.c"
+        IFS=':' read -r name config source <<< "$entry"
+        local src="$SCRIPT_DIR/${source:-$name}.c"
         # Extract the comment header (first line of /* ... */ comment)
         if [[ -f "$src" ]]; then
             local desc
@@ -75,8 +78,9 @@ list_tests() {
 run_litmus() {
     local test_name="$1"
     local config_file="$2"
+    local source_name="${3:-$test_name}"
 
-    local src="$SCRIPT_DIR/${test_name}.c"
+    local src="$SCRIPT_DIR/${source_name}.c"
     local input_ll="$OUT_DIR/${test_name}.ll"
     local output_ll="$OUT_DIR/${test_name}_out.ll"
     local stderr_log="$OUT_DIR/${test_name}_stderr.txt"
@@ -176,8 +180,8 @@ if [[ $# -eq 0 ]]; then
     echo ""
 
     for entry in "${LITMUS_TESTS[@]}"; do
-        IFS=':' read -r name config <<< "$entry"
-        run_litmus "$name" "$config"
+        IFS=':' read -r name config source <<< "$entry"
+        run_litmus "$name" "$config" "${source:-}"
     done
 
     echo "=========================================="
@@ -191,9 +195,9 @@ else
         # Find matching entry
         found=false
         for entry in "${LITMUS_TESTS[@]}"; do
-            IFS=':' read -r name config <<< "$entry"
+            IFS=':' read -r name config source <<< "$entry"
             if [[ "$name" == "$test_name" ]]; then
-                run_litmus "$name" "$config"
+                run_litmus "$name" "$config" "${source:-}"
                 found=true
                 break
             fi
