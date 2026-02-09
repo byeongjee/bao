@@ -6,7 +6,7 @@
 int g_a, g_b, g_c, g_d, g_e;
 volatile int barrier;
 
-void litmus_vm_overflow(int x) {
+void scenario_vm_overflow(int x) {
     /* Write all 5 globals, pad with enough instructions */
     g_a = x + 1;
     g_b = x + 2;

@@ -2,7 +2,7 @@
  * Switch with 4 cases of varying cost.
  * Expected: Handles multi-successor CFG correctly. */
 
-int litmus_switch(int sel) {
+int scenario_switch(int sel) {
     int result;
     switch (sel) {
     case 0:

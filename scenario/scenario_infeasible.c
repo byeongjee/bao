@@ -2,7 +2,7 @@
  * One basic block with energy > capacity (25), making placement infeasible.
  * Expected: Error "exceed energy capacity". */
 
-int litmus_infeasible(int x) {
+int scenario_infeasible(int x) {
     int a = x + 1;
     int b = a + 2;
     int c = b + 3;

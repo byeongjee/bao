@@ -3,7 +3,7 @@
  * since placing it inside would multiply overhead by iteration count.
  * Expected: No boundary inside loop body. */
 
-int litmus_loop(int n) {
+int scenario_loop(int n) {
     int sum = 0;
     for (int i = 0; i < n; i++) {
         sum += i * 2 + 1;
