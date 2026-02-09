@@ -50,22 +50,13 @@ bool CheckpointOptimizer::solve() {
         return true;
     }
 
-    // Check if we have a feasible (but non-optimal) solution
-    if (acceptFeasible_ && model_.get(GRB_IntAttr_SolCount) > 0) {
-        double gap = model_.get(GRB_DoubleAttr_MIPGap);
-        llvm::errs() << "Warning: Using feasible but non-optimal solution"
-                     << " (Gurobi status=" << status
-                     << ", MIP gap=" << gap << ")\n";
-        extractSolution();
-        solution_.solverStatus = SolverStatus::Feasible;
-        solution_.mipGap = gap;
-        return true;
-    }
+    // Non-optimal: always report the status
+    int solCount = model_.get(GRB_IntAttr_SolCount);
+    llvm::errs() << "Optimization did not prove optimality"
+                 << " (Gurobi status=" << status
+                 << ", solutions found=" << solCount << ")\n";
 
-    llvm::errs() << "Optimization failed: no optimal solution found\n";
-    LLVM_DEBUG(llvm::dbgs() << "Gurobi status: " << status << "\n");
-
-    // Compute IIS to identify conflicting constraints
+    // Compute IIS for infeasible models
     if (status == GRB_INFEASIBLE) {
         LLVM_DEBUG({
             llvm::dbgs() << "Computing IIS...\n";
@@ -90,6 +81,16 @@ bool CheckpointOptimizer::solve() {
                 }
             }
         });
+    }
+
+    // Accept feasible solution if allowed
+    if (acceptFeasible_ && solCount > 0) {
+        double gap = model_.get(GRB_DoubleAttr_MIPGap);
+        llvm::errs() << "Accepting feasible solution (MIP gap=" << gap << ")\n";
+        extractSolution();
+        solution_.solverStatus = SolverStatus::Feasible;
+        solution_.mipGap = gap;
+        return true;
     }
 
     return false;
