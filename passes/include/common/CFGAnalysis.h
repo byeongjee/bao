@@ -15,8 +15,6 @@ namespace checkpoint {
 struct BlockInfo {
     std::string name;
     double energyCost;  // Energy cost from estimator
-    double freq;        // Estimated execution frequency
-    int loopDepth;      // Nesting depth (0 = not in loop)
 };
 
 /// CFG analysis using LLVM's infrastructure.
