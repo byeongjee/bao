@@ -6,7 +6,7 @@
 int g_rare;
 volatile int barrier;
 
-int litmus_nvm_efficient(int x) {
+int scenario_nvm_efficient(int x) {
     /* Phase 1: write g_rare once, pad entry block */
     g_rare = x + 42;
     int a = x + 1;

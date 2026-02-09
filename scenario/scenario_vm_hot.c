@@ -5,7 +5,7 @@
 
 int g_hot;
 
-int litmus_vm_hot(int n) {
+int scenario_vm_hot(int n) {
     g_hot = 0;
     for (int i = 0; i < n; i++) {
         g_hot += i;

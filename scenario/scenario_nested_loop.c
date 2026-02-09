@@ -3,7 +3,7 @@
  * boundaries inside the inner loop body.
  * Expected: No boundary inside inner loop body. */
 
-int litmus_nested_loop(int n, int m) {
+int scenario_nested_loop(int n, int m) {
     int sum = 0;
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < m; j++) {

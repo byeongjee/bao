@@ -1,10 +1,10 @@
-/* E1. Very tight capacity (uses litmus_tight_config.json with capacity=12).
+/* E1. Very tight capacity (uses scenario_tight_config.json with capacity=12).
  * Chain of volatile-guarded branches, each block ~8 instructions.
  * Expected: Region starts (3+). */
 
 volatile int barrier;
 
-int litmus_tight(int x) {
+int scenario_tight(int x) {
     int a = x + 1;
     int b = a + 2;
     int c = b + 3;

@@ -5,7 +5,7 @@
 
 volatile int barrier;
 
-int litmus_forced_ckpt(int a) {
+int scenario_forced_ckpt(int a) {
     /* Phase 1: ~14 adds → ~17 energy with load+icmp+br */
     int b = a + 1;
     int c = b + 2;

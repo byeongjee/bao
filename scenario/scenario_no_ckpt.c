@@ -2,7 +2,7 @@
  * A short function with only a few instructions.
  * Expected: Region starts (1) — entry only. */
 
-int litmus_no_ckpt(int a, int b) {
+int scenario_no_ckpt(int a, int b) {
     int c = a + b;
     int d = c - 1;
     return d;

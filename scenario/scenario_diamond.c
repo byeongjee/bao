@@ -2,7 +2,7 @@
  * One branch cheap, the other expensive.
  * Expected: Energy propagation handles both paths correctly. */
 
-int litmus_diamond(int x) {
+int scenario_diamond(int x) {
     int result;
     if (x > 0) {
         /* Cheap branch: ~3 instructions */

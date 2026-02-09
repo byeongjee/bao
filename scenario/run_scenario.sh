@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Litmus microbenchmark runner for MILP checkpoint optimizer
+# Scenario runner for MILP checkpoint optimizer
 # Usage:
-#   ./litmus/run_litmus.sh                     # run all litmus tests
-#   ./litmus/run_litmus.sh litmus_forced_ckpt  # run one specific test
-#   ./litmus/run_litmus.sh --list              # list available tests
+#   ./scenario/run_scenario.sh                        # run all scenarios
+#   ./scenario/run_scenario.sh scenario_forced_ckpt   # run one specific scenario
+#   ./scenario/run_scenario.sh --list                 # list available scenarios
 
 set -e
 
@@ -27,8 +27,8 @@ else
 fi
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
-CONFIG="$SCRIPT_DIR/litmus_config.json"
-TIGHT_CONFIG="$SCRIPT_DIR/litmus_tight_config.json"
+CONFIG="$SCRIPT_DIR/scenario_config.json"
+TIGHT_CONFIG="$SCRIPT_DIR/scenario_tight_config.json"
 
 # Colors
 RED='\033[0;31m'
@@ -38,30 +38,30 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All litmus tests: name:config_file[:source_name]
+# All scenarios: name:config_file[:source_name]
 # config_file is relative to SCRIPT_DIR
 # source_name is optional; if provided, uses ${source_name}.c instead of ${name}.c
-LITMUS_TESTS=(
-    "litmus_no_ckpt:litmus_config.json"
-    "litmus_forced_ckpt:litmus_config.json"
-    "litmus_loop:litmus_config.json"
-    "litmus_nested_loop:litmus_config.json"
-    "litmus_diamond:litmus_config.json"
-    "litmus_switch:litmus_config.json"
-    "litmus_store_reg:litmus_config.json"
-    "litmus_store_global:litmus_config.json"
-    "litmus_vm_hot:litmus_config.json"
-    "litmus_vm_overflow:litmus_vm_overflow_config.json"
-    "litmus_needvol:litmus_config.json"
-    "litmus_tight:litmus_tight_config.json"
-    "litmus_infeasible:litmus_config.json"
-    "litmus_nvm_efficient:litmus_config.json"
-    "litmus_nvm_efficient_vm:litmus_nvm_efficient_vm_config.json:litmus_nvm_efficient"
+SCENARIOS=(
+    "scenario_no_ckpt:scenario_config.json"
+    "scenario_forced_ckpt:scenario_config.json"
+    "scenario_loop:scenario_config.json"
+    "scenario_nested_loop:scenario_config.json"
+    "scenario_diamond:scenario_config.json"
+    "scenario_switch:scenario_config.json"
+    "scenario_store_reg:scenario_config.json"
+    "scenario_store_global:scenario_config.json"
+    "scenario_vm_hot:scenario_config.json"
+    "scenario_vm_overflow:scenario_vm_overflow_config.json"
+    "scenario_needvol:scenario_config.json"
+    "scenario_tight:scenario_tight_config.json"
+    "scenario_infeasible:scenario_config.json"
+    "scenario_nvm_efficient:scenario_config.json"
+    "scenario_nvm_efficient_vm:scenario_nvm_efficient_vm_config.json:scenario_nvm_efficient"
 )
 
 list_tests() {
-    echo "Available litmus tests:"
-    for entry in "${LITMUS_TESTS[@]}"; do
+    echo "Available scenarios:"
+    for entry in "${SCENARIOS[@]}"; do
         IFS=':' read -r name config source <<< "$entry"
         local src="$SCRIPT_DIR/${source:-$name}.c"
         # Extract the comment header (first line of /* ... */ comment)
@@ -75,7 +75,7 @@ list_tests() {
     done
 }
 
-run_litmus() {
+run_scenario() {
     local test_name="$1"
     local config_file="$2"
     local source_name="${3:-$test_name}"
@@ -173,38 +173,38 @@ mkdir -p "$OUT_DIR"
 
 # Handle arguments
 if [[ $# -eq 0 ]]; then
-    # Run all tests
+    # Run all scenarios
     echo "=========================================="
-    echo "  Litmus Microbenchmark Suite"
+    echo "  Scenario Suite"
     echo "=========================================="
     echo ""
 
-    for entry in "${LITMUS_TESTS[@]}"; do
+    for entry in "${SCENARIOS[@]}"; do
         IFS=':' read -r name config source <<< "$entry"
-        run_litmus "$name" "$config" "${source:-}"
+        run_scenario "$name" "$config" "${source:-}"
     done
 
     echo "=========================================="
-    echo "  Litmus suite complete"
+    echo "  Scenario suite complete"
     echo "=========================================="
 elif [[ "$1" == "--list" ]]; then
     list_tests
 else
-    # Run specific test(s)
+    # Run specific scenario(s)
     for test_name in "$@"; do
         # Find matching entry
         found=false
-        for entry in "${LITMUS_TESTS[@]}"; do
+        for entry in "${SCENARIOS[@]}"; do
             IFS=':' read -r name config source <<< "$entry"
             if [[ "$name" == "$test_name" ]]; then
-                run_litmus "$name" "$config" "${source:-}"
+                run_scenario "$name" "$config" "${source:-}"
                 found=true
                 break
             fi
         done
         if ! $found; then
-            echo -e "${RED}Unknown test: $test_name${NC}"
-            echo "Run with --list to see available tests."
+            echo -e "${RED}Unknown scenario: $test_name${NC}"
+            echo "Run with --list to see available scenarios."
             exit 1
         fi
     done

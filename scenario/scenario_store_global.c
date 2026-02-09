@@ -1,14 +1,14 @@
-/* D1. VM global restored at boundary.
- * Global in VM, live-in at region boundary. Blocks large enough to
- * force a boundary.
- * Expected: __restore_mem call at boundary in the instrumented IR. */
+/* B2. Global memory store at def site.
+ * Global written before a volatile-guarded branch, read after boundary.
+ * Blocks large enough to force a boundary.
+ * Expected: __checkpoint_store_mem call in the instrumented IR. */
 
-int g_vol;
+int g_data;
 volatile int barrier;
 
-int litmus_needvol(int x) {
-    /* Write VM global in entry block, pad with instructions */
-    g_vol = x + 99;
+void scenario_store_global(int x) {
+    /* Write global in entry block, pad with enough instructions */
+    g_data = x + 42;
     int a = x + 1;
     int b = a + 2;
     int c = b + 3;
@@ -23,8 +23,8 @@ int litmus_needvol(int x) {
     int l = k + 12;
 
     if (barrier) {
-        /* Read the VM global after boundary (needs volatile restore) */
-        int m = l + g_vol;
+        /* Read global after boundary */
+        int m = l + g_data;
         int n = m + 1;
         int o = n + 2;
         int p = o + 3;
@@ -35,8 +35,6 @@ int litmus_needvol(int x) {
         int u = t + 8;
         int v = u + 9;
         int w = v + 10;
-        return w;
+        g_data = w;
     }
-
-    return l;
 }
