@@ -31,7 +31,36 @@ uint16_t __milp_nvm_sp;
 MILP_NVM
 uint16_t __milp_nvm_regs[12];
 
-void __milp_checkpoint(const char *block_name) {
-    (void)block_name;
-    /* TODO: Implement real checkpoint persistence + recovery. */
+void __region_prologue(void) {
+    /* TODO */
+}
+
+void __region_epilogue(void) {
+    /* TODO */
+}
+
+void __checkpoint_store_reg(int32_t slot_id, int64_t value) {
+    (void)slot_id;
+    (void)value;
+    /* TODO */
+}
+
+void __checkpoint_store_mem(void *nvm_dst, void *vm_src, int32_t size) {
+    (void)nvm_dst;
+    (void)vm_src;
+    (void)size;
+    /* TODO */
+}
+
+void __restore_reg(int32_t slot_id, void *dest) {
+    (void)slot_id;
+    (void)dest;
+    /* TODO */
+}
+
+void __restore_mem(void *vm_dst, void *nvm_src, int32_t size) {
+    (void)vm_dst;
+    (void)nvm_src;
+    (void)size;
+    /* TODO */
 }
