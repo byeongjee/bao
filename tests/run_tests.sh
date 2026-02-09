@@ -80,6 +80,8 @@ MILP_TESTS=(
     "test_exit_constraint:Exit constraint - expensive exit block:checkpoint:simple_config.json:O3:pass"
     "test_switch:Switch statement - multiple successors:checkpoint:simple_config.json:O3:pass"
     "test_infeasible:Infeasible - block exceeds capacity (expect error):checkpoint:simple_config.json:O3:infeasible"
+    "test_distributed_stores:Distributed stores - checkpoint stores at def sites:checkpoint:milp_new_config.json:O3:pass"
+    "test_vm_nvm_placement:VM/NVM placement - global memory assignment:checkpoint:milp_new_config.json:O3:pass"
 )
 
 ROCKCLIMB_TESTS=(
