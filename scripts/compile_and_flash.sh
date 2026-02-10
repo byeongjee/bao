@@ -149,6 +149,10 @@ compile_to_ir() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
         CLANG_FLAGS="-S -emit-llvm -O$CLANG_OPT_LEVEL"
         CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include"
+        # Source-built clang may not know the SDK path on macOS
+        if command -v xcrun &>/dev/null; then
+            CLANG_FLAGS="$CLANG_FLAGS -isysroot $(xcrun --show-sdk-path)"
+        fi
     else
         CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
         CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
@@ -291,6 +295,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             fi
 
             if [[ "$LOCAL_MODE" == "true" ]]; then
+                # Strip ELF-only .nvm section specifier (invalid on Mach-O)
+                sed -i '' 's/, section ".nvm"//g' "$TMP_DIR/ckpt.ll"
                 if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
                     link_local "$TMP_DIR/ckpt.ll" "$ENERGY_VALIDATE_RUNTIME"
                 else
@@ -342,6 +348,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             fi
 
             if [[ "$LOCAL_MODE" == "true" ]]; then
+                # Strip ELF-only .nvm section specifier (invalid on Mach-O)
+                sed -i '' 's/, section ".nvm"//g' "$TMP_DIR/ckpt.ll"
                 if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
                     link_local "$TMP_DIR/ckpt.ll" "$ENERGY_VALIDATE_RUNTIME"
                 else
