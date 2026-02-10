@@ -20,6 +20,14 @@ CheckpointOptimizer::CheckpointOptimizer(const MILPInput &input)
     model_.set(GRB_IntParam_OutputFlag, 0);
 }
 
+int CheckpointOptimizer::getNumVars() const {
+    return model_.get(GRB_IntAttr_NumVars);
+}
+
+int CheckpointOptimizer::getNumConstrs() const {
+    return model_.get(GRB_IntAttr_NumConstrs);
+}
+
 std::vector<std::string> CheckpointOptimizer::getInfeasibleBlocks() const {
     std::vector<std::string> infeasible;
     for (const auto &blockName : cfg_.getBlocks()) {

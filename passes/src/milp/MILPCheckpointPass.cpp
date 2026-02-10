@@ -85,33 +85,25 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         return PreservedAnalyses::all();
     }
 
-    // Report solution
-    errs() << "MILP solution for " << F.getName() << ":\n";
-    errs() << "  Region starts (" << solution.regionStarts.size() << "): ";
-    bool first = true;
-    for (const auto &rs : solution.regionStarts) {
-        if (!first) errs() << ", ";
-        errs() << rs;
-        first = false;
-    }
-    errs() << "\n";
-    errs() << "  Enabled checkpoint stores: "
-           << solution.enabledDefStores.size() << "\n";
-    errs() << "  VM-placed globals: ";
-    unsigned vmCount = 0;
-    for (const auto &[gv, inVm] : solution.vmPlacement) {
-        if (inVm) vmCount++;
-    }
-    errs() << vmCount << " / " << solution.vmPlacement.size() << "\n";
-    errs() << "  Objective value: " << solution.objectiveValue << "\n";
-    if (solution.solverStatus == SolverStatus::Feasible) {
-        errs() << "  Solver status: FEASIBLE (MIP gap: " << solution.mipGap
-               << ")\n";
-    }
-
     // Step 7: Instrument IR (Pass F)
     CheckpointInstrumenter instrumenter(*F.getParent());
     instrumenter.instrumentFunction(F, solution, *ctx.stateAnalysis);
+
+    // Statistics summary
+    errs() << "=== MILP Checkpoint Insertion Statistics ===\n";
+    errs() << "  Basic blocks:                    " << ctx.cfg->getBlocks().size() << "\n";
+    errs() << "  Edges:                           " << ctx.cfg->getEdges().size() << "\n";
+    errs() << "  Global variables:                " << ctx.stateAnalysis->getVMObjs().size() << "\n";
+    errs() << "  MILP variables:                  " << optimizer.getNumVars() << "\n";
+    errs() << "  MILP constraints:                " << optimizer.getNumConstrs() << "\n";
+    if (solution.solverStatus == SolverStatus::Optimal) {
+        errs() << "  Optimal solution:                yes\n";
+    } else {
+        errs() << "  Optimal solution:                no (MIP gap: " << solution.mipGap << ")\n";
+    }
+    errs() << "  Regions:                         " << solution.regionStarts.size() << "\n";
+    errs() << "  Region boundaries inserted:      " << (solution.regionStarts.size() - 1) << "\n";
+    errs() << "  Distributed checkpoints inserted: " << solution.enabledDefStores.size() << "\n";
 
     return PreservedAnalyses::none();
 }

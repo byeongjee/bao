@@ -87,6 +87,12 @@ public:
     /// Get the objective value.
     double getObjectiveValue() const { return solution_.objectiveValue; }
 
+    /// Get number of MILP variables in the model.
+    int getNumVars() const;
+
+    /// Get number of MILP constraints in the model.
+    int getNumConstrs() const;
+
     /// Check feasibility - returns blocks whose base energy exceeds capacity.
     std::vector<std::string> getInfeasibleBlocks() const;
 
