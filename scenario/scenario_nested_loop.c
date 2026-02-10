@@ -3,7 +3,8 @@
  * boundaries inside the inner loop body.
  * Expected: No boundary inside inner loop body. */
 
-int scenario_nested_loop(int n, int m) {
+int main(void) {
+    int n = 5, m = 5;
     int sum = 0;
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < m; j++) {

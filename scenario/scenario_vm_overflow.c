@@ -6,7 +6,8 @@
 int g_a, g_b, g_c, g_d, g_e;
 volatile int barrier;
 
-void scenario_vm_overflow(int x) {
+int main(void) {
+    int x = 1;
     /* Write all 5 globals, pad with enough instructions */
     g_a = x + 1;
     g_b = x + 2;
@@ -35,4 +36,5 @@ void scenario_vm_overflow(int x) {
         int q = p + 5;
         g_a = q;
     }
+    return 0;
 }

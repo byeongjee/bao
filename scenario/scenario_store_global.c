@@ -6,7 +6,8 @@
 int g_data;
 volatile int barrier;
 
-void scenario_store_global(int x) {
+int main(void) {
+    int x = 1;
     /* Write global in entry block, pad with enough instructions */
     g_data = x + 42;
     int a = x + 1;
@@ -37,4 +38,5 @@ void scenario_store_global(int x) {
         int w = v + 10;
         g_data = w;
     }
+    return 0;
 }

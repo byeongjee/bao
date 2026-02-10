@@ -6,7 +6,8 @@
 
 volatile int barrier;
 
-int scenario_store_reg(int x) {
+int main(void) {
+    int x = 1;
     /* Define 'val' early, then pad to force boundary */
     int val = x * 3 + 7;
     int a = val + 1;

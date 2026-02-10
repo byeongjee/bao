@@ -6,7 +6,8 @@
 int g_vol;
 volatile int barrier;
 
-int scenario_needvol(int x) {
+int main(void) {
+    int x = 1;
     /* Write VM global in entry block, pad with instructions */
     g_vol = x + 99;
     int a = x + 1;

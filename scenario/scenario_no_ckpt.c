@@ -2,7 +2,8 @@
  * A short function with only a few instructions.
  * Expected: Region starts (1) — entry only. */
 
-int scenario_no_ckpt(int a, int b) {
+int main(void) {
+    int a = 1, b = 2;
     int c = a + b;
     int d = c - 1;
     return d;

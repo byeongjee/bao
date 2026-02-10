@@ -5,7 +5,8 @@
 
 int g_hot;
 
-int scenario_vm_hot(int n) {
+int main(void) {
+    int n = 10;
     g_hot = 0;
     for (int i = 0; i < n; i++) {
         g_hot += i;

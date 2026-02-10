@@ -2,7 +2,8 @@
  * One branch cheap, the other expensive.
  * Expected: Energy propagation handles both paths correctly. */
 
-int scenario_diamond(int x) {
+int main(void) {
+    int x = 1;
     int result;
     if (x > 0) {
         /* Cheap branch: ~3 instructions */

@@ -6,7 +6,8 @@
 int g_rare;
 volatile int barrier;
 
-int scenario_nvm_efficient(int x) {
+int main(void) {
+    int x = 1;
     /* Phase 1: write g_rare once, pad entry block */
     g_rare = x + 42;
     int a = x + 1;

@@ -2,7 +2,8 @@
  * Switch with 4 cases of varying cost.
  * Expected: Handles multi-successor CFG correctly. */
 
-int scenario_switch(int sel) {
+int main(void) {
+    int sel = 2;
     int result;
     switch (sel) {
     case 0:

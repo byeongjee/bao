@@ -5,7 +5,8 @@
 
 volatile int barrier;
 
-int scenario_forced_ckpt(int a) {
+int main(void) {
+    int a = 1;
     /* Phase 1: ~14 adds → ~17 energy with load+icmp+br */
     int b = a + 1;
     int c = b + 2;

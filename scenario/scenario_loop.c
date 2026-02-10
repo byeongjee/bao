@@ -3,7 +3,8 @@
  * since placing it inside would multiply overhead by iteration count.
  * Expected: No boundary inside loop body. */
 
-int scenario_loop(int n) {
+int main(void) {
+    int n = 10;
     int sum = 0;
     for (int i = 0; i < n; i++) {
         sum += i * 2 + 1;

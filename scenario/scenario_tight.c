@@ -4,7 +4,8 @@
 
 volatile int barrier;
 
-int scenario_tight(int x) {
+int main(void) {
+    int x = 1;
     int a = x + 1;
     int b = a + 2;
     int c = b + 3;

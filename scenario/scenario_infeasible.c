@@ -2,7 +2,8 @@
  * One basic block with energy > capacity (25), making placement infeasible.
  * Expected: Error "exceed energy capacity". */
 
-int scenario_infeasible(int x) {
+int main(void) {
+    int x = 1;
     int a = x + 1;
     int b = a + 2;
     int c = b + 3;
