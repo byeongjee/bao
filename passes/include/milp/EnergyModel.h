@@ -6,22 +6,24 @@
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 
 #include <map>
+#include <optional>
 #include <string>
 
 namespace checkpoint {
 
-/// Energy parameters loaded from config JSON for the new MILP formulation.
+/// Energy parameters loaded from MILP config JSON.
+/// All fields are required - no silent defaults.
 struct MILPEnergyParams {
-    double capacity = 100.0;       // E_buf: energy buffer capacity
-    double E_pro = 0.0;            // Prologue energy at region boundary
-    double E_epi = 0.0;            // Epilogue energy at region boundary
-    double regStoreEnergy = 0.0;   // Energy to store one SSA reg to FRAM
-    double regRestoreEnergy = 0.0; // Energy to restore one SSA reg from FRAM
-    double nvmAccessPenalty = 0.0; // Extra energy per NVM access vs VM
-    double memStoreEnergyPerByte = 0.0;   // Energy per byte for VM->FRAM copy
-    double memRestoreEnergyPerByte = 0.0; // Energy per byte for FRAM->VM copy
-    unsigned vmCapacityBytes = 2048;      // VM (SRAM) capacity in bytes
-    double qRebootProb = 1.0;     // Probability of reboot at boundary
+    double capacity;               // E_buf: energy buffer capacity
+    double E_pro;                  // Prologue energy at region boundary
+    double E_epi;                  // Epilogue energy at region boundary
+    double regStoreEnergy;         // Energy to store one SSA reg to FRAM
+    double regRestoreEnergy;       // Energy to restore one SSA reg from FRAM
+    double nvmAccessPenalty;       // Extra energy per NVM access vs VM
+    double memStoreEnergyPerByte;  // Energy per byte for VM->FRAM copy
+    double memRestoreEnergyPerByte; // Energy per byte for FRAM->VM copy
+    unsigned vmCapacityBytes;      // VM (SRAM) capacity in bytes
+    double qRebootProb;            // Probability of reboot at boundary
 };
 
 /// Computes all energy parameters needed by the MILP (spec Sections 4 + 8).
@@ -81,7 +83,7 @@ private:
 };
 
 /// Parse MILP energy parameters from a JSON config file.
-/// Missing fields get sensible defaults (backward compatible with old configs).
-MILPEnergyParams parseMILPEnergyParams(const std::string &configPath);
+/// All fields are required. Returns std::nullopt on error.
+std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configPath);
 
 } // namespace checkpoint

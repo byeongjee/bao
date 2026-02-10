@@ -19,16 +19,13 @@ struct BaseContext {
     std::unique_ptr<EnergyEstimator> estimator;
     std::unique_ptr<CFGAnalysis> cfg;
     llvm::LoopInfo *loopInfo;
-    double capacity;
 
     BaseContext(std::unique_ptr<EnergyEstimator> est,
                std::unique_ptr<CFGAnalysis> cfgAnalysis,
-               llvm::LoopInfo *li,
-               double cap)
+               llvm::LoopInfo *li)
         : estimator(std::move(est)),
           cfg(std::move(cfgAnalysis)),
-          loopInfo(li),
-          capacity(cap) {}
+          loopInfo(li) {}
 
     // Move-only
     BaseContext(BaseContext &&) = default;
@@ -38,7 +35,7 @@ struct BaseContext {
 
 protected:
     // Allow derived classes to default-construct for two-phase init
-    BaseContext() : loopInfo(nullptr), capacity(0.0) {}
+    BaseContext() : loopInfo(nullptr) {}
 };
 
 /// Generic result type for context creation.
@@ -106,8 +103,6 @@ inline ContextResult<BaseContext> createBaseContext(
         return Result::skip();
     }
 
-    double capacity = estimator->getCapacity();
-
     // Prepare estimator for this function (needed by AssemblyBasedEstimator)
     estimator->prepareForFunction(F);
 
@@ -115,7 +110,7 @@ inline ContextResult<BaseContext> createBaseContext(
     auto cfg = std::make_unique<CFGAnalysis>(F, LI, *estimator);
 
     return Result::ok(std::make_unique<BaseContext>(
-        std::move(estimator), std::move(cfg), &LI, capacity));
+        std::move(estimator), std::move(cfg), &LI));
 }
 
 } // namespace checkpoint

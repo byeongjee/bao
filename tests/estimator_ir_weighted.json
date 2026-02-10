@@ -1,9 +1,6 @@
 {
-  "version": "1.0",
-  "description": "RockClimb configuration with memory checkpointing enabled",
   "estimator_type": "ir",
   "energy_parameters": {
-    "capacity": 500.0,
     "instruction_costs": {
       "simple_arithmetic": 1,
       "complex_arithmetic": 3,
@@ -20,14 +17,5 @@
       "atomic": 8,
       "default": 1
     }
-  },
-  "rockclimb_parameters": {
-    "V_max": 3.6,
-    "V_min": 1.8,
-    "C_buf_uF": 104.5,
-    "N_reg": 16,
-    "E_restore_per_reg": 0.5,
-    "distributed_checkpointing": true,
-    "memory_checkpointing": true
   }
 }

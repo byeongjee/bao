@@ -18,14 +18,12 @@ public:
     static std::unique_ptr<IRBasedEstimator> create(const std::string &configPath);
 
     EnergyEstimate estimate(const llvm::BasicBlock &BB) override;
-    double getCapacity() const override;
     std::string getName() const override;
 
 private:
     /// Private constructor - use create() factory method.
     IRBasedEstimator() = default;
 
-    double capacity_ = 0.0;
     std::unordered_map<std::string, int> instructionCosts_;
 
     /// Load configuration from JSON file.

@@ -38,13 +38,6 @@ bool AssemblyBasedEstimator::loadConfig(const std::string &configPath) {
 
     auto &params = config["energy_parameters"];
 
-    // Load capacity (required)
-    if (!params.contains("capacity")) {
-        llvm::errs() << "Error: Missing 'capacity' in config: " << configPath << "\n";
-        return false;
-    }
-    capacity_ = params["capacity"].get<double>();
-
     // Load energy data path (required)
     if (!params.contains("energy_data_path")) {
         llvm::errs() << "Error: Missing 'energy_data_path' in config: " << configPath << "\n";
@@ -102,10 +95,6 @@ bool AssemblyBasedEstimator::loadEnergyData(const std::string &energyDataPath) {
     }
 
     return true;
-}
-
-double AssemblyBasedEstimator::getCapacity() const {
-    return capacity_;
 }
 
 std::string AssemblyBasedEstimator::getName() const {

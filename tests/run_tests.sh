@@ -27,8 +27,13 @@ else
 fi
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
-MILP_CONFIG="$SCRIPT_DIR/simple_config.json"
-ROCKCLIMB_CONFIG="$SCRIPT_DIR/rockclimb_config.json"
+
+# Config files (split into estimator + mode-specific)
+ESTIMATOR_UNIFORM="$SCRIPT_DIR/estimator_ir_uniform.json"
+ESTIMATOR_WEIGHTED="$SCRIPT_DIR/estimator_ir_weighted.json"
+MILP_PARAMS="$SCRIPT_DIR/milp_params.json"
+MILP_PARAMS_SMALL="$SCRIPT_DIR/milp_params_small.json"
+ROCKCLIMB_PARAMS="$SCRIPT_DIR/rockclimb_params.json"
 
 # Ensure tmp directory exists
 mkdir -p "$TMP_DIR"
@@ -68,31 +73,32 @@ if [ ! -f "$PASS_LIB" ]; then
     exit 1
 fi
 
-# Test entries: name:description:pass:config:clang_opt:check_type
-#   pass       = checkpoint | rockclimb
-#   config     = config filename (relative to SCRIPT_DIR)
-#   clang_opt  = O3 | O0 (O0 adds -Xclang -disable-O0-optnone)
-#   check_type = pass (expect success) | infeasible (expect capacity error) | regions (check "Region boundaries")
+# Test entries: name:description:pass:estimator_config:milp_or_rc_config:clang_opt:check_type
+#   pass            = checkpoint | rockclimb
+#   estimator_config = estimator config filename (relative to SCRIPT_DIR)
+#   milp_or_rc_config = MILP or RockClimb params config filename
+#   clang_opt       = O3 | O0 (O0 adds -Xclang -disable-O0-optnone)
+#   check_type      = pass (expect success) | infeasible (expect capacity error) | regions (check "Region boundaries")
 
 MILP_TESTS=(
-    "test_linear:Linear sequence - basic energy propagation:checkpoint:simple_config.json:O3:pass"
-    "test_diamond:Diamond CFG - asymmetric if-else paths:checkpoint:simple_config.json:O3:pass"
-    "test_simple_loop:Simple loop - frequency weighting:checkpoint:simple_config.json:O3:pass"
-    "test_nested_loops:Nested loops - avoid inner loop:checkpoint:simple_config.json:O3:pass"
-    "test_early_return:Early return - multiple exit blocks:checkpoint:simple_config.json:O3:pass"
-    "test_exit_constraint:Exit constraint - expensive exit block:checkpoint:simple_config.json:O3:pass"
-    "test_switch:Switch statement - multiple successors:checkpoint:simple_config.json:O3:pass"
-    "test_infeasible:Infeasible - block exceeds capacity (expect error):checkpoint:simple_config.json:O3:infeasible"
-    "test_distributed_stores:Distributed stores - checkpoint stores at def sites:checkpoint:milp_new_config.json:O3:pass"
-    "test_vm_nvm_placement:VM/NVM placement - global memory assignment:checkpoint:milp_new_config.json:O3:pass"
+    "test_linear:Linear sequence - basic energy propagation:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
+    "test_diamond:Diamond CFG - asymmetric if-else paths:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
+    "test_simple_loop:Simple loop - frequency weighting:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
+    "test_nested_loops:Nested loops - avoid inner loop:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
+    "test_early_return:Early return - multiple exit blocks:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
+    "test_exit_constraint:Exit constraint - expensive exit block:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
+    "test_switch:Switch statement - multiple successors:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
+    "test_infeasible:Infeasible - block exceeds capacity (expect error):checkpoint:estimator_ir_uniform.json:milp_params_small.json:O3:infeasible"
+    "test_distributed_stores:Distributed stores - checkpoint stores at def sites:checkpoint:estimator_ir_uniform.json:milp_params_small.json:O3:pass"
+    "test_vm_nvm_placement:VM/NVM placement - global memory assignment:checkpoint:estimator_ir_uniform.json:milp_params_small.json:O3:pass"
 )
 
 ROCKCLIMB_TESTS=(
-    "test_rockclimb_linear:Linear sequence - basic region partitioning:rockclimb:rockclimb_config.json:O0:regions"
-    "test_rockclimb_loop:Simple loop - mandatory loop header boundary:rockclimb:rockclimb_config.json:O0:regions"
-    "test_rockclimb_nested:Nested loops - multiple loop boundaries:rockclimb:rockclimb_config.json:O0:regions"
-    "test_rockclimb_diamond:Diamond CFG - branching within regions:rockclimb:rockclimb_config.json:O0:regions"
-    "test_rockclimb_liveout:Live-out registers - distributed checkpointing:rockclimb:rockclimb_config.json:O0:regions"
+    "test_rockclimb_linear:Linear sequence - basic region partitioning:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
+    "test_rockclimb_loop:Simple loop - mandatory loop header boundary:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
+    "test_rockclimb_nested:Nested loops - multiple loop boundaries:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
+    "test_rockclimb_diamond:Diamond CFG - branching within regions:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
+    "test_rockclimb_liveout:Live-out registers - distributed checkpointing:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
 )
 
 # Collect tests to run
@@ -123,13 +129,13 @@ echo ""
 
 # Verify config files exist
 CONFIGS_OK=true
-if $RUN_MILP && [ ! -f "$MILP_CONFIG" ]; then
-    echo -e "${RED}Error: MILP config not found at $MILP_CONFIG${NC}"
-    CONFIGS_OK=false
+if $RUN_MILP; then
+    [ ! -f "$ESTIMATOR_UNIFORM" ] && echo -e "${RED}Error: Estimator config not found at $ESTIMATOR_UNIFORM${NC}" && CONFIGS_OK=false
+    [ ! -f "$MILP_PARAMS" ] && echo -e "${RED}Error: MILP params not found at $MILP_PARAMS${NC}" && CONFIGS_OK=false
 fi
-if $RUN_ROCKCLIMB && [ ! -f "$ROCKCLIMB_CONFIG" ]; then
-    echo -e "${RED}Error: RockClimb config not found at $ROCKCLIMB_CONFIG${NC}"
-    CONFIGS_OK=false
+if $RUN_ROCKCLIMB; then
+    [ ! -f "$ESTIMATOR_WEIGHTED" ] && echo -e "${RED}Error: Estimator config not found at $ESTIMATOR_WEIGHTED${NC}" && CONFIGS_OK=false
+    [ ! -f "$ROCKCLIMB_PARAMS" ] && echo -e "${RED}Error: RockClimb params not found at $ROCKCLIMB_PARAMS${NC}" && CONFIGS_OK=false
 fi
 if ! $CONFIGS_OK; then
     exit 1
@@ -140,13 +146,15 @@ run_test() {
     local test_name="$1"
     local description="$2"
     local pass="$3"
-    local config="$4"
-    local clang_opt="$5"
-    local check_type="$6"
+    local estimator_config="$4"
+    local mode_config="$5"
+    local clang_opt="$6"
+    local check_type="$7"
 
     local test_file="$SCRIPT_DIR/${test_name}.c"
     local ll_file="$TMP_DIR/${test_name}.ll"
-    local config_path="$SCRIPT_DIR/${config}"
+    local estimator_path="$SCRIPT_DIR/${estimator_config}"
+    local mode_config_path="$SCRIPT_DIR/${mode_config}"
 
     echo "----------------------------------------"
     echo -e "${YELLOW}Test: $test_name${NC}"
@@ -168,11 +176,11 @@ run_test() {
     fi
 
     # Build pass-specific flags
-    local pass_flag
+    local pass_flags
     if [[ "$pass" == "checkpoint" ]]; then
-        pass_flag="-energy-config=$config_path"
+        pass_flags="-energy-config=$estimator_path -milp-config=$mode_config_path"
     else
-        pass_flag="-rockclimb-config=$config_path"
+        pass_flags="-energy-config=$estimator_path -rockclimb-config=$mode_config_path"
     fi
 
     # Run pass
@@ -183,7 +191,7 @@ run_test() {
         infeasible)
             OUTPUT=$("$OPT" -load-pass-plugin="$PASS_LIB" \
                       -passes="$pass" \
-                      "$pass_flag" \
+                      $pass_flags \
                       "$ll_file" -S -o /dev/null 2>&1)
             echo "$OUTPUT"
             if echo "$OUTPUT" | grep -q "exceed energy capacity"; then
@@ -195,7 +203,7 @@ run_test() {
         regions)
             OUTPUT=$("$OPT" -load-pass-plugin="$PASS_LIB" \
                       -passes="$pass" \
-                      "$pass_flag" \
+                      $pass_flags \
                       "$ll_file" -S -o /dev/null 2>&1) || true
             echo "$OUTPUT"
             if echo "$OUTPUT" | grep -q "Region boundaries"; then
@@ -209,7 +217,7 @@ run_test() {
         pass)
             if "$OPT" -load-pass-plugin="$PASS_LIB" \
                       -passes="$pass" \
-                      "$pass_flag" \
+                      $pass_flags \
                       "$ll_file" -S -o /dev/null 2>&1; then
                 echo -e "${GREEN}  PASS${NC}"
             else
@@ -223,8 +231,8 @@ run_test() {
 
 # Execute all selected tests
 for test_entry in "${TESTS[@]}"; do
-    IFS=':' read -r name desc pass config clang_opt check_type <<< "$test_entry"
-    run_test "$name" "$desc" "$pass" "$config" "$clang_opt" "$check_type"
+    IFS=':' read -r name desc pass est_config mode_config clang_opt check_type <<< "$test_entry"
+    run_test "$name" "$desc" "$pass" "$est_config" "$mode_config" "$clang_opt" "$check_type"
 done
 
 # Run comparison if RockClimb tests are included
@@ -249,14 +257,16 @@ if $RUN_ROCKCLIMB; then
         echo -e "${CYAN}--- MILP Pass ---${NC}"
         "$OPT" -load-pass-plugin="$PASS_LIB" \
               -passes=checkpoint \
-              -energy-config="$MILP_CONFIG" \
+              -energy-config="$ESTIMATOR_UNIFORM" \
+              -milp-config="$MILP_PARAMS" \
               "$ll_file" -S -o /dev/null 2>&1 || true
 
         echo ""
         echo -e "${CYAN}--- RockClimb Pass ---${NC}"
         "$OPT" -load-pass-plugin="$PASS_LIB" \
               -passes=rockclimb \
-              -rockclimb-config="$ROCKCLIMB_CONFIG" \
+              -energy-config="$ESTIMATOR_WEIGHTED" \
+              -rockclimb-config="$ROCKCLIMB_PARAMS" \
               "$ll_file" -S -o /dev/null 2>&1 || true
     fi
 fi

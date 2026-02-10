@@ -24,7 +24,8 @@ else
 fi
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
-CONFIG="$SCRIPT_DIR/rockclimb_config.json"
+ESTIMATOR_CONFIG="$SCRIPT_DIR/estimator_ir_weighted.json"
+ROCKCLIMB_CONFIG="$SCRIPT_DIR/rockclimb_memory_params.json"
 
 # Ensure tmp directory exists
 mkdir -p "$TMP_DIR"
@@ -39,7 +40,8 @@ NC='\033[0m' # No Color
 echo "=========================================="
 echo "RockClimb Memory Checkpointing Test Suite"
 echo "=========================================="
-echo "Config: $CONFIG"
+echo "Estimator config: $ESTIMATOR_CONFIG"
+echo "RockClimb config: $ROCKCLIMB_CONFIG"
 echo ""
 
 # Check prerequisites
@@ -49,8 +51,13 @@ if [ ! -f "$PASS_LIB" ]; then
     exit 1
 fi
 
-if [ ! -f "$CONFIG" ]; then
-    echo -e "${RED}Error: Config file not found at $CONFIG${NC}"
+if [ ! -f "$ESTIMATOR_CONFIG" ]; then
+    echo -e "${RED}Error: Estimator config file not found at $ESTIMATOR_CONFIG${NC}"
+    exit 1
+fi
+
+if [ ! -f "$ROCKCLIMB_CONFIG" ]; then
+    echo -e "${RED}Error: RockClimb config file not found at $ROCKCLIMB_CONFIG${NC}"
     exit 1
 fi
 
@@ -81,7 +88,9 @@ for test_entry in "${TESTS[@]}"; do
 
     # Compile C to LLVM IR
     echo "  Compiling to IR..."
-    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone "$test_file" -o "$ll_file" 2>/dev/null
+    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+        -I"$PROJECT_DIR/passes/include/rockclimb" \
+        "$test_file" -o "$ll_file" 2>/dev/null
 
     # Run RockClimb pass with memory checkpointing enabled
     echo "  Running RockClimb pass with memory checkpointing..."
@@ -89,7 +98,8 @@ for test_entry in "${TESTS[@]}"; do
 
     OUTPUT=$("$OPT" -load-pass-plugin="$PASS_LIB" \
               -passes=rockclimb \
-              -rockclimb-config="$CONFIG" \
+              -energy-config="$ESTIMATOR_CONFIG" \
+              -rockclimb-config="$ROCKCLIMB_CONFIG" \
               -rockclimb-memory-ckpt=true \
               "$ll_file" -S -o "$output_file" 2>&1) || true
 
@@ -140,18 +150,22 @@ echo ""
 COMPARISON_TEST="test_rockclimb_memory_stack"
 test_file="$SCRIPT_DIR/${COMPARISON_TEST}.c"
 ll_file="$TMP_DIR/${COMPARISON_TEST}.ll"
+RC_NO_MEM="$SCRIPT_DIR/rockclimb_params.json"
 
 if [ -f "$test_file" ]; then
     echo "Comparing on: $COMPARISON_TEST"
     echo ""
 
     # Compile
-    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone "$test_file" -o "$ll_file" 2>/dev/null
+    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+        -I"$PROJECT_DIR/passes/include/rockclimb" \
+        "$test_file" -o "$ll_file" 2>/dev/null
 
     echo -e "${CYAN}--- Without Memory Checkpointing ---${NC}"
     "$OPT" -load-pass-plugin="$PASS_LIB" \
           -passes=rockclimb \
-          -rockclimb-config="$CONFIG" \
+          -energy-config="$ESTIMATOR_CONFIG" \
+          -rockclimb-config="$RC_NO_MEM" \
           -rockclimb-memory-ckpt=false \
           "$ll_file" -S -o /dev/null 2>&1 | grep -E "(Regions|checkpoints|Metrics)" || true
 
@@ -159,7 +173,8 @@ if [ -f "$test_file" ]; then
     echo -e "${CYAN}--- With Memory Checkpointing ---${NC}"
     "$OPT" -load-pass-plugin="$PASS_LIB" \
           -passes=rockclimb \
-          -rockclimb-config="$CONFIG" \
+          -energy-config="$ESTIMATOR_CONFIG" \
+          -rockclimb-config="$ROCKCLIMB_CONFIG" \
           -rockclimb-memory-ckpt=true \
           "$ll_file" -S -o /dev/null 2>&1 | grep -E "(Regions|checkpoints|Metrics)" || true
 fi

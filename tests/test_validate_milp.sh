@@ -22,6 +22,9 @@ OPT="${OPT:-${LLVM_DIR:+$LLVM_DIR/bin/}opt}"
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 RUNTIME="$PROJECT_DIR/passes/runtime/energy_validate_runtime.c"
 
+ESTIMATOR_CONFIG="$SCRIPT_DIR/estimator_ir_uniform.json"
+MILP_CONFIG="$SCRIPT_DIR/milp_params.json"
+
 # Sysroot for source-built clang on macOS
 SYSROOT_FLAGS=""
 if command -v xcrun &>/dev/null; then
@@ -44,7 +47,8 @@ FAIL_COUNT=0
 run_milp_validate() {
     local test_name="$1"
     local test_file="$2"
-    local config="$3"
+    local est_config="$3"
+    local milp_config="$4"
 
     echo -e "${YELLOW}Test: $test_name${NC}"
 
@@ -65,13 +69,15 @@ run_milp_validate() {
     # MILP pass
     $OPT -load-pass-plugin="$PASS_LIB" \
         -passes=milp \
-        -energy-config="$config" \
+        -energy-config="$est_config" \
+        -milp-config="$milp_config" \
         -S "$tmp_dir/test.ll" -o "$tmp_dir/ckpt.ll" 2>/dev/null
 
     # Energy-validate pass
     $OPT -load-pass-plugin="$PASS_LIB" \
         -passes=energy-validate \
-        -energy-config="$config" \
+        -energy-config="$est_config" \
+        -milp-config="$milp_config" \
         -S "$tmp_dir/ckpt.ll" -o "$tmp_dir/validated.ll" 2>/dev/null
 
     # Compile and link with validation runtime
@@ -99,13 +105,13 @@ run_milp_validate() {
 
 # Test MILP validation on existing test programs
 run_milp_validate "test_linear (MILP validate)" \
-    "$SCRIPT_DIR/test_linear.c" "$SCRIPT_DIR/simple_config.json"
+    "$SCRIPT_DIR/test_linear.c" "$ESTIMATOR_CONFIG" "$MILP_CONFIG"
 
 run_milp_validate "test_diamond (MILP validate)" \
-    "$SCRIPT_DIR/test_diamond.c" "$SCRIPT_DIR/simple_config.json"
+    "$SCRIPT_DIR/test_diamond.c" "$ESTIMATOR_CONFIG" "$MILP_CONFIG"
 
 run_milp_validate "test_simple_loop (MILP validate)" \
-    "$SCRIPT_DIR/test_simple_loop.c" "$SCRIPT_DIR/simple_config.json"
+    "$SCRIPT_DIR/test_simple_loop.c" "$ESTIMATOR_CONFIG" "$MILP_CONFIG"
 
 # Summary
 echo "=========================================="

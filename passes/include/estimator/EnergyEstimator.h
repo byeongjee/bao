@@ -26,10 +26,6 @@ public:
     /// @return EnergyEstimate with cost and method description.
     virtual EnergyEstimate estimate(const llvm::BasicBlock &BB) = 0;
 
-    /// Get configured energy capacity.
-    /// @return The energy capacity threshold.
-    virtual double getCapacity() const = 0;
-
     /// Get estimator name for diagnostics.
     /// @return A human-readable name for this estimator.
     virtual std::string getName() const = 0;

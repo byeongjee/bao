@@ -38,13 +38,6 @@ bool IRBasedEstimator::loadConfig(const std::string &path) {
 
     auto &params = config["energy_parameters"];
 
-    // Load capacity (required)
-    if (!params.contains("capacity")) {
-        llvm::errs() << "Error: Missing 'capacity' in config: " << path << "\n";
-        return false;
-    }
-    capacity_ = params["capacity"].get<double>();
-
     // Load instruction costs (required)
     if (!params.contains("instruction_costs")) {
         llvm::errs() << "Error: Missing 'instruction_costs' in config: " << path << "\n";
@@ -70,10 +63,6 @@ bool IRBasedEstimator::loadConfig(const std::string &path) {
     }
 
     return true;
-}
-
-double IRBasedEstimator::getCapacity() const {
-    return capacity_;
 }
 
 std::string IRBasedEstimator::getName() const {

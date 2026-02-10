@@ -18,6 +18,9 @@ using namespace llvm;
 
 // Defined in PassRegistry.cpp
 extern cl::opt<std::string> EnergyConfigOpt;
+extern cl::opt<std::string> MILPConfigOpt;
+// Defined in RockClimbPass.cpp
+extern cl::opt<std::string> RockClimbConfigOpt;
 
 // Local CLI options
 namespace {
@@ -53,18 +56,26 @@ static cl::opt<ValidateMode> ValidateModeOpt(
 namespace checkpoint {
 
 /// Compute the effective capacity for the given mode.
-/// MILP: MILPEnergyParams::capacity (= E_buf)
-/// RockClimb: RockClimbParams::calculateESafe() (= E_input - E_restore)
-static double computeEffectiveCapacity(ValidateMode mode,
-                                        const std::string &configPath) {
+/// MILP: MILPEnergyParams::capacity (= E_buf) from milp-config
+/// RockClimb: RockClimbParams::calculateESafe() (= E_input - E_restore) from rockclimb-config
+static double computeEffectiveCapacity(ValidateMode mode) {
     switch (mode) {
     case ValidateMode::RockClimb: {
         RockClimbParams rcParams;
-        parseRockClimbParams(configPath, rcParams);
+        if (!parseRockClimbParams(RockClimbConfigOpt.getValue(), rcParams)) {
+            llvm::errs() << "Error: Failed to parse RockClimb config for validation\n";
+            return 0.0;
+        }
         return rcParams.calculateESafe();
     }
-    case ValidateMode::MILP:
-        return parseMILPEnergyParams(configPath).capacity;
+    case ValidateMode::MILP: {
+        auto milpParams = parseMILPEnergyParams(MILPConfigOpt.getValue());
+        if (!milpParams) {
+            llvm::errs() << "Error: Failed to parse MILP config for validation\n";
+            return 0.0;
+        }
+        return milpParams->capacity;
+    }
     }
     llvm_unreachable("unknown validate mode");
 }
@@ -202,10 +213,18 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
 
     // Step 2: Compute effective capacity based on mode
     ValidateMode mode = ValidateModeOpt;
-    double effectiveCapacity = computeEffectiveCapacity(mode, configPath);
+    double effectiveCapacity = computeEffectiveCapacity(mode);
 
-    // Step 3: Parse overhead parameters
-    MILPEnergyParams milpParams = parseMILPEnergyParams(configPath);
+    // Step 3: Parse overhead parameters (only needed for MILP mode)
+    MILPEnergyParams milpParams{0,0,0,0,0,0,0,0,0,0};
+    if (mode == ValidateMode::MILP) {
+        auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
+        if (!milpParamsOpt) {
+            errs() << "Error: Failed to parse MILP config for validation\n";
+            return PreservedAnalyses::all();
+        }
+        milpParams = *milpParamsOpt;
+    }
     double callCost = 0.0;
     // Get call instruction cost from estimator (via a dummy block's analysis is
     // impractical, so we read instruction_costs.call from config directly)

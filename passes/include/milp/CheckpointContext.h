@@ -18,9 +18,8 @@ struct CheckpointContext : public BaseContext {
 
     CheckpointContext(std::unique_ptr<EnergyEstimator> est,
                       std::unique_ptr<CFGAnalysis> cfgAnalysis,
-                      llvm::LoopInfo *li,
-                      double cap)
-        : BaseContext(std::move(est), std::move(cfgAnalysis), li, cap) {}
+                      llvm::LoopInfo *li)
+        : BaseContext(std::move(est), std::move(cfgAnalysis), li) {}
 
     // Move-only
     CheckpointContext(CheckpointContext &&) = default;
@@ -62,8 +61,6 @@ inline CheckpointContextResult createCheckpointContext(
         return Result::skip();
     }
 
-    double capacity = estimator->getCapacity();
-
     // Prepare estimator for this function
     estimator->prepareForFunction(F);
 
@@ -71,7 +68,7 @@ inline CheckpointContextResult createCheckpointContext(
     auto cfg = std::make_unique<CFGAnalysis>(F, LI, *estimator);
 
     return Result::ok(std::make_unique<CheckpointContext>(
-        std::move(estimator), std::move(cfg), &LI, capacity));
+        std::move(estimator), std::move(cfg), &LI));
 }
 
 } // namespace checkpoint

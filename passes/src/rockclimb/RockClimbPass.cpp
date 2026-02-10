@@ -15,14 +15,17 @@
 
 using namespace llvm;
 
-// Command line options for RockClimb pass
-namespace {
+// Extern declaration for shared energy-config option (defined in PassRegistry.cpp)
+extern cl::opt<std::string> EnergyConfigOpt;
 
-static cl::opt<std::string> RockClimbConfigOpt(
+// Command line options for RockClimb pass
+cl::opt<std::string> RockClimbConfigOpt(
     "rockclimb-config",
     cl::desc("Path to JSON configuration file for RockClimb pass"),
     cl::value_desc("filename"),
     cl::init(""));
+
+namespace {
 
 static cl::opt<bool> DistributedCkptOpt(
     "rockclimb-distributed-ckpt",
@@ -48,10 +51,13 @@ static cl::opt<bool> MemoryCkptOpt(
 
 namespace checkpoint {
 
-// Parse RockClimb-specific parameters from JSON config
+// Parse RockClimb-specific parameters from flat JSON config.
+// All fields are required except memory_checkpointing (defaults to false).
 bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     std::ifstream file(configPath.str());
     if (!file.is_open()) {
+        errs() << "Error: Cannot open RockClimb config file: "
+               << configPath << "\n";
         return false;
     }
 
@@ -62,40 +68,65 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     Expected<json::Value> parsed = json::parse(content);
     if (!parsed) {
         consumeError(parsed.takeError());
+        errs() << "Error: JSON parse error in RockClimb config: "
+               << configPath << "\n";
         return false;
     }
 
     json::Object *root = parsed->getAsObject();
     if (!root) {
+        errs() << "Error: RockClimb config is not a JSON object: "
+               << configPath << "\n";
         return false;
     }
 
-    // Look for rockclimb_parameters section
-    json::Object *rcParams = root->getObject("rockclimb_parameters");
-    if (!rcParams) {
-        return false;  // No rockclimb parameters - use defaults
+    // All fields required - flat JSON (no rockclimb_parameters wrapper)
+    auto V_max = root->getNumber("V_max");
+    if (!V_max) {
+        errs() << "Error: Missing required field 'V_max' in RockClimb config: "
+               << configPath << "\n";
+        return false;
+    }
+    auto V_min = root->getNumber("V_min");
+    if (!V_min) {
+        errs() << "Error: Missing required field 'V_min' in RockClimb config: "
+               << configPath << "\n";
+        return false;
+    }
+    auto C_buf_uF = root->getNumber("C_buf_uF");
+    if (!C_buf_uF) {
+        errs() << "Error: Missing required field 'C_buf_uF' in RockClimb config: "
+               << configPath << "\n";
+        return false;
+    }
+    auto N_reg = root->getInteger("N_reg");
+    if (!N_reg) {
+        errs() << "Error: Missing required field 'N_reg' in RockClimb config: "
+               << configPath << "\n";
+        return false;
+    }
+    auto E_restore_per_reg = root->getNumber("E_restore_per_reg");
+    if (!E_restore_per_reg) {
+        errs() << "Error: Missing required field 'E_restore_per_reg' in RockClimb config: "
+               << configPath << "\n";
+        return false;
+    }
+    auto distributed = root->getBoolean("distributed_checkpointing");
+    if (!distributed) {
+        errs() << "Error: Missing required field 'distributed_checkpointing' in RockClimb config: "
+               << configPath << "\n";
+        return false;
     }
 
-    // Parse individual parameters
-    if (auto v = rcParams->getNumber("V_max")) {
-        params.V_max = *v;
-    }
-    if (auto v = rcParams->getNumber("V_min")) {
-        params.V_min = *v;
-    }
-    if (auto v = rcParams->getNumber("C_buf_uF")) {
-        params.C_buf_uF = *v;
-    }
-    if (auto v = rcParams->getInteger("N_reg")) {
-        params.N_reg = static_cast<unsigned>(*v);
-    }
-    if (auto v = rcParams->getNumber("E_restore_per_reg")) {
-        params.E_restore_per_reg = *v;
-    }
-    if (auto v = rcParams->getBoolean("distributed_checkpointing")) {
-        params.distributedCheckpointing = *v;
-    }
-    if (auto v = rcParams->getBoolean("memory_checkpointing")) {
+    params.V_max = *V_max;
+    params.V_min = *V_min;
+    params.C_buf_uF = *C_buf_uF;
+    params.N_reg = static_cast<unsigned>(*N_reg);
+    params.E_restore_per_reg = *E_restore_per_reg;
+    params.distributedCheckpointing = *distributed;
+
+    // memory_checkpointing is optional (defaults to false)
+    if (auto v = root->getBoolean("memory_checkpointing")) {
         params.memoryCheckpointing = *v;
     }
 
@@ -104,17 +135,11 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
 
 PreservedAnalyses RockClimbPass::run(Function &F,
                                       FunctionAnalysisManager &AM) {
-    // Determine config path - try rockclimb-config first, fall back to energy-config
-    std::string configPath = RockClimbConfigOpt;
-    if (configPath.empty()) {
-        // Try to use the common energy-config option
-        // This requires declaring it as extern
-        configPath = "";  // Will trigger error in createRockClimbContext
-    }
-
-    // Create RockClimb context
+    // Create RockClimb context with separate estimator and rockclimb configs
     auto &LI = AM.getResult<LoopAnalysis>(F);
-    auto ctxResult = createRockClimbContext(F, LI, configPath);
+    auto ctxResult = createRockClimbContext(F, LI,
+                                            EnergyConfigOpt.getValue(),
+                                            RockClimbConfigOpt.getValue());
 
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip()) {
@@ -139,7 +164,7 @@ PreservedAnalyses RockClimbPass::run(Function &F,
 
     errs() << "=== RockClimb Pass on " << F.getName() << " ===\n";
     errs() << "  E_safe: " << ctx.E_safe << "\n";
-    errs() << "  Capacity (from config): " << ctx.capacity << "\n";
+    errs() << "  Capacity (E_safe): " << ctx.E_safe << "\n";
     errs() << "  V_max: " << ctx.params.V_max << " V\n";
     errs() << "  V_min: " << ctx.params.V_min << " V\n";
     errs() << "  C_buf: " << ctx.params.C_buf_uF << " uF\n";

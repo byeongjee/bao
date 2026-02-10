@@ -142,53 +142,52 @@ void EnergyModel::computeRestoreCosts() {
 
 // ---- Config parsing ----
 
-MILPEnergyParams parseMILPEnergyParams(const std::string &configPath) {
-    MILPEnergyParams params;
-
+std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configPath) {
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        llvm::errs() << "Warning: Cannot open config for MILP params: "
+        llvm::errs() << "Error: Cannot open MILP config file: "
                      << configPath << "\n";
-        return params;
+        return std::nullopt;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::errs() << "Warning: JSON parse error in: " << configPath << "\n";
-        return params;
+        llvm::errs() << "Error: JSON parse error in MILP config: " << configPath << "\n";
+        return std::nullopt;
     }
 
-    if (!config.contains("energy_parameters"))
-        return params;
+    // All fields are required - flat JSON (no energy_parameters wrapper)
+    const std::vector<std::string> requiredDouble = {
+        "capacity", "E_pro", "E_epi",
+        "reg_store_energy", "reg_restore_energy", "nvm_access_penalty",
+        "mem_store_energy_per_byte", "mem_restore_energy_per_byte",
+        "q_reboot_probability"
+    };
 
-    const auto &ep = config["energy_parameters"];
+    for (const auto &field : requiredDouble) {
+        if (!config.contains(field)) {
+            llvm::errs() << "Error: Missing required field '" << field
+                         << "' in MILP config: " << configPath << "\n";
+            return std::nullopt;
+        }
+    }
+    if (!config.contains("vm_capacity_bytes")) {
+        llvm::errs() << "Error: Missing required field 'vm_capacity_bytes'"
+                     << " in MILP config: " << configPath << "\n";
+        return std::nullopt;
+    }
 
-    // capacity is already loaded by the estimator, but we read it here too
-    // for the MILP's E_buf
-    if (ep.contains("capacity"))
-        params.capacity = ep["capacity"].get<double>();
-
-    // New MILP-specific parameters with backward-compatible defaults
-    if (ep.contains("E_pro"))
-        params.E_pro = ep["E_pro"].get<double>();
-    if (ep.contains("E_epi"))
-        params.E_epi = ep["E_epi"].get<double>();
-    if (ep.contains("reg_store_energy"))
-        params.regStoreEnergy = ep["reg_store_energy"].get<double>();
-    if (ep.contains("reg_restore_energy"))
-        params.regRestoreEnergy = ep["reg_restore_energy"].get<double>();
-    if (ep.contains("nvm_access_penalty"))
-        params.nvmAccessPenalty = ep["nvm_access_penalty"].get<double>();
-    if (ep.contains("mem_store_energy_per_byte"))
-        params.memStoreEnergyPerByte =
-            ep["mem_store_energy_per_byte"].get<double>();
-    if (ep.contains("mem_restore_energy_per_byte"))
-        params.memRestoreEnergyPerByte =
-            ep["mem_restore_energy_per_byte"].get<double>();
-    if (ep.contains("vm_capacity_bytes"))
-        params.vmCapacityBytes = ep["vm_capacity_bytes"].get<unsigned>();
-    if (ep.contains("q_reboot_probability"))
-        params.qRebootProb = ep["q_reboot_probability"].get<double>();
+    MILPEnergyParams params;
+    params.capacity = config["capacity"].get<double>();
+    params.E_pro = config["E_pro"].get<double>();
+    params.E_epi = config["E_epi"].get<double>();
+    params.regStoreEnergy = config["reg_store_energy"].get<double>();
+    params.regRestoreEnergy = config["reg_restore_energy"].get<double>();
+    params.nvmAccessPenalty = config["nvm_access_penalty"].get<double>();
+    params.memStoreEnergyPerByte = config["mem_store_energy_per_byte"].get<double>();
+    params.memRestoreEnergyPerByte = config["mem_restore_energy_per_byte"].get<double>();
+    params.vmCapacityBytes = config["vm_capacity_bytes"].get<unsigned>();
+    params.qRebootProb = config["q_reboot_probability"].get<double>();
 
     return params;
 }

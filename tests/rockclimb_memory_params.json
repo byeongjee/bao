@@ -1,0 +1,9 @@
+{
+  "V_max": 3.6,
+  "V_min": 1.8,
+  "C_buf_uF": 104.5,
+  "N_reg": 16,
+  "E_restore_per_reg": 0.5,
+  "distributed_checkpointing": true,
+  "memory_checkpointing": true
+}

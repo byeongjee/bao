@@ -19,15 +19,12 @@ public:
     static std::unique_ptr<AssemblyBasedEstimator> create(const std::string &configPath);
 
     EnergyEstimate estimate(const llvm::BasicBlock &BB) override;
-    double getCapacity() const override;
     std::string getName() const override;
     void prepareForFunction(const llvm::Function &F) override;
     void finalizeFunction(const llvm::Function &F) override;
 
 private:
     AssemblyBasedEstimator() = default;
-
-    double capacity_ = 0.0;
 
     // Per-function, per-BB energy: funcName -> {bbName -> energy}
     std::map<std::string, std::map<std::string, double>> functionEnergy_;

@@ -15,7 +15,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
-CONFIG="$SCRIPT_DIR/simple_config.json"
+ESTIMATOR_CONFIG="$SCRIPT_DIR/estimator_ir_uniform.json"
+MILP_CONFIG="$SCRIPT_DIR/milp_params.json"
 
 if [[ ! -f "$PASS_LIB" ]]; then
     echo -e "${RED}Error: Pass library not found at $PASS_LIB${NC}"
@@ -43,7 +44,8 @@ run_validate_test() {
     local test_name="$1"
     local test_file="$2"
     local expect_pass="$3"  # true or false
-    local config="${4:-$CONFIG}"
+    local est_config="${4:-$ESTIMATOR_CONFIG}"
+    local milp_config="${5:-$MILP_CONFIG}"
 
     echo -e "${YELLOW}Test: $test_name${NC}"
 
@@ -70,7 +72,8 @@ run_validate_test() {
     # Run energy-validate pass
     $OPT -load-pass-plugin="$PASS_LIB" \
         -passes=energy-validate \
-        -energy-config="$config" \
+        -energy-config="$est_config" \
+        -milp-config="$milp_config" \
         -validate-checkpoint-function=checkpoint \
         -S "$tmp_dir/test.ll" -o "$tmp_dir/validated.ll" 2>/dev/null
 

@@ -15,6 +15,7 @@ using namespace llvm;
 
 // Defined in src/common/PassRegistry.cpp
 extern cl::opt<std::string> EnergyConfigOpt;
+extern cl::opt<std::string> MILPConfigOpt;
 extern cl::opt<bool> AcceptFeasibleOpt;
 
 namespace checkpoint {
@@ -44,8 +45,13 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
 
     // Step 4: Parse MILP energy params and build EnergyModel (Pass C/D)
-    ctx.milpParams = parseMILPEnergyParams(EnergyConfigOpt.getValue());
-    ctx.milpParams.capacity = ctx.capacity;  // Use estimator's capacity
+    auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
+    if (!milpParamsOpt) {
+        errs() << "Error: Failed to parse MILP config: "
+               << MILPConfigOpt.getValue() << "\n";
+        return PreservedAnalyses::all();
+    }
+    ctx.milpParams = *milpParamsOpt;
     ctx.energyModel = std::make_unique<EnergyModel>(
         *ctx.cfg, *ctx.stateAnalysis, BFI, F, ctx.milpParams);
 
@@ -60,7 +66,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         for (const auto &block : infeasible) {
             errs() << "  " << block << " (cost: "
                    << ctx.cfg->getBlockInfo(block).energyCost
-                   << ", capacity: " << ctx.capacity << ")\n";
+                   << ", capacity: " << ctx.milpParams.capacity << ")\n";
         }
         return PreservedAnalyses::all();
     }

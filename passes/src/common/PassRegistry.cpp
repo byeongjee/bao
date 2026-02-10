@@ -17,6 +17,12 @@ cl::opt<std::string> EnergyConfigOpt(
     cl::value_desc("filename"),
     cl::init(""));
 
+cl::opt<std::string> MILPConfigOpt(
+    "milp-config",
+    cl::desc("Path to JSON MILP configuration file (required for MILP passes)"),
+    cl::value_desc("filename"),
+    cl::init(""));
+
 cl::opt<bool> AcceptFeasibleOpt(
     "milp-accept-feasible",
     cl::desc("Accept feasible (non-optimal) MILP solutions (e.g., from time limit)"),

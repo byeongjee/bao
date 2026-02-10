@@ -17,6 +17,7 @@ using namespace llvm;
 
 // Defined in src/common/PassRegistry.cpp
 extern cl::opt<std::string> EnergyConfigOpt;
+extern cl::opt<std::string> MILPConfigOpt;
 
 namespace {
 
@@ -54,8 +55,13 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
         std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
 
     // Step 4: Build EnergyModel
-    ctx.milpParams = parseMILPEnergyParams(EnergyConfigOpt.getValue());
-    ctx.milpParams.capacity = ctx.capacity;
+    auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
+    if (!milpParamsOpt) {
+        errs() << "Error: Failed to parse MILP config: "
+               << MILPConfigOpt.getValue() << "\n";
+        return PreservedAnalyses::all();
+    }
+    ctx.milpParams = *milpParamsOpt;
     ctx.energyModel = std::make_unique<EnergyModel>(
         *ctx.cfg, *ctx.stateAnalysis, BFI, F, ctx.milpParams);
 
@@ -70,7 +76,7 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
         for (const auto &block : infeasible) {
             errs() << "  " << block << " (cost: "
                    << ctx.cfg->getBlockInfo(block).energyCost
-                   << ", capacity: " << ctx.capacity << ")\n";
+                   << ", capacity: " << ctx.milpParams.capacity << ")\n";
         }
         return PreservedAnalyses::all();
     }
@@ -106,7 +112,7 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
     // Output results
     errs() << "=== Checkpoint Analysis: " << F.getName() << " ===\n";
     errs() << "Configuration:\n";
-    errs() << "  Energy capacity: " << ctx.capacity << "\n";
+    errs() << "  Energy capacity: " << ctx.milpParams.capacity << "\n";
     errs() << "  Default loop bound: " << DefaultBoundOpt << "\n";
     errs() << "\n";
 

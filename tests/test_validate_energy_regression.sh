@@ -22,7 +22,8 @@ NC='\033[0m'
 CLANG="${CLANG:-${LLVM_DIR:+$LLVM_DIR/bin/}clang}"
 OPT="${OPT:-${LLVM_DIR:+$LLVM_DIR/bin/}opt}"
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
-CONFIG="$SCRIPT_DIR/simple_config.json"
+ESTIMATOR_CONFIG="$SCRIPT_DIR/estimator_ir_uniform.json"
+MILP_CONFIG="$SCRIPT_DIR/milp_params.json"
 RUNTIME="$PROJECT_DIR/passes/runtime/energy_validate_runtime.c"
 TEST_FILE="$SCRIPT_DIR/test_linear.c"
 
@@ -59,7 +60,8 @@ $CLANG $SYSROOT_FLAGS -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
 echo "Running MILP pass..."
 $OPT -load-pass-plugin="$PASS_LIB" \
     -passes=milp \
-    -energy-config="$CONFIG" \
+    -energy-config="$ESTIMATOR_CONFIG" \
+    -milp-config="$MILP_CONFIG" \
     -S "$TMP_DIR/test.ll" -o "$TMP_DIR/ckpt.ll" 2>"$TMP_DIR/milp_output.txt" || true
 
 echo -e "${YELLOW}MILP output:${NC}"
@@ -70,7 +72,8 @@ echo ""
 echo "Running energy-validate pass..."
 $OPT -load-pass-plugin="$PASS_LIB" \
     -passes=energy-validate \
-    -energy-config="$CONFIG" \
+    -energy-config="$ESTIMATOR_CONFIG" \
+    -milp-config="$MILP_CONFIG" \
     -validate-verbose \
     -S "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/validated.ll" 2>"$TMP_DIR/validate_pass_output.txt"
 

@@ -14,8 +14,9 @@
 #   --compile-only   Compile but don't flash
 #   --flash-only     Flash existing binary
 #   -o <output>      Output base name (default: build/<input>)
-#   -c <config>      RockClimb config JSON (default: tests/rockclimb_config.json)
-#   -e <config>      MILP energy config JSON (default: tests/simple_config.json)
+#   -e <config>      Energy estimator config JSON (required for all modes)
+#   -m <config>      MILP config JSON (required for milp mode)
+#   -c <config>      RockClimb config JSON (required for rockclimb mode)
 #   -O <level>       LLC optimization level (default: 2)
 #   -Oc <level>      Clang optimization level (default: 2)
 #   -I <dir>         Add include directory (can be repeated)
@@ -64,13 +65,15 @@ BUILD_DIR="$PROJECT_DIR/build"
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 
-ROCKCLIMB_CONFIG="$PROJECT_DIR/tests/rockclimb_config.json"
+ESTIMATOR_CONFIG=""
+MILP_CONFIG=""
+ROCKCLIMB_CONFIG=""
+
 ROCKCLIMB_RUNTIME="$PROJECT_DIR/passes/runtime/rockclimb_runtime.c"
 ROCKCLIMB_BOOT="$PROJECT_DIR/passes/runtime/rockclimb_boot.S"
 ROCKCLIMB_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/rockclimb_mock_ckpt_counter.c"
 ROCKCLIMB_LINKER="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
 
-MILP_ENERGY_CONFIG="$PROJECT_DIR/tests/simple_config.json"
 MILP_RUNTIME="$PROJECT_DIR/passes/runtime/milp_runtime.c"
 MILP_BOOT="$PROJECT_DIR/passes/runtime/milp_boot.S"
 MILP_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/milp_mock_ckpt_counter.c"
@@ -79,7 +82,7 @@ MILP_LINKER="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
 ENERGY_VALIDATE_RUNTIME="$PROJECT_DIR/passes/runtime/energy_validate_runtime.c"
 VALIDATE_CKPT_FUNCTION=""
 
-usage() { sed -n '2,24p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
 
@@ -176,8 +179,9 @@ while [[ $# -gt 0 ]]; do
         --flash-only) FLASH_ONLY="true"; shift ;;
         --verbose) VERBOSE="true"; shift ;;
         -o) OUTPUT="$2"; shift 2 ;;
-        -c) ROCKCLIMB_CONFIG="$2"; shift 2 ;;
-        -e|--energy-config) MILP_ENERGY_CONFIG="$2"; shift 2 ;;
+        -e|--energy-config) ESTIMATOR_CONFIG="$2"; shift 2 ;;
+        -m|--milp-config) MILP_CONFIG="$2"; shift 2 ;;
+        -c|--rockclimb-config) ROCKCLIMB_CONFIG="$2"; shift 2 ;;
         -O) OPT_LEVEL="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
@@ -202,6 +206,30 @@ fi
 # energy-validate requires --local (runs on host, not MSP430)
 if [[ "$RUNTIME_TYPE" == "energy-validate" && "$LOCAL_MODE" != "true" ]]; then
     error "--runtime energy-validate requires --local (energy validation runs on host)"
+fi
+
+# Validate required configs per mode
+if [[ "$FLASH_ONLY" != "true" ]]; then
+    case "$MODE" in
+        milp)
+            [[ -z "$ESTIMATOR_CONFIG" ]] && error "Energy estimator config required for milp mode: use -e <config.json>"
+            [[ ! -f "$ESTIMATOR_CONFIG" ]] && error "Estimator config not found: $ESTIMATOR_CONFIG"
+            [[ -z "$MILP_CONFIG" ]] && error "MILP config required for milp mode: use -m <config.json>"
+            [[ ! -f "$MILP_CONFIG" ]] && error "MILP config not found: $MILP_CONFIG"
+            ;;
+        rockclimb)
+            [[ -z "$ESTIMATOR_CONFIG" ]] && error "Energy estimator config required for rockclimb mode: use -e <config.json>"
+            [[ ! -f "$ESTIMATOR_CONFIG" ]] && error "Estimator config not found: $ESTIMATOR_CONFIG"
+            [[ -z "$ROCKCLIMB_CONFIG" ]] && error "RockClimb config required: use -c <config.json>"
+            [[ ! -f "$ROCKCLIMB_CONFIG" ]] && error "RockClimb config not found: $ROCKCLIMB_CONFIG"
+            ;;
+        none)
+            if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
+                [[ -z "$ESTIMATOR_CONFIG" ]] && error "Energy estimator config required for energy-validate: use -e <config.json>"
+                [[ ! -f "$ESTIMATOR_CONFIG" ]] && error "Estimator config not found: $ESTIMATOR_CONFIG"
+            fi
+            ;;
+    esac
 fi
 
 # Validate
@@ -234,7 +262,9 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             # Run energy-validate pass if requested (for user-defined checkpoints)
             if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
                 info "Running energy-validate pass..."
-                VALIDATE_FLAGS="-energy-config=$MILP_ENERGY_CONFIG"
+                VALIDATE_FLAGS="-energy-config=$ESTIMATOR_CONFIG"
+                # For none mode with energy-validate, use milp-config if provided
+                [[ -n "$MILP_CONFIG" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -milp-config=$MILP_CONFIG"
                 [[ -n "$VALIDATE_CKPT_FUNCTION" ]] && \
                     VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-checkpoint-function=$VALIDATE_CKPT_FUNCTION"
                 [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
@@ -266,13 +296,13 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
         rockclimb)
             info "Compiling with RockClimb..."
             [[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
-            [[ ! -f "$ROCKCLIMB_CONFIG" ]] && error "Config not found: $ROCKCLIMB_CONFIG"
 
             compile_to_ir
 
             # RockClimb pass
             PASS_OUTPUT=$($OPT -load-pass-plugin="$PASS_LIB" \
                 -passes=rockclimb \
+                -energy-config="$ESTIMATOR_CONFIG" \
                 -rockclimb-config="$ROCKCLIMB_CONFIG" \
                 -rockclimb-memory-ckpt="$MEMORY_CKPT" \
                 -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" 2>&1)
@@ -286,7 +316,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             # Run energy-validate pass if requested
             if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
                 info "Running energy-validate pass..."
-                VALIDATE_FLAGS="-energy-config=$ROCKCLIMB_CONFIG -validate-mode=rockclimb"
+                VALIDATE_FLAGS="-energy-config=$ESTIMATOR_CONFIG -rockclimb-config=$ROCKCLIMB_CONFIG -validate-mode=rockclimb"
                 [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
                 $OPT -load-pass-plugin="$PASS_LIB" \
                     -passes=energy-validate \
@@ -320,14 +350,14 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
         milp)
             info "Compiling with MILP..."
             [[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
-            [[ ! -f "$MILP_ENERGY_CONFIG" ]] && error "Energy config not found: $MILP_ENERGY_CONFIG"
 
             compile_to_ir
 
             # MILP pass
             PASS_OUTPUT=$($OPT -load-pass-plugin="$PASS_LIB" \
                 -passes=milp \
-                -energy-config="$MILP_ENERGY_CONFIG" \
+                -energy-config="$ESTIMATOR_CONFIG" \
+                -milp-config="$MILP_CONFIG" \
                 -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" 2>&1)
 
             if [[ "$VERBOSE" == "true" ]]; then
@@ -339,7 +369,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             # Run energy-validate pass if requested
             if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
                 info "Running energy-validate pass..."
-                VALIDATE_FLAGS="-energy-config=$MILP_ENERGY_CONFIG -validate-mode=milp"
+                VALIDATE_FLAGS="-energy-config=$ESTIMATOR_CONFIG -milp-config=$MILP_CONFIG -validate-mode=milp"
                 [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
                 $OPT -load-pass-plugin="$PASS_LIB" \
                     -passes=energy-validate \

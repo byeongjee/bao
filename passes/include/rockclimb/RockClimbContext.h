@@ -39,9 +39,8 @@ struct RockClimbContext : public BaseContext {
     RockClimbContext(std::unique_ptr<EnergyEstimator> est,
                      std::unique_ptr<CFGAnalysis> cfgAnalysis,
                      llvm::LoopInfo *li,
-                     double cap,
                      const RockClimbParams &p)
-        : BaseContext(std::move(est), std::move(cfgAnalysis), li, cap),
+        : BaseContext(std::move(est), std::move(cfgAnalysis), li),
           params(p),
           E_safe(p.calculateESafe()) {}
 
@@ -61,14 +60,17 @@ using RockClimbContextResult = ContextResult<RockClimbContext>;
 /// @return True if parsing succeeded.
 bool parseRockClimbParams(llvm::StringRef configPath, RockClimbParams &params);
 
-/// Create RockClimb context from function and config path.
+/// Create RockClimb context from function and config paths.
+/// @param estimatorConfigPath Path to energy estimator config JSON.
+/// @param rockclimbConfigPath Path to RockClimb params config JSON.
 inline RockClimbContextResult createRockClimbContext(
     llvm::Function &F,
     llvm::LoopInfo &LI,
-    llvm::StringRef configPath) {
+    llvm::StringRef estimatorConfigPath,
+    llvm::StringRef rockclimbConfigPath) {
 
-    // Use createBaseContext for common setup
-    auto baseResult = createBaseContext(F, LI, configPath, "rockclimb pass");
+    // Use createBaseContext for common setup (estimator config)
+    auto baseResult = createBaseContext(F, LI, estimatorConfigPath, "rockclimb pass");
 
     if (!baseResult.success()) {
         // Propagate error/skip with matching status
@@ -100,14 +102,15 @@ inline RockClimbContextResult createRockClimbContext(
 
     // Parse RockClimb-specific parameters
     RockClimbParams params;
-    if (!parseRockClimbParams(configPath, params)) {
-        // Use defaults if no rockclimb_parameters section
-        llvm::errs() << "Warning: No rockclimb_parameters in config, using defaults\n";
+    if (!parseRockClimbParams(rockclimbConfigPath, params)) {
+        return RockClimbContextResult::error(
+            RockClimbContextResult::Status::InvalidParams,
+            "Error: Failed to parse RockClimb config: " + rockclimbConfigPath.str() + "\n");
     }
 
     return RockClimbContextResult::ok(std::make_unique<RockClimbContext>(
         std::move(base.estimator), std::move(base.cfg),
-        base.loopInfo, base.capacity, params));
+        base.loopInfo, params));
 }
 
 } // namespace checkpoint
