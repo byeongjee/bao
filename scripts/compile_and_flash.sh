@@ -68,7 +68,7 @@ PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 ROCKCLIMB_CONFIG="$PROJECT_DIR/tests/rockclimb_config.json"
 ROCKCLIMB_RUNTIME="$PROJECT_DIR/passes/runtime/rockclimb_runtime.c"
 ROCKCLIMB_BOOT="$PROJECT_DIR/passes/runtime/rockclimb_boot.S"
-ROCKCLIMB_STUBS="$PROJECT_DIR/passes/runtime/rockclimb_stubs.c"
+ROCKCLIMB_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/rockclimb_mock_ckpt_counter.c"
 ROCKCLIMB_LINKER="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
 
 MILP_ENERGY_CONFIG="$PROJECT_DIR/tests/simple_config.json"
@@ -182,11 +182,11 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
 
             if [[ "$USE_STUBS" == "true" ]]; then
                 # Debug mode: use stubs (no real recovery)
-                info "Using stub runtime (no power failure recovery)"
+                info "Using mock counter runtime (no power failure recovery)"
                 GCC_DEBUG_FLAGS=""
                 [[ "$DEBUG_MODE" == "true" ]] && GCC_DEBUG_FLAGS="-DDEBUG"
                 $GCC -mmcu=$DEVICE -O2 -msmall $GCC_DEBUG_FLAGS -I"$MSP430GCC_SUPPORT_PATH/include" \
-                    -c "$ROCKCLIMB_STUBS" -o "$TMP_DIR/stubs.o"
+                    -c "$ROCKCLIMB_MOCK_CKPT_COUNTER" -o "$TMP_DIR/stubs.o"
 
                 $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
                     "$TMP_DIR/ckpt.o" "$TMP_DIR/stubs.o" -o "${OUTPUT}.elf"
