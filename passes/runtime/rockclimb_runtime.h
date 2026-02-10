@@ -32,17 +32,24 @@ extern "C" {
  * NVM Storage (placed in non-volatile memory section)
  * ============================================================================ */
 
+/* Section attribute for NVM placement (ELF targets only) */
+#if defined(__ELF__)
+#define NVM_SECTION __attribute__((section(".nvm")))
+#else
+#define NVM_SECTION
+#endif
+
 /* Checkpointed register values */
-extern uint16_t __nvm_regs[ROCKCLIMB_MAX_REGS] __attribute__((section(".nvm")));
+extern uint16_t __nvm_regs[ROCKCLIMB_MAX_REGS] NVM_SECTION;
 
 /* Current region ID (incremented at each boundary) */
-extern uint16_t __nvm_region_id __attribute__((section(".nvm")));
+extern uint16_t __nvm_region_id NVM_SECTION;
 
 /* Saved program counter for recovery */
-extern uint16_t __nvm_pc __attribute__((section(".nvm")));
+extern uint16_t __nvm_pc NVM_SECTION;
 
 /* Saved stack pointer for recovery */
-extern uint16_t __nvm_sp __attribute__((section(".nvm")));
+extern uint16_t __nvm_sp NVM_SECTION;
 
 /* Voltage threshold for V_max comparison */
 extern volatile uint16_t __rockclimb_vmax_threshold;

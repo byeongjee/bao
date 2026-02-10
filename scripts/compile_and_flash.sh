@@ -9,6 +9,7 @@
 #   --mode <mode>    Checkpoint mode: none, rockclimb, milp (default: none)
 #   --memory         Enable memory checkpointing (for rockclimb)
 #   --runtime <type> Runtime variant: real (default), mock-counter
+#   --local          Compile for host machine instead of MSP430 (run locally)
 #   --debug          Enable DEBUG output via UART
 #   --compile-only   Compile but don't flash
 #   --flash-only     Flash existing binary
@@ -48,6 +49,8 @@ SIZE="msp430-elf-size"
 MODE="none"
 MEMORY_CKPT="false"
 RUNTIME_TYPE="real"
+RUNTIME_SET="false"
+LOCAL_MODE="false"
 DEBUG_MODE="false"
 COMPILE_ONLY="false"
 FLASH_ONLY="false"
@@ -73,7 +76,7 @@ MILP_BOOT="$PROJECT_DIR/passes/runtime/milp_boot.S"
 MILP_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/milp_mock_ckpt_counter.c"
 MILP_LINKER="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
 
-usage() { sed -n '2,23p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,24p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
 
@@ -117,12 +120,38 @@ link_runtime() {
     esac
 }
 
+# Compile LLVM IR to a host-native executable.
+# Usage: link_local <ll_file> [mock_counter_source]
+link_local() {
+    local ll_file="$1"
+    local mock_counter="${2:-}"
+    local sysroot_flags=""
+
+    # Source-built clang may not know the SDK path on macOS
+    if command -v xcrun &>/dev/null; then
+        sysroot_flags="-isysroot $(xcrun --show-sdk-path)"
+    fi
+
+    if [[ -n "$mock_counter" ]]; then
+        $CLANG -O"$OPT_LEVEL" $sysroot_flags \
+            -I"$PROJECT_DIR/passes/runtime" \
+            "$ll_file" "$mock_counter" -o "${OUTPUT}"
+    else
+        $CLANG -O"$OPT_LEVEL" $sysroot_flags "$ll_file" -o "${OUTPUT}"
+    fi
+}
+
 # Compile C source to LLVM IR.
 compile_to_ir() {
-    CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
+    if [[ "$LOCAL_MODE" == "true" ]]; then
+        CLANG_FLAGS="-S -emit-llvm -O$CLANG_OPT_LEVEL"
+        CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include"
+    else
+        CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
+        CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
+    fi
     [[ "$CLANG_OPT_LEVEL" == "0" ]] && \
         CLANG_FLAGS="$CLANG_FLAGS -Xclang -disable-O0-optnone"
-    CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
     CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
     [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"
     $CLANG $CLANG_FLAGS "$INPUT" -o "$TMP_DIR/input.ll"
@@ -133,7 +162,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode) MODE="$2"; shift 2 ;;
         --memory) MEMORY_CKPT="true"; shift ;;
-        --runtime) RUNTIME_TYPE="$2"; shift 2 ;;
+        --runtime) RUNTIME_TYPE="$2"; RUNTIME_SET="true"; shift 2 ;;
+        --local) LOCAL_MODE="true"; shift ;;
         --debug) DEBUG_MODE="true"; shift ;;
         --compile-only) COMPILE_ONLY="true"; shift ;;
         --flash-only) FLASH_ONLY="true"; shift ;;
@@ -149,6 +179,17 @@ while [[ $# -gt 0 ]]; do
         *) INPUT="$1"; shift ;;
     esac
 done
+
+# Validate --local flag combinations
+if [[ "$LOCAL_MODE" == "true" ]]; then
+    [[ "$FLASH_ONLY" == "true" ]] && \
+        error "--local and --flash-only are incompatible"
+    if [[ "$MODE" != "none" && "$RUNTIME_SET" != "true" ]]; then
+        error "--local requires --runtime (e.g., --runtime mock-counter)"
+    fi
+    [[ "$RUNTIME_SET" == "true" && "$RUNTIME_TYPE" == "real" ]] && \
+        error "--local is incompatible with --runtime real (real runtime needs MSP430 hardware)"
+fi
 
 # Validate
 [[ "$FLASH_ONLY" != "true" && -z "$INPUT" ]] && error "No input file specified"
@@ -166,7 +207,7 @@ TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 echo "=========================================="
-echo "Mode: $MODE | Runtime: $RUNTIME_TYPE | Debug: $DEBUG_MODE"
+echo "Mode: $MODE | Runtime: $RUNTIME_TYPE | Target: $(if [[ "$LOCAL_MODE" == "true" ]]; then echo "host"; else echo "msp430"; fi) | Debug: $DEBUG_MODE"
 echo "Output: $OUTPUT"
 echo "=========================================="
 
@@ -177,15 +218,19 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
 
             compile_to_ir
 
-            # LLVM IR to assembly
-            $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/input.ll" -o "$TMP_DIR/output.s"
+            if [[ "$LOCAL_MODE" == "true" ]]; then
+                link_local "$TMP_DIR/input.ll"
+            else
+                # LLVM IR to assembly
+                $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/input.ll" -o "$TMP_DIR/output.s"
 
-            # Assemble and link with GCC
-            $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
-                -L"$MSP430GCC_SUPPORT_PATH/include" \
-                "$TMP_DIR/output.s" -o "${OUTPUT}.elf"
+                # Assemble and link with GCC
+                $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
+                    -L"$MSP430GCC_SUPPORT_PATH/include" \
+                    "$TMP_DIR/output.s" -o "${OUTPUT}.elf"
 
-            cp "$TMP_DIR/output.s" "${OUTPUT}.s"
+                cp "$TMP_DIR/output.s" "${OUTPUT}.s"
+            fi
             ;;
 
         rockclimb)
@@ -208,17 +253,21 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 echo "$PASS_OUTPUT" | grep -E "^(Region|Memory|Inserted|===)" | head -10
             fi
 
-            # LLVM IR to assembly
-            $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
+            if [[ "$LOCAL_MODE" == "true" ]]; then
+                link_local "$TMP_DIR/ckpt.ll" "$ROCKCLIMB_MOCK_CKPT_COUNTER"
+            else
+                # LLVM IR to assembly
+                $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
 
-            # Assemble with GCC
-            $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
-                -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
+                # Assemble with GCC
+                $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
+                    -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
 
-            link_runtime "$ROCKCLIMB_MOCK_CKPT_COUNTER" "$ROCKCLIMB_RUNTIME" \
-                "$ROCKCLIMB_BOOT" "$ROCKCLIMB_LINKER"
+                link_runtime "$ROCKCLIMB_MOCK_CKPT_COUNTER" "$ROCKCLIMB_RUNTIME" \
+                    "$ROCKCLIMB_BOOT" "$ROCKCLIMB_LINKER"
 
-            cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+                cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+            fi
             ;;
 
         milp)
@@ -240,17 +289,21 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 echo "$PASS_OUTPUT" | head -10
             fi
 
-            # LLVM IR to assembly
-            $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
+            if [[ "$LOCAL_MODE" == "true" ]]; then
+                link_local "$TMP_DIR/ckpt.ll" "$MILP_MOCK_CKPT_COUNTER"
+            else
+                # LLVM IR to assembly
+                $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
 
-            # Assemble with GCC
-            $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
-                -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
+                # Assemble with GCC
+                $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
+                    -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
 
-            link_runtime "$MILP_MOCK_CKPT_COUNTER" "$MILP_RUNTIME" \
-                "$MILP_BOOT" "$MILP_LINKER"
+                link_runtime "$MILP_MOCK_CKPT_COUNTER" "$MILP_RUNTIME" \
+                    "$MILP_BOOT" "$MILP_LINKER"
 
-            cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+                cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+            fi
             ;;
 
         *)
@@ -258,14 +311,23 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             ;;
     esac
 
-    $SIZE "${OUTPUT}.elf"
+    if [[ "$LOCAL_MODE" == "true" ]]; then
+        size "${OUTPUT}" 2>/dev/null || true
+    else
+        $SIZE "${OUTPUT}.elf"
+    fi
 fi
 
 if [[ "$COMPILE_ONLY" != "true" ]]; then
-    info "Flashing..."
-    mspdebug tilib "prog ${OUTPUT}.elf"
-    echo ""
-    [[ "$DEBUG_MODE" == "true" ]] && echo "Serial: screen /dev/tty.usbmodem* 9600"
+    if [[ "$LOCAL_MODE" == "true" ]]; then
+        info "Running locally..."
+        "${OUTPUT}"
+    else
+        info "Flashing..."
+        mspdebug tilib "prog ${OUTPUT}.elf"
+        echo ""
+        [[ "$DEBUG_MODE" == "true" ]] && echo "Serial: screen /dev/tty.usbmodem* 9600"
+    fi
 fi
 
 echo "Done."
