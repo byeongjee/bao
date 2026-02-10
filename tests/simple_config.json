@@ -2,7 +2,7 @@
   "version": "1.0",
   "estimator_type": "ir",
   "energy_parameters": {
-    "capacity": 100.0,
+    "capacity": 300.0,
     "instruction_costs": {
       "simple_arithmetic": 1,
       "complex_arithmetic": 1,
