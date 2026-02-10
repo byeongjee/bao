@@ -81,21 +81,9 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     }
 
     // All fields required - flat JSON (no rockclimb_parameters wrapper)
-    auto V_max = root->getNumber("V_max");
-    if (!V_max) {
-        errs() << "Error: Missing required field 'V_max' in RockClimb config: "
-               << configPath << "\n";
-        return false;
-    }
-    auto V_min = root->getNumber("V_min");
-    if (!V_min) {
-        errs() << "Error: Missing required field 'V_min' in RockClimb config: "
-               << configPath << "\n";
-        return false;
-    }
-    auto C_buf_uF = root->getNumber("C_buf_uF");
-    if (!C_buf_uF) {
-        errs() << "Error: Missing required field 'C_buf_uF' in RockClimb config: "
+    auto E_input = root->getNumber("E_input");
+    if (!E_input) {
+        errs() << "Error: Missing required field 'E_input' in RockClimb config: "
                << configPath << "\n";
         return false;
     }
@@ -118,9 +106,7 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
         return false;
     }
 
-    params.V_max = *V_max;
-    params.V_min = *V_min;
-    params.C_buf_uF = *C_buf_uF;
+    params.E_input = *E_input;
     params.N_reg = static_cast<unsigned>(*N_reg);
     params.E_restore_per_reg = *E_restore_per_reg;
     params.distributedCheckpointing = *distributed;
@@ -163,11 +149,8 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     }
 
     errs() << "=== RockClimb Pass on " << F.getName() << " ===\n";
+    errs() << "  E_input: " << ctx.params.E_input << "\n";
     errs() << "  E_safe: " << ctx.E_safe << "\n";
-    errs() << "  Capacity (E_safe): " << ctx.E_safe << "\n";
-    errs() << "  V_max: " << ctx.params.V_max << " V\n";
-    errs() << "  V_min: " << ctx.params.V_min << " V\n";
-    errs() << "  C_buf: " << ctx.params.C_buf_uF << " uF\n";
     errs() << "  Distributed checkpointing: "
            << (useDistributedCkpt ? "enabled" : "disabled") << "\n";
     errs() << "  Memory checkpointing: "

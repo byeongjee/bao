@@ -1,7 +1,5 @@
 {
-  "V_max": 3.6,
-  "V_min": 1.8,
-  "C_buf_uF": 22.2,
+  "E_input": 107.892,
   "N_reg": 16,
   "E_restore_per_reg": 0.5,
   "distributed_checkpointing": true,

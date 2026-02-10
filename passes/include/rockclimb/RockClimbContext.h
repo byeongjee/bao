@@ -9,24 +9,15 @@ namespace checkpoint {
 
 /// RockClimb-specific parameters from config.
 struct RockClimbParams {
-    double V_max = 3.6;           // Maximum voltage (V)
-    double V_min = 1.8;           // Minimum operating voltage (V)
-    double C_buf_uF = 10.0;       // Buffer capacitance (microfarads)
-    unsigned N_reg = 16;          // Number of registers
+    double E_input;                // Harvestable energy per cycle (same units as energy model)
+    unsigned N_reg = 16;           // Number of registers
     double E_restore_per_reg = 0.5;  // Energy to restore one register
     bool distributedCheckpointing = true;  // Enable distributed register checkpointing
     bool memoryCheckpointing = false;      // Enable memory (alloca/global) checkpointing
 
-    /// Calculate E_safe from physical parameters.
-    /// E_safe = E_input - E_restore
-    /// E_input = 0.5 * C_buf * (V_max^2 - V_min^2)
-    /// E_restore = N_reg * E_restore_per_reg
+    /// Calculate E_safe = E_input - E_restore.
     double calculateESafe() const {
-        double C_buf_F = C_buf_uF * 1e-6;  // Convert to Farads
-        double E_input = 0.5 * C_buf_F * (V_max * V_max - V_min * V_min);
-        double E_restore = N_reg * E_restore_per_reg;
-        // Convert to same units as energy model (multiply by 1e6 for micro-Joules scale)
-        return E_input * 1e6 - E_restore;
+        return E_input - N_reg * E_restore_per_reg;
     }
 };
 
