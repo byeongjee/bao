@@ -1,3 +1,4 @@
+#include "common/EnergyValidatorPass.h"
 #include "milp/MILPCheckpointPass.h"
 #include "milp/CheckpointAnalysisPass.h"
 #include "rockclimb/RockClimbPass.h"
@@ -46,6 +47,10 @@ llvmGetPassPluginInfo() {
                     }
                     if (Name == "rockclimb") {
                         FPM.addPass(checkpoint::RockClimbPass());
+                        return true;
+                    }
+                    if (Name == "energy-validate") {
+                        FPM.addPass(checkpoint::EnergyValidatorPass());
                         return true;
                     }
                     return false;

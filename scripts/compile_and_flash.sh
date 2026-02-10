@@ -8,7 +8,7 @@
 # Options:
 #   --mode <mode>    Checkpoint mode: none, rockclimb, milp (default: none)
 #   --memory         Enable memory checkpointing (for rockclimb)
-#   --runtime <type> Runtime variant: real (default), mock-counter
+#   --runtime <type> Runtime variant: real (default), mock-counter, energy-validate
 #   --local          Compile for host machine instead of MSP430 (run locally)
 #   --debug          Enable DEBUG output via UART
 #   --compile-only   Compile but don't flash
@@ -75,6 +75,9 @@ MILP_RUNTIME="$PROJECT_DIR/passes/runtime/milp_runtime.c"
 MILP_BOOT="$PROJECT_DIR/passes/runtime/milp_boot.S"
 MILP_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/milp_mock_ckpt_counter.c"
 MILP_LINKER="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
+
+ENERGY_VALIDATE_RUNTIME="$PROJECT_DIR/passes/runtime/energy_validate_runtime.c"
+VALIDATE_CKPT_FUNCTION=""
 
 usage() { sed -n '2,24p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
@@ -174,6 +177,7 @@ while [[ $# -gt 0 ]]; do
         -O) OPT_LEVEL="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
+        --validate-checkpoint-function) VALIDATE_CKPT_FUNCTION="$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) error "Unknown option: $1" ;;
         *) INPUT="$1"; shift ;;
@@ -189,6 +193,11 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
     fi
     [[ "$RUNTIME_SET" == "true" && "$RUNTIME_TYPE" == "real" ]] && \
         error "--local is incompatible with --runtime real (real runtime needs MSP430 hardware)"
+fi
+
+# energy-validate requires --local (runs on host, not MSP430)
+if [[ "$RUNTIME_TYPE" == "energy-validate" && "$LOCAL_MODE" != "true" ]]; then
+    error "--runtime energy-validate requires --local (energy validation runs on host)"
 fi
 
 # Validate
@@ -218,8 +227,25 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
 
             compile_to_ir
 
+            # Run energy-validate pass if requested (for user-defined checkpoints)
+            if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
+                info "Running energy-validate pass..."
+                VALIDATE_FLAGS="-energy-config=$MILP_ENERGY_CONFIG"
+                [[ -n "$VALIDATE_CKPT_FUNCTION" ]] && \
+                    VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-checkpoint-function=$VALIDATE_CKPT_FUNCTION"
+                [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
+                $OPT -load-pass-plugin="$PASS_LIB" \
+                    -passes=energy-validate \
+                    $VALIDATE_FLAGS \
+                    -S "$TMP_DIR/input.ll" -o "$TMP_DIR/input.ll"
+            fi
+
             if [[ "$LOCAL_MODE" == "true" ]]; then
-                link_local "$TMP_DIR/input.ll"
+                if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
+                    link_local "$TMP_DIR/input.ll" "$ENERGY_VALIDATE_RUNTIME"
+                else
+                    link_local "$TMP_DIR/input.ll"
+                fi
             else
                 # LLVM IR to assembly
                 $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/input.ll" -o "$TMP_DIR/output.s"
@@ -253,8 +279,23 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 echo "$PASS_OUTPUT" | grep -E "^(Region|Memory|Inserted|===)" | head -10
             fi
 
+            # Run energy-validate pass if requested
+            if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
+                info "Running energy-validate pass..."
+                VALIDATE_FLAGS="-energy-config=$ROCKCLIMB_CONFIG"
+                [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
+                $OPT -load-pass-plugin="$PASS_LIB" \
+                    -passes=energy-validate \
+                    $VALIDATE_FLAGS \
+                    -S "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.ll"
+            fi
+
             if [[ "$LOCAL_MODE" == "true" ]]; then
-                link_local "$TMP_DIR/ckpt.ll" "$ROCKCLIMB_MOCK_CKPT_COUNTER"
+                if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
+                    link_local "$TMP_DIR/ckpt.ll" "$ENERGY_VALIDATE_RUNTIME"
+                else
+                    link_local "$TMP_DIR/ckpt.ll" "$ROCKCLIMB_MOCK_CKPT_COUNTER"
+                fi
             else
                 # LLVM IR to assembly
                 $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
@@ -289,8 +330,23 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 echo "$PASS_OUTPUT" | head -10
             fi
 
+            # Run energy-validate pass if requested
+            if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
+                info "Running energy-validate pass..."
+                VALIDATE_FLAGS="-energy-config=$MILP_ENERGY_CONFIG"
+                [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
+                $OPT -load-pass-plugin="$PASS_LIB" \
+                    -passes=energy-validate \
+                    $VALIDATE_FLAGS \
+                    -S "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.ll"
+            fi
+
             if [[ "$LOCAL_MODE" == "true" ]]; then
-                link_local "$TMP_DIR/ckpt.ll" "$MILP_MOCK_CKPT_COUNTER"
+                if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
+                    link_local "$TMP_DIR/ckpt.ll" "$ENERGY_VALIDATE_RUNTIME"
+                else
+                    link_local "$TMP_DIR/ckpt.ll" "$MILP_MOCK_CKPT_COUNTER"
+                fi
             else
                 # LLVM IR to assembly
                 $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"

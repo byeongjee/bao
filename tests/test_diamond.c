@@ -32,3 +32,7 @@ int test_diamond(volatile int x) {
     result = result * 2;
     return result;
 }
+
+int main(void) {
+    return test_diamond(5) == 0;
+}

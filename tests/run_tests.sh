@@ -43,19 +43,22 @@ NC='\033[0m' # No Color
 # Parse flags
 RUN_MILP=false
 RUN_ROCKCLIMB=false
+RUN_VALIDATE=false
 
 for arg in "$@"; do
     case "$arg" in
         --milp) RUN_MILP=true ;;
         --rockclimb) RUN_ROCKCLIMB=true ;;
-        *) echo "Unknown option: $arg"; echo "Usage: $0 [--milp] [--rockclimb]"; exit 1 ;;
+        --validate) RUN_VALIDATE=true ;;
+        *) echo "Unknown option: $arg"; echo "Usage: $0 [--milp] [--rockclimb] [--validate]"; exit 1 ;;
     esac
 done
 
 # Default: run everything
-if ! $RUN_MILP && ! $RUN_ROCKCLIMB; then
+if ! $RUN_MILP && ! $RUN_ROCKCLIMB && ! $RUN_VALIDATE; then
     RUN_MILP=true
     RUN_ROCKCLIMB=true
+    RUN_VALIDATE=true
 fi
 
 # Check prerequisites
@@ -105,12 +108,16 @@ fi
 echo "=========================================="
 echo "Checkpoint Optimization Test Suite"
 echo "=========================================="
-if $RUN_MILP && $RUN_ROCKCLIMB; then
-    echo "Mode: All tests (MILP + RockClimb)"
+if $RUN_MILP && $RUN_ROCKCLIMB && $RUN_VALIDATE; then
+    echo "Mode: All tests (MILP + RockClimb + Validate)"
+elif $RUN_MILP && $RUN_ROCKCLIMB; then
+    echo "Mode: MILP + RockClimb tests"
 elif $RUN_MILP; then
     echo "Mode: MILP tests only"
-else
+elif $RUN_ROCKCLIMB; then
     echo "Mode: RockClimb tests only"
+elif $RUN_VALIDATE; then
+    echo "Mode: Validation tests only"
 fi
 echo ""
 
@@ -251,6 +258,21 @@ if $RUN_ROCKCLIMB; then
               -passes=rockclimb \
               -rockclimb-config="$ROCKCLIMB_CONFIG" \
               "$ll_file" -S -o /dev/null 2>&1 || true
+    fi
+fi
+
+# Run validation tests if requested
+if $RUN_VALIDATE; then
+    echo ""
+    echo "=========================================="
+    echo "Energy Validation Tests"
+    echo "=========================================="
+    echo ""
+
+    if [[ -x "$SCRIPT_DIR/test_validate.sh" ]]; then
+        "$SCRIPT_DIR/test_validate.sh" || true
+    else
+        echo -e "${YELLOW}Skipping: test_validate.sh not found or not executable${NC}"
     fi
 fi
 

@@ -36,3 +36,7 @@ int test_linear(int x) {
 
     return d;
 }
+
+int main(void) {
+    return test_linear(42) == 0;
+}

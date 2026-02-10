@@ -46,6 +46,7 @@ include_directories(
 add_library(CheckpointPass MODULE
     # Common utilities
     src/common/CFGAnalysis.cpp
+    src/common/EnergyValidatorPass.cpp
     src/common/LoopTripCount.cpp
     src/common/PassRegistry.cpp
     # Energy estimators

@@ -23,3 +23,7 @@ int test_simple_loop(volatile int n) {
 
     return sum;
 }
+
+int main(void) {
+    return test_simple_loop(10) == 0;
+}
