@@ -55,6 +55,12 @@ void __restore_mem(void *vm_dst, void *nvm_src, int32_t size) {
     cnt_restore_mem++;
 }
 
+/* No-op stub for loop trip-count annotations that survive into the final IR. */
+void __loop_tripcount(int max_iterations) {
+    (void)max_iterations;
+}
+
+__attribute__((destructor))
 void __milp_print_counts(void) {
     printf("=== MILP Checkpoint Counter Summary ===\n");
     printf("  __region_prologue:       %u\n", cnt_region_prologue);
