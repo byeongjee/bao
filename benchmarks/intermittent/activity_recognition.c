@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include "loop_tripcount.h"
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
@@ -64,6 +65,7 @@ FORCE_INLINE unsigned sqrt16(unsigned long n) {
   unsigned long c = 0x8000;
   unsigned long g = 0x8000;
   for (;;) {
+    __loop_tripcount(16);  // 16-bit binary search
     if (g * g > n)
       g ^= c;
     c >>= 1;
@@ -77,11 +79,11 @@ FORCE_INLINE unsigned sqrt16(unsigned long n) {
 
 static int mock_scenario;
 
-void ACCEL_init() {
+FORCE_INLINE void ACCEL_init() {
   // Real sensor init would go here
 }
 
-void accel_sample(accelReading *sample) {
+FORCE_INLINE void accel_sample(accelReading *sample) {
   // Generate synthetic data based on current scenario
   if (mock_scenario == 0) {
     // Stationary: Small noise near 0
@@ -98,19 +100,21 @@ void accel_sample(accelReading *sample) {
 
 // --- Core Algorithm Logic ---
 
-void acquire_window(accelWindow window) {
+FORCE_INLINE void acquire_window(accelWindow window) {
   accelReading sample;
   unsigned samplesInWindow = 0;
 
   while (samplesInWindow < ACCEL_WINDOW_SIZE) {
+    __loop_tripcount(ACCEL_WINDOW_SIZE);  // 3 iterations
     accel_sample(&sample);
     window[samplesInWindow++] = sample;
   }
 }
 
-void transform(accelWindow window) {
+FORCE_INLINE void transform(accelWindow window) {
   unsigned i = 0;
   for (i = 0; i < ACCEL_WINDOW_SIZE; i++) {
+    __loop_tripcount(ACCEL_WINDOW_SIZE);  // 3 iterations
     accelReading *sample = &window[i];
 
     // Simple High-pass / Noise gate filter
@@ -123,13 +127,14 @@ void transform(accelWindow window) {
   }
 }
 
-void featurize(volatile features_t *features, accelWindow aWin) {
+FORCE_INLINE void featurize(volatile features_t *features, accelWindow aWin) {
   long mean_x = 0, mean_y = 0, mean_z = 0;
   long std_x = 0, std_y = 0, std_z = 0;
   int i;
 
   // Calculate Mean
   for (i = 0; i < ACCEL_WINDOW_SIZE; i++) {
+    __loop_tripcount(ACCEL_WINDOW_SIZE);  // 3 iterations
     mean_x += aWin[i].x;
     mean_y += aWin[i].y;
     mean_z += aWin[i].z;
@@ -140,6 +145,7 @@ void featurize(volatile features_t *features, accelWindow aWin) {
 
   // Calculate Deviation
   for (i = 0; i < ACCEL_WINDOW_SIZE; i++) {
+    __loop_tripcount(ACCEL_WINDOW_SIZE);  // 3 iterations
     std_x += abs(aWin[i].x - mean_x);
     std_y += abs(aWin[i].y - mean_y);
     std_z += abs(aWin[i].z - mean_z);
@@ -155,7 +161,7 @@ void featurize(volatile features_t *features, accelWindow aWin) {
   features->stddevmag = sqrt16(stddevmag);
 }
 
-class_t classify(features_t *features, volatile model_t *model) {
+FORCE_INLINE class_t classify(features_t *features, volatile model_t *model) {
   int move_less_error = 0;
   int stat_less_error = 0;
   volatile features_t *model_features;
@@ -163,6 +169,7 @@ class_t classify(features_t *features, volatile model_t *model) {
 
   // Nearest Centroid-ish classification
   for (i = 0; i < MODEL_SIZE; ++i) {
+    __loop_tripcount(MODEL_SIZE);  // 16 iterations
     model_features = &model->stationary[i];
     long stat_mean_err =
         abs((long)model_features->meanmag - (long)features->meanmag);
@@ -189,15 +196,16 @@ class_t classify(features_t *features, volatile model_t *model) {
   return (move_less_error > stat_less_error) ? CLASS_MOVING : CLASS_STATIONARY;
 }
 
-void warmup_sensor() {
+FORCE_INLINE void warmup_sensor() {
   unsigned discarded = 0;
   accelReading sample;
   while (discarded++ < NUM_WARMUP_SAMPLES) {
+    __loop_tripcount(NUM_WARMUP_SAMPLES);  // 3 iterations
     accel_sample(&sample);
   }
 }
 
-void train(volatile features_t *classModel) {
+FORCE_INLINE void train(volatile features_t *classModel) {
   accelWindow sampleWindow;
   features_t features;
   unsigned i;
@@ -205,6 +213,7 @@ void train(volatile features_t *classModel) {
   warmup_sensor();
 
   for (i = 0; i < MODEL_SIZE; ++i) {
+    __loop_tripcount(MODEL_SIZE);  // 16 iterations
     acquire_window(sampleWindow);
     transform(sampleWindow);
     featurize(&features, sampleWindow);
@@ -212,7 +221,7 @@ void train(volatile features_t *classModel) {
   }
 }
 
-unsigned recognize_loop(volatile model_t *model) {
+FORCE_INLINE unsigned recognize_loop(volatile model_t *model) {
   volatile stats_t stats = {0};
   accelWindow sampleWindow;
   features_t features;
@@ -220,6 +229,7 @@ unsigned recognize_loop(volatile model_t *model) {
   unsigned i;
 
   for (i = 0; i < SAMPLES_TO_COLLECT; ++i) {
+    __loop_tripcount(SAMPLES_TO_COLLECT);  // 64 iterations
     // Toggle Mock Scenario halfway through
     if (i == SAMPLES_TO_COLLECT / 2) {
       mock_scenario = !mock_scenario;
