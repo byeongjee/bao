@@ -18,7 +18,6 @@
 #   -O <level>       LLC optimization level (default: 2)
 #   -Oc <level>      Clang optimization level (default: 2)
 #   -I <dir>         Add include directory (can be repeated)
-#   --analyze        Show NVM symbols and section analysis
 #   --verbose        Show detailed pass output
 #   -h, --help       Show this help message
 #
@@ -44,7 +43,6 @@ LLC="${LLVM_DIR:+$LLVM_DIR/bin/}llc"
 # GCC tools
 GCC="msp430-elf-gcc"
 SIZE="msp430-elf-size"
-OBJDUMP="msp430-elf-objdump"
 
 # Defaults
 MODE="none"
@@ -54,7 +52,6 @@ DEBUG_MODE="false"
 COMPILE_ONLY="false"
 FLASH_ONLY="false"
 VERBOSE="false"
-ANALYZE="false"
 OUTPUT=""
 OPT_LEVEL=""
 CLANG_OPT_LEVEL=""
@@ -76,7 +73,7 @@ MILP_BOOT="$PROJECT_DIR/passes/runtime/milp_boot.S"
 MILP_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/milp_mock_ckpt_counter.c"
 MILP_LINKER="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
 
-usage() { sed -n '2,24p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,23p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
 
@@ -141,7 +138,6 @@ while [[ $# -gt 0 ]]; do
         --compile-only) COMPILE_ONLY="true"; shift ;;
         --flash-only) FLASH_ONLY="true"; shift ;;
         --verbose) VERBOSE="true"; shift ;;
-        --analyze) ANALYZE="true"; shift ;;
         -o) OUTPUT="$2"; shift 2 ;;
         -c) ROCKCLIMB_CONFIG="$2"; shift 2 ;;
         -e|--energy-config) MILP_ENERGY_CONFIG="$2"; shift 2 ;;
@@ -223,19 +219,6 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 "$ROCKCLIMB_BOOT" "$ROCKCLIMB_LINKER"
 
             cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
-
-            # Analysis
-            if [[ "$ANALYZE" == "true" ]]; then
-                echo ""
-                info "=== Analysis ==="
-                echo "NVM Symbols:"
-                $OBJDUMP -t "$TMP_DIR/ckpt.o" 2>/dev/null | grep -E "__nvm" | while read line; do
-                    echo "  $line"
-                done
-                echo ""
-                echo "External Dependencies:"
-                $OBJDUMP -t "$TMP_DIR/ckpt.o" 2>/dev/null | grep "\*UND\*" | awk '{print "  " $NF}'
-            fi
             ;;
 
         milp)
