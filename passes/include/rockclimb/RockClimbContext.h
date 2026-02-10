@@ -10,10 +10,10 @@ namespace checkpoint {
 /// RockClimb-specific parameters from config.
 struct RockClimbParams {
     double E_input;                // Harvestable energy per cycle (same units as energy model)
-    unsigned N_reg = 16;           // Number of registers
-    double E_restore_per_reg = 0.5;  // Energy to restore one register
-    bool distributedCheckpointing = true;  // Enable distributed register checkpointing
-    bool memoryCheckpointing = false;      // Enable memory (alloca/global) checkpointing
+    unsigned N_reg;                // Number of registers
+    double E_restore_per_reg;      // Energy to restore one register
+    bool distributedCheckpointing; // Enable distributed register checkpointing
+    bool memoryCheckpointing;      // Enable memory (alloca/global) checkpointing
 
     /// Calculate E_safe = E_input - E_restore.
     double calculateESafe() const {

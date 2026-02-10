@@ -111,10 +111,13 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     params.E_restore_per_reg = *E_restore_per_reg;
     params.distributedCheckpointing = *distributed;
 
-    // memory_checkpointing is optional (defaults to false)
-    if (auto v = root->getBoolean("memory_checkpointing")) {
-        params.memoryCheckpointing = *v;
+    auto memCkpt = root->getBoolean("memory_checkpointing");
+    if (!memCkpt) {
+        errs() << "Error: Missing required field 'memory_checkpointing' in RockClimb config: "
+               << configPath << "\n";
+        return false;
     }
+    params.memoryCheckpointing = *memCkpt;
 
     return true;
 }
