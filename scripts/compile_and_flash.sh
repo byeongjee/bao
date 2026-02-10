@@ -282,7 +282,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             # Run energy-validate pass if requested
             if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
                 info "Running energy-validate pass..."
-                VALIDATE_FLAGS="-energy-config=$ROCKCLIMB_CONFIG"
+                VALIDATE_FLAGS="-energy-config=$ROCKCLIMB_CONFIG -validate-mode=rockclimb"
                 [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
                 $OPT -load-pass-plugin="$PASS_LIB" \
                     -passes=energy-validate \
@@ -333,7 +333,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             # Run energy-validate pass if requested
             if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
                 info "Running energy-validate pass..."
-                VALIDATE_FLAGS="-energy-config=$MILP_ENERGY_CONFIG"
+                VALIDATE_FLAGS="-energy-config=$MILP_ENERGY_CONFIG -validate-mode=milp"
                 [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
                 $OPT -load-pass-plugin="$PASS_LIB" \
                     -passes=energy-validate \

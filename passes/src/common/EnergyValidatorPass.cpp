@@ -38,34 +38,35 @@ static cl::opt<bool> ValidateVerboseOpt(
     cl::desc("Print per-block remaining energy to stderr"),
     cl::init(false));
 
+enum class ValidateMode { MILP, RockClimb };
+
+static cl::opt<ValidateMode> ValidateModeOpt(
+    "validate-mode",
+    cl::desc("Checkpoint algorithm mode for energy validation"),
+    cl::values(
+        clEnumValN(ValidateMode::MILP, "milp", "MILP checkpoint insertion"),
+        clEnumValN(ValidateMode::RockClimb, "rockclimb", "RockClimb (PFI) checkpoint insertion")),
+    cl::init(ValidateMode::MILP));
+
 } // anonymous namespace
 
 namespace checkpoint {
 
-/// Check if the config JSON contains a "rockclimb_parameters" key.
-static bool isRockClimbMode(const std::string &configPath) {
-    std::ifstream file(configPath);
-    if (!file.is_open())
-        return false;
-    nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
-    if (config.is_discarded())
-        return false;
-    return config.contains("rockclimb_parameters");
-}
-
-/// Get the effective capacity for the given mode.
-/// MILP: MILPEnergyParams::capacity
-/// RockClimb: RockClimbParams::calculateESafe()
-static double getEffectiveCapacity(const std::string &configPath,
-                                    double baseCapacity) {
-    if (isRockClimbMode(configPath)) {
+/// Compute the effective capacity for the given mode.
+/// MILP: MILPEnergyParams::capacity (= E_buf)
+/// RockClimb: RockClimbParams::calculateESafe() (= E_input - E_restore)
+static double computeEffectiveCapacity(ValidateMode mode,
+                                        const std::string &configPath) {
+    switch (mode) {
+    case ValidateMode::RockClimb: {
         RockClimbParams rcParams;
         parseRockClimbParams(configPath, rcParams);
         return rcParams.calculateESafe();
     }
-    // MILP mode: parse MILP params for capacity
-    MILPEnergyParams milpParams = parseMILPEnergyParams(configPath);
-    return milpParams.capacity;
+    case ValidateMode::MILP:
+        return parseMILPEnergyParams(configPath).capacity;
+    }
+    llvm_unreachable("unknown validate mode");
 }
 
 /// Build the set of known checkpoint runtime function names whose call costs
@@ -199,9 +200,9 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
 
     auto &ctx = *ctxResult.context;
 
-    // Step 2: Detect mode and compute effective capacity
-    bool rockclimbMode = isRockClimbMode(configPath);
-    double effectiveCapacity = getEffectiveCapacity(configPath, ctx.capacity);
+    // Step 2: Compute effective capacity based on mode
+    ValidateMode mode = ValidateModeOpt;
+    double effectiveCapacity = computeEffectiveCapacity(mode, configPath);
 
     // Step 3: Parse overhead parameters
     MILPEnergyParams milpParams = parseMILPEnergyParams(configPath);
@@ -272,7 +273,7 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
         double adjustedEnergy = baseEnergy - (numExcludedCalls * callCost);
 
         // MILP mode: add NVM access penalties
-        if (!rockclimbMode) {
+        if (mode == ValidateMode::MILP) {
             unsigned nvmAccesses = countNvmAccesses(BB, M, excludedNvmNames);
             adjustedEnergy += nvmAccesses * nvmPenalty;
         }
