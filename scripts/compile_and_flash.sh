@@ -81,6 +81,17 @@ usage() { sed -n '2,25p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
 
+# Compile C source to LLVM IR.
+compile_to_ir() {
+    CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
+    [[ "$CLANG_OPT_LEVEL" == "0" ]] && \
+        CLANG_FLAGS="$CLANG_FLAGS -Xclang -disable-O0-optnone"
+    CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
+    CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
+    [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"
+    $CLANG $CLANG_FLAGS "$INPUT" -o "$TMP_DIR/input.ll"
+}
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -129,12 +140,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
         none)
             info "Compiling without checkpointing (via LLVM)..."
 
-            # C to LLVM IR
-            CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
-            CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
-            CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
-            [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"
-            $CLANG $CLANG_FLAGS "$INPUT" -o "$TMP_DIR/input.ll"
+            compile_to_ir
 
             # LLVM IR to assembly
             $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/input.ll" -o "$TMP_DIR/output.s"
@@ -152,13 +158,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             [[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
             [[ ! -f "$ROCKCLIMB_CONFIG" ]] && error "Config not found: $ROCKCLIMB_CONFIG"
 
-            # C to LLVM IR
-            CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
-            [[ "$CLANG_OPT_LEVEL" == "0" ]] && CLANG_FLAGS="$CLANG_FLAGS -Xclang -disable-O0-optnone"
-            CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
-            CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
-            [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"
-            $CLANG $CLANG_FLAGS "$INPUT" -o "$TMP_DIR/input.ll"
+            compile_to_ir
 
             # RockClimb pass
             PASS_OUTPUT=$($OPT -load-pass-plugin="$PASS_LIB" \
@@ -228,13 +228,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             [[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
             [[ ! -f "$MILP_ENERGY_CONFIG" ]] && error "Energy config not found: $MILP_ENERGY_CONFIG"
 
-            # C to LLVM IR
-            CLANG_FLAGS="--target=msp430-elf -S -emit-llvm -O$CLANG_OPT_LEVEL -D__MSP430FR5994__"
-            [[ "$CLANG_OPT_LEVEL" == "0" ]] && CLANG_FLAGS="$CLANG_FLAGS -Xclang -disable-O0-optnone"
-            CLANG_FLAGS="$CLANG_FLAGS -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
-            CLANG_FLAGS="$CLANG_FLAGS $EXTRA_INCLUDES"
-            [[ "$DEBUG_MODE" == "true" ]] && CLANG_FLAGS="$CLANG_FLAGS -DDEBUG"
-            $CLANG $CLANG_FLAGS "$INPUT" -o "$TMP_DIR/input.ll"
+            compile_to_ir
 
             # MILP pass
             PASS_OUTPUT=$($OPT -load-pass-plugin="$PASS_LIB" \
