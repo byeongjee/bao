@@ -104,7 +104,11 @@ uint16_t __rockclimb_is_recovery(void);
  * Restores registers from NVM and returns to saved PC.
  * This function does not return normally.
  */
-void __rockclimb_recover(void) __attribute__((noreturn));
+void __rockclimb_recover(void)
+#if defined(__ELF__)
+    __attribute__((noreturn))
+#endif
+;
 
 #ifdef __cplusplus
 }
