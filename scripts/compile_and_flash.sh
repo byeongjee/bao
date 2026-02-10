@@ -8,8 +8,7 @@
 # Options:
 #   --mode <mode>    Checkpoint mode: none, rockclimb, milp (default: none)
 #   --memory         Enable memory checkpointing (for rockclimb)
-#   --stubs          Use stub runtime for testing under constant power
-#                    (Default: uses real runtime with power failure recovery)
+#   --runtime <type> Runtime variant: real (default), mock-counter
 #   --debug          Enable DEBUG output via UART
 #   --compile-only   Compile but don't flash
 #   --flash-only     Flash existing binary
@@ -50,7 +49,7 @@ OBJDUMP="msp430-elf-objdump"
 # Defaults
 MODE="none"
 MEMORY_CKPT="false"
-USE_STUBS="false"
+RUNTIME_TYPE="real"
 DEBUG_MODE="false"
 COMPILE_ONLY="false"
 FLASH_ONLY="false"
@@ -77,9 +76,49 @@ MILP_BOOT="$PROJECT_DIR/passes/runtime/milp_boot.S"
 MILP_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/milp_mock_ckpt_counter.c"
 MILP_LINKER="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
 
-usage() { sed -n '2,25p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,24p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
+
+# Link checkpoint object with mock counter or real runtime.
+# Usage: link_runtime <mock_counter> <runtime> <boot> <linker>
+link_runtime() {
+    local mock_counter="$1" runtime="$2" boot="$3" linker="$4"
+
+    GCC_DEBUG_FLAGS=""
+    [[ "$DEBUG_MODE" == "true" ]] && GCC_DEBUG_FLAGS="-DDEBUG"
+
+    case "$RUNTIME_TYPE" in
+    mock-counter)
+        info "Using mock counter runtime (no power failure recovery)"
+        $GCC -mmcu=$DEVICE -O2 -msmall $GCC_DEBUG_FLAGS \
+            -I"$MSP430GCC_SUPPORT_PATH/include" \
+            -I"$PROJECT_DIR/passes/runtime" \
+            -c "$mock_counter" -o "$TMP_DIR/mock.o"
+
+        $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
+            "$TMP_DIR/ckpt.o" "$TMP_DIR/mock.o" -o "${OUTPUT}.elf"
+        ;;
+    real)
+        info "Using real runtime (with power failure recovery)"
+        $GCC -mmcu=$DEVICE -O2 -msmall $GCC_DEBUG_FLAGS \
+            -I"$MSP430GCC_SUPPORT_PATH/include" \
+            -I"$PROJECT_DIR/passes/runtime" \
+            -c "$runtime" -o "$TMP_DIR/runtime.o"
+
+        $GCC -mmcu=$DEVICE -msmall \
+            -c "$boot" -o "$TMP_DIR/boot.o"
+
+        $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
+            -T "$linker" \
+            "$TMP_DIR/ckpt.o" "$TMP_DIR/runtime.o" "$TMP_DIR/boot.o" \
+            -o "${OUTPUT}.elf"
+        ;;
+    *)
+        error "Unknown runtime type: $RUNTIME_TYPE (use: real, mock-counter)"
+        ;;
+    esac
+}
 
 # Compile C source to LLVM IR.
 compile_to_ir() {
@@ -97,7 +136,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode) MODE="$2"; shift 2 ;;
         --memory) MEMORY_CKPT="true"; shift ;;
-        --stubs) USE_STUBS="true"; shift ;;
+        --runtime) RUNTIME_TYPE="$2"; shift 2 ;;
         --debug) DEBUG_MODE="true"; shift ;;
         --compile-only) COMPILE_ONLY="true"; shift ;;
         --flash-only) FLASH_ONLY="true"; shift ;;
@@ -131,7 +170,7 @@ TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 echo "=========================================="
-echo "Mode: $MODE | Stubs: $USE_STUBS | Debug: $DEBUG_MODE"
+echo "Mode: $MODE | Runtime: $RUNTIME_TYPE | Debug: $DEBUG_MODE"
 echo "Output: $OUTPUT"
 echo "=========================================="
 
@@ -180,32 +219,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
                 -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
 
-            if [[ "$USE_STUBS" == "true" ]]; then
-                # Debug mode: use stubs (no real recovery)
-                info "Using mock counter runtime (no power failure recovery)"
-                GCC_DEBUG_FLAGS=""
-                [[ "$DEBUG_MODE" == "true" ]] && GCC_DEBUG_FLAGS="-DDEBUG"
-                $GCC -mmcu=$DEVICE -O2 -msmall $GCC_DEBUG_FLAGS -I"$MSP430GCC_SUPPORT_PATH/include" \
-                    -c "$ROCKCLIMB_MOCK_CKPT_COUNTER" -o "$TMP_DIR/stubs.o"
-
-                $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
-                    "$TMP_DIR/ckpt.o" "$TMP_DIR/stubs.o" -o "${OUTPUT}.elf"
-            else
-                # Default: real runtime with recovery
-                info "Using real runtime (with power failure recovery)"
-                $GCC -mmcu=$DEVICE -O2 -msmall \
-                    -I"$MSP430GCC_SUPPORT_PATH/include" \
-                    -I"$PROJECT_DIR/passes/runtime" \
-                    -c "$ROCKCLIMB_RUNTIME" -o "$TMP_DIR/runtime.o"
-
-                $GCC -mmcu=$DEVICE -msmall \
-                    -c "$ROCKCLIMB_BOOT" -o "$TMP_DIR/boot.o"
-
-                $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
-                    -T "$ROCKCLIMB_LINKER" \
-                    "$TMP_DIR/ckpt.o" "$TMP_DIR/runtime.o" "$TMP_DIR/boot.o" \
-                    -o "${OUTPUT}.elf"
-            fi
+            link_runtime "$ROCKCLIMB_MOCK_CKPT_COUNTER" "$ROCKCLIMB_RUNTIME" \
+                "$ROCKCLIMB_BOOT" "$ROCKCLIMB_LINKER"
 
             cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
 
@@ -249,33 +264,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
                 -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
 
-            GCC_DEBUG_FLAGS=""
-            [[ "$DEBUG_MODE" == "true" ]] && GCC_DEBUG_FLAGS="-DDEBUG"
-
-            if [[ "$USE_STUBS" == "true" ]]; then
-                info "Using mock counter runtime (no power failure recovery)"
-                $GCC -mmcu=$DEVICE -O2 -msmall $GCC_DEBUG_FLAGS \
-                    -I"$MSP430GCC_SUPPORT_PATH/include" \
-                    -I"$PROJECT_DIR/passes/runtime" \
-                    -c "$MILP_MOCK_CKPT_COUNTER" -o "$TMP_DIR/stubs.o"
-
-                $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
-                    "$TMP_DIR/ckpt.o" "$TMP_DIR/stubs.o" -o "${OUTPUT}.elf"
-            else
-                info "Using real runtime (with power failure recovery stubbed)"
-                $GCC -mmcu=$DEVICE -O2 -msmall $GCC_DEBUG_FLAGS \
-                    -I"$MSP430GCC_SUPPORT_PATH/include" \
-                    -I"$PROJECT_DIR/passes/runtime" \
-                    -c "$MILP_RUNTIME" -o "$TMP_DIR/runtime.o"
-
-                $GCC -mmcu=$DEVICE -msmall \
-                    -c "$MILP_BOOT" -o "$TMP_DIR/boot.o"
-
-                $GCC -mmcu=$DEVICE -msmall -L"$MSP430GCC_SUPPORT_PATH/include" \
-                    -T "$MILP_LINKER" \
-                    "$TMP_DIR/ckpt.o" "$TMP_DIR/runtime.o" "$TMP_DIR/boot.o" \
-                    -o "${OUTPUT}.elf"
-            fi
+            link_runtime "$MILP_MOCK_CKPT_COUNTER" "$MILP_RUNTIME" \
+                "$MILP_BOOT" "$MILP_LINKER"
 
             cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
             ;;
