@@ -1,22 +1,12 @@
-#include "setup.h"
 #include <stdbool.h>
 #include <stdint.h>
 
+#define FORCE_INLINE static inline __attribute__((always_inline))
+
 // --- Configuration & Constants ---
 
-// Adjust these based on your specific board headers/setup
-#define PIN_LED_1 0
-#define PIN_LED_2 1
-#define PORT_LED_1 P1OUT
-#define PORT_LED_1_DIR P1DIR
-#define PORT_LED_2 P4OUT
-#define PORT_LED_2_DIR P4DIR
-
-#define VERBOSE
 #define DIGIT_BITS 8
 #define DIGIT_MASK 0x00ff
-// Assuming KEY_SIZE_BITS is defined in keysize.h, otherwise define here
-// #define KEY_SIZE_BITS 64
 #include "./data/keysize.h"
 
 #define NUM_DIGITS (KEY_SIZE_BITS / DIGIT_BITS)
@@ -46,57 +36,33 @@ static const unsigned char PLAINTEXT[] =
   (sizeof(PLAINTEXT) / (NUM_DIGITS - NUM_PAD_DIGITS) + 1)
 #define CYPHERTEXT_SIZE (NUM_PLAINTEXT_BLOCKS * NUM_DIGITS)
 
-// --- Global Buffers (replacing Channels) ---
-// We use globals to avoid stack overflow on MSP430 and mimic channel
-// persistence
+// --- Global Buffers ---
 digit_t g_A[NUM_DIGITS];
 digit_t g_B[NUM_DIGITS];
 digit_t g_product[NUM_DIGITS * 2];
-digit_t g_base[NUM_DIGITS * 2]; // Needs space for padding during ops
+digit_t g_base[NUM_DIGITS * 2];
 digit_t g_block[NUM_DIGITS * 2];
 digit_t g_cyphertext[CYPHERTEXT_SIZE];
 unsigned g_cyphertext_len = 0;
 
 // --- Helper Functions ---
 
-INLINE void print_hex_ascii(const uint8_t *m, unsigned len) {
-  int i, j;
-  for (i = 0; i < len; i += PRINT_HEX_ASCII_COLS) {
-    for (j = 0; j < PRINT_HEX_ASCII_COLS && i + j < len; ++j)
-      DEBUG_OUT_STR("0x");
-    DEBUG_OUT_HEX(m[i + j]);
-    DEBUG_OUT_STR(" ");
-    for (; j < PRINT_HEX_ASCII_COLS; ++j)
-      DEBUG_OUT_STR("   ");
-    DEBUG_OUT_STR(" ");
-    for (j = 0; j < PRINT_HEX_ASCII_COLS && i + j < len; ++j) {
-      char c = m[i + j];
-      if (!(32 <= c && c <= 127))
-        c = '.';
-      DEBUG_OUT_CHAR(c);
-    }
-    DEBUG_OUT_STR("\r\n");
-  }
-}
-
 // Helper for 16-bit multiplication used in reduction
-INLINE uint32_t mult16(digit_t a, digit_t b) { return (uint32_t)a * b; }
+FORCE_INLINE uint32_t mult16(digit_t a, digit_t b) { return (uint32_t)a * b; }
 
-// --- Logic Functions (Converted Tasks) ---
+// --- Logic Functions ---
 
 // Forward declaration
-INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer);
+FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B,
+                                     digit_t *result_buffer);
 
 /* * Performs: result = (A * B) mod N
  * This consolidates task_mult_mod, task_mult, and all task_reduce_*
  */
-INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
+FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B,
+                                     digit_t *result_buffer) {
   int i, j;
 
-  // --- Original Task: task_mult_mod ---
-  // (Setup phase was here, now handled by passing args)
-
-  // --- Original Task: task_mult ---
   // Standard schoolbook multiplication: A * B -> product
   digit_t c = 0;
   digit_t p = 0;
@@ -129,7 +95,6 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
     g_product[digit] = p;
   }
 
-  // --- Original Task: task_reduce_digits ---
   // Find Most Significant Digit (MSD)
   int d = 2 * NUM_DIGITS;
   digit_t m;
@@ -146,13 +111,8 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
   }
 
   // Reduction Loop
-  // The state machine looped between normalize, quotient, multiply, compare,
-  // add, subtract We implement this as a while loop that reduces 'd' (current
-  // digit index)
-
   while (1) {
 
-    // --- Original Task: task_reduce_normalizable ---
     bool normalizable = true;
     unsigned offset = d + 1 - NUM_DIGITS;
 
@@ -172,11 +132,10 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
 
     if (!normalizable && d == NUM_DIGITS - 1) {
       // Reduction done: message < modulus
-      break; // Exit reduction loop
+      break;
     }
 
     if (normalizable) {
-      // --- Original Task: task_reduce_normalize ---
       // Simple subtraction: product = product - (N << offset)
       unsigned borrow = 0;
       for (i = 0; i < NUM_DIGITS; ++i) {
@@ -193,18 +152,14 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
         g_product[i + offset] = m_val - s;
       }
 
-      // Check loop bounds logic from original code
       if (offset == 0) {
-        break; // Done
+        break;
       }
-      // Loop continues (implicit transition to n_divisor logic if offset > 0)
     } else {
-      // --- Original Task: task_reduce_n_divisor ---
       digit_t n1 = pubkey.n[NUM_DIGITS - 1];
       digit_t n0 = pubkey.n[NUM_DIGITS - 2];
       digit_t n_div = ((n1 << DIGIT_BITS) + n0);
 
-      // --- Original Task: task_reduce_quotient ---
       digit_t m2 = g_product[d];
       digit_t m1 = g_product[d - 1];
       digit_t m0 = g_product[d - 2];
@@ -227,16 +182,9 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
         qn = mult16(n_div, q_final);
       } while (qn > n_q);
 
-      // Note: d is decremented in original task here for the next loop
-      // iteration We store the current 'd' for the multiply/compare steps, but
-      // update it for the next loop
       unsigned current_d = d;
-      d--; // Prepare for next iteration
+      d--;
 
-      // --- Original Task: task_reduce_multiply ---
-      // Calculate Q * N, store in temporary or directly subtract?
-      // Original calculated Q*N and put it in 'product' channel via ch_qn.
-      // We need a temp buffer for qn result to compare.
       digit_t qn_arr[NUM_DIGITS * 2];
       for (int k = 0; k < NUM_DIGITS * 2; k++)
         qn_arr[k] = 0;
@@ -253,7 +201,6 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
         qn_arr[i] = m_curr & DIGIT_MASK;
       }
 
-      // --- Original Task: task_reduce_compare ---
       char relation = '=';
       for (i = NUM_DIGITS * 2 - 1; i >= 0; --i) {
         if (g_product[i] > qn_arr[i]) {
@@ -266,9 +213,6 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
       }
 
       if (relation == '<') {
-        // --- Original Task: task_reduce_add ---
-        // product = product + (N << offset)
-        // Used to correct estimation error
         unsigned add_offset = current_d - NUM_DIGITS;
         digit_t add_c = 0;
         for (i = add_offset; i < 2 * NUM_DIGITS; ++i) {
@@ -280,15 +224,12 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
         }
       }
 
-      // --- Original Task: task_reduce_subtract ---
-      // product = product - Q*N (or the adjusted value)
       unsigned sub_offset = current_d - NUM_DIGITS;
       unsigned sub_borrow = 0;
 
       for (i = 0; i < 2 * NUM_DIGITS; ++i) {
         if (i >= sub_offset) {
-          digit_t sub_qn =
-              qn_arr[i]; // This is the Q*N value calculated in multiply task
+          digit_t sub_qn = qn_arr[i];
           digit_t sub_s = sub_qn + sub_borrow;
 
           if (g_product[i] < sub_s) {
@@ -300,8 +241,6 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
           g_product[i] = g_product[i] - sub_s;
         }
       }
-
-      // Loop continues with decremented d
     }
   }
 
@@ -311,41 +250,12 @@ INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buffer) {
   }
 }
 
-int main(void) {
-  initialize();
-  // --- Original Task: init ---
-  // Setup GPIO (Simplification of original macros)
-  PORT_LED_1_DIR |= (1 << PIN_LED_1);
-  PORT_LED_2_DIR |= (1 << PIN_LED_2);
-
-  __enable_interrupt();
-
-  DEBUG_OUT_STR(".Init.\r\n");
-
-  // --- Original Task: task_init (Logic) ---
+__attribute__((noinline)) int main(void) {
   unsigned message_length = sizeof(PLAINTEXT) - 1;
-
-#ifdef DEBUG
-  DEBUG_OUT_STR("Message:\r\n");
-  print_hex_ascii(PLAINTEXT, message_length);
-  DEBUG_OUT_STR("Public key: exp = 0x%x  N = \r\n", pubkey.e);
-  print_hex_ascii(pubkey.n, NUM_DIGITS);
-#endif
-
   unsigned block_offset = 0;
 
-  begin_measurement_window();
-
-  begin_event();
   // Main Loop handling blocks
   while (block_offset < message_length) {
-
-    // --- Original Task: task_pad ---
-    DEBUG_OUT_STR("pad: len=");
-    DEBUG_OUT_U16(message_length);
-    DEBUG_OUT_STR(" offset=");
-    DEBUG_OUT_U16(block_offset);
-    DEBUG_OUT_STR("\r\n");
 
     // Construct the base for this block
     int i;
@@ -366,86 +276,39 @@ int main(void) {
     digit_t e = pubkey.e;
     block_offset += NUM_DIGITS - NUM_PAD_DIGITS;
 
-    // --- Original Task: task_exp (Modular Exponentiation) ---
-    // Loops through bits of exponent
-    DEBUG_OUT_STR("exp: e=");
-    DEBUG_OUT_HEX(e);
-    DEBUG_OUT_STR("\r\n");
-
+    // Modular Exponentiation
     while (e > 0) {
       bool multiply = e & 0x1;
       e >>= 1;
 
       if (multiply) {
-        // --- Original Task: task_mult_block ---
         // block = (block * base) % N
-        // Copy globals to temp args for clarity
         for (int k = 0; k < NUM_DIGITS; k++)
-          g_A[k] = g_base[k]; // A = base
+          g_A[k] = g_base[k];
         for (int k = 0; k < NUM_DIGITS; k++)
-          g_B[k] = g_block[k]; // B = block
+          g_B[k] = g_block[k];
 
-        mult_mod_operation(g_A, g_B, g_block); // Result goes back into g_block
-
-        // --- Original Task: task_mult_block_get_result ---
-        // Logic merged above (updating g_block).
-        // Check if this was the last step (e==0) handled after loop or by check
+        mult_mod_operation(g_A, g_B, g_block);
       }
 
       if (e > 0) {
-        // --- Original Task: task_square_base ---
         // base = (base * base) % N
         for (int k = 0; k < NUM_DIGITS; k++)
           g_A[k] = g_base[k];
         for (int k = 0; k < NUM_DIGITS; k++)
           g_B[k] = g_base[k];
 
-        mult_mod_operation(g_A, g_B, g_base); // Result updates g_base
+        mult_mod_operation(g_A, g_B, g_base);
       }
     }
 
-    // --- Original Task: task_mult_block_get_result (Final save) ---
-    // Exponentiation done for this block. Save g_block to cyphertext.
+    // Save block to cyphertext
     if (g_cyphertext_len + NUM_DIGITS <= CYPHERTEXT_SIZE) {
       for (i = 0; i < NUM_DIGITS; ++i) {
         g_cyphertext[g_cyphertext_len++] = g_block[i];
       }
-    } else {
-      DEBUG_OUT_STR("WARN: block dropped: cyphertext overflow\r\n");
-    }
-
-#ifdef DEBUG
-    PORT_LED_1 ^= (1 << PIN_LED_1); // Toggle LED to show progress
-#endif
-  }
-
-  // --- Original Task: task_print_cyphertext ---
-  DEBUG_OUT_STR("Cyphertext:\r\n");
-  volatile char line[PRINT_HEX_ASCII_COLS];
-  int j = 0;
-
-  for (int i = 0; i < g_cyphertext_len; ++i) {
-    digit_t c = g_cyphertext[i];
-    DEBUG_OUT_STR("0x");
-    DEBUG_OUT_HEX(c);
-    DEBUG_OUT_STR(" ");
-    line[j++] = c;
-    if ((i + 1) % PRINT_HEX_ASCII_COLS == 0) {
-      DEBUG_OUT_STR(" ");
-      for (int k = 0; k < PRINT_HEX_ASCII_COLS; ++k) {
-        char ch = line[k];
-        if (!(32 <= ch && ch <= 127))
-          ch = '.';
-        DEBUG_OUT_CHAR(ch);
-      }
-      j = 0;
-      DEBUG_OUT_STR("\r\n");
     }
   }
-  DEBUG_OUT_STR("\r\n");
 
-  end_event();
-  end_measurement_window();
-
-  return 0;
+  return (int)g_cyphertext_len;
 }
