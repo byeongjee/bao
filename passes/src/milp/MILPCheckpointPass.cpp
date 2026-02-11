@@ -10,6 +10,9 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Format.h"
+
+#include <chrono>
 
 using namespace llvm;
 
@@ -72,10 +75,13 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     }
 
     // Step 6: Solve MILP
+    auto solveStart = std::chrono::steady_clock::now();
     if (!optimizer.solve()) {
         errs() << "Optimization failed\n";
         return PreservedAnalyses::all();
     }
+    auto solveEnd = std::chrono::steady_clock::now();
+    double solveTimeMs = std::chrono::duration<double, std::milli>(solveEnd - solveStart).count();
 
     const auto &solution = optimizer.getSolution();
 
@@ -104,6 +110,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     errs() << "  Regions:                         " << solution.regionStarts.size() << "\n";
     errs() << "  Region boundaries inserted:      " << (solution.regionStarts.size() - 1) << "\n";
     errs() << "  Distributed checkpoints inserted: " << solution.enabledDefStores.size() << "\n";
+    errs() << "  Solve time (ms):                 " << llvm::format("%.3f", solveTimeMs) << "\n";
 
     return PreservedAnalyses::none();
 }
