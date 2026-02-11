@@ -59,7 +59,7 @@ bool IRBasedEstimator::loadConfig(const std::string &path) {
                          << "' in config: " << path << "\n";
             return false;
         }
-        instructionCosts_[cat] = costs[cat].get<int>();
+        instructionCosts_[cat] = costs[cat].get<double>();
     }
 
     return true;
@@ -164,7 +164,7 @@ std::string IRBasedEstimator::getCostCategory(unsigned Opcode) const {
     }
 }
 
-int IRBasedEstimator::getInstructionCost(unsigned Opcode) const {
+double IRBasedEstimator::getInstructionCost(unsigned Opcode) const {
     std::string category = getCostCategory(Opcode);
     auto it = instructionCosts_.find(category);
     if (it != instructionCosts_.end()) {

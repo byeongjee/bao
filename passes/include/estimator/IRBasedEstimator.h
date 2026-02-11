@@ -24,14 +24,14 @@ private:
     /// Private constructor - use create() factory method.
     IRBasedEstimator() = default;
 
-    std::unordered_map<std::string, int> instructionCosts_;
+    std::unordered_map<std::string, double> instructionCosts_;
 
     /// Load configuration from JSON file.
     /// @return true on success, false on error (with message to errs()).
     bool loadConfig(const std::string &path);
 
     /// Get cost for an LLVM opcode.
-    int getInstructionCost(unsigned Opcode) const;
+    double getInstructionCost(unsigned Opcode) const;
 
     /// Map opcode to cost category name.
     std::string getCostCategory(unsigned Opcode) const;
