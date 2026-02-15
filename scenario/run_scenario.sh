@@ -58,11 +58,11 @@ SCENARIOS=(
     "scenario_infeasible:scenario_config.json:scenario_milp_config.json"
     "scenario_nvm_efficient:scenario_config.json:scenario_milp_config.json"
     "scenario_nvm_efficient_vm:scenario_nvm_efficient_vm_config.json:scenario_milp_nvm_efficient_vm_config.json:scenario_nvm_efficient"
-    # Slide examples
-    "slide_basic:slide_config.json:slide_milp_config.json"
-    "slide_distributed:slide_config.json:slide_milp_config.json"
-    "slide_nvm:slide_config.json:slide_milp_nvm_config.json"
-    "slide_greedy:slide_config.json:slide_milp_greedy_config.json"
+    # Slide examples (descriptive names mapped to existing source files)
+    "slide_two_phase_checkpoint:slide_config.json:slide_milp_config.json:slide_basic"
+    "slide_liveout_commit_cost:slide_config.json:slide_milp_config.json:slide_distributed"
+    "slide_hot_cold_nvm_placement:slide_config.json:slide_milp_nvm_config.json:slide_nvm"
+    "slide_early_vs_late_boundary:slide_config.json:slide_milp_greedy_config.json:slide_greedy"
 )
 
 list_tests() {
