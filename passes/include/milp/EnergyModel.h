@@ -28,9 +28,8 @@ struct MILPEnergyParams {
 
 /// Computes all energy parameters needed by the MILP (spec Sections 4 + 8).
 ///
-/// Uses BlockFrequencyInfo for block frequency estimation (replaces the crude
-/// 10^loopDepth heuristic), and StateAnalysis access maps for per-global
-/// NVM access penalty computation.
+/// Uses BlockFrequencyInfo for block frequency estimation and StateAnalysis
+/// access maps for per-global NVM access penalty computation.
 class EnergyModel {
 public:
     EnergyModel(const CFGAnalysis &cfg,
@@ -50,17 +49,14 @@ public:
     double getENvm(const std::string &block,
                    llvm::GlobalVariable *gv) const;
 
-    /// E_store[d]: energy cost of checkpoint store at def site d.
-    double getEStore(unsigned defSiteId) const;
+    /// E_sv[v]: energy cost of committing candidate global v to checkpoint.
+    double getESave(llvm::GlobalVariable *gv) const;
 
-    /// E_rst[s]: energy cost of restoring state element s.
-    double getERst(unsigned stateElemId) const;
+    /// E_rst[v]: energy cost of restoring candidate global v.
+    double getERestore(llvm::GlobalVariable *gv) const;
 
     /// F_entry[b]: estimated entry frequency for block b.
     double getFEntry(const std::string &block) const;
-
-    /// F_def[d]: estimated frequency of def site d (= F_entry of its block).
-    double getFDef(unsigned defSiteId) const;
 
     /// q_b: reboot probability at block b (currently uniform = q_reboot_prob).
     double getQReboot(const std::string &block) const;
@@ -73,13 +69,12 @@ private:
     // Precomputed values
     std::map<std::string, double> fEntry_;          // Block frequencies
     std::map<std::pair<std::string, llvm::GlobalVariable *>, double> eNvm_;
-    std::map<unsigned, double> eStore_;             // DefSite id -> store energy
-    std::map<unsigned, double> eRst_;               // StateElement id -> restore energy
+    std::map<llvm::GlobalVariable *, double> eSaveByGV_;
+    std::map<llvm::GlobalVariable *, double> eRestoreByGV_;
 
     void computeFrequencies(llvm::BlockFrequencyInfo &BFI, llvm::Function &F);
     void computeNvmPenalties();
-    void computeStoreCosts();
-    void computeRestoreCosts();
+    void computeSaveRestoreCosts();
 };
 
 /// Parse MILP energy parameters from a JSON config file.

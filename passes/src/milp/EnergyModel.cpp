@@ -18,8 +18,7 @@ EnergyModel::EnergyModel(const CFGAnalysis &cfg,
     : cfg_(cfg), state_(state), params_(params) {
     computeFrequencies(BFI, F);
     computeNvmPenalties();
-    computeStoreCosts();
-    computeRestoreCosts();
+    computeSaveRestoreCosts();
 }
 
 double EnergyModel::getEBase(const std::string &block) const {
@@ -35,16 +34,16 @@ double EnergyModel::getENvm(const std::string &block,
     return 0.0;
 }
 
-double EnergyModel::getEStore(unsigned defSiteId) const {
-    auto it = eStore_.find(defSiteId);
-    if (it != eStore_.end())
+double EnergyModel::getESave(llvm::GlobalVariable *gv) const {
+    auto it = eSaveByGV_.find(gv);
+    if (it != eSaveByGV_.end())
         return it->second;
     return 0.0;
 }
 
-double EnergyModel::getERst(unsigned stateElemId) const {
-    auto it = eRst_.find(stateElemId);
-    if (it != eRst_.end())
+double EnergyModel::getERestore(llvm::GlobalVariable *gv) const {
+    auto it = eRestoreByGV_.find(gv);
+    if (it != eRestoreByGV_.end())
         return it->second;
     return 0.0;
 }
@@ -53,14 +52,6 @@ double EnergyModel::getFEntry(const std::string &block) const {
     auto it = fEntry_.find(block);
     if (it != fEntry_.end())
         return it->second;
-    return 1.0;
-}
-
-double EnergyModel::getFDef(unsigned defSiteId) const {
-    const auto &defSites = state_.getDefSites();
-    if (defSiteId < defSites.size()) {
-        return getFEntry(defSites[defSiteId].blockName);
-    }
     return 1.0;
 }
 
@@ -108,35 +99,19 @@ void EnergyModel::computeNvmPenalties() {
     }
 }
 
-void EnergyModel::computeStoreCosts() {
-    // E_store[d]: SSA reg -> reg_store_energy, VMObj -> size * mem_store_energy_per_byte
-    for (const auto &ds : state_.getDefSites()) {
-        if (ds.kind == DefSite::SSAReg) {
-            eStore_[ds.id] = params_.regStoreEnergy;
-        } else {
-            // MemoryDef: cost is based on the size of the VMObj
-            int elemId = state_.getVMObjStateElemId(ds.globalVar);
-            if (elemId >= 0) {
-                const StateElement &elem = state_.getStateElement(
-                    static_cast<unsigned>(elemId));
-                eStore_[ds.id] =
-                    static_cast<double>(elem.sizeBytes) *
-                    params_.memStoreEnergyPerByte;
-            }
-        }
-    }
-}
+void EnergyModel::computeSaveRestoreCosts() {
+    // E_sv[v], E_rst[v] are modeled for candidate globals only.
+    for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        int elemId = state_.getVMObjStateElemId(GV);
+        if (elemId < 0)
+            continue;
 
-void EnergyModel::computeRestoreCosts() {
-    // E_rst[s]: SSA reg -> reg_restore_energy, VMObj -> size * mem_restore_energy_per_byte
-    for (const auto &elem : state_.getStateElements()) {
-        if (elem.kind == StateElement::Reg) {
-            eRst_[elem.id] = params_.regRestoreEnergy;
-        } else {
-            eRst_[elem.id] =
-                static_cast<double>(elem.sizeBytes) *
-                params_.memRestoreEnergyPerByte;
-        }
+        const StateElement &elem =
+            state_.getStateElement(static_cast<unsigned>(elemId));
+        eSaveByGV_[GV] =
+            static_cast<double>(elem.sizeBytes) * params_.memStoreEnergyPerByte;
+        eRestoreByGV_[GV] =
+            static_cast<double>(elem.sizeBytes) * params_.memRestoreEnergyPerByte;
     }
 }
 

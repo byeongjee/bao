@@ -4,14 +4,52 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
+#include <cctype>
+#include <map>
+#include <vector>
 
 #define DEBUG_TYPE "checkpoint-optimizer"
 
 namespace checkpoint {
 
+namespace {
+
+static std::string sanitizeToken(llvm::StringRef input) {
+    std::string out;
+    out.reserve(input.size());
+    for (char c : input) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
+            out.push_back(c);
+        } else {
+            out.push_back('_');
+        }
+    }
+    return out;
+}
+
+static std::string makeVarName(const char *prefix,
+                               const std::string &block,
+                               llvm::GlobalVariable *gv) {
+    return std::string(prefix) + "_" + sanitizeToken(block) + "_" +
+           sanitizeToken(gv->getName());
+}
+
+static std::map<std::string, std::vector<std::string>>
+buildPredecessorMap(const CFGAnalysis &cfg) {
+    std::map<std::string, std::vector<std::string>> preds;
+    for (const auto &block : cfg.getBlocks()) {
+        preds[block] = {};
+    }
+    for (const auto &[src, dst] : cfg.getEdges()) {
+        preds[dst].push_back(src);
+    }
+    return preds;
+}
+
+} // namespace
+
 CheckpointOptimizer::CheckpointOptimizer(const MILPInput &input)
-    : input_(input),
-      cfg_(input.cfg),
+    : cfg_(input.cfg),
       state_(input.state),
       energy_(input.energy),
       params_(input.energy.getParams()),
@@ -51,20 +89,17 @@ bool CheckpointOptimizer::solve() {
     solved_ = true;
 
     int status = model_.get(GRB_IntAttr_Status);
-
     if (status == GRB_OPTIMAL) {
         extractSolution();
         solution_.solverStatus = SolverStatus::Optimal;
         return true;
     }
 
-    // Non-optimal: always report the status
     int solCount = model_.get(GRB_IntAttr_SolCount);
     llvm::errs() << "Optimization did not prove optimality"
                  << " (Gurobi status=" << status
                  << ", solutions found=" << solCount << ")\n";
 
-    // Compute IIS for infeasible models
     if (status == GRB_INFEASIBLE) {
         LLVM_DEBUG({
             llvm::dbgs() << "Computing IIS...\n";
@@ -91,7 +126,6 @@ bool CheckpointOptimizer::solve() {
         });
     }
 
-    // Accept feasible solution if allowed
     if (acceptFeasible_ && solCount > 0) {
         double gap = model_.get(GRB_DoubleAttr_MIPGap);
         llvm::errs() << "Accepting feasible solution (MIP gap=" << gap << ")\n";
@@ -112,221 +146,91 @@ void CheckpointOptimizer::buildModel() {
 }
 
 void CheckpointOptimizer::addVariables() {
-    double Ebuf = params_.capacity;
+    const double Ebuf = params_.capacity;
+    const std::string &entry = cfg_.getEntryBlock();
 
-    LLVM_DEBUG(llvm::dbgs() << "=== MILP Variables ===\n");
-    LLVM_DEBUG(llvm::dbgs() << "  capacity (E_buf) = " << Ebuf << "\n");
-
-    // is_region_start[b]: binary for each block
-    for (const auto &blockName : cfg_.getBlocks()) {
-        isRegionStart_[blockName] = model_.addVar(
-            0.0, 1.0, 0.0, GRB_BINARY, "is_region_start_" + blockName);
-    }
-    LLVM_DEBUG(llvm::dbgs() << "  is_region_start: "
-                            << isRegionStart_.size() << " blocks\n");
-
-    // store_enabled[d]: binary for each def site
-    for (const auto &ds : state_.getDefSites()) {
-        storeEnabled_[ds.id] = model_.addVar(
+    for (const auto &block : cfg_.getBlocks()) {
+        isRegionStart_[block] = model_.addVar(
             0.0, 1.0, 0.0, GRB_BINARY,
-            "store_enabled_" + std::to_string(ds.id));
+            "is_region_start_" + sanitizeToken(block));
     }
-    LLVM_DEBUG({
-        llvm::dbgs() << "  store_enabled: " << storeEnabled_.size()
-                     << " def sites\n";
-        for (const auto &ds : state_.getDefSites()) {
-            llvm::dbgs() << "    ds" << ds.id << " in " << ds.blockName
-                         << " kind=" << (ds.kind == DefSite::SSAReg ? "SSAReg" : "MemDef");
-            if (ds.globalVar)
-                llvm::dbgs() << " gv=" << ds.globalVar->getName();
-            llvm::dbgs() << " eStore=" << energy_.getEStore(ds.id) << "\n";
-        }
-    });
 
-    // placed_in_vm[v]: binary for each VMObj
-    for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-        placedInVm_[GV] = model_.addVar(
-            0.0, 1.0, 0.0, GRB_BINARY,
-            "placed_in_vm_" + GV->getName().str());
-    }
-    LLVM_DEBUG({
-        llvm::dbgs() << "  placed_in_vm: " << placedInVm_.size() << " VMObjs\n";
+    for (const auto &block : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-            int elemId = state_.getVMObjStateElemId(GV);
-            unsigned sz = (elemId >= 0)
-                ? state_.getStateElement(static_cast<unsigned>(elemId)).sizeBytes
-                : 0;
-            llvm::dbgs() << "    " << GV->getName() << " size=" << sz << "B\n";
-        }
-    });
-
-    // needs_vol_restore[b,v]: binary for each (block, VMObj) where VMObj is
-    // live-in
-    for (const auto &blockName : cfg_.getBlocks()) {
-        const auto &liveVMObjs = state_.getVMObjLiveIn(blockName);
-        for (llvm::GlobalVariable *GV : liveVMObjs) {
-            int elemId = state_.getVMObjStateElemId(GV);
-            if (elemId < 0)
-                continue;
-            auto key = std::make_pair(blockName, static_cast<unsigned>(elemId));
-            needsVolRestore_[key] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                "needs_vol_restore_" + blockName + "_" +
-                    GV->getName().str());
-            LLVM_DEBUG(llvm::dbgs() << "  needs_vol_restore[" << blockName
-                                    << ", " << GV->getName() << "]\n");
+            BlockGVKey key = std::make_pair(block, GV);
+            placeInVm_[key] = model_.addVar(
+                0.0, 1.0, 0.0, GRB_BINARY, makeVarName("place_in_vm", block, GV));
+            pending_[key] = model_.addVar(
+                0.0, 1.0, 0.0, GRB_BINARY, makeVarName("pending", block, GV));
+            vmPending_[key] = model_.addVar(
+                0.0, 1.0, 0.0, GRB_BINARY, makeVarName("vm_pending", block, GV));
         }
     }
 
-    // energy_accumulated[b]: continuous [0, E_buf]
-    for (const auto &blockName : cfg_.getBlocks()) {
-        energyAccumulated_[blockName] = model_.addVar(
+    for (const auto &block : cfg_.getBlocks()) {
+        for (llvm::GlobalVariable *GV : state_.getVMObjLiveIn(block)) {
+            BlockGVKey key = std::make_pair(block, GV);
+            needRestore_[key] = model_.addVar(
+                0.0, 1.0, 0.0, GRB_BINARY, makeVarName("need_restore", block, GV));
+            if (block != entry) {
+                commit_[key] = model_.addVar(
+                    0.0, 1.0, 0.0, GRB_BINARY, makeVarName("commit", block, GV));
+            }
+        }
+    }
+
+    for (const auto &block : cfg_.getBlocks()) {
+        energyAccumulated_[block] = model_.addVar(
             0.0, Ebuf, 0.0, GRB_CONTINUOUS,
-            "energy_accumulated_" + blockName);
+            "energy_accumulated_" + sanitizeToken(block));
     }
-
-    LLVM_DEBUG({
-        llvm::dbgs() << "\n=== Block info ===\n";
-        for (const auto &blockName : cfg_.getBlocks()) {
-            const auto &info = cfg_.getBlockInfo(blockName);
-            llvm::dbgs() << "  " << blockName << ": E_base=" << info.energyCost;
-            // NVM penalties
-            for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-                double nvm = energy_.getENvm(blockName, GV);
-                if (nvm > 0)
-                    llvm::dbgs() << " E_nvm(" << GV->getName() << ")=" << nvm;
-            }
-            // Def sites
-            const auto &defs = state_.getBlockDefSites(blockName);
-            if (!defs.empty())
-                llvm::dbgs() << " defs=" << defs.size();
-            // SSA reg live-in
-            const auto &regLI = state_.getRegLiveIn(blockName);
-            if (!regLI.empty())
-                llvm::dbgs() << " regLiveIn=" << regLI.size();
-            // VMObj live-in
-            const auto &vmLI = state_.getVMObjLiveIn(blockName);
-            if (!vmLI.empty()) {
-                llvm::dbgs() << " vmObjLiveIn={";
-                bool first = true;
-                for (auto *GV : vmLI) {
-                    if (!first) llvm::dbgs() << ",";
-                    llvm::dbgs() << GV->getName();
-                    first = false;
-                }
-                llvm::dbgs() << "}";
-            }
-            llvm::dbgs() << "\n";
-        }
-    });
 
     model_.update();
 }
 
 void CheckpointOptimizer::addObjective() {
     GRBLinExpr objective = 0;
+    const std::string &entry = cfg_.getEntryBlock();
 
-    // Term 1: NVM placement penalties
-    // Sigma_b F_entry[b] * Sigma_v E_nvm[b,v] * (1 - placed_in_vm[v])
-    for (const auto &blockName : cfg_.getBlocks()) {
-        double fEntry = energy_.getFEntry(blockName);
+    // Term 1: placement penalty.
+    for (const auto &block : cfg_.getBlocks()) {
+        double fEntry = energy_.getFEntry(block);
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-            double eNvm = energy_.getENvm(blockName, GV);
+            double eNvm = energy_.getENvm(block, GV);
             if (eNvm == 0.0)
                 continue;
-            // eNvm * (1 - p_v) = eNvm - eNvm * p_v
             objective += fEntry * eNvm;
-            objective -= fEntry * eNvm * placedInVm_[GV];
+            objective -= fEntry * eNvm * placeInVm_[std::make_pair(block, GV)];
         }
     }
 
-    // Term 2: Prologue overhead
-    // Sigma_b F_entry[b] * is_region_start[b] * E_pro
-    if (params_.E_pro > 0.0) {
-        for (const auto &blockName : cfg_.getBlocks()) {
-            double fEntry = energy_.getFEntry(blockName);
-            objective += fEntry * params_.E_pro * isRegionStart_[blockName];
-        }
+    // Term 2: expected region-start overhead.
+    for (const auto &block : cfg_.getBlocks()) {
+        objective += energy_.getFEntry(block) * buildEStart(block);
     }
 
-    // Term 3: Epilogue overhead (for all blocks except entry)
-    // Sigma_{b != b0} F_entry[b] * is_region_start[b] * E_epi
-    if (params_.E_epi > 0.0) {
-        const std::string &entry = cfg_.getEntryBlock();
-        for (const auto &blockName : cfg_.getBlocks()) {
-            if (blockName == entry)
-                continue;
-            double fEntry = energy_.getFEntry(blockName);
-            objective += fEntry * params_.E_epi * isRegionStart_[blockName];
-        }
-    }
-
-    // Term 4: Checkpoint store cost
-    // Sigma_d F_def[d] * store_enabled[d] * E_store[d]
-    for (const auto &ds : state_.getDefSites()) {
-        double fDef = energy_.getFDef(ds.id);
-        double eStore = energy_.getEStore(ds.id);
-        if (eStore > 0.0) {
-            objective += fDef * eStore * storeEnabled_[ds.id];
-        }
-    }
-
-    // Term 5: Expected restore cost
-    // Sigma_b F_entry[b] * q_b * (
-    //   Sigma_{r in LiveIn(b) cap Regs} E_rst[r] * is_region_start[b]
-    //   + Sigma_{v in LiveIn(b) cap VMObjs} E_rst[v] * needs_vol_restore[b,v])
-    for (const auto &blockName : cfg_.getBlocks()) {
-        double fEntry = energy_.getFEntry(blockName);
-        double qb = energy_.getQReboot(blockName);
-
-        // SSA regs live-in: restore cost proportional to is_region_start
-        const auto &regLiveIn = state_.getRegLiveIn(blockName);
-        double totalRegRst = 0.0;
-        for (llvm::Value *V : regLiveIn) {
-            int elemId = state_.getRegStateElemId(V);
-            if (elemId >= 0) {
-                totalRegRst += energy_.getERst(static_cast<unsigned>(elemId));
-            }
-        }
-        if (totalRegRst > 0.0) {
-            objective +=
-                fEntry * qb * totalRegRst * isRegionStart_[blockName];
-        }
-
-        // VMObjs live-in: restore cost proportional to needs_vol_restore
-        const auto &vmObjLiveIn = state_.getVMObjLiveIn(blockName);
-        for (llvm::GlobalVariable *GV : vmObjLiveIn) {
-            int elemId = state_.getVMObjStateElemId(GV);
-            if (elemId < 0)
-                continue;
-            auto key =
-                std::make_pair(blockName, static_cast<unsigned>(elemId));
-            auto it = needsVolRestore_.find(key);
-            if (it == needsVolRestore_.end())
-                continue;
-            double eRst = energy_.getERst(static_cast<unsigned>(elemId));
-            if (eRst > 0.0) {
-                objective += fEntry * qb * eRst * it->second;
-            }
-        }
+    // Term 3: expected region-end overhead (excluding entry).
+    for (const auto &block : cfg_.getBlocks()) {
+        if (block == entry)
+            continue;
+        objective += energy_.getFEntry(block) * buildEEnd(block);
     }
 
     model_.setObjective(objective, GRB_MINIMIZE);
 }
 
 void CheckpointOptimizer::addConstraints() {
-    LLVM_DEBUG(llvm::dbgs() << "\n=== Adding constraints ===\n");
     addC1_EntryRegionStart();
     addC3_VMCapacity();
     addC4_NeedVolLinearization();
-    addC5_CheckpointAvailability();
-    addC6_EnergyInit();
-    addC7_EnergyPropagation();
-    addC8_BufferSafety();
-    LLVM_DEBUG(llvm::dbgs() << "=== Constraints done ===\n\n");
+    addC5_PlacementPropagation();
+    addC6_PendingPropagation();
+    addC7_CommitModel();
+    addC8_EnergyInit();
+    addC9_EnergyPropagation();
+    addC10_BufferSafety();
 }
 
-// C1: Entry is always a region start
 void CheckpointOptimizer::addC1_EntryRegionStart() {
     const std::string &entry = cfg_.getEntryBlock();
     if (!entry.empty() && isRegionStart_.count(entry)) {
@@ -334,312 +238,249 @@ void CheckpointOptimizer::addC1_EntryRegionStart() {
     }
 }
 
-// C3: VM capacity constraint
-// Sigma size(v) * placed_in_vm[v] <= S_VM
 void CheckpointOptimizer::addC3_VMCapacity() {
     if (state_.getVMObjs().empty())
         return;
 
-    GRBLinExpr vmUsage = 0;
-    for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-        int elemId = state_.getVMObjStateElemId(GV);
-        if (elemId < 0)
-            continue;
-        const StateElement &elem =
-            state_.getStateElement(static_cast<unsigned>(elemId));
-        vmUsage += static_cast<double>(elem.sizeBytes) * placedInVm_[GV];
-    }
-    model_.addConstr(vmUsage <= static_cast<double>(params_.vmCapacityBytes),
-                     "C3_vm_capacity");
-}
-
-// C4: NeedVol linearization
-// needs_vol_restore[b,v] <= is_region_start[b]
-// needs_vol_restore[b,v] <= placed_in_vm[v]
-// needs_vol_restore[b,v] >= is_region_start[b] + placed_in_vm[v] - 1
-void CheckpointOptimizer::addC4_NeedVolLinearization() {
-    for (auto &[key, yVar] : needsVolRestore_) {
-        const std::string &blockName = key.first;
-        unsigned elemId = key.second;
-        const StateElement &elem = state_.getStateElement(elemId);
-        llvm::GlobalVariable *GV = elem.globalVar;
-        if (!GV)
-            continue;
-
-        std::string suffix =
-            blockName + "_" + GV->getName().str();
-
-        model_.addConstr(yVar <= isRegionStart_[blockName],
-                         "C4a_nvr_le_x_" + suffix);
-        model_.addConstr(yVar <= placedInVm_[GV],
-                         "C4b_nvr_le_p_" + suffix);
-        model_.addConstr(yVar >= isRegionStart_[blockName] +
-                                     placedInVm_[GV] - 1,
-                         "C4c_nvr_ge_xp_" + suffix);
-    }
-}
-
-// C5: Checkpoint availability
-// For SSA regs: store_enabled[d] >= is_region_start[b] for d in
-// DefSites(b,r)
-// For VMObjs: store_enabled[d] >= needs_vol_restore[b,v] for d in
-// DefSites(b,v)
-void CheckpointOptimizer::addC5_CheckpointAvailability() {
-    unsigned constrIdx = 0;
-
-    LLVM_DEBUG(llvm::dbgs() << "  C5: Checkpoint availability\n");
-
-    for (const auto &blockName : cfg_.getBlocks()) {
-        // SSA regs live-in at b
-        const auto &regLiveIn = state_.getRegLiveIn(blockName);
-        for (llvm::Value *V : regLiveIn) {
-            int elemId = state_.getRegStateElemId(V);
-            if (elemId < 0)
-                continue;
-            unsigned eid = static_cast<unsigned>(elemId);
-            const auto &reaching =
-                state_.getReachingDefs(blockName, eid);
-            LLVM_DEBUG(llvm::dbgs() << "    C5 reg at " << blockName
-                                    << " elem=" << eid
-                                    << " reachingDefs=" << reaching.size() << "\n");
-            for (unsigned dsId : reaching) {
-                if (storeEnabled_.count(dsId)) {
-                    model_.addConstr(
-                        storeEnabled_[dsId] >= isRegionStart_[blockName],
-                        "C5_reg_" + std::to_string(constrIdx++));
-                    LLVM_DEBUG(llvm::dbgs() << "      store_enabled[" << dsId
-                                            << "] >= is_region_start[" << blockName << "]\n");
-                }
-            }
-        }
-
-        // VMObjs live-in at b
-        const auto &vmObjLiveIn = state_.getVMObjLiveIn(blockName);
-        for (llvm::GlobalVariable *GV : vmObjLiveIn) {
+    for (const auto &block : cfg_.getBlocks()) {
+        GRBLinExpr vmUsage = 0;
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             int elemId = state_.getVMObjStateElemId(GV);
             if (elemId < 0)
                 continue;
-            unsigned eid = static_cast<unsigned>(elemId);
-            auto nvrKey = std::make_pair(blockName, eid);
-            auto nvrIt = needsVolRestore_.find(nvrKey);
-            if (nvrIt == needsVolRestore_.end())
-                continue;
+            const StateElement &elem =
+                state_.getStateElement(static_cast<unsigned>(elemId));
+            vmUsage +=
+                static_cast<double>(elem.sizeBytes) * placeInVm_[std::make_pair(block, GV)];
+        }
+        model_.addConstr(vmUsage <= static_cast<double>(params_.vmCapacityBytes),
+                         "C3_vm_capacity_" + sanitizeToken(block));
+    }
+}
 
-            const auto &reaching =
-                state_.getReachingDefs(blockName, eid);
-            LLVM_DEBUG(llvm::dbgs() << "    C5 vmobj " << GV->getName()
-                                    << " at " << blockName
-                                    << " reachingDefs=" << reaching.size() << "\n");
-            for (unsigned dsId : reaching) {
-                if (storeEnabled_.count(dsId)) {
-                    model_.addConstr(
-                        storeEnabled_[dsId] >= nvrIt->second,
-                        "C5_vmobj_" + std::to_string(constrIdx++));
-                    LLVM_DEBUG(llvm::dbgs() << "      store_enabled[" << dsId
-                                            << "] >= needs_vol_restore[" << blockName
-                                            << "," << GV->getName() << "]\n");
-                }
-            }
+void CheckpointOptimizer::addC4_NeedVolLinearization() {
+    for (const auto &[key, needVar] : needRestore_) {
+        const std::string &block = key.first;
+        BlockGVKey placeKey = std::make_pair(block, key.second);
+        auto placeIt = placeInVm_.find(placeKey);
+        if (placeIt == placeInVm_.end())
+            continue;
+
+        std::string suffix = sanitizeToken(block) + "_" + sanitizeToken(key.second->getName());
+        model_.addConstr(needVar <= isRegionStart_[block], "C4a_need_le_x_" + suffix);
+        model_.addConstr(needVar <= placeIt->second, "C4b_need_le_p_" + suffix);
+        model_.addConstr(needVar >= isRegionStart_[block] + placeIt->second - 1,
+                         "C4c_need_ge_xp_" + suffix);
+    }
+}
+
+void CheckpointOptimizer::addC5_PlacementPropagation() {
+    unsigned idx = 0;
+    for (const auto &[pred, succ] : cfg_.getEdges()) {
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            GRBVar pPred = placeInVm_[std::make_pair(pred, GV)];
+            GRBVar pSucc = placeInVm_[std::make_pair(succ, GV)];
+            GRBVar xSucc = isRegionStart_[succ];
+            model_.addConstr(
+                pSucc <= pPred + xSucc,
+                "C5a_place_prop_" + std::to_string(idx));
+            model_.addConstr(
+                pSucc >= pPred - xSucc,
+                "C5b_place_prop_" + std::to_string(idx));
+            idx++;
         }
     }
 }
 
-// C6: Energy initialization at region starts
-// energy_accumulated[b] >= E_start[b] - M*(1 - is_region_start[b])
-// energy_accumulated[b] <= E_start[b] + M*(1 - is_region_start[b])
-void CheckpointOptimizer::addC6_EnergyInit() {
-    double M = params_.capacity;
+void CheckpointOptimizer::addC6_PendingPropagation() {
+    auto preds = buildPredecessorMap(cfg_);
 
-    LLVM_DEBUG(llvm::dbgs() << "  C6: Energy init (M=" << M
-                            << ", E_pro=" << params_.E_pro << ")\n");
+    // (1), (3), (4)
+    for (const auto &block : cfg_.getBlocks()) {
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            BlockGVKey key = std::make_pair(block, GV);
+            GRBVar p = pending_[key];
+            double def = state_.getDefIndicator(block, GV) ? 1.0 : 0.0;
 
-    for (const auto &blockName : cfg_.getBlocks()) {
-        GRBLinExpr eStart = buildEStart(blockName);
+            std::string suffix = sanitizeToken(block) + "_" + sanitizeToken(GV->getName());
+            model_.addConstr(p >= def, "C6a_pending_local_" + suffix);
 
-        model_.addConstr(
-            energyAccumulated_[blockName] >=
-                eStart - M * (1 - isRegionStart_[blockName]),
-            "C6a_einit_lb_" + blockName);
-        model_.addConstr(
-            energyAccumulated_[blockName] <=
-                eStart + M * (1 - isRegionStart_[blockName]),
-            "C6b_einit_ub_" + blockName);
-
-        LLVM_DEBUG({
-            // Compute constant part of E_start for display
-            double regRestoreSum = params_.E_pro;
-            const auto &regLI = state_.getRegLiveIn(blockName);
-            for (llvm::Value *V : regLI) {
-                int eid = state_.getRegStateElemId(V);
-                if (eid >= 0)
-                    regRestoreSum += energy_.getERst(static_cast<unsigned>(eid));
+            GRBLinExpr predSum = 0;
+            for (const auto &pred : preds[block]) {
+                predSum += pending_[std::make_pair(pred, GV)];
             }
-            const auto &vmLI = state_.getVMObjLiveIn(blockName);
-            unsigned nvrCount = 0;
-            for (llvm::GlobalVariable *GV : vmLI) {
-                int eid = state_.getVMObjStateElemId(GV);
-                if (eid >= 0) {
-                    auto key = std::make_pair(blockName, static_cast<unsigned>(eid));
-                    if (needsVolRestore_.count(key))
-                        nvrCount++;
-                }
-            }
-            llvm::dbgs() << "    " << blockName
-                         << ": E_start = " << regRestoreSum << "*x["
-                         << blockName << "]";
-            if (nvrCount > 0)
-                llvm::dbgs() << " + " << nvrCount << " nvr terms";
-            llvm::dbgs() << "\n";
-        });
+            model_.addConstr(p <= def + predSum, "C6b_pending_ub_" + suffix);
+            model_.addConstr(p <= def + (1 - isRegionStart_[block]),
+                             "C6c_pending_reset_" + suffix);
+        }
+    }
+
+    // (2)
+    unsigned idx = 0;
+    for (const auto &[pred, succ] : cfg_.getEdges()) {
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            model_.addConstr(
+                pending_[std::make_pair(succ, GV)] >=
+                    pending_[std::make_pair(pred, GV)] - isRegionStart_[succ],
+                "C6d_pending_edge_" + std::to_string(idx));
+            idx++;
+        }
     }
 }
 
-// C7: Energy propagation along edges
-// energy_accumulated[succ] >= energy_accumulated[pred] + E_blk[pred] -
-//                             M * is_region_start[succ]
-void CheckpointOptimizer::addC7_EnergyPropagation() {
-    double M = params_.capacity;
-    unsigned edgeIdx = 0;
+void CheckpointOptimizer::addC7_CommitModel() {
+    auto preds = buildPredecessorMap(cfg_);
 
+    // vm_pending[b,v] = pending[b,v] AND place_in_vm[b,v]
+    for (const auto &block : cfg_.getBlocks()) {
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            BlockGVKey key = std::make_pair(block, GV);
+            GRBVar vmP = vmPending_[key];
+            GRBVar p = pending_[key];
+            GRBVar place = placeInVm_[key];
+            std::string suffix = sanitizeToken(block) + "_" + sanitizeToken(GV->getName());
+            model_.addConstr(vmP <= p, "C7a_vmp_le_pending_" + suffix);
+            model_.addConstr(vmP <= place, "C7b_vmp_le_place_" + suffix);
+            model_.addConstr(vmP >= p + place - 1, "C7c_vmp_ge_and_" + suffix);
+        }
+    }
+
+    // commit[b,v] model (for b != entry and v in LiveIn(b))
+    for (const auto &[key, commitVar] : commit_) {
+        const std::string &block = key.first;
+        llvm::GlobalVariable *GV = key.second;
+        std::string suffix = sanitizeToken(block) + "_" + sanitizeToken(GV->getName());
+
+        model_.addConstr(commitVar <= isRegionStart_[block], "C7d_commit_le_x_" + suffix);
+
+        GRBLinExpr predVmPending = 0;
+        for (const auto &pred : preds[block]) {
+            predVmPending += vmPending_[std::make_pair(pred, GV)];
+        }
+        model_.addConstr(commitVar <= predVmPending, "C7e_commit_le_preds_" + suffix);
+
+        for (const auto &pred : preds[block]) {
+            model_.addConstr(
+                commitVar >= isRegionStart_[block] +
+                                 vmPending_[std::make_pair(pred, GV)] - 1,
+                "C7f_commit_ge_pred_" + sanitizeToken(pred) + "_" + suffix);
+        }
+    }
+}
+
+void CheckpointOptimizer::addC8_EnergyInit() {
+    const double M = params_.capacity;
+    for (const auto &block : cfg_.getBlocks()) {
+        GRBLinExpr eStart = buildEStart(block);
+        model_.addConstr(
+            energyAccumulated_[block] >=
+                eStart - M * (1 - isRegionStart_[block]),
+            "C8a_einit_lb_" + sanitizeToken(block));
+        model_.addConstr(
+            energyAccumulated_[block] <=
+                eStart + M * (1 - isRegionStart_[block]),
+            "C8b_einit_ub_" + sanitizeToken(block));
+    }
+}
+
+void CheckpointOptimizer::addC9_EnergyPropagation() {
+    const double M = params_.capacity;
+    unsigned edgeIdx = 0;
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
-
         model_.addConstr(
             energyAccumulated_[dst] >=
-                energyAccumulated_[src] + eBlkSrc -
-                    M * isRegionStart_[dst],
-            "C7_propagate_" + std::to_string(edgeIdx++));
+                energyAccumulated_[src] + eBlkSrc - M * isRegionStart_[dst],
+            "C9_propagate_" + std::to_string(edgeIdx++));
     }
 }
 
-// C8: Buffer safety
-// Per edge: energy_accumulated[pred] + E_blk[pred] +
-//           E_epi * is_region_start[succ] <= E_buf
-// For exits: energy_accumulated[pred] + E_blk[pred] <= E_buf
-void CheckpointOptimizer::addC8_BufferSafety() {
-    double Ebuf = params_.capacity;
+void CheckpointOptimizer::addC10_BufferSafety() {
+    const double Ebuf = params_.capacity;
     unsigned edgeIdx = 0;
-
-    LLVM_DEBUG(llvm::dbgs() << "  C8: Buffer safety (E_buf=" << Ebuf
-                            << ", E_epi=" << params_.E_epi << ")\n");
 
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
-
+        GRBLinExpr eEndDst = buildEEnd(dst);
         model_.addConstr(
-            energyAccumulated_[src] + eBlkSrc +
-                    params_.E_epi * isRegionStart_[dst] <=
-                Ebuf,
-            "C8_edge_" + std::to_string(edgeIdx));
-        LLVM_DEBUG(llvm::dbgs() << "    C8_edge_" << edgeIdx << ": eacc["
-                                << src << "] + E_blk[" << src << "] + "
-                                << params_.E_epi << "*x[" << dst
-                                << "] <= " << Ebuf << "\n");
-        edgeIdx++;
+            energyAccumulated_[src] + eBlkSrc + eEndDst <= Ebuf,
+            "C10_edge_" + std::to_string(edgeIdx++));
     }
 
-    // Exit blocks
     for (const auto &exitBlock : cfg_.getExitBlocks()) {
         GRBLinExpr eBlkExit = buildEBlk(exitBlock);
-
-        model_.addConstr(energyAccumulated_[exitBlock] + eBlkExit <= Ebuf,
-                         "C8_exit_" + exitBlock);
-        LLVM_DEBUG(llvm::dbgs() << "    C8_exit_" << exitBlock
-                                << ": eacc[" << exitBlock << "] + E_blk["
-                                << exitBlock << "] <= " << Ebuf << "\n");
+        model_.addConstr(
+            energyAccumulated_[exitBlock] + eBlkExit <= Ebuf,
+            "C10_exit_" + sanitizeToken(exitBlock));
     }
 }
 
-// E_blk[b] = E_base[b]
-//           + Sigma_v E_nvm[b,v] * (1 - placed_in_vm[v])
-//           + Sigma_{d in Defs(b)} E_store[d] * store_enabled[d]
 GRBLinExpr CheckpointOptimizer::buildEBlk(const std::string &block) {
     GRBLinExpr expr = energy_.getEBase(block);
-
-    // NVM penalties
     for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
         double eNvm = energy_.getENvm(block, GV);
         if (eNvm == 0.0)
             continue;
-        // eNvm * (1 - p_v) = eNvm - eNvm * p_v
         expr += eNvm;
-        expr -= eNvm * placedInVm_[GV];
+        expr -= eNvm * placeInVm_[std::make_pair(block, GV)];
     }
+    return expr;
+}
 
-    // Store costs for defs in this block
-    const auto &blockDefs = state_.getBlockDefSites(block);
-    for (unsigned dsId : blockDefs) {
-        double eStore = energy_.getEStore(dsId);
-        if (eStore > 0.0) {
-            expr += eStore * storeEnabled_[dsId];
+GRBLinExpr CheckpointOptimizer::buildEStart(const std::string &block) {
+    GRBLinExpr expr = 0;
+    expr += params_.E_pro * isRegionStart_[block];
+
+    double qb = energy_.getQReboot(block);
+    for (llvm::GlobalVariable *GV : state_.getVMObjLiveIn(block)) {
+        auto it = needRestore_.find(std::make_pair(block, GV));
+        if (it == needRestore_.end())
+            continue;
+        double eRestore = energy_.getERestore(GV);
+        if (eRestore > 0.0) {
+            expr += qb * eRestore * it->second;
         }
     }
 
     return expr;
 }
 
-// E_start[b] = (E_pro + Sigma_{r in LiveIn(b) cap Regs} E_rst[r])
-//              * is_region_start[b]
-//            + Sigma_{v in LiveIn(b) cap VMObjs} E_rst[v] *
-//              needs_vol_restore[b,v]
-GRBLinExpr CheckpointOptimizer::buildEStart(const std::string &block) {
+GRBLinExpr CheckpointOptimizer::buildEEnd(const std::string &block) {
     GRBLinExpr expr = 0;
+    expr += params_.E_epi * isRegionStart_[block];
 
-    // Prologue + SSA reg restores (proportional to is_region_start)
-    double prologuePlusRegRestore = params_.E_pro;
-    const auto &regLiveIn = state_.getRegLiveIn(block);
-    for (llvm::Value *V : regLiveIn) {
-        int elemId = state_.getRegStateElemId(V);
-        if (elemId >= 0) {
-            prologuePlusRegRestore +=
-                energy_.getERst(static_cast<unsigned>(elemId));
+    for (llvm::GlobalVariable *GV : state_.getVMObjLiveIn(block)) {
+        auto it = commit_.find(std::make_pair(block, GV));
+        if (it == commit_.end())
+            continue;
+        double eSave = energy_.getESave(GV);
+        if (eSave > 0.0) {
+            expr += eSave * it->second;
         }
-    }
-    expr += prologuePlusRegRestore * isRegionStart_[block];
-
-    // VMObj restores (proportional to needs_vol_restore)
-    const auto &vmObjLiveIn = state_.getVMObjLiveIn(block);
-    for (llvm::GlobalVariable *GV : vmObjLiveIn) {
-        int elemId = state_.getVMObjStateElemId(GV);
-        if (elemId < 0)
-            continue;
-        auto key = std::make_pair(block, static_cast<unsigned>(elemId));
-        auto it = needsVolRestore_.find(key);
-        if (it == needsVolRestore_.end())
-            continue;
-        double eRst = energy_.getERst(static_cast<unsigned>(elemId));
-        expr += eRst * it->second;
     }
 
     return expr;
 }
 
 void CheckpointOptimizer::extractSolution() {
-    // Region starts
     for (const auto &[blockName, var] : isRegionStart_) {
         if (var.get(GRB_DoubleAttr_X) > 0.5) {
             solution_.regionStarts.insert(blockName);
         }
     }
 
-    // Enabled def stores
-    for (const auto &[dsId, var] : storeEnabled_) {
-        if (var.get(GRB_DoubleAttr_X) > 0.5) {
-            solution_.enabledDefStores.insert(dsId);
-        }
+    for (const auto &[key, var] : placeInVm_) {
+        solution_.placeInVm[key] = var.get(GRB_DoubleAttr_X) > 0.5;
     }
 
-    // VM placement
-    for (const auto &[gv, var] : placedInVm_) {
-        solution_.vmPlacement[gv] = var.get(GRB_DoubleAttr_X) > 0.5;
+    for (const auto &[key, var] : needRestore_) {
+        solution_.needRestore[key] = var.get(GRB_DoubleAttr_X) > 0.5;
     }
 
-    // NeedVol restore
-    for (const auto &[key, var] : needsVolRestore_) {
-        solution_.needVolRestore[key] = var.get(GRB_DoubleAttr_X) > 0.5;
+    for (const auto &[key, var] : commit_) {
+        solution_.commit[key] = var.get(GRB_DoubleAttr_X) > 0.5;
     }
 
-    // Energy levels
     for (const auto &[blockName, var] : energyAccumulated_) {
         solution_.energyAccumulated[blockName] = var.get(GRB_DoubleAttr_X);
     }

@@ -53,6 +53,13 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
     // Step 3: Run StateAnalysis
     ctx.stateAnalysis =
         std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
+    if (ctx.stateAnalysis->hasAnalysisErrors()) {
+        errs() << "=== Checkpoint Analysis: " << F.getName() << " ===\n";
+        ctx.stateAnalysis->printAnalysisErrors(errs());
+        errs() << "Aborting MILP analysis for this function due to unresolved "
+                  "memory/call effects.\n";
+        return PreservedAnalyses::all();
+    }
 
     // Step 4: Build EnergyModel
     auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
@@ -130,8 +137,13 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
     }
     errs() << "\n";
 
-    errs() << "Enabled checkpoint stores: "
-           << solution.enabledDefStores.size() << "\n";
+    unsigned commitCount = 0;
+    for (const auto &[key, enabled] : solution.commit) {
+        (void)key;
+        if (enabled)
+            commitCount++;
+    }
+    errs() << "Boundary commits enabled: " << commitCount << "\n";
     errs() << "\n";
 
     errs() << "Loop bounds:\n";

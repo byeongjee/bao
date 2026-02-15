@@ -8,6 +8,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <map>
 #include <set>
@@ -16,8 +17,7 @@
 
 namespace checkpoint {
 
-/// A definition site: an instruction that defines an SSA register or writes a
-/// VMObj (global variable).
+/// Legacy def-site struct kept for compatibility with older call sites.
 struct DefSite {
     unsigned id;
     llvm::Instruction *inst;
@@ -30,7 +30,7 @@ struct DefSite {
     llvm::GlobalVariable *globalVar;  // non-null for MemoryDef
 };
 
-/// A state element that may need checkpoint/restore across region boundaries.
+/// Legacy state-element struct kept for compatibility with older call sites.
 struct StateElement {
     unsigned id;
 
@@ -42,10 +42,12 @@ struct StateElement {
     unsigned sizeBytes;               // only meaningful for VMObj
 };
 
-/// Computes all state-modeling data needed by the MILP (spec Sections 2 + 7).
+/// Computes candidate-global state data for MILP checkpoint optimization.
 ///
-/// Uses LLVM's AAResults for global access identification, DominatorTree for
-/// efficient liveness computation, and LoopInfo for loop structure.
+/// v1 contract:
+/// - Candidates are fixed-address globals annotated with "milp_candidate"
+/// - Intra-procedural analysis only
+/// - Strict unresolved-memory policy (diagnostic + function-level abort)
 class StateAnalysis {
 public:
     StateAnalysis(llvm::Function &F,
@@ -54,12 +56,32 @@ public:
                   llvm::DominatorTree &DT,
                   const CFGAnalysis &cfg);
 
-    // -- VMObj identification --
+    // -- Candidate globals --
 
-    /// All global variables considered as VMObjs (excludes constants, intrinsics).
+    /// All candidate globals considered by MILP.
     const std::vector<llvm::GlobalVariable *> &getVMObjs() const { return vmObjs_; }
+    bool isCandidateGlobal(llvm::GlobalVariable *gv) const;
 
-    // -- State elements --
+    // -- Strict-analysis diagnostics --
+
+    bool hasAnalysisErrors() const { return !analysisErrors_.empty(); }
+    const std::vector<std::string> &getAnalysisErrors() const {
+        return analysisErrors_;
+    }
+    void printAnalysisErrors(llvm::raw_ostream &os) const;
+
+    // -- Block-level global data --
+
+    /// Candidate globals live-in at block b.
+    const std::set<llvm::GlobalVariable *> &getVMObjLiveIn(const std::string &block) const;
+
+    /// Candidate globals that may be defined in block b.
+    const std::set<llvm::GlobalVariable *> &getDefGlobals(const std::string &block) const;
+
+    /// D_{b,v}: 1 if v may be defined in block b.
+    bool getDefIndicator(const std::string &block, llvm::GlobalVariable *gv) const;
+
+    // -- Legacy API (compatibility) --
 
     /// All state elements (SSA regs + VMObjs).
     const std::vector<StateElement> &getStateElements() const { return stateElements_; }
@@ -75,19 +97,10 @@ public:
     /// Definition sites in a given block.
     const std::vector<unsigned> &getBlockDefSites(const std::string &block) const;
 
-    // -- Liveness --
-
-    /// SSA registers live-in at block b.
+    /// Legacy: no register state is modeled in MILP v1.
     const std::set<llvm::Value *> &getRegLiveIn(const std::string &block) const;
 
-    /// VMObjs live-in at block b.
-    const std::set<llvm::GlobalVariable *> &getVMObjLiveIn(const std::string &block) const;
-
-    // -- Reaching definitions --
-
-    /// DefSite IDs for state element s that reach block b.
-    /// For SSA regs, this is always a single def (SSA property).
-    /// For VMObjs, this is the set of stores that may reach b.
+    /// Legacy: reaching-def sets are not used in v1 model.
     const std::set<unsigned> &getReachingDefs(const std::string &block,
                                                unsigned stateElemId) const;
 
@@ -119,8 +132,10 @@ private:
     llvm::DominatorTree &DT_;
     const CFGAnalysis &cfg_;
 
-    // VMObjs
+    // Candidate globals
     std::vector<llvm::GlobalVariable *> vmObjs_;
+    std::set<llvm::GlobalVariable *> vmObjSet_;
+    std::vector<std::string> analysisErrors_;
 
     // State elements
     std::vector<StateElement> stateElements_;
@@ -136,6 +151,7 @@ private:
     // Liveness
     std::map<std::string, std::set<llvm::Value *>> regLiveIn_;
     std::map<std::string, std::set<llvm::GlobalVariable *>> vmObjLiveIn_;
+    std::map<std::string, std::set<llvm::GlobalVariable *>> defGlobals_;
 
     // Reaching definitions: (block, stateElemId) -> set of DefSite ids
     std::map<std::pair<std::string, unsigned>, std::set<unsigned>> reachingDefs_;
@@ -152,6 +168,11 @@ private:
     static const std::set<llvm::Value *> emptyRegSet_;
     static const std::set<llvm::GlobalVariable *> emptyGVSet_;
     static const std::set<unsigned> emptyIdSet_;
+
+    bool isMilpCandidateAnnotated(llvm::GlobalVariable *GV) const;
+    bool isAllowedDirectCall(const llvm::CallBase &CB) const;
+    bool validateInstructionForStrictMode(const llvm::Instruction &I);
+    void reportStrictError(const llvm::Instruction &I, const std::string &reason);
 
     void identifyVMObjs();
     void buildBlockMap();

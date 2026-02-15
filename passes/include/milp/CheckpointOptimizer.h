@@ -31,14 +31,14 @@ struct MILPSolution {
     /// Blocks where is_region_start = 1.
     std::set<std::string> regionStarts;
 
-    /// DefSite IDs where store_enabled = 1.
-    std::set<unsigned> enabledDefStores;
+    /// place_in_vm[b,v] values.
+    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> placeInVm;
 
-    /// VMObj placement: true = VM (SRAM), false = NVM (FRAM).
-    std::map<llvm::GlobalVariable *, bool> vmPlacement;
+    /// need_restore[b,v] values (for v in LiveIn(b)).
+    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> needRestore;
 
-    /// needs_vol_restore[b,v] = true: VMObj v needs volatile restore at block b.
-    std::map<std::pair<std::string, unsigned>, bool> needVolRestore;
+    /// commit[b,v] values (for b != b0 and v in LiveIn(b)).
+    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> commit;
 
     /// energy_accumulated[b] values.
     std::map<std::string, double> energyAccumulated;
@@ -55,12 +55,8 @@ struct MILPSolution {
 
 /// MILP optimizer for checkpoint placement using Gurobi.
 ///
-/// Implements the spec formulation with:
-/// - Distributed checkpoint stores at definition sites
-/// - VM/NVM memory placement for globals
-/// - NeedVol linearization linking placement and boundary decisions
-/// - Richer energy objective minimizing expected energy overhead
-/// - Constraints C1, C3-C9
+/// Implements the deterministic MILP formulation with boundary commit
+/// decisions and per-block placement variables.
 class CheckpointOptimizer {
 public:
     /// Construct optimizer from analysis results.
@@ -97,7 +93,6 @@ public:
     std::vector<std::string> getInfeasibleBlocks() const;
 
 private:
-    const MILPInput &input_;
     const CFGAnalysis &cfg_;
     const StateAnalysis &state_;
     const EnergyModel &energy_;
@@ -109,13 +104,16 @@ private:
     bool solved_ = false;
     bool acceptFeasible_ = false;
 
+    using BlockGVKey = std::pair<std::string, llvm::GlobalVariable *>;
+
     // MILP variables
-    std::map<std::string, GRBVar> isRegionStart_;     // x[b] binary
-    std::map<unsigned, GRBVar> storeEnabled_;          // z[d] binary
-    std::map<llvm::GlobalVariable *, GRBVar> placedInVm_; // p[v] binary
-    // y[b,stateElemId] binary (only for VMObjs live-in at b)
-    std::map<std::pair<std::string, unsigned>, GRBVar> needsVolRestore_;
-    std::map<std::string, GRBVar> energyAccumulated_;  // eaccum[b] continuous
+    std::map<std::string, GRBVar> isRegionStart_; // x[b]
+    std::map<BlockGVKey, GRBVar> placeInVm_;      // p[b,v]
+    std::map<BlockGVKey, GRBVar> needRestore_;    // y[b,v]
+    std::map<BlockGVKey, GRBVar> pending_;        // pending[b,v]
+    std::map<BlockGVKey, GRBVar> vmPending_;      // vm_pending[b,v]
+    std::map<BlockGVKey, GRBVar> commit_;         // commit[b,v]
+    std::map<std::string, GRBVar> energyAccumulated_; // eaccum[b]
 
     void buildModel();
     void addVariables();
@@ -127,14 +125,17 @@ private:
     void addC1_EntryRegionStart();
     void addC3_VMCapacity();
     void addC4_NeedVolLinearization();
-    void addC5_CheckpointAvailability();
-    void addC6_EnergyInit();
-    void addC7_EnergyPropagation();
-    void addC8_BufferSafety();
+    void addC5_PlacementPropagation();
+    void addC6_PendingPropagation();
+    void addC7_CommitModel();
+    void addC8_EnergyInit();
+    void addC9_EnergyPropagation();
+    void addC10_BufferSafety();
 
-    // Expression builders for E_blk and E_start (linear in decision variables)
+    // Expression builders (linear in decision variables)
     GRBLinExpr buildEBlk(const std::string &block);
     GRBLinExpr buildEStart(const std::string &block);
+    GRBLinExpr buildEEnd(const std::string &block);
 };
 
 } // namespace checkpoint

@@ -14,9 +14,8 @@ namespace checkpoint {
 ///
 /// Handles:
 /// - Region boundaries: prologue/epilogue calls
-/// - Distributed checkpoint stores at definition sites
-/// - Memory placement: setting globals to NVM section
-/// - Restore calls at region prologues
+/// - Boundary commits/restores for candidate globals
+/// - Candidate global section marking for runtime handling
 class CheckpointInstrumenter {
 public:
     CheckpointInstrumenter(llvm::Module &M);
@@ -36,20 +35,15 @@ private:
     // Runtime function callees (lazily declared)
     llvm::FunctionCallee prologueFn_;
     llvm::FunctionCallee epilogueFn_;
-    llvm::FunctionCallee storeRegFn_;
     llvm::FunctionCallee storeMemFn_;
-    llvm::FunctionCallee restoreRegFn_;
     llvm::FunctionCallee restoreMemFn_;
 
     void declareRuntimeFunctions();
 
-    void insertRegionBoundaries(llvm::Function &F,
-                                const MILPSolution &solution,
-                                const StateAnalysis &state);
-    void insertDistributedStores(llvm::Function &F,
-                                 const MILPSolution &solution,
-                                 const StateAnalysis &state);
-    void applyMemoryPlacement(const MILPSolution &solution);
+    unsigned insertRegionBoundaries(llvm::Function &F,
+                                    const MILPSolution &solution,
+                                    const StateAnalysis &state);
+    void applyMemoryPlacement(const StateAnalysis &state);
 };
 
 } // namespace checkpoint

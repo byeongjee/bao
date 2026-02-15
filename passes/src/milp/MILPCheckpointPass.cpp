@@ -46,6 +46,12 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     // Step 3: Run StateAnalysis (Pass B)
     ctx.stateAnalysis =
         std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
+    if (ctx.stateAnalysis->hasAnalysisErrors()) {
+        ctx.stateAnalysis->printAnalysisErrors(errs());
+        errs() << "Skipping MILP instrumentation for function " << F.getName()
+               << " due to unresolved memory/call effects.\n";
+        return PreservedAnalyses::all();
+    }
 
     // Step 4: Parse MILP energy params and build EnergyModel (Pass C/D)
     auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
@@ -93,7 +99,21 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
 
     // Step 7: Instrument IR (Pass F)
     CheckpointInstrumenter instrumenter(*F.getParent());
-    instrumenter.instrumentFunction(F, solution, *ctx.stateAnalysis);
+    unsigned inserted = instrumenter.instrumentFunction(
+        F, solution, *ctx.stateAnalysis);
+
+    unsigned commitCount = 0;
+    for (const auto &[key, enabled] : solution.commit) {
+        (void)key;
+        if (enabled)
+            commitCount++;
+    }
+    unsigned restoreCount = 0;
+    for (const auto &[key, enabled] : solution.needRestore) {
+        (void)key;
+        if (enabled)
+            restoreCount++;
+    }
 
     // Statistics summary
     errs() << "=== MILP Checkpoint Insertion Statistics ===\n";
@@ -109,7 +129,9 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     }
     errs() << "  Regions:                         " << solution.regionStarts.size() << "\n";
     errs() << "  Region boundaries inserted:      " << (solution.regionStarts.size() - 1) << "\n";
-    errs() << "  Distributed checkpoints inserted: " << solution.enabledDefStores.size() << "\n";
+    errs() << "  Boundary commits enabled:        " << commitCount << "\n";
+    errs() << "  Boundary restores enabled:       " << restoreCount << "\n";
+    errs() << "  Runtime calls inserted:          " << inserted << "\n";
     errs() << "  Solve time (ms):                 " << llvm::format("%.3f", solveTimeMs) << "\n";
 
     return PreservedAnalyses::none();
