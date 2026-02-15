@@ -49,15 +49,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
             continue;
         }
 
-        llvm::Instruction *insertPt = BB.getFirstNonPHI();
-        if (!insertPt) {
-            insertPt = BB.getTerminator();
-        }
-        if (!insertPt) {
+        llvm::BasicBlock::iterator insertIt = BB.getFirstNonPHIIt();
+        if (insertIt == BB.end()) {
             continue;
         }
 
-        llvm::IRBuilder<> builder(insertPt);
+        llvm::IRBuilder<> builder(&BB, insertIt);
 
         // For b != b0, emit boundary-end code first.
         if (blockName != entryName) {
@@ -119,4 +116,3 @@ void CheckpointInstrumenter::applyMemoryPlacement(const StateAnalysis &state) {
 }
 
 } // namespace checkpoint
-
