@@ -38,31 +38,37 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All scenarios: name:config_file[:source_name]
-# config_file is relative to SCRIPT_DIR
-# source_name is optional; if provided, uses ${source_name}.c instead of ${name}.c
+# All scenarios: name:energy_config:milp_config[:source_name]
+# energy_config: energy estimator config (instruction costs)
+# milp_config:   MILP optimization parameters (capacity, etc.)
+# source_name:   optional; if provided, uses ${source_name}.c instead of ${name}.c
 SCENARIOS=(
-    "scenario_no_ckpt:scenario_config.json"
-    "scenario_forced_ckpt:scenario_config.json"
-    "scenario_loop:scenario_config.json"
-    "scenario_nested_loop:scenario_config.json"
-    "scenario_diamond:scenario_config.json"
-    "scenario_switch:scenario_config.json"
-    "scenario_store_reg:scenario_config.json"
-    "scenario_store_global:scenario_config.json"
-    "scenario_vm_hot:scenario_config.json"
-    "scenario_vm_overflow:scenario_vm_overflow_config.json"
-    "scenario_needvol:scenario_config.json"
-    "scenario_tight:scenario_tight_config.json"
-    "scenario_infeasible:scenario_config.json"
-    "scenario_nvm_efficient:scenario_config.json"
-    "scenario_nvm_efficient_vm:scenario_nvm_efficient_vm_config.json:scenario_nvm_efficient"
+    "scenario_no_ckpt:scenario_config.json:scenario_milp_config.json"
+    "scenario_forced_ckpt:scenario_config.json:scenario_milp_config.json"
+    "scenario_loop:scenario_config.json:scenario_milp_config.json"
+    "scenario_nested_loop:scenario_config.json:scenario_milp_config.json"
+    "scenario_diamond:scenario_config.json:scenario_milp_config.json"
+    "scenario_switch:scenario_config.json:scenario_milp_config.json"
+    "scenario_store_reg:scenario_config.json:scenario_milp_config.json"
+    "scenario_store_global:scenario_config.json:scenario_milp_config.json"
+    "scenario_vm_hot:scenario_config.json:scenario_milp_config.json"
+    "scenario_vm_overflow:scenario_vm_overflow_config.json:scenario_milp_vm_overflow_config.json"
+    "scenario_needvol:scenario_config.json:scenario_milp_config.json"
+    "scenario_tight:scenario_tight_config.json:scenario_milp_tight_config.json"
+    "scenario_infeasible:scenario_config.json:scenario_milp_config.json"
+    "scenario_nvm_efficient:scenario_config.json:scenario_milp_config.json"
+    "scenario_nvm_efficient_vm:scenario_nvm_efficient_vm_config.json:scenario_milp_nvm_efficient_vm_config.json:scenario_nvm_efficient"
+    # Slide examples
+    "slide_basic:slide_config.json:slide_milp_config.json"
+    "slide_distributed:slide_config.json:slide_milp_config.json"
+    "slide_nvm:slide_config.json:slide_milp_nvm_config.json"
+    "slide_greedy:slide_config.json:slide_milp_greedy_config.json"
 )
 
 list_tests() {
     echo "Available scenarios:"
     for entry in "${SCENARIOS[@]}"; do
-        IFS=':' read -r name config source <<< "$entry"
+        IFS=':' read -r name econfig mconfig source <<< "$entry"
         local src="$SCRIPT_DIR/${source:-$name}.c"
         # Extract the comment header (first line of /* ... */ comment)
         if [[ -f "$src" ]]; then
@@ -77,14 +83,16 @@ list_tests() {
 
 run_scenario() {
     local test_name="$1"
-    local config_file="$2"
-    local source_name="${3:-$test_name}"
+    local energy_config_file="$2"
+    local milp_config_file="$3"
+    local source_name="${4:-$test_name}"
 
     local src="$SCRIPT_DIR/${source_name}.c"
     local input_ll="$OUT_DIR/${test_name}.ll"
     local output_ll="$OUT_DIR/${test_name}_out.ll"
     local stderr_log="$OUT_DIR/${test_name}_stderr.txt"
-    local config_path="$SCRIPT_DIR/${config_file}"
+    local energy_config_path="$SCRIPT_DIR/${energy_config_file}"
+    local milp_config_path="$SCRIPT_DIR/${milp_config_file}"
 
     echo -e "${BOLD}=========================================="
     echo -e "  ${test_name}"
@@ -119,13 +127,15 @@ run_scenario() {
 
     # Step 3: Run MILP checkpoint pass
     echo -e "${YELLOW}--- Running MILP checkpoint pass ---${NC}"
-    echo "  config: $config_file"
+    echo "  energy-config: $energy_config_file"
+    echo "  milp-config:   $milp_config_file"
     echo ""
 
     local pass_exit=0
     "$OPT" -load-pass-plugin="$PASS_LIB" \
            -passes=checkpoint \
-           -energy-config="$config_path" \
+           -energy-config="$energy_config_path" \
+           -milp-config="$milp_config_path" \
            -S "$input_ll" -o "$output_ll" 2>"$stderr_log" || pass_exit=$?
 
     # Step 4: Show MILP solution (stderr output)
@@ -180,8 +190,8 @@ if [[ $# -eq 0 ]]; then
     echo ""
 
     for entry in "${SCENARIOS[@]}"; do
-        IFS=':' read -r name config source <<< "$entry"
-        run_scenario "$name" "$config" "${source:-}"
+        IFS=':' read -r name econfig mconfig source <<< "$entry"
+        run_scenario "$name" "$econfig" "$mconfig" "${source:-}"
     done
 
     echo "=========================================="
@@ -195,9 +205,9 @@ else
         # Find matching entry
         found=false
         for entry in "${SCENARIOS[@]}"; do
-            IFS=':' read -r name config source <<< "$entry"
+            IFS=':' read -r name econfig mconfig source <<< "$entry"
             if [[ "$name" == "$test_name" ]]; then
-                run_scenario "$name" "$config" "${source:-}"
+                run_scenario "$name" "$econfig" "$mconfig" "${source:-}"
                 found=true
                 break
             fi
