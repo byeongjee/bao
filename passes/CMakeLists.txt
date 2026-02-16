@@ -56,6 +56,7 @@ add_library(CheckpointPass MODULE
     # MILP checkpoint insertion
     src/milp/StateAnalysis.cpp
     src/milp/EnergyModel.cpp
+    src/milp/LoopStripMiningPass.cpp
     src/milp/MILPCheckpointPass.cpp
     src/milp/CheckpointOptimizer.cpp
     src/milp/CheckpointInstrumenter.cpp

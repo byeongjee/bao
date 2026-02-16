@@ -1,5 +1,6 @@
 #include "common/EnergyValidatorPass.h"
 #include "milp/MILPCheckpointPass.h"
+#include "milp/LoopStripMiningPass.h"
 #include "milp/CheckpointAnalysisPass.h"
 #include "rockclimb/RockClimbPass.h"
 
@@ -28,6 +29,11 @@ cl::opt<bool> AcceptFeasibleOpt(
     cl::desc("Accept feasible (non-optimal) MILP solutions (e.g., from time limit)"),
     cl::init(false));
 
+cl::opt<bool> LoopChunkingEnabledOpt(
+    "loop-chunking-enabled",
+    cl::desc("Enable loop strip-mining before MILP passes"),
+    cl::init(false));
+
 // Plugin registration for new pass manager
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
@@ -40,14 +46,17 @@ llvmGetPassPluginInfo() {
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                     if (Name == "checkpoint") {
+                        FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
                     }
                     if (Name == "milp") {
+                        FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
                     }
                     if (Name == "checkpoint-analysis") {
+                        FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::CheckpointAnalysisPass());
                         return true;
                     }
