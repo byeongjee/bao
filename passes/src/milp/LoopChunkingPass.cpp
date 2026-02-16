@@ -223,7 +223,7 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
             return getEnergy(BB);
         }
 
-        VisitState &state = visitState[BB];
+        VisitState state = visitState.lookup(BB);
         if (state == VisitState::Visiting) {
             cycleDetected = true;
             return -1.0;
@@ -232,7 +232,7 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
             return memo[BB];
         }
 
-        state = VisitState::Visiting;
+        visitState[BB] = VisitState::Visiting;
         double bestSucc = -1.0;
         for (const BasicBlock *Succ : successors(BB)) {
             if (!L->contains(Succ)) {
@@ -249,7 +249,7 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
                 bestSucc = succEnergy;
             }
         }
-        state = VisitState::Visited;
+        visitState[BB] = VisitState::Visited;
 
         if (bestSucc < 0.0) {
             memo[BB] = -1.0;

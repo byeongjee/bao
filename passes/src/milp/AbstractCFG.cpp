@@ -115,7 +115,7 @@ static PathSummary computeWorstCasePathSummary(
             return getEnergy(BB);
         }
 
-        VisitState &state = visitState[BB];
+        VisitState state = visitState.lookup(BB);
         if (state == VisitState::Visiting) {
             cycleDetected = true;
             return -1.0;
@@ -124,7 +124,7 @@ static PathSummary computeWorstCasePathSummary(
             return memo[BB];
         }
 
-        state = VisitState::Visiting;
+        visitState[BB] = VisitState::Visiting;
         double bestSuccEnergy = -1.0;
         const BasicBlock *best = nullptr;
         for (const BasicBlock *Succ : successors(BB)) {
@@ -143,7 +143,7 @@ static PathSummary computeWorstCasePathSummary(
                 best = Succ;
             }
         }
-        state = VisitState::Visited;
+        visitState[BB] = VisitState::Visited;
 
         if (!best || bestSuccEnergy < 0.0) {
             memo[BB] = -1.0;
