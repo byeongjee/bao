@@ -4,18 +4,20 @@
 # and capacitor sizes. Outputs a CSV summary.
 #
 # Usage:
-#   ./scripts/benchmark_milp.sh [-o output.csv]
+#   ./scripts/benchmark_milp.sh [-o output.csv] [-v|--verbose]
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 OUTPUT_CSV="$PROJECT_DIR/benchmarks/milp_benchmark_summary.csv"
+VERBOSE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) OUTPUT_CSV="$2"; shift 2 ;;
-        -h|--help) echo "Usage: $0 [-o output.csv]"; exit 0 ;;
+        -v|--verbose) VERBOSE=1; shift ;;
+        -h|--help) echo "Usage: $0 [-o output.csv] [-v|--verbose]"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -96,6 +98,10 @@ for bench_path in "${BENCHMARKS[@]}"; do
 
         # Run compile_and_flash, capture all output regardless of exit code
         full_output=$("${run_cmd[@]}" 2>&1) || true
+
+        if [[ "$VERBOSE" -eq 1 ]]; then
+            echo "$full_output"
+        fi
 
         # Check for infeasibility
         if echo "$full_output" | grep -q "blocks exceed energy capacity"; then
