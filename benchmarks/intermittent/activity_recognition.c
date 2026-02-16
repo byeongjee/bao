@@ -146,9 +146,9 @@ FORCE_INLINE void featurize(volatile features_t *features, accelWindow aWin) {
   // Calculate Deviation
   for (i = 0; i < ACCEL_WINDOW_SIZE; i++) {
     __loop_tripcount(ACCEL_WINDOW_SIZE);  // 3 iterations
-    std_x += abs(aWin[i].x - mean_x);
-    std_y += abs(aWin[i].y - mean_y);
-    std_z += abs(aWin[i].z - mean_z);
+    std_x += labs(aWin[i].x - mean_x);
+    std_y += labs(aWin[i].y - mean_y);
+    std_z += labs(aWin[i].z - mean_z);
   }
   std_x /= ACCEL_WINDOW_SIZE;
   std_y /= ACCEL_WINDOW_SIZE;
@@ -172,15 +172,15 @@ FORCE_INLINE class_t classify(features_t *features, volatile model_t *model) {
     __loop_tripcount(MODEL_SIZE);  // 16 iterations
     model_features = &model->stationary[i];
     long stat_mean_err =
-        abs((long)model_features->meanmag - (long)features->meanmag);
+        labs((long)model_features->meanmag - (long)features->meanmag);
     long stat_sd_err =
-        abs((long)model_features->stddevmag - (long)features->stddevmag);
+        labs((long)model_features->stddevmag - (long)features->stddevmag);
 
     model_features = &model->moving[i];
     long move_mean_err =
-        abs((long)model_features->meanmag - (long)features->meanmag);
+        labs((long)model_features->meanmag - (long)features->meanmag);
     long move_sd_err =
-        abs((long)model_features->stddevmag - (long)features->stddevmag);
+        labs((long)model_features->stddevmag - (long)features->stddevmag);
 
     if (move_mean_err < stat_mean_err)
       move_less_error++;
