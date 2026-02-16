@@ -44,10 +44,25 @@ fi
 HEADER="benchmark,capacitor,basic_blocks,edges,global_variables,milp_variables,milp_constraints,optimal_solution,regions,region_boundaries_inserted,distributed_checkpoints_inserted,solve_time_ms,total_execution_time_ms,__region_prologue,__region_epilogue,__checkpoint_store_reg,__checkpoint_store_mem,__restore_reg,__restore_mem"
 echo "$HEADER" > "$OUTPUT_CSV"
 
-# Extract value after "label:" from output (macOS-compatible)
+# Extract first numeric/token value after "label:" from output.
+# Accepts multiple labels and returns the first match.
 extract_stat() {
-    local output="$1" label="$2"
-    echo "$output" | grep "$label:" | head -1 | sed "s/.*$label:[[:space:]]*//" | awk '{print $1}'
+    local output="$1"
+    shift
+
+    local label line value
+    for label in "$@"; do
+        line=$(echo "$output" | grep -F "$label:" | head -1 || true)
+        if [[ -n "$line" ]]; then
+            value="${line#*:}"
+            value=$(echo "$value" | awk '{print $1}')
+            if [[ -n "$value" ]]; then
+                echo "$value"
+                return 0
+            fi
+        fi
+    done
+    return 1
 }
 
 total=$((${#BENCHMARKS[@]} * ${#CAPACITOR_CONFIGS[@]}))
@@ -94,19 +109,22 @@ for bench_path in "${BENCHMARKS[@]}"; do
             continue
         fi
 
-        basic_blocks=$(extract_stat "$full_output" "Basic blocks")
-        edges=$(extract_stat "$full_output" "Edges")
+        basic_blocks=$(extract_stat "$full_output" "Basic blocks (concrete)" "Basic blocks")
+        edges=$(extract_stat "$full_output" "Edges (concrete)" "Edges")
         global_vars=$(extract_stat "$full_output" "Global variables")
         milp_vars=$(extract_stat "$full_output" "MILP variables")
         milp_constrs=$(extract_stat "$full_output" "MILP constraints")
-        if echo "$full_output" | grep "Optimal solution:" | head -1 | grep -q "yes"; then
+        optimal_raw=$(extract_stat "$full_output" "Optimal solution")
+        if [[ "$optimal_raw" == "yes" ]]; then
             optimal="yes"
         else
             optimal="no"
         fi
         regions=$(extract_stat "$full_output" "Regions")
         boundaries=$(extract_stat "$full_output" "Region boundaries inserted")
-        dist_ckpts=$(extract_stat "$full_output" "Distributed checkpoints inserted")
+        dist_ckpts=$(extract_stat "$full_output" \
+            "Distributed checkpoints inserted" \
+            "Boundary commits enabled")
         solve_time=$(extract_stat "$full_output" "Solve time (ms)")
         total_exec_time=$(extract_stat "$full_output" "Total execution time (ms)")
 
