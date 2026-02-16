@@ -67,6 +67,12 @@ struct EnergyPathResult {
     std::string error;
 };
 
+enum class VisitState {
+    Unvisited = 0,
+    Visiting,
+    Visited,
+};
+
 struct LoopChunkingStats {
     unsigned loopsSeen = 0;
     unsigned loopsEligible = 0;
@@ -207,7 +213,7 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
         return result;
     }
 
-    DenseMap<const BasicBlock *, unsigned> visitState;
+    DenseMap<const BasicBlock *, VisitState> visitState;
     DenseMap<const BasicBlock *, double> memo;
     bool cycleDetected = false;
 
@@ -217,16 +223,16 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
             return getEnergy(BB);
         }
 
-        unsigned &state = visitState[BB];
-        if (state == 1) {
+        VisitState &state = visitState[BB];
+        if (state == VisitState::Visiting) {
             cycleDetected = true;
             return -1.0;
         }
-        if (state == 2) {
+        if (state == VisitState::Visited) {
             return memo[BB];
         }
 
-        state = 1;
+        state = VisitState::Visiting;
         double bestSucc = -1.0;
         for (const BasicBlock *Succ : successors(BB)) {
             if (!L->contains(Succ)) {
@@ -243,7 +249,7 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
                 bestSucc = succEnergy;
             }
         }
-        state = 2;
+        state = VisitState::Visited;
 
         if (bestSucc < 0.0) {
             memo[BB] = -1.0;

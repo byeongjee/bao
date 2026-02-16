@@ -44,6 +44,12 @@ struct LoopAggregate {
     double qReboot = 1.0;
 };
 
+enum class VisitState {
+    Unvisited = 0,
+    Visiting,
+    Visited,
+};
+
 static bool containsInvoke(const Loop *L) {
     for (const BasicBlock *BB : L->blocks()) {
         for (const Instruction &I : *BB) {
@@ -98,7 +104,7 @@ static PathSummary computeWorstCasePathSummary(
         return result;
     }
 
-    DenseMap<const BasicBlock *, unsigned> visitState;
+    DenseMap<const BasicBlock *, VisitState> visitState;
     DenseMap<const BasicBlock *, double> memo;
     DenseMap<const BasicBlock *, const BasicBlock *> bestSucc;
     bool cycleDetected = false;
@@ -109,16 +115,16 @@ static PathSummary computeWorstCasePathSummary(
             return getEnergy(BB);
         }
 
-        unsigned &state = visitState[BB];
-        if (state == 1) {
+        VisitState &state = visitState[BB];
+        if (state == VisitState::Visiting) {
             cycleDetected = true;
             return -1.0;
         }
-        if (state == 2) {
+        if (state == VisitState::Visited) {
             return memo[BB];
         }
 
-        state = 1;
+        state = VisitState::Visiting;
         double bestSuccEnergy = -1.0;
         const BasicBlock *best = nullptr;
         for (const BasicBlock *Succ : successors(BB)) {
@@ -137,7 +143,7 @@ static PathSummary computeWorstCasePathSummary(
                 best = Succ;
             }
         }
-        state = 2;
+        state = VisitState::Visited;
 
         if (!best || bestSuccEnergy < 0.0) {
             memo[BB] = -1.0;
