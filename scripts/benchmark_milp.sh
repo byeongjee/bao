@@ -41,7 +41,7 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,basic_blocks,edges,global_variables,milp_variables,milp_constraints,optimal_solution,regions,region_boundaries_inserted,distributed_checkpoints_inserted,solve_time_ms,total_execution_time_ms,__region_prologue,__region_epilogue,__checkpoint_store_reg,__checkpoint_store_mem,__restore_reg,__restore_mem"
+HEADER="benchmark,capacitor,basic_blocks,edges,global_variables,milp_variables,milp_constraints,optimal_solution,regions,region_boundaries_inserted,distributed_checkpoints_inserted,milp_solve_time_ms,milp_total_execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 # Extract first numeric/token value after "label:" from output.

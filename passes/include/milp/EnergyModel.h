@@ -12,7 +12,7 @@
 namespace checkpoint {
 
 /// Energy parameters loaded from MILP config JSON.
-/// All fields are required - no silent defaults.
+/// Core energy fields are required; loop chunking toggle is optional.
 struct MILPEnergyParams {
     double capacity;               // E_buf: energy buffer capacity
     double E_pro;                  // Prologue energy at region boundary
@@ -24,6 +24,7 @@ struct MILPEnergyParams {
     double memRestoreEnergyPerByte; // Energy per byte for FRAM->VM copy
     unsigned vmCapacityBytes;      // VM (SRAM) capacity in bytes
     double qRebootProb;            // Probability of reboot at boundary
+    bool loopChunkingEnabled = false; // Enable loop chunking pass
 };
 
 /// Computes all energy parameters needed by the MILP (spec Sections 4 + 8).
@@ -78,7 +79,8 @@ private:
 };
 
 /// Parse MILP energy parameters from a JSON config file.
-/// All fields are required. Returns std::nullopt on error.
+/// Energy fields are required; loop_chunking_enabled is optional.
+/// Returns std::nullopt on error.
 std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configPath);
 
 } // namespace checkpoint
