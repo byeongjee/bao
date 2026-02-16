@@ -7,6 +7,7 @@
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils/LCSSA.h"
+#include "llvm/Transforms/Utils/LoopSimplify.h"
 
 using namespace llvm;
 
@@ -46,12 +47,14 @@ llvmGetPassPluginInfo() {
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                     if (Name == "checkpoint") {
+                        FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(checkpoint::LoopChunkingPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
                     }
                     if (Name == "milp") {
+                        FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(checkpoint::LoopChunkingPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
