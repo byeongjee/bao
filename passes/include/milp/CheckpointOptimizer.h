@@ -26,20 +26,20 @@ enum class SolverStatus {
 
 /// Solution from the MILP optimizer.
 struct MILPSolution {
-    /// Blocks where is_region_start = 1.
-    std::set<std::string> regionStarts;
+    /// Nodes where is_region_start = 1.
+    std::set<NodeId> regionStarts;
 
     /// place_in_vm[b,v] values.
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> placeInVm;
+    std::map<std::pair<NodeId, llvm::GlobalVariable *>, bool> placeInVm;
 
     /// need_restore[b,v] values (for v in LiveIn(b)).
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> needRestore;
+    std::map<std::pair<NodeId, llvm::GlobalVariable *>, bool> needRestore;
 
     /// commit[b,v] values (for b != b0 and v in LiveIn(b)).
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> commit;
+    std::map<std::pair<NodeId, llvm::GlobalVariable *>, bool> commit;
 
     /// energy_accumulated[b] values.
-    std::map<std::string, double> energyAccumulated;
+    std::map<NodeId, double> energyAccumulated;
 
     /// Objective function value.
     double objectiveValue = 0.0;
@@ -52,43 +52,25 @@ struct MILPSolution {
 };
 
 /// MILP optimizer for checkpoint placement using Gurobi.
-///
-/// Implements the deterministic MILP formulation with boundary commit
-/// decisions and per-block placement variables.
 class CheckpointOptimizer {
 public:
-    /// Construct optimizer from analysis results.
     CheckpointOptimizer(const MILPInput &input);
 
-    /// Build and solve the MILP model.
-    /// @return true if optimization succeeded, false otherwise.
     bool solve();
 
-    /// Allow accepting feasible (non-optimal) solutions.
-    /// When true, solutions from time/node/solution limits are accepted
-    /// if Gurobi found at least one feasible solution.
     void setAcceptFeasible(bool accept) { acceptFeasible_ = accept; }
 
-    /// Get the full MILP solution.
     const MILPSolution &getSolution() const { return solution_; }
 
-    /// Get blocks where region starts are placed (convenience, same as
-    /// solution.regionStarts).
-    std::set<std::string> getCheckpoints() const {
-        return solution_.regionStarts;
-    }
+    std::set<NodeId> getCheckpoints() const { return solution_.regionStarts; }
 
-    /// Get the objective value.
     double getObjectiveValue() const { return solution_.objectiveValue; }
 
-    /// Get number of MILP variables in the model.
     int getNumVars() const;
-
-    /// Get number of MILP constraints in the model.
     int getNumConstrs() const;
 
-    /// Check feasibility - returns blocks whose base energy exceeds capacity.
-    std::vector<std::string> getInfeasibleBlocks() const;
+    /// Check feasibility - returns nodes whose base energy exceeds capacity.
+    std::vector<NodeId> getInfeasibleBlocks() const;
 
 private:
     const ICFGView &cfg_;
@@ -102,16 +84,16 @@ private:
     bool solved_ = false;
     bool acceptFeasible_ = false;
 
-    using BlockGVKey = std::pair<std::string, llvm::GlobalVariable *>;
+    using BlockGVKey = std::pair<NodeId, llvm::GlobalVariable *>;
 
     // MILP variables
-    std::map<std::string, GRBVar> isRegionStart_; // x[b]
-    std::map<BlockGVKey, GRBVar> placeInVm_;      // p[b,v]
-    std::map<BlockGVKey, GRBVar> needRestore_;    // y[b,v]
-    std::map<BlockGVKey, GRBVar> pending_;        // pending[b,v]
-    std::map<BlockGVKey, GRBVar> vmPending_;      // vm_pending[b,v]
-    std::map<BlockGVKey, GRBVar> commit_;         // commit[b,v]
-    std::map<std::string, GRBVar> energyAccumulated_; // eaccum[b]
+    std::map<NodeId, GRBVar> isRegionStart_;         // x[b]
+    std::map<BlockGVKey, GRBVar> placeInVm_;         // p[b,v]
+    std::map<BlockGVKey, GRBVar> needRestore_;       // y[b,v]
+    std::map<BlockGVKey, GRBVar> pending_;           // pending[b,v]
+    std::map<BlockGVKey, GRBVar> vmPending_;         // vm_pending[b,v]
+    std::map<BlockGVKey, GRBVar> commit_;            // commit[b,v]
+    std::map<NodeId, GRBVar> energyAccumulated_;     // eaccum[b]
 
     void buildModel();
     void addVariables();
@@ -131,9 +113,9 @@ private:
     void addC10_BufferSafety();
 
     // Expression builders (linear in decision variables)
-    GRBLinExpr buildEBlk(const std::string &block);
-    GRBLinExpr buildEStart(const std::string &block);
-    GRBLinExpr buildEEnd(const std::string &block);
+    GRBLinExpr buildEBlk(NodeId block);
+    GRBLinExpr buildEStart(NodeId block);
+    GRBLinExpr buildEEnd(NodeId block);
 };
 
 } // namespace checkpoint

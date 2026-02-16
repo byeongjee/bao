@@ -1,8 +1,12 @@
 #include "milp/CheckpointInstrumenter.h"
-#include "common/BlockUtils.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include <set>
+#include <vector>
 
 namespace checkpoint {
 
@@ -27,10 +31,11 @@ void CheckpointInstrumenter::declareRuntimeFunctions() {
 unsigned CheckpointInstrumenter::instrumentFunction(
     llvm::Function &F,
     const MILPSolution &solution,
+    const ICFGView &cfg,
     const StateAnalysis &state) {
 
     unsigned inserted = 0;
-    inserted += insertRegionBoundaries(F, solution, state);
+    inserted += insertRegionBoundaries(F, solution, cfg, state);
     applyMemoryPlacement(state);
     return inserted;
 }
@@ -38,16 +43,31 @@ unsigned CheckpointInstrumenter::instrumentFunction(
 unsigned CheckpointInstrumenter::insertRegionBoundaries(
     llvm::Function &F,
     const MILPSolution &solution,
+    const ICFGView &cfg,
     const StateAnalysis &state) {
 
     unsigned inserted = 0;
-    const std::string &entryName = getBlockName(F.getEntryBlock(), F);
+    NodeId entryNode = cfg.getEntryBlock();
 
-    for (llvm::BasicBlock &BB : F) {
-        std::string blockName = getBlockName(BB, F);
-        if (!solution.regionStarts.count(blockName)) {
+    llvm::DenseMap<llvm::BasicBlock *, std::vector<NodeId>> nodesByBlock;
+    for (NodeId node : solution.regionStarts) {
+        llvm::BasicBlock *BB = cfg.getNodeMap().getConcreteBlock(node);
+        if (!BB || BB->getParent() != &F) {
+            llvm::errs() << "CheckpointInstrumenter: unresolved region-start node "
+                         << cfg.getNodeName(node) << "\n";
             continue;
         }
+        nodesByBlock[BB].push_back(node);
+    }
+
+    for (llvm::BasicBlock &BB : F) {
+        auto itNodeVec = nodesByBlock.find(&BB);
+        if (itNodeVec == nodesByBlock.end()) {
+            continue;
+        }
+
+        const std::vector<NodeId> &nodes = itNodeVec->second;
+        std::set<NodeId> nodeSet(nodes.begin(), nodes.end());
 
         llvm::BasicBlock::iterator insertIt = BB.getFirstNonPHIIt();
         if (insertIt == BB.end()) {
@@ -56,18 +76,25 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
 
         llvm::IRBuilder<> builder(&BB, insertIt);
 
+        bool isEntryNode = nodeSet.count(entryNode) > 0;
+
         // For b != b0, emit boundary-end code first.
-        if (blockName != entryName) {
+        if (!isEntryNode) {
             builder.CreateCall(epilogueFn_);
             inserted++;
 
-            for (llvm::GlobalVariable *GV : state.getVMObjLiveIn(blockName)) {
-                auto key = std::make_pair(blockName, GV);
-                auto it = solution.commit.find(key);
-                if (it == solution.commit.end() || !it->second) {
+            std::set<llvm::GlobalVariable *> commitGVs;
+            for (const auto &[key, enabled] : solution.commit) {
+                if (!enabled) {
                     continue;
                 }
+                if (!nodeSet.count(key.first)) {
+                    continue;
+                }
+                commitGVs.insert(key.second);
+            }
 
+            for (llvm::GlobalVariable *GV : commitGVs) {
                 int elemId = state.getVMObjStateElemId(GV);
                 if (elemId < 0) {
                     continue;
@@ -85,13 +112,18 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         builder.CreateCall(prologueFn_);
         inserted++;
 
-        for (llvm::GlobalVariable *GV : state.getVMObjLiveIn(blockName)) {
-            auto key = std::make_pair(blockName, GV);
-            auto it = solution.needRestore.find(key);
-            if (it == solution.needRestore.end() || !it->second) {
+        std::set<llvm::GlobalVariable *> restoreGVs;
+        for (const auto &[key, enabled] : solution.needRestore) {
+            if (!enabled) {
                 continue;
             }
+            if (!nodeSet.count(key.first)) {
+                continue;
+            }
+            restoreGVs.insert(key.second);
+        }
 
+        for (llvm::GlobalVariable *GV : restoreGVs) {
             int elemId = state.getVMObjStateElemId(GV);
             if (elemId < 0) {
                 continue;
@@ -109,7 +141,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
 }
 
 void CheckpointInstrumenter::applyMemoryPlacement(const StateAnalysis &state) {
-    // Candidate globals are placed in a dedicated section for runtime handling.
     for (llvm::GlobalVariable *GV : state.getVMObjs()) {
         GV->setSection(".candidate");
     }

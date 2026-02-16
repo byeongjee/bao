@@ -1,9 +1,10 @@
 #include "milp/MILPCheckpointPass.h"
+
+#include "milp/AbstractCFG.h"
 #include "milp/CheckpointContext.h"
 #include "milp/CheckpointInstrumenter.h"
 #include "milp/CheckpointOptimizer.h"
 #include "milp/EnergyModel.h"
-#include "milp/AbstractCFG.h"
 #include "milp/StateAnalysis.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -14,7 +15,6 @@
 #include "llvm/Support/Format.h"
 
 #include <chrono>
-#include <map>
 
 using namespace llvm;
 
@@ -23,71 +23,10 @@ extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<std::string> MILPConfigOpt;
 extern cl::opt<bool> AcceptFeasibleOpt;
 
-namespace {
-
-static std::string mapNodeName(
-    const std::string &name,
-    const std::map<std::string, std::string> &abstractToConcreteRepresentative) {
-    auto it = abstractToConcreteRepresentative.find(name);
-    if (it != abstractToConcreteRepresentative.end()) {
-        return it->second;
-    }
-    return name;
-}
-
-static checkpoint::MILPSolution mapSolutionToConcrete(
-    const checkpoint::MILPSolution &abstractSolution,
-    const std::map<std::string, std::string> &abstractToConcreteRepresentative) {
-    checkpoint::MILPSolution concrete;
-    concrete.objectiveValue = abstractSolution.objectiveValue;
-    concrete.solverStatus = abstractSolution.solverStatus;
-    concrete.mipGap = abstractSolution.mipGap;
-
-    for (const std::string &block : abstractSolution.regionStarts) {
-        concrete.regionStarts.insert(
-            mapNodeName(block, abstractToConcreteRepresentative));
-    }
-
-    for (const auto &[key, enabled] : abstractSolution.placeInVm) {
-        std::string block =
-            mapNodeName(key.first, abstractToConcreteRepresentative);
-        auto concreteKey = std::make_pair(block, key.second);
-        concrete.placeInVm[concreteKey] = concrete.placeInVm[concreteKey] || enabled;
-    }
-
-    for (const auto &[key, enabled] : abstractSolution.needRestore) {
-        std::string block =
-            mapNodeName(key.first, abstractToConcreteRepresentative);
-        auto concreteKey = std::make_pair(block, key.second);
-        concrete.needRestore[concreteKey] =
-            concrete.needRestore[concreteKey] || enabled;
-    }
-
-    for (const auto &[key, enabled] : abstractSolution.commit) {
-        std::string block =
-            mapNodeName(key.first, abstractToConcreteRepresentative);
-        auto concreteKey = std::make_pair(block, key.second);
-        concrete.commit[concreteKey] = concrete.commit[concreteKey] || enabled;
-    }
-
-    for (const auto &[block, value] : abstractSolution.energyAccumulated) {
-        std::string concreteBlock =
-            mapNodeName(block, abstractToConcreteRepresentative);
-        auto it = concrete.energyAccumulated.find(concreteBlock);
-        if (it == concrete.energyAccumulated.end() || value > it->second) {
-            concrete.energyAccumulated[concreteBlock] = value;
-        }
-    }
-
-    return concrete;
-}
-
-} // namespace
-
 namespace checkpoint {
 
 PreservedAnalyses MILPCheckpointPass::run(Function &F,
-                                       FunctionAnalysisManager &AM) {
+                                          FunctionAnalysisManager &AM) {
     const auto totalStart = std::chrono::steady_clock::now();
 
     // Step 1: Obtain LLVM analyses
@@ -109,8 +48,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     auto &ctx = *ctxResult.context;
 
     // Step 3: Run StateAnalysis (Pass B)
-    ctx.stateAnalysis =
-        std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
+    ctx.stateAnalysis = std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
     if (ctx.stateAnalysis->hasAnalysisErrors()) {
         ctx.stateAnalysis->printAnalysisErrors(errs());
         errs() << "Skipping MILP instrumentation for function " << F.getName()
@@ -130,8 +68,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         *ctx.cfg, *ctx.stateAnalysis, BFI, F, ctx.milpParams);
 
     // Step 5: Build abstract MILP model (loop summaries) and check feasibility.
-    AbstractCFGBuildResult abstractCFG = buildAbstractCFG(
-        F, LI, *ctx.cfg, *ctx.stateAnalysis, *ctx.energyModel);
+    AbstractCFGBuildResult abstractCFG =
+        buildAbstractCFG(F, LI, *ctx.cfg, *ctx.stateAnalysis, *ctx.energyModel);
 
     MILPInput milpInput{*abstractCFG.model, *abstractCFG.model, *abstractCFG.model};
     CheckpointOptimizer optimizer(milpInput);
@@ -140,8 +78,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
         errs() << "Error: The following blocks exceed energy capacity:\n";
-        for (const auto &block : infeasible) {
-            errs() << "  " << block << " (cost: "
+        for (NodeId block : infeasible) {
+            errs() << "  " << abstractCFG.model->getNodeName(block) << " (cost: "
                    << abstractCFG.model->getBlockEnergyCost(block)
                    << ", capacity: " << ctx.milpParams.capacity << ")\n";
         }
@@ -155,11 +93,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         return PreservedAnalyses::all();
     }
     auto solveEnd = std::chrono::steady_clock::now();
-    double solveTimeMs = std::chrono::duration<double, std::milli>(solveEnd - solveStart).count();
+    double solveTimeMs =
+        std::chrono::duration<double, std::milli>(solveEnd - solveStart).count();
 
-    const auto &abstractSolution = optimizer.getSolution();
-    MILPSolution solution = mapSolutionToConcrete(
-        abstractSolution, abstractCFG.abstractToConcreteRepresentative);
+    const auto &solution = optimizer.getSolution();
 
     if (solution.regionStarts.empty()) {
         errs() << "No region boundaries needed for function " << F.getName()
@@ -169,8 +106,9 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
 
     // Step 7: Instrument IR (Pass F)
     CheckpointInstrumenter instrumenter(*F.getParent());
-    unsigned inserted = instrumenter.instrumentFunction(
-        F, solution, *ctx.stateAnalysis);
+    unsigned inserted =
+        instrumenter.instrumentFunction(F, solution, *abstractCFG.model,
+                                        *ctx.stateAnalysis);
 
     unsigned commitCount = 0;
     for (const auto &[key, enabled] : solution.commit) {
@@ -187,34 +125,45 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
 
     const auto totalEnd = std::chrono::steady_clock::now();
     double totalExecutionTimeMs =
-        std::chrono::duration<double, std::milli>(totalEnd - totalStart)
-            .count();
+        std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
     // Statistics summary
     errs() << "=== MILP Checkpoint Insertion Statistics ===\n";
-    errs() << "  Basic blocks (concrete):         " << ctx.cfg->getBlocks().size() << "\n";
-    errs() << "  Edges (concrete):                " << ctx.cfg->getEdges().size() << "\n";
-    errs() << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes << "\n";
-    errs() << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges << "\n";
-    errs() << "  Loops seen:                      " << abstractCFG.stats.loopsSeen << "\n";
-    errs() << "  Loops eligible:                  " << abstractCFG.stats.loopsEligible << "\n";
-    errs() << "  Loops summarized:                " << abstractCFG.stats.loopsSummarized << "\n";
-    errs() << "  Global variables:                " << ctx.stateAnalysis->getVMObjs().size() << "\n";
+    errs() << "  Basic blocks (concrete):         " << ctx.cfg->getBlocks().size()
+           << "\n";
+    errs() << "  Edges (concrete):                " << ctx.cfg->getEdges().size()
+           << "\n";
+    errs() << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes
+           << "\n";
+    errs() << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges
+           << "\n";
+    errs() << "  Loops seen:                      " << abstractCFG.stats.loopsSeen
+           << "\n";
+    errs() << "  Loops eligible:                  " << abstractCFG.stats.loopsEligible
+           << "\n";
+    errs() << "  Loops summarized:                "
+           << abstractCFG.stats.loopsSummarized << "\n";
+    errs() << "  Global variables:                "
+           << ctx.stateAnalysis->getVMObjs().size() << "\n";
     errs() << "  MILP variables:                  " << optimizer.getNumVars() << "\n";
-    errs() << "  MILP constraints:                " << optimizer.getNumConstrs() << "\n";
-    if (abstractSolution.solverStatus == SolverStatus::Optimal) {
+    errs() << "  MILP constraints:                " << optimizer.getNumConstrs()
+           << "\n";
+    if (solution.solverStatus == SolverStatus::Optimal) {
         errs() << "  Optimal solution:                yes\n";
     } else {
-        errs() << "  Optimal solution:                no (MIP gap: " << abstractSolution.mipGap << ")\n";
+        errs() << "  Optimal solution:                no (MIP gap: "
+               << solution.mipGap << ")\n";
     }
-    errs() << "  Regions:                         " << solution.regionStarts.size() << "\n";
+    errs() << "  Regions:                         " << solution.regionStarts.size()
+           << "\n";
     errs() << "  Region boundaries inserted:      "
            << (solution.regionStarts.empty() ? 0 : solution.regionStarts.size() - 1)
            << "\n";
     errs() << "  Boundary commits enabled:        " << commitCount << "\n";
     errs() << "  Boundary restores enabled:       " << restoreCount << "\n";
     errs() << "  Runtime calls inserted:          " << inserted << "\n";
-    errs() << "  Solve time (ms):                 " << llvm::format("%.3f", solveTimeMs) << "\n";
+    errs() << "  Solve time (ms):                 "
+           << llvm::format("%.3f", solveTimeMs) << "\n";
     errs() << "  Total execution time (ms):       "
            << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
     if (!abstractCFG.stats.skippedReasons.empty()) {

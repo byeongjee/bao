@@ -180,8 +180,7 @@ static PathSummary computeWorstCasePathSummary(
         cur = it->second;
     }
 
-    if (pathBlocks.empty() ||
-        !pathBlocks.count(getBlockName(*Latch, F))) {
+    if (pathBlocks.empty() || !pathBlocks.count(getBlockName(*Latch, F))) {
         result.error = "path-reconstruction-failed";
         return result;
     }
@@ -192,7 +191,8 @@ static PathSummary computeWorstCasePathSummary(
     return result;
 }
 
-static bool overlapsSelected(Loop *L, const std::set<std::string> &selectedBlocks,
+static bool overlapsSelected(Loop *L,
+                             const std::set<std::string> &selectedBlocks,
                              const Function &F) {
     for (const BasicBlock *BB : L->blocks()) {
         if (selectedBlocks.count(getBlockName(*BB, F))) {
@@ -219,7 +219,7 @@ static std::string makeUniqueSummaryNodeName(const std::string &headerName,
 
 } // namespace
 
-double AbstractCFG::getBlockEnergyCost(const std::string &block) const {
+double AbstractCFG::getBlockEnergyCost(NodeId block) const {
     auto it = blockEnergyCost_.find(block);
     if (it != blockEnergyCost_.end()) {
         return it->second;
@@ -227,8 +227,17 @@ double AbstractCFG::getBlockEnergyCost(const std::string &block) const {
     return 0.0;
 }
 
+const std::string &AbstractCFG::getNodeName(NodeId node) const {
+    static const std::string kUnknown = "<unknown-node>";
+    auto it = nodeNames_.find(node);
+    if (it == nodeNames_.end()) {
+        return kUnknown;
+    }
+    return it->second;
+}
+
 const std::set<llvm::GlobalVariable *> &
-AbstractCFG::getVMObjLiveIn(const std::string &block) const {
+AbstractCFG::getVMObjLiveIn(NodeId block) const {
     auto it = vmObjLiveIn_.find(block);
     if (it != vmObjLiveIn_.end()) {
         return it->second;
@@ -237,8 +246,7 @@ AbstractCFG::getVMObjLiveIn(const std::string &block) const {
     return kEmpty;
 }
 
-bool AbstractCFG::getDefIndicator(const std::string &block,
-                                       llvm::GlobalVariable *gv) const {
+bool AbstractCFG::getDefIndicator(NodeId block, llvm::GlobalVariable *gv) const {
     auto it = defIndicator_.find(std::make_pair(block, gv));
     if (it != defIndicator_.end()) {
         return it->second;
@@ -254,7 +262,7 @@ int AbstractCFG::getVMObjSizeBytes(llvm::GlobalVariable *gv) const {
     return 0;
 }
 
-double AbstractCFG::getEBase(const std::string &block) const {
+double AbstractCFG::getEBase(NodeId block) const {
     auto it = blockEnergyCost_.find(block);
     if (it != blockEnergyCost_.end()) {
         return it->second;
@@ -262,8 +270,7 @@ double AbstractCFG::getEBase(const std::string &block) const {
     return 0.0;
 }
 
-double AbstractCFG::getENvm(const std::string &block,
-                                 llvm::GlobalVariable *gv) const {
+double AbstractCFG::getENvm(NodeId block, llvm::GlobalVariable *gv) const {
     auto it = eNvm_.find(std::make_pair(block, gv));
     if (it != eNvm_.end()) {
         return it->second;
@@ -287,7 +294,7 @@ double AbstractCFG::getERestore(llvm::GlobalVariable *gv) const {
     return 0.0;
 }
 
-double AbstractCFG::getFEntry(const std::string &block) const {
+double AbstractCFG::getFEntry(NodeId block) const {
     auto it = fEntry_.find(block);
     if (it != fEntry_.end()) {
         return it->second;
@@ -295,19 +302,20 @@ double AbstractCFG::getFEntry(const std::string &block) const {
     return 1.0;
 }
 
-double AbstractCFG::getQReboot(const std::string &block) const {
+double AbstractCFG::getQReboot(NodeId block) const {
     auto it = qReboot_.find(block);
     if (it != qReboot_.end()) {
         return it->second;
     }
+    (void)block;
     return params_.qRebootProb;
 }
 
 AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
-                                             llvm::LoopInfo &LI,
-                                             const CFGAnalysis &cfg,
-                                             const StateAnalysis &state,
-                                             const EnergyModel &energy) {
+                                        llvm::LoopInfo &LI,
+                                        const CFGAnalysis &cfg,
+                                        const StateAnalysis &state,
+                                        const EnergyModel &energy) {
     AbstractCFGBuildResult out;
     out.model = std::make_unique<AbstractCFG>();
     AbstractCFG &model = *out.model;
@@ -335,7 +343,8 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     std::set<std::string> summarizedConcreteBlocks;
     std::map<std::string, LoopAggregate> summariesByNode;
 
-    const double budget = model.params_.capacity - model.params_.E_pro - model.params_.E_epi;
+    const double budget =
+        model.params_.capacity - model.params_.E_pro - model.params_.E_epi;
 
     for (Loop *L : loops) {
         out.stats.loopsSeen++;
@@ -414,7 +423,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         }
 
         summariesByNode[nodeName] = agg;
-        out.abstractToConcreteRepresentative[nodeName] = headerName;
         out.stats.loopsSummarized++;
     }
 
@@ -429,78 +437,168 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         }
     }
 
-    std::set<std::string> seenNodes;
-    for (const std::string &block : cfg.getBlocks()) {
-        const std::string &node = concreteToAbstract[block];
-        if (seenNodes.insert(node).second) {
-            model.blocks_.push_back(node);
+    std::vector<std::string> abstractBlocks;
+    {
+        std::set<std::string> seenNodes;
+        for (const std::string &block : cfg.getBlocks()) {
+            const std::string &node = concreteToAbstract[block];
+            if (seenNodes.insert(node).second) {
+                abstractBlocks.push_back(node);
+            }
         }
     }
 
-    model.entryBlock_ = concreteToAbstract[cfg.getEntryBlock()];
+    std::string abstractEntry = concreteToAbstract[cfg.getEntryBlock()];
 
-    std::set<std::pair<std::string, std::string>> edgeSet;
-    for (const auto &[src, dst] : cfg.getEdges()) {
-        std::string aSrc = concreteToAbstract[src];
-        std::string aDst = concreteToAbstract[dst];
-        // Preserve true concrete self-edges when no abstraction occurred.
-        // Drop only edges that collapsed due to loop summarization.
-        bool isUncollapsedConcreteSelfEdge =
-            (src == dst) && (aSrc == src) && (aDst == dst);
-        if (aSrc == aDst && !isUncollapsedConcreteSelfEdge) {
-            continue;
-        }
-        if (edgeSet.insert(std::make_pair(aSrc, aDst)).second) {
-            model.edges_.emplace_back(aSrc, aDst);
-        }
-    }
-
-    std::set<std::string> exitSeen;
-    for (const std::string &exitBlock : cfg.getExitBlocks()) {
-        std::string node = concreteToAbstract[exitBlock];
-        if (exitSeen.insert(node).second) {
-            model.exitBlocks_.push_back(node);
+    std::vector<std::pair<std::string, std::string>> abstractEdges;
+    {
+        std::set<std::pair<std::string, std::string>> edgeSet;
+        for (const auto &[src, dst] : cfg.getEdges()) {
+            std::string aSrc = concreteToAbstract[src];
+            std::string aDst = concreteToAbstract[dst];
+            bool isUncollapsedConcreteSelfEdge =
+                (src == dst) && (aSrc == src) && (aDst == dst);
+            if (aSrc == aDst && !isUncollapsedConcreteSelfEdge) {
+                continue;
+            }
+            if (edgeSet.insert(std::make_pair(aSrc, aDst)).second) {
+                abstractEdges.emplace_back(aSrc, aDst);
+            }
         }
     }
 
-    for (const std::string &node : model.blocks_) {
+    std::vector<std::string> abstractExitBlocks;
+    {
+        std::set<std::string> exitSeen;
+        for (const std::string &exitBlock : cfg.getExitBlocks()) {
+            std::string node = concreteToAbstract[exitBlock];
+            if (exitSeen.insert(node).second) {
+                abstractExitBlocks.push_back(node);
+            }
+        }
+    }
+
+    std::map<std::string, double> blockEnergyByAbstract;
+    std::map<std::string, std::set<llvm::GlobalVariable *>> liveInByAbstract;
+    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> defByAbstract;
+    std::map<std::pair<std::string, llvm::GlobalVariable *>, double> eNvmByAbstract;
+    std::map<std::string, double> fEntryByAbstract;
+    std::map<std::string, double> qRebootByAbstract;
+
+    for (const std::string &node : abstractBlocks) {
         auto summaryIt = summariesByNode.find(node);
         if (summaryIt != summariesByNode.end()) {
             const LoopAggregate &agg = summaryIt->second;
-            model.blockEnergyCost_[node] = agg.pathEnergy;
-            model.fEntry_[node] = agg.fEntry;
-            model.qReboot_[node] = agg.qReboot;
-            model.vmObjLiveIn_[node] = agg.liveIn;
+            blockEnergyByAbstract[node] = agg.pathEnergy;
+            fEntryByAbstract[node] = agg.fEntry;
+            qRebootByAbstract[node] = agg.qReboot;
+            liveInByAbstract[node] = agg.liveIn;
             for (llvm::GlobalVariable *GV : model.vmObjs_) {
                 if (agg.defGlobals.count(GV)) {
-                    model.defIndicator_[std::make_pair(node, GV)] = true;
+                    defByAbstract[std::make_pair(node, GV)] = true;
                 }
                 auto eIt = agg.eNvmByGV.find(GV);
                 if (eIt != agg.eNvmByGV.end()) {
-                    model.eNvm_[std::make_pair(node, GV)] = eIt->second;
+                    eNvmByAbstract[std::make_pair(node, GV)] = eIt->second;
                 }
             }
             continue;
         }
 
-        model.blockEnergyCost_[node] = cfg.getBlockInfo(node).energyCost;
-        model.fEntry_[node] = energy.getFEntry(node);
-        model.qReboot_[node] = energy.getQReboot(node);
-        model.vmObjLiveIn_[node] = state.getVMObjLiveIn(node);
+        blockEnergyByAbstract[node] = cfg.getBlockInfo(node).energyCost;
+        fEntryByAbstract[node] = energy.getFEntry(node);
+        qRebootByAbstract[node] = energy.getQReboot(node);
+        liveInByAbstract[node] = state.getVMObjLiveIn(node);
         for (llvm::GlobalVariable *GV : model.vmObjs_) {
             if (state.getDefIndicator(node, GV)) {
-                model.defIndicator_[std::make_pair(node, GV)] = true;
+                defByAbstract[std::make_pair(node, GV)] = true;
             }
             double nvm = energy.getENvm(node, GV);
             if (nvm != 0.0) {
-                model.eNvm_[std::make_pair(node, GV)] = nvm;
+                eNvmByAbstract[std::make_pair(node, GV)] = nvm;
             }
         }
     }
 
-    for (const std::string &node : model.blocks_) {
-        if (!out.abstractToConcreteRepresentative.count(node)) {
-            out.abstractToConcreteRepresentative[node] = node;
+    std::map<std::string, NodeId> nodeIdByName;
+    NodeId nextNodeId = 0;
+    for (const std::string &nodeName : abstractBlocks) {
+        NodeId nodeId = nextNodeId++;
+        nodeIdByName[nodeName] = nodeId;
+
+        model.blocks_.push_back(nodeId);
+        model.nodeNames_[nodeId] = nodeName;
+
+        auto summaryIt = summariesByNode.find(nodeName);
+        if (summaryIt != summariesByNode.end()) {
+            llvm::BasicBlock *rep = state.getBlock(summaryIt->second.headerName);
+            model.nodeMap_.setSummaryRepresentative(nodeId, rep);
+        } else {
+            llvm::BasicBlock *bb = state.getBlock(nodeName);
+            model.nodeMap_.setConcreteNode(nodeId, bb);
+        }
+    }
+
+    auto entryIt = nodeIdByName.find(abstractEntry);
+    if (entryIt != nodeIdByName.end()) {
+        model.entryBlock_ = entryIt->second;
+    }
+
+    for (const auto &[srcName, dstName] : abstractEdges) {
+        auto srcIt = nodeIdByName.find(srcName);
+        auto dstIt = nodeIdByName.find(dstName);
+        if (srcIt == nodeIdByName.end() || dstIt == nodeIdByName.end()) {
+            continue;
+        }
+        model.edges_.emplace_back(srcIt->second, dstIt->second);
+    }
+
+    for (const std::string &exitName : abstractExitBlocks) {
+        auto it = nodeIdByName.find(exitName);
+        if (it != nodeIdByName.end()) {
+            model.exitBlocks_.push_back(it->second);
+        }
+    }
+
+    for (const auto &[name, val] : blockEnergyByAbstract) {
+        auto it = nodeIdByName.find(name);
+        if (it != nodeIdByName.end()) {
+            model.blockEnergyCost_[it->second] = val;
+        }
+    }
+
+    for (const auto &[name, val] : fEntryByAbstract) {
+        auto it = nodeIdByName.find(name);
+        if (it != nodeIdByName.end()) {
+            model.fEntry_[it->second] = val;
+        }
+    }
+
+    for (const auto &[name, val] : qRebootByAbstract) {
+        auto it = nodeIdByName.find(name);
+        if (it != nodeIdByName.end()) {
+            model.qReboot_[it->second] = val;
+        }
+    }
+
+    for (const auto &[name, gvs] : liveInByAbstract) {
+        auto it = nodeIdByName.find(name);
+        if (it != nodeIdByName.end()) {
+            model.vmObjLiveIn_[it->second] = gvs;
+        }
+    }
+
+    for (const auto &[key, val] : defByAbstract) {
+        auto it = nodeIdByName.find(key.first);
+        if (it != nodeIdByName.end()) {
+            model.defIndicator_[std::make_pair(it->second, key.second)] = val;
+        }
+    }
+
+    for (const auto &[key, val] : eNvmByAbstract) {
+        auto it = nodeIdByName.find(key.first);
+        if (it != nodeIdByName.end()) {
+            model.eNvm_[std::make_pair(it->second, key.second)] = val;
         }
     }
 
