@@ -1,6 +1,6 @@
 #include "common/EnergyValidatorPass.h"
 #include "milp/MILPCheckpointPass.h"
-#include "milp/LoopStripMiningPass.h"
+#include "milp/LoopChunkingPass.h"
 #include "rockclimb/RockClimbPass.h"
 
 #include "llvm/Passes/PassBuilder.h"
@@ -30,7 +30,7 @@ cl::opt<bool> AcceptFeasibleOpt(
 
 cl::opt<bool> LoopChunkingEnabledOpt(
     "loop-chunking-enabled",
-    cl::desc("Enable loop strip-mining before MILP passes"),
+    cl::desc("Enable loop chunking before MILP passes"),
     cl::init(false));
 
 // Plugin registration for new pass manager
@@ -45,12 +45,12 @@ llvmGetPassPluginInfo() {
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                     if (Name == "checkpoint") {
-                        FPM.addPass(checkpoint::LoopStripMiningPass());
+                        FPM.addPass(checkpoint::LoopChunkingPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
                     }
                     if (Name == "milp") {
-                        FPM.addPass(checkpoint::LoopStripMiningPass());
+                        FPM.addPass(checkpoint::LoopChunkingPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
                     }
