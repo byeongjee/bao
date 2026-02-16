@@ -95,14 +95,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
             }
 
             for (llvm::GlobalVariable *GV : commitGVs) {
-                int elemId = state.getVMObjStateElemId(GV);
-                if (elemId < 0) {
+                unsigned sizeBytes = state.getVMObjSizeBytes(GV);
+                if (sizeBytes == 0) {
                     continue;
                 }
-                const StateElement &elem =
-                    state.getStateElement(static_cast<unsigned>(elemId));
                 llvm::Value *size = llvm::ConstantInt::get(
-                    llvm::Type::getInt32Ty(M_.getContext()), elem.sizeBytes);
+                    llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
                 builder.CreateCall(storeMemFn_, {GV, GV, size});
                 inserted++;
             }
@@ -124,14 +122,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         }
 
         for (llvm::GlobalVariable *GV : restoreGVs) {
-            int elemId = state.getVMObjStateElemId(GV);
-            if (elemId < 0) {
+            unsigned sizeBytes = state.getVMObjSizeBytes(GV);
+            if (sizeBytes == 0) {
                 continue;
             }
-            const StateElement &elem =
-                state.getStateElement(static_cast<unsigned>(elemId));
             llvm::Value *size = llvm::ConstantInt::get(
-                llvm::Type::getInt32Ty(M_.getContext()), elem.sizeBytes);
+                llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
             builder.CreateCall(restoreMemFn_, {GV, GV, size});
             inserted++;
         }

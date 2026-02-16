@@ -102,16 +102,14 @@ void EnergyModel::computeNvmPenalties() {
 void EnergyModel::computeSaveRestoreCosts() {
     // E_sv[v], E_rst[v] are modeled for candidate globals only.
     for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-        int elemId = state_.getVMObjStateElemId(GV);
-        if (elemId < 0)
+        unsigned sizeBytes = state_.getVMObjSizeBytes(GV);
+        if (sizeBytes == 0)
             continue;
 
-        const StateElement &elem =
-            state_.getStateElement(static_cast<unsigned>(elemId));
         eSaveByGV_[GV] =
-            static_cast<double>(elem.sizeBytes) * params_.memStoreEnergyPerByte;
+            static_cast<double>(sizeBytes) * params_.memStoreEnergyPerByte;
         eRestoreByGV_[GV] =
-            static_cast<double>(elem.sizeBytes) * params_.memRestoreEnergyPerByte;
+            static_cast<double>(sizeBytes) * params_.memRestoreEnergyPerByte;
     }
 }
 

@@ -10,7 +10,6 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/IR/Dominators.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Format.h"
 
@@ -32,7 +31,6 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     // Step 1: Obtain LLVM analyses
     auto &LI = AM.getResult<LoopAnalysis>(F);
     auto &AA = AM.getResult<AAManager>(F);
-    auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
     auto &BFI = AM.getResult<BlockFrequencyAnalysis>(F);
 
     // Step 2: Create base checkpoint context (estimator + CFG)
@@ -48,7 +46,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     auto &ctx = *ctxResult.context;
 
     // Step 3: Run StateAnalysis (Pass B)
-    ctx.stateAnalysis = std::make_unique<StateAnalysis>(F, LI, AA, DT, *ctx.cfg);
+    ctx.stateAnalysis = std::make_unique<StateAnalysis>(F, AA, *ctx.cfg);
     if (ctx.stateAnalysis->hasAnalysisErrors()) {
         ctx.stateAnalysis->printAnalysisErrors(errs());
         errs() << "Skipping MILP instrumentation for function " << F.getName()

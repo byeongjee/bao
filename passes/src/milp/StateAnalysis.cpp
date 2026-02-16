@@ -58,24 +58,16 @@ static bool isWhitelistedHelperName(llvm::StringRef N) {
 } // namespace
 
 // Static empty containers for safe reference returns
-const std::vector<unsigned> StateAnalysis::emptyDefSiteVec_;
-const std::set<llvm::Value *> StateAnalysis::emptyRegSet_;
 const std::set<llvm::GlobalVariable *> StateAnalysis::emptyGVSet_;
-const std::set<unsigned> StateAnalysis::emptyIdSet_;
 
 StateAnalysis::StateAnalysis(llvm::Function &F,
-                             llvm::LoopInfo &LI,
                              llvm::AAResults &AA,
-                             llvm::DominatorTree &DT,
                              const CFGAnalysis &cfg)
-    : F_(F), LI_(LI), AA_(AA), DT_(DT), cfg_(cfg) {
+    : F_(F), AA_(AA), cfg_(cfg) {
     buildBlockMap();
     identifyVMObjs();
     computeAccessMaps();
-    computeDefSites();
-    computeRegLiveness();
     computeVMObjLiveness();
-    computeReachingDefs();
 }
 
 bool StateAnalysis::isCandidateGlobal(llvm::GlobalVariable *gv) const {
@@ -86,22 +78,6 @@ void StateAnalysis::printAnalysisErrors(llvm::raw_ostream &os) const {
     for (const auto &msg : analysisErrors_) {
         os << msg << "\n";
     }
-}
-
-const std::vector<unsigned> &
-StateAnalysis::getBlockDefSites(const std::string &block) const {
-    auto it = blockDefSites_.find(block);
-    if (it != blockDefSites_.end())
-        return it->second;
-    return emptyDefSiteVec_;
-}
-
-const std::set<llvm::Value *> &
-StateAnalysis::getRegLiveIn(const std::string &block) const {
-    auto it = regLiveIn_.find(block);
-    if (it != regLiveIn_.end())
-        return it->second;
-    return emptyRegSet_;
 }
 
 const std::set<llvm::GlobalVariable *> &
@@ -128,16 +104,6 @@ bool StateAnalysis::getDefIndicator(const std::string &block,
     return it->second.count(gv) > 0;
 }
 
-const std::set<unsigned> &
-StateAnalysis::getReachingDefs(const std::string &block,
-                               unsigned stateElemId) const {
-    auto key = std::make_pair(block, stateElemId);
-    auto it = reachingDefs_.find(key);
-    if (it != reachingDefs_.end())
-        return it->second;
-    return emptyIdSet_;
-}
-
 unsigned StateAnalysis::getLoadCount(const std::string &block,
                                      llvm::GlobalVariable *gv) const {
     auto key = std::make_pair(block, gv);
@@ -156,18 +122,12 @@ unsigned StateAnalysis::getStoreCount(const std::string &block,
     return 0;
 }
 
-int StateAnalysis::getRegStateElemId(llvm::Value *v) const {
-    auto it = regToStateElem_.find(v);
-    if (it != regToStateElem_.end())
-        return static_cast<int>(it->second);
-    return -1;
-}
-
-int StateAnalysis::getVMObjStateElemId(llvm::GlobalVariable *gv) const {
-    auto it = gvToStateElem_.find(gv);
-    if (it != gvToStateElem_.end())
-        return static_cast<int>(it->second);
-    return -1;
+unsigned StateAnalysis::getVMObjSizeBytes(llvm::GlobalVariable *gv) const {
+    auto it = vmObjSizeBytes_.find(gv);
+    if (it != vmObjSizeBytes_.end()) {
+        return it->second;
+    }
+    return 0;
 }
 
 llvm::BasicBlock *StateAnalysis::getBlock(const std::string &name) const {
@@ -244,12 +204,8 @@ void StateAnalysis::identifyVMObjs() {
 
         vmObjs_.push_back(&GV);
         vmObjSet_.insert(&GV);
-
-        unsigned elemId = stateElements_.size();
         unsigned sizeBytes = DL.getTypeAllocSize(GV.getValueType());
-        stateElements_.push_back(
-            StateElement{elemId, StateElement::VMObj, nullptr, &GV, sizeBytes});
-        gvToStateElem_[&GV] = elemId;
+        vmObjSizeBytes_[&GV] = sizeBytes;
     }
 }
 
@@ -412,18 +368,6 @@ void StateAnalysis::computeAccessMaps() {
     }
 }
 
-void StateAnalysis::computeDefSites() {
-    // v1 MILP model uses boundary commits, not distributed def-site stores.
-    defSites_.clear();
-    blockDefSites_.clear();
-    stateElemDefSites_.clear();
-}
-
-void StateAnalysis::computeRegLiveness() {
-    // v1 does not model SSA register state in MILP.
-    regLiveIn_.clear();
-}
-
 void StateAnalysis::computeVMObjLiveness() {
     if (vmObjs_.empty())
         return;
@@ -504,11 +448,6 @@ void StateAnalysis::computeVMObjLiveness() {
                 vmObjLiveIn_[blockName].insert(GV);
         }
     }
-}
-
-void StateAnalysis::computeReachingDefs() {
-    // v1 MILP model does not use reaching def-site sets.
-    reachingDefs_.clear();
 }
 
 } // namespace checkpoint

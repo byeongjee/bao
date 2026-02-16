@@ -323,11 +323,8 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     model.params_ = energy.getParams();
     model.vmObjs_ = state.getVMObjs();
     for (llvm::GlobalVariable *GV : model.vmObjs_) {
-        int elemId = state.getVMObjStateElemId(GV);
-        if (elemId >= 0) {
-            model.vmObjSizeBytes_[GV] = static_cast<int>(
-                state.getStateElement(static_cast<unsigned>(elemId)).sizeBytes);
-        }
+        model.vmObjSizeBytes_[GV] =
+            static_cast<int>(state.getVMObjSizeBytes(GV));
         model.eSaveByGV_[GV] = energy.getESave(GV);
         model.eRestoreByGV_[GV] = energy.getERestore(GV);
     }
