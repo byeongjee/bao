@@ -3,6 +3,7 @@
 #include "milp/CheckpointContext.h"
 #include "milp/CheckpointOptimizer.h"
 #include "milp/EnergyModel.h"
+#include "milp/ModelViews.h"
 #include "milp/StateAnalysis.h"
 #include "common/LoopTripCount.h"
 #include "milp/MaxCheckpointCounter.h"
@@ -73,7 +74,9 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
         *ctx.cfg, *ctx.stateAnalysis, BFI, F, ctx.milpParams);
 
     // Step 5: Solve MILP
-    MILPInput milpInput{*ctx.cfg, *ctx.stateAnalysis, *ctx.energyModel};
+    ConcreteMILPViewAdapter modelView(*ctx.cfg, *ctx.stateAnalysis,
+                                      *ctx.energyModel);
+    MILPInput milpInput{modelView, modelView, modelView};
     CheckpointOptimizer optimizer(milpInput);
 
     auto infeasible = optimizer.getInfeasibleBlocks();
@@ -82,7 +85,7 @@ PreservedAnalyses CheckpointAnalysisPass::run(Function &F,
         errs() << "Error: The following blocks exceed energy capacity:\n";
         for (const auto &block : infeasible) {
             errs() << "  " << block << " (cost: "
-                   << ctx.cfg->getBlockInfo(block).energyCost
+                   << modelView.getBlockEnergyCost(block)
                    << ", capacity: " << ctx.milpParams.capacity << ")\n";
         }
         return PreservedAnalyses::all();

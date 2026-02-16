@@ -1,8 +1,6 @@
 #pragma once
 
-#include "common/CFGAnalysis.h"
-#include "milp/EnergyModel.h"
-#include "milp/StateAnalysis.h"
+#include "milp/ModelViews.h"
 
 #include "gurobi_c++.h"
 
@@ -15,9 +13,9 @@ namespace checkpoint {
 
 /// Input data for the MILP optimizer (aggregates all analysis results).
 struct MILPInput {
-    const CFGAnalysis &cfg;
-    const StateAnalysis &state;
-    const EnergyModel &energy;
+    const ICFGView &cfg;
+    const IStateView &state;
+    const IEnergyView &energy;
 };
 
 /// Solver optimality status.
@@ -93,9 +91,9 @@ public:
     std::vector<std::string> getInfeasibleBlocks() const;
 
 private:
-    const CFGAnalysis &cfg_;
-    const StateAnalysis &state_;
-    const EnergyModel &energy_;
+    const ICFGView &cfg_;
+    const IStateView &state_;
+    const IEnergyView &energy_;
     const MILPEnergyParams &params_;
 
     GRBEnv env_;

@@ -35,7 +35,7 @@ static std::string makeVarName(const char *prefix,
 }
 
 static std::map<std::string, std::vector<std::string>>
-buildPredecessorMap(const CFGAnalysis &cfg) {
+buildPredecessorMap(const ICFGView &cfg) {
     std::map<std::string, std::vector<std::string>> preds;
     for (const auto &block : cfg.getBlocks()) {
         preds[block] = {};
@@ -69,8 +69,7 @@ int CheckpointOptimizer::getNumConstrs() const {
 std::vector<std::string> CheckpointOptimizer::getInfeasibleBlocks() const {
     std::vector<std::string> infeasible;
     for (const auto &blockName : cfg_.getBlocks()) {
-        const BlockInfo &info = cfg_.getBlockInfo(blockName);
-        if (info.energyCost > params_.capacity) {
+        if (cfg_.getBlockEnergyCost(blockName) > params_.capacity) {
             infeasible.push_back(blockName);
         }
     }
@@ -245,13 +244,12 @@ void CheckpointOptimizer::addC3_VMCapacity() {
     for (const auto &block : cfg_.getBlocks()) {
         GRBLinExpr vmUsage = 0;
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-            int elemId = state_.getVMObjStateElemId(GV);
-            if (elemId < 0)
+            int sizeBytes = state_.getVMObjSizeBytes(GV);
+            if (sizeBytes <= 0) {
                 continue;
-            const StateElement &elem =
-                state_.getStateElement(static_cast<unsigned>(elemId));
-            vmUsage +=
-                static_cast<double>(elem.sizeBytes) * placeInVm_[std::make_pair(block, GV)];
+            }
+            vmUsage += static_cast<double>(sizeBytes) *
+                       placeInVm_[std::make_pair(block, GV)];
         }
         model_.addConstr(vmUsage <= static_cast<double>(params_.vmCapacityBytes),
                          "C3_vm_capacity_" + sanitizeToken(block));
