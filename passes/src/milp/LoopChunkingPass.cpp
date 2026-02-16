@@ -522,6 +522,9 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
     LoopChunkingStats stats;
     bool changed = false;
 
+    // Intentionally snapshot only the original innermost loop headers.
+    // Rewrites can create new loops (e.g., unroll remainders), but we do not
+    // re-queue those in the same pass run.
     std::vector<WeakTrackingVH> worklist = collectInnermostLoopHeaders(LI);
     stats.loopsSeen = static_cast<unsigned>(worklist.size());
 
