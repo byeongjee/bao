@@ -25,6 +25,8 @@ namespace checkpoint {
 
 PreservedAnalyses MILPCheckpointPass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
+    const auto totalStart = std::chrono::steady_clock::now();
+
     // Step 1: Obtain LLVM analyses
     auto &LI = AM.getResult<LoopAnalysis>(F);
     auto &AA = AM.getResult<AAManager>(F);
@@ -115,6 +117,11 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
             restoreCount++;
     }
 
+    const auto totalEnd = std::chrono::steady_clock::now();
+    double totalExecutionTimeMs =
+        std::chrono::duration<double, std::milli>(totalEnd - totalStart)
+            .count();
+
     // Statistics summary
     errs() << "=== MILP Checkpoint Insertion Statistics ===\n";
     errs() << "  Basic blocks:                    " << ctx.cfg->getBlocks().size() << "\n";
@@ -133,6 +140,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     errs() << "  Boundary restores enabled:       " << restoreCount << "\n";
     errs() << "  Runtime calls inserted:          " << inserted << "\n";
     errs() << "  Solve time (ms):                 " << llvm::format("%.3f", solveTimeMs) << "\n";
+    errs() << "  Total execution time (ms):       "
+           << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
 
     return PreservedAnalyses::none();
 }
