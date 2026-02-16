@@ -61,8 +61,6 @@ add_library(CheckpointPass MODULE
     src/milp/MILPCheckpointPass.cpp
     src/milp/CheckpointOptimizer.cpp
     src/milp/CheckpointInstrumenter.cpp
-    src/milp/CheckpointAnalysisPass.cpp
-    src/milp/MaxCheckpointCounter.cpp
     # RockClimb (PFI baseline)
     src/rockclimb/RockClimbPass.cpp
     src/rockclimb/RockClimbOptimizer.cpp

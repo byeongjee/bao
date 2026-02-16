@@ -27,18 +27,16 @@ checkpoint-insertion/
 │   │   ├── CFGAnalysis.h           # CFG construction with loop info
 │   │   ├── CheckpointOptimizer.h   # Gurobi MILP solver
 │   │   ├── CheckpointPass.h        # Main LLVM pass
-│   │   ├── CheckpointAnalysisPass.h # Analysis pass
 │   │   ├── LoopTripCount.h         # Loop bound extraction
-│   │   └── MaxCheckpointCounter.h  # Path checkpoint counting
+│   │   └── LoopStripMiningPass.h   # Strip-mining pass
 │   └── src/
 │       ├── IRBasedEstimator.cpp
 │       ├── EnergyEstimatorFactory.cpp
 │       ├── CFGAnalysis.cpp
 │       ├── CheckpointOptimizer.cpp
 │       ├── CheckpointPass.cpp
-│       ├── CheckpointAnalysisPass.cpp
 │       ├── LoopTripCount.cpp
-│       └── MaxCheckpointCounter.cpp
+│       └── LoopStripMiningPass.cpp
 ├── tests/                     # Test suite
 │   ├── run_tests.sh
 │   └── *.c                    # Test cases

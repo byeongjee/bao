@@ -1,7 +1,6 @@
 #include "common/EnergyValidatorPass.h"
 #include "milp/MILPCheckpointPass.h"
 #include "milp/LoopStripMiningPass.h"
-#include "milp/CheckpointAnalysisPass.h"
 #include "rockclimb/RockClimbPass.h"
 
 #include "llvm/Passes/PassBuilder.h"
@@ -11,7 +10,7 @@
 using namespace llvm;
 
 // Shared command line option for energy config path.
-// Referenced via extern from MILPCheckpointPass.cpp and CheckpointAnalysisPass.cpp.
+// Referenced via extern from MILPCheckpointPass.cpp.
 cl::opt<std::string> EnergyConfigOpt(
     "energy-config",
     cl::desc("Path to JSON energy configuration file (required for checkpoint passes)"),
@@ -53,11 +52,6 @@ llvmGetPassPluginInfo() {
                     if (Name == "milp") {
                         FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
-                        return true;
-                    }
-                    if (Name == "checkpoint-analysis") {
-                        FPM.addPass(checkpoint::LoopStripMiningPass());
-                        FPM.addPass(checkpoint::CheckpointAnalysisPass());
                         return true;
                     }
                     if (Name == "rockclimb") {
