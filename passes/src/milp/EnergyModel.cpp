@@ -55,7 +55,7 @@ double EnergyModel::getFEntry(const std::string &block) const {
     return 1.0;
 }
 
-double EnergyModel::getQReboot(const std::string &) const {
+double EnergyModel::getQReboot() const {
     return params_.qRebootProb;
 }
 

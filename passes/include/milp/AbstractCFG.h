@@ -68,7 +68,7 @@ public:
     double getESave(llvm::GlobalVariable *gv) const override;
     double getERestore(llvm::GlobalVariable *gv) const override;
     double getFEntry(NodeId block) const override;
-    double getQReboot(NodeId block) const override;
+    double getQReboot() const override;
 
 private:
     friend struct AbstractCFGBuildResult;
@@ -98,7 +98,6 @@ private:
     std::map<llvm::GlobalVariable *, double> eSaveByGV_;
     std::map<llvm::GlobalVariable *, double> eRestoreByGV_;
     std::map<NodeId, double> fEntry_;
-    std::map<NodeId, double> qReboot_;
 };
 
 struct AbstractCFGBuildResult {

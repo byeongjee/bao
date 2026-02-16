@@ -59,8 +59,8 @@ public:
     /// F_entry[b]: estimated entry frequency for block b.
     double getFEntry(const std::string &block) const;
 
-    /// q_b: reboot probability at block b (currently uniform = q_reboot_prob).
-    double getQReboot(const std::string &block) const;
+    /// q_reboot: uniform reboot probability (= q_reboot_prob parameter).
+    double getQReboot() const;
 
 private:
     const CFGAnalysis &cfg_;

@@ -51,7 +51,7 @@ public:
     virtual double getESave(llvm::GlobalVariable *gv) const = 0;
     virtual double getERestore(llvm::GlobalVariable *gv) const = 0;
     virtual double getFEntry(NodeId block) const = 0;
-    virtual double getQReboot(NodeId block) const = 0;
+    virtual double getQReboot() const = 0;
 };
 
 } // namespace checkpoint

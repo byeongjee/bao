@@ -41,7 +41,6 @@ struct LoopAggregate {
     std::set<llvm::GlobalVariable *> liveIn;
     std::set<llvm::GlobalVariable *> defGlobals;
     double fEntry = 1.0;
-    double qReboot = 1.0;
 };
 
 enum class VisitState {
@@ -302,12 +301,7 @@ double AbstractCFG::getFEntry(NodeId block) const {
     return 1.0;
 }
 
-double AbstractCFG::getQReboot(NodeId block) const {
-    auto it = qReboot_.find(block);
-    if (it != qReboot_.end()) {
-        return it->second;
-    }
-    (void)block;
+double AbstractCFG::getQReboot() const {
     return params_.qRebootProb;
 }
 
@@ -389,7 +383,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         agg.pathBlocks = path.blocksOnPath;
         agg.pathEnergy = path.energy;
         agg.fEntry = energy.getFEntry(headerName);
-        agg.qReboot = energy.getQReboot(headerName);
 
         for (const BasicBlock *BB : L->blocks()) {
             std::string blockName = getBlockName(*BB, F);
@@ -480,7 +473,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> defByAbstract;
     std::map<std::pair<std::string, llvm::GlobalVariable *>, double> eNvmByAbstract;
     std::map<std::string, double> fEntryByAbstract;
-    std::map<std::string, double> qRebootByAbstract;
 
     for (const std::string &node : abstractBlocks) {
         auto summaryIt = summariesByNode.find(node);
@@ -488,7 +480,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             const LoopAggregate &agg = summaryIt->second;
             blockEnergyByAbstract[node] = agg.pathEnergy;
             fEntryByAbstract[node] = agg.fEntry;
-            qRebootByAbstract[node] = agg.qReboot;
             liveInByAbstract[node] = agg.liveIn;
             for (llvm::GlobalVariable *GV : model.vmObjs_) {
                 if (agg.defGlobals.count(GV)) {
@@ -504,7 +495,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
 
         blockEnergyByAbstract[node] = cfg.getBlockInfo(node).energyCost;
         fEntryByAbstract[node] = energy.getFEntry(node);
-        qRebootByAbstract[node] = energy.getQReboot(node);
         liveInByAbstract[node] = state.getVMObjLiveIn(node);
         for (llvm::GlobalVariable *GV : model.vmObjs_) {
             if (state.getDefIndicator(node, GV)) {
@@ -568,13 +558,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         auto it = nodeIdByName.find(name);
         if (it != nodeIdByName.end()) {
             model.fEntry_[it->second] = val;
-        }
-    }
-
-    for (const auto &[name, val] : qRebootByAbstract) {
-        auto it = nodeIdByName.find(name);
-        if (it != nodeIdByName.end()) {
-            model.qReboot_[it->second] = val;
         }
     }
 

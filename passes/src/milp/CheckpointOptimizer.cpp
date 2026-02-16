@@ -439,7 +439,7 @@ GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
     GRBLinExpr expr = 0;
     expr += params_.E_pro * isRegionStart_[block];
 
-    double qb = energy_.getQReboot(block);
+    double qb = energy_.getQReboot();
     for (llvm::GlobalVariable *GV : state_.getVMObjLiveIn(block)) {
         auto it = needRestore_.find(std::make_pair(block, GV));
         if (it == needRestore_.end())
