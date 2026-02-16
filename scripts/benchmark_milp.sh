@@ -79,16 +79,23 @@ for bench_path in "${BENCHMARKS[@]}"; do
         row_name="${bench_name}-${cap_label}"
         echo "[$count/$total] Running $row_name ..."
 
+        run_cmd=(
+            "$SCRIPT_DIR/compile_and_flash.sh"
+            --mode milp
+            --runtime mock-counter
+            -e "$ENERGY_CONFIG"
+            -m "$cap_config"
+            --local
+            -I "$PROJECT_DIR/passes/runtime"
+            --verbose
+            "$bench_path"
+        )
+        printf -v run_cmd_display '%q ' "${run_cmd[@]}"
+        run_cmd_display="${run_cmd_display% }"
+        echo "  Command: $run_cmd_display"
+
         # Run compile_and_flash, capture all output regardless of exit code
-        full_output=$("$SCRIPT_DIR/compile_and_flash.sh" \
-            --mode milp \
-            --runtime mock-counter \
-            -e "$ENERGY_CONFIG" \
-            -m "$cap_config" \
-            --local \
-            -I "$PROJECT_DIR/passes/runtime" \
-            --verbose \
-            "$bench_path" 2>&1) || true
+        full_output=$("${run_cmd[@]}" 2>&1) || true
 
         # Check for infeasibility
         if echo "$full_output" | grep -q "blocks exceed energy capacity"; then
