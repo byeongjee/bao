@@ -26,3 +26,12 @@ tests/dwarf-validation/output/
 .claude/
 .omc/
 .envrc
+
+# Local untracked artifacts
+.DS_Store
+.omx/
+AGENTS.md
+benchmarks/milp_benchmark_summary.csv
+docs/
+scripts/.omx/
+typescript
