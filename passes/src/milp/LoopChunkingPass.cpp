@@ -20,6 +20,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
@@ -82,51 +83,24 @@ struct LoopChunkingStats {
 };
 
 static void collectInnermostLoopHeaders(const Loop *L,
-                                        const Function &F,
-                                        std::vector<std::string> &out) {
+                                        std::vector<WeakTrackingVH> &out) {
     for (const Loop *Sub : L->getSubLoops()) {
-        collectInnermostLoopHeaders(Sub, F, out);
+        collectInnermostLoopHeaders(Sub, out);
     }
     if (L->getSubLoops().empty()) {
-        out.push_back(checkpoint::getBlockName(*L->getHeader(), F));
+        if (BasicBlock *Header = L->getHeader()) {
+            out.emplace_back(Header);
+        }
     }
 }
 
-static std::vector<std::string> collectInnermostLoopHeaders(const LoopInfo &LI,
-                                                            const Function &F) {
-    std::vector<std::string> headers;
+static std::vector<WeakTrackingVH> collectInnermostLoopHeaders(
+    const LoopInfo &LI) {
+    std::vector<WeakTrackingVH> headers;
     for (const Loop *L : LI) {
-        collectInnermostLoopHeaders(L, F, headers);
+        collectInnermostLoopHeaders(L, headers);
     }
     return headers;
-}
-
-static Loop *findInnermostLoopByHeaderName(Loop *L,
-                                           const Function &F,
-                                           StringRef headerName) {
-    for (Loop *Sub : L->getSubLoops()) {
-        if (Loop *Found = findInnermostLoopByHeaderName(Sub, F, headerName)) {
-            return Found;
-        }
-    }
-    if (!L->getSubLoops().empty()) {
-        return nullptr;
-    }
-    if (checkpoint::getBlockName(*L->getHeader(), F) == headerName) {
-        return L;
-    }
-    return nullptr;
-}
-
-static Loop *findInnermostLoopByHeaderName(LoopInfo &LI,
-                                           const Function &F,
-                                           StringRef headerName) {
-    for (Loop *L : LI) {
-        if (Loop *Found = findInnermostLoopByHeaderName(L, F, headerName)) {
-            return Found;
-        }
-    }
-    return nullptr;
 }
 
 static bool containsInvoke(const Loop *L) {
@@ -548,13 +522,24 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
     LoopChunkingStats stats;
     bool changed = false;
 
-    std::vector<std::string> worklist = collectInnermostLoopHeaders(LI, F);
+    std::vector<WeakTrackingVH> worklist = collectInnermostLoopHeaders(LI);
     stats.loopsSeen = static_cast<unsigned>(worklist.size());
 
-    for (const std::string &headerName : worklist) {
-        Loop *L = findInnermostLoopByHeaderName(LI, F, headerName);
-        if (!L) {
-            stats.skippedReasons["loop-not-found-after-prior-rewrite"]++;
+    for (const WeakTrackingVH &headerHandle : worklist) {
+        BasicBlock *Header = dyn_cast_or_null<BasicBlock>(headerHandle);
+        if (!Header) {
+            stats.skippedReasons["loop-header-erased-after-prior-rewrite"]++;
+            continue;
+        }
+
+        std::string headerName = checkpoint::getBlockName(*Header, F);
+        Loop *L = LI.getLoopFor(Header);
+        if (!L || L->getHeader() != Header) {
+            stats.skippedReasons["loop-unresolvable-from-header"]++;
+            continue;
+        }
+        if (!L->getSubLoops().empty()) {
+            stats.skippedReasons["loop-no-longer-innermost-after-prior-rewrite"]++;
             continue;
         }
 
