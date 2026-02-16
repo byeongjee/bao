@@ -404,7 +404,7 @@ static bool rewriteLoopWithChunkSize(const LoopRewritePlan &plan,
     opts.Runtime = false;
     opts.AllowExpensiveTripCount = true;
     opts.UnrollRemainder = true;
-    opts.ForgetAllSCEV = false;
+    opts.ForgetAllSCEV = true;
     opts.Heart = nullptr;
     opts.SCEVExpansionBudget = 32;
     opts.RuntimeUnrollMultiExit = false;
