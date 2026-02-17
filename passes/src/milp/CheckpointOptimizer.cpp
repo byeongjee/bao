@@ -1,6 +1,7 @@
 #include "milp/CheckpointOptimizer.h"
 
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -297,9 +298,15 @@ void CheckpointOptimizer::addC3_VMCapacity() {
     if (state_.getVMObjs().empty() && state_.getIneligibleObjs().empty())
         return;
 
-    // Ineligible objects always occupy VM — compute their constant size.
+    // Memory-backed ineligible objects always occupy VM (e.g., globals/allocas).
+    // Cross-block SSA values are checkpoint-tracked state but do not consume
+    // persistent VM capacity.
     double ineligibleSize = 0;
     for (llvm::Value *V : state_.getIneligibleObjs()) {
+        if (!llvm::isa<llvm::GlobalVariable>(V) &&
+            !llvm::isa<llvm::AllocaInst>(V)) {
+            continue;
+        }
         int sizeBytes = state_.getVarSizeBytes(V);
         if (sizeBytes > 0)
             ineligibleSize += static_cast<double>(sizeBytes);

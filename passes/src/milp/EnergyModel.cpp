@@ -3,6 +3,7 @@
 #include "common/BlockUtils.h"
 
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
@@ -117,6 +118,15 @@ void EnergyModel::computeNvmPenalties() {
 void EnergyModel::computeSaveRestoreCosts() {
     // E_sv[v], E_rst[v] for all tracked variables (elig + inelig).
     auto computeForVar = [&](llvm::Value *V) {
+        if (auto *I = llvm::dyn_cast<llvm::Instruction>(V)) {
+            if (!llvm::isa<llvm::AllocaInst>(I)) {
+                // Cross-block SSA values represent register state.
+                eSaveByVar_[V] = params_.regStoreEnergy;
+                eRestoreByVar_[V] = params_.regRestoreEnergy;
+                return;
+            }
+        }
+
         unsigned sizeBytes = state_.getVarSizeBytes(V);
         if (sizeBytes == 0)
             return;
