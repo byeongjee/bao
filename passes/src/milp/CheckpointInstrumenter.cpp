@@ -170,6 +170,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
              std::vector<std::pair<llvm::BasicBlock *, llvm::Value *>>>
         ssaRestoreDefs;
     std::set<llvm::Instruction *> allCommitInsts;
+    // Deferred SSA commit stores: origVal → [(nvmBackup, insertBefore), ...]
+    std::map<llvm::Value *,
+             std::vector<std::pair<llvm::GlobalVariable *, llvm::Instruction *>>>
+        pendingSSACommits;
 
     // Phase 1: Insert commit stores, epilogues, prologues, and restore loads
     // at each boundary block. Accumulate SSA restore definitions for Phase 2.
@@ -201,6 +205,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         // For b != b0, emit boundary-end code first.
         // Order: commit stores -> epilogue -> prologue -> restores
         if (!isEntryNode) {
+            // Deferred SSA commits for this boundary block.
+            std::vector<std::pair<llvm::Value *, llvm::GlobalVariable *>>
+                ssaCommitsHere;
+
             // Commit dirty data while the region is still active.
             std::set<llvm::Value *> commitVars;
             for (const auto &[key, enabled] : solution.commit) {
@@ -245,19 +253,24 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                                        {backupIt->second, V, size});
                     commitInsts.insert(call);
                 } else {
-                    // SSA register -> NVM slot (typed store)
+                    // SSA register: defer — direct store may violate dominance.
+                    // Phase 2 will use SSAUpdater to find the reaching def.
                     auto backupIt = nvmBackupMap_.find(V);
                     assert(backupIt != nvmBackupMap_.end() &&
                            "SSA commit requires an NVM backup");
-                    auto *store = builder.CreateStore(V, backupIt->second);
-                    commitInsts.insert(store);
+                    ssaCommitsHere.emplace_back(V, backupIt->second);
                 }
                 inserted++;
             }
 
             // Finalize the old region after all commits are done.
-            builder.CreateCall(epilogueFn_);
+            auto *epilogueCall = builder.CreateCall(epilogueFn_);
             inserted++;
+
+            // Transfer deferred SSA commits with the epilogue as insertion point.
+            for (auto &[origVal, nvmBackup] : ssaCommitsHere) {
+                pendingSSACommits[origVal].emplace_back(nvmBackup, epilogueCall);
+            }
         }
 
         // Then emit boundary-start code.
@@ -331,7 +344,43 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         allCommitInsts.insert(commitInsts.begin(), commitInsts.end());
     }
 
-    // Phase 2: Use SSAUpdater for each ineligible SSA value to correctly
+    // Phase 2: Resolve deferred SSA commits via SSAUpdater.
+    // For each SSA value with pending commits, use SSAUpdater to find the
+    // reaching definition at each boundary block and create the store with
+    // correct dominance.
+    for (auto &[origVal, commits] : pendingSSACommits) {
+        llvm::SmallVector<llvm::PHINode *, 4> newPHIs;
+        llvm::SSAUpdater commitUpdater(&newPHIs);
+        commitUpdater.Initialize(origVal->getType(), origVal->getName());
+
+        // Seed only the original definition.  Ineligible SSA values are
+        // always Instructions (identified by iterating over block
+        // instructions in StateAnalysis).
+        auto *I = llvm::dyn_cast<llvm::Instruction>(origVal);
+        assert(I && "SSA commit value must be an Instruction");
+        commitUpdater.AddAvailableValue(I->getParent(), origVal);
+
+        for (auto &[nvmBackup, insertBefore] : commits) {
+            // GetValueInMiddleOfBlock is correct here: commit stores sit
+            // at the top of the boundary block (before the epilogue).
+            // When the defining block *is* the boundary, GVIMOB walks
+            // predecessors to find the incoming value — the value from
+            // the closing region, which is exactly what we want to commit.
+            llvm::Value *reaching =
+                commitUpdater.GetValueInMiddleOfBlock(insertBefore->getParent());
+            llvm::IRBuilder<> commitBuilder(
+                insertBefore->getParent(), insertBefore->getIterator());
+            auto *store = commitBuilder.CreateStore(reaching, nvmBackup);
+            allCommitInsts.insert(store);
+        }
+
+        // Mark new PHIs as commit-related so Phase 3 restore rewriting
+        // skips them.
+        for (auto *PHI : newPHIs)
+            allCommitInsts.insert(PHI);
+    }
+
+    // Phase 3: Use SSAUpdater for each ineligible SSA value to correctly
     // handle multi-definition reaching and insert PHI nodes at merge points.
     for (auto &[origVal, defs] : ssaRestoreDefs) {
         llvm::SSAUpdater updater;
