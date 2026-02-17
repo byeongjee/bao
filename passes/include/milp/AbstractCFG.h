@@ -6,6 +6,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Value.h"
 
 #include <map>
 #include <memory>
@@ -36,6 +37,7 @@ class AbstractCFG final : public ICFGView,
                           public IEnergyView {
 public:
     using BlockGVKey = std::pair<NodeId, llvm::GlobalVariable *>;
+    using BlockVarKey = std::pair<NodeId, llvm::Value *>;
 
     AbstractCFG() = default;
 
@@ -52,24 +54,32 @@ public:
     const std::string &getNodeName(NodeId node) const override;
     const NodeMap &getNodeMap() const override { return nodeMap_; }
 
-    // IStateView
+    // IStateView — eligible
     const std::vector<llvm::GlobalVariable *> &getVMObjs() const override {
         return vmObjs_;
     }
-    const std::vector<llvm::GlobalVariable *> &getIneligibleObjs() const override;
-    bool isIneligibleGlobal(llvm::GlobalVariable *gv) const override;
     const std::set<llvm::GlobalVariable *> &
-    getVMObjLiveIn(NodeId block) const override;
-    bool getDefIndicator(NodeId block,
-                         llvm::GlobalVariable *gv) const override;
-    int getVMObjSizeBytes(llvm::GlobalVariable *gv) const override;
+    getEligLiveIn(NodeId block) const override;
+    bool getEligDefIndicator(NodeId block,
+                             llvm::GlobalVariable *gv) const override;
+
+    // IStateView — ineligible
+    const std::vector<llvm::Value *> &getIneligibleObjs() const override;
+    bool isIneligible(llvm::Value *v) const override;
+    const std::set<llvm::Value *> &
+    getIneligLiveIn(NodeId block) const override;
+    bool getIneligDefIndicator(NodeId block,
+                               llvm::Value *v) const override;
+
+    // IStateView — shared
+    int getVarSizeBytes(llvm::Value *v) const override;
 
     // IEnergyView
     const MILPEnergyParams &getParams() const override { return params_; }
     double getEBase(NodeId block) const override;
     double getENvm(NodeId block, llvm::GlobalVariable *gv) const override;
-    double getESave(llvm::GlobalVariable *gv) const override;
-    double getERestore(llvm::GlobalVariable *gv) const override;
+    double getESave(llvm::Value *v) const override;
+    double getERestore(llvm::Value *v) const override;
     double getFEntry(NodeId block) const override;
     double getQReboot() const override;
 
@@ -92,17 +102,24 @@ private:
     std::map<NodeId, std::string> nodeNames_;
     std::map<NodeId, double> blockEnergyCost_;
 
+    // Eligible (candidate globals)
     std::vector<llvm::GlobalVariable *> vmObjs_;
-    std::vector<llvm::GlobalVariable *> ineligibleObjs_;
-    std::set<llvm::GlobalVariable *> ineligibleObjSet_;
-    std::map<NodeId, std::set<llvm::GlobalVariable *>> vmObjLiveIn_;
-    std::map<BlockGVKey, bool> defIndicator_;
-    std::map<llvm::GlobalVariable *, int> vmObjSizeBytes_;
+    std::map<NodeId, std::set<llvm::GlobalVariable *>> eligLiveIn_;
+    std::map<BlockGVKey, bool> eligDefIndicator_;
+
+    // Ineligible (non-candidate globals, allocas, SSA values)
+    std::vector<llvm::Value *> ineligibleObjs_;
+    std::set<llvm::Value *> ineligibleObjSet_;
+    std::map<NodeId, std::set<llvm::Value *>> ineligLiveIn_;
+    std::map<BlockVarKey, bool> ineligDefIndicator_;
+
+    // Shared size map
+    std::map<llvm::Value *, int> varSizeBytes_;
 
     MILPEnergyParams params_{};
     std::map<BlockGVKey, double> eNvm_;
-    std::map<llvm::GlobalVariable *, double> eSaveByGV_;
-    std::map<llvm::GlobalVariable *, double> eRestoreByGV_;
+    std::map<llvm::Value *, double> eSaveByVar_;
+    std::map<llvm::Value *, double> eRestoreByVar_;
     std::map<NodeId, double> fEntry_;
 };
 

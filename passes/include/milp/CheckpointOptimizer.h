@@ -29,14 +29,15 @@ struct MILPSolution {
     /// Nodes where is_region_start = 1.
     std::set<NodeId> regionStarts;
 
-    /// place_in_vm[b,v] values.
+    /// place_in_vm[b,v] values (eligible only).
     std::map<std::pair<NodeId, llvm::GlobalVariable *>, bool> placeInVm;
 
-    /// need_restore[b,v] values (for v in LiveIn(b)).
+    /// need_restore[b,v] values (eligible only, for v in EligLiveIn(b)).
     std::map<std::pair<NodeId, llvm::GlobalVariable *>, bool> needRestore;
 
     /// commit[b,v] values (for b != b0 and v in LiveIn(b)).
-    std::map<std::pair<NodeId, llvm::GlobalVariable *>, bool> commit;
+    /// Uses Value* to handle both eligible globals and ineligible objects.
+    std::map<std::pair<NodeId, llvm::Value *>, bool> commit;
 
     /// energy_accumulated[b] values.
     std::map<NodeId, double> energyAccumulated;
@@ -85,14 +86,15 @@ private:
     bool acceptFeasible_ = false;
 
     using BlockGVKey = std::pair<NodeId, llvm::GlobalVariable *>;
+    using BlockVarKey = std::pair<NodeId, llvm::Value *>;
 
     // MILP variables
     std::map<NodeId, GRBVar> isRegionStart_;         // x[b]
-    std::map<BlockGVKey, GRBVar> placeInVm_;         // p[b,v]
-    std::map<BlockGVKey, GRBVar> needRestore_;       // y[b,v]
-    std::map<BlockGVKey, GRBVar> pending_;           // pending[b,v]
-    std::map<BlockGVKey, GRBVar> vmPending_;         // vm_pending[b,v]
-    std::map<BlockGVKey, GRBVar> commit_;            // commit[b,v]
+    std::map<BlockGVKey, GRBVar> placeInVm_;         // p[b,v] — eligible only
+    std::map<BlockGVKey, GRBVar> needRestore_;       // y[b,v] — eligible only
+    std::map<BlockVarKey, GRBVar> pending_;           // pending[b,v] — all tracked
+    std::map<BlockGVKey, GRBVar> vmPending_;          // vm_pending[b,v] — eligible only
+    std::map<BlockVarKey, GRBVar> commit_;            // commit[b,v] — all tracked
     std::map<NodeId, GRBVar> energyAccumulated_;     // eaccum[b]
 
     void buildModel();

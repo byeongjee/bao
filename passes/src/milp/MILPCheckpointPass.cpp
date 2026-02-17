@@ -11,6 +11,7 @@
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Format.h"
 
@@ -124,6 +125,17 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
             restoreCount++;
     }
 
+    // Count ineligible objects by type.
+    unsigned ineligGlobalCount = 0, ineligAllocaCount = 0, ineligSSACount = 0;
+    for (llvm::Value *V : ctx.stateAnalysis->getIneligibleObjs()) {
+        if (llvm::isa<llvm::GlobalVariable>(V))
+            ineligGlobalCount++;
+        else if (llvm::isa<llvm::AllocaInst>(V))
+            ineligAllocaCount++;
+        else
+            ineligSSACount++;
+    }
+
     const auto totalEnd = std::chrono::steady_clock::now();
     double totalExecutionTimeMs =
         std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
@@ -144,8 +156,11 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
            << "\n";
     errs() << "  Loops summarized:                "
            << abstractCFG.stats.loopsSummarized << "\n";
-    errs() << "  Global variables:                "
+    errs() << "  Candidate globals (V_elig):      "
            << ctx.stateAnalysis->getVMObjs().size() << "\n";
+    errs() << "  Ineligible globals:              " << ineligGlobalCount << "\n";
+    errs() << "  Ineligible allocas:              " << ineligAllocaCount << "\n";
+    errs() << "  Ineligible SSA registers:        " << ineligSSACount << "\n";
     errs() << "  MILP variables:                  " << optimizer.getNumVars() << "\n";
     errs() << "  MILP constraints:                " << optimizer.getNumConstrs()
            << "\n";

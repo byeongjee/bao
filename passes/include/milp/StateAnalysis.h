@@ -6,6 +6,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Value.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <map>
@@ -21,23 +22,42 @@ namespace checkpoint {
 /// - Candidates are fixed-address globals annotated with "milp_candidate"
 /// - Intra-procedural analysis only
 /// - Strict unresolved-memory policy (diagnostic + function-level abort)
+///
+/// V_inelig includes:
+/// - Non-candidate globals accessed in the function
+/// - Static allocas (stack slots)
+/// - Cross-block live SSA instructions (virtual registers)
 class StateAnalysis {
 public:
     StateAnalysis(llvm::Function &F,
                   llvm::AAResults &AA,
                   const CFGAnalysis &cfg);
 
-    // -- Candidate globals --
+    // -- Candidate globals (V_elig) --
 
     /// All candidate globals considered by MILP.
     const std::vector<llvm::GlobalVariable *> &getVMObjs() const { return vmObjs_; }
     bool isCandidateGlobal(llvm::GlobalVariable *gv) const;
 
-    // -- Ineligible globals (V_inelig) --
+    // -- Eligible live-in/def --
 
-    /// Non-candidate globals accessed in the function (always in VM/SRAM).
-    const std::vector<llvm::GlobalVariable *> &getIneligibleObjs() const;
-    bool isIneligibleGlobal(llvm::GlobalVariable *gv) const;
+    /// Candidate globals live-in at block b.
+    const std::set<llvm::GlobalVariable *> &getEligLiveIn(const std::string &block) const;
+
+    /// D_{b,v}: 1 if eligible v may be defined in block b.
+    bool getEligDefIndicator(const std::string &block, llvm::GlobalVariable *gv) const;
+
+    // -- Ineligible objects (V_inelig) --
+
+    /// All ineligible objects: non-candidate globals, allocas, cross-block SSA values.
+    const std::vector<llvm::Value *> &getIneligibleObjs() const;
+    bool isIneligible(llvm::Value *v) const;
+
+    /// Ineligible objects live-in at block b.
+    const std::set<llvm::Value *> &getIneligLiveIn(const std::string &block) const;
+
+    /// D_{b,v}: 1 if ineligible v may be defined in block b.
+    bool getIneligDefIndicator(const std::string &block, llvm::Value *v) const;
 
     // -- Strict-analysis diagnostics --
 
@@ -46,17 +66,6 @@ public:
         return analysisErrors_;
     }
     void printAnalysisErrors(llvm::raw_ostream &os) const;
-
-    // -- Block-level global data --
-
-    /// Candidate globals live-in at block b.
-    const std::set<llvm::GlobalVariable *> &getVMObjLiveIn(const std::string &block) const;
-
-    /// Candidate globals that may be defined in block b.
-    const std::set<llvm::GlobalVariable *> &getDefGlobals(const std::string &block) const;
-
-    /// D_{b,v}: 1 if v may be defined in block b.
-    bool getDefIndicator(const std::string &block, llvm::GlobalVariable *gv) const;
 
     // -- Access maps (for energy model) --
 
@@ -70,8 +79,9 @@ public:
 
     // -- Mappings --
 
-    /// Get candidate global size in bytes (0 for non-candidates/unknown).
-    unsigned getVMObjSizeBytes(llvm::GlobalVariable *gv) const;
+    /// Get variable size in bytes (works for candidates, ineligible globals,
+    /// allocas, and SSA values). Returns 0 for unknown.
+    unsigned getVarSizeBytes(llvm::Value *v) const;
 
     /// Get the LLVM BasicBlock* for a block name.
     llvm::BasicBlock *getBlock(const std::string &name) const;
@@ -81,21 +91,27 @@ private:
     llvm::AAResults &AA_;
     const CFGAnalysis &cfg_;
 
-    // Candidate globals
+    // Candidate globals (V_elig)
     std::vector<llvm::GlobalVariable *> vmObjs_;
     std::set<llvm::GlobalVariable *> vmObjSet_;
     std::vector<std::string> analysisErrors_;
-    std::map<llvm::GlobalVariable *, unsigned> vmObjSizeBytes_;
 
-    // Ineligible globals (V_inelig)
-    std::vector<llvm::GlobalVariable *> ineligibleObjs_;
-    std::set<llvm::GlobalVariable *> ineligibleObjSet_;
+    // Ineligible objects (V_inelig): non-candidate globals, allocas, SSA values
+    std::vector<llvm::Value *> ineligibleObjs_;
+    std::set<llvm::Value *> ineligibleObjSet_;
 
-    // Liveness
-    std::map<std::string, std::set<llvm::GlobalVariable *>> vmObjLiveIn_;
-    std::map<std::string, std::set<llvm::GlobalVariable *>> defGlobals_;
+    // Unified size map for all tracked variables (elig + inelig)
+    std::map<llvm::Value *, unsigned> varSizeBytes_;
 
-    // Access maps: (block, globalVar) -> count
+    // Eligible liveness
+    std::map<std::string, std::set<llvm::GlobalVariable *>> eligLiveIn_;
+    std::map<std::string, std::set<llvm::GlobalVariable *>> eligDefGlobals_;
+
+    // Ineligible liveness
+    std::map<std::string, std::set<llvm::Value *>> ineligLiveIn_;
+    std::map<std::string, std::set<llvm::Value *>> ineligDefVars_;
+
+    // Access maps: (block, globalVar) -> count (for NVM penalty computation)
     std::map<std::pair<std::string, llvm::GlobalVariable *>, unsigned> loadCounts_;
     std::map<std::pair<std::string, llvm::GlobalVariable *>, unsigned> storeCounts_;
 
@@ -104,6 +120,7 @@ private:
 
     // Empty sets for returning references
     static const std::set<llvm::GlobalVariable *> emptyGVSet_;
+    static const std::set<llvm::Value *> emptyValueSet_;
 
     bool isMilpCandidateAnnotated(llvm::GlobalVariable *GV) const;
     bool isAllowedDirectCall(const llvm::CallBase &CB) const;
@@ -112,9 +129,12 @@ private:
 
     void identifyVMObjs();
     void identifyIneligibleObjs();
+    void identifyIneligibleSSAValues();
     void buildBlockMap();
     void computeAccessMaps();
-    void computeVMObjLiveness();
+    void computeEligLiveness();
+    void computeIneligGlobalAllocaLiveness();
+    void computeIneligSSALiveness();
 };
 
 } // namespace checkpoint

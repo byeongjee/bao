@@ -60,6 +60,8 @@ SCENARIOS=(
     "scenario_nvm_efficient:scenario_config.json:scenario_milp_config.json"
     "scenario_noncandidate_ckpt:scenario_config.json:scenario_milp_config.json"
     "scenario_nvm_efficient_vm:scenario_nvm_efficient_vm_config.json:scenario_milp_nvm_efficient_vm_config.json:scenario_nvm_efficient"
+    "scenario_alloca_ckpt:scenario_config.json:scenario_milp_config.json"
+    "scenario_ssa_ckpt:scenario_config.json:scenario_milp_config.json"
     # Slide examples (descriptive names mapped to existing source files)
     "slide_two_phase_checkpoint:slide_config.json:slide_milp_config.json:slide_basic"
     "slide_liveout_commit_cost:slide_config.json:slide_milp_config.json:slide_distributed"

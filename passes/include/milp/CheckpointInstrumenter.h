@@ -5,8 +5,10 @@
 #include "milp/StateAnalysis.h"
 
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Value.h"
 
 #include <map>
+#include <set>
 
 namespace checkpoint {
 
@@ -33,8 +35,8 @@ private:
     /// Maps candidate globals to their SRAM shadow globals.
     std::map<llvm::GlobalVariable *, llvm::GlobalVariable *> shadowMap_;
 
-    /// Maps ineligible globals to their NVM backup globals.
-    std::map<llvm::GlobalVariable *, llvm::GlobalVariable *> nvmBackupMap_;
+    /// Maps ineligible objects (globals, allocas, SSA values) to NVM backup globals.
+    std::map<llvm::Value *, llvm::GlobalVariable *> nvmBackupMap_;
 
     void declareRuntimeFunctions();
 
@@ -54,6 +56,12 @@ private:
                                     const IStateView &stateView,
                                     const StateAnalysis &state);
     void applyMemoryPlacement(const StateAnalysis &state);
+
+    /// Compute the set of blocks in the same region as `start`.
+    std::set<llvm::BasicBlock *> computeRegionBlocks(
+        llvm::BasicBlock *start,
+        const MILPSolution &solution,
+        const ICFGView &cfg) const;
 };
 
 } // namespace checkpoint

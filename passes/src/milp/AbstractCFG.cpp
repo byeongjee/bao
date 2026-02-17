@@ -40,8 +40,10 @@ struct LoopAggregate {
     std::set<std::string> pathBlocks;
     double pathEnergy = 0.0;
     std::map<llvm::GlobalVariable *, double> eNvmByGV;
-    std::set<llvm::GlobalVariable *> liveIn;
-    std::set<llvm::GlobalVariable *> defGlobals;
+    std::set<llvm::GlobalVariable *> eligLiveIn;
+    std::set<llvm::GlobalVariable *> eligDefGlobals;
+    std::set<llvm::Value *> ineligLiveIn;
+    std::set<llvm::Value *> ineligDefVars;
     double fEntry = 1.0;
 };
 
@@ -298,38 +300,58 @@ const std::string &AbstractCFG::getNodeName(NodeId node) const {
 }
 
 const std::set<llvm::GlobalVariable *> &
-AbstractCFG::getVMObjLiveIn(NodeId block) const {
-    auto it = vmObjLiveIn_.find(block);
-    if (it != vmObjLiveIn_.end()) {
+AbstractCFG::getEligLiveIn(NodeId block) const {
+    auto it = eligLiveIn_.find(block);
+    if (it != eligLiveIn_.end()) {
         return it->second;
     }
     static const std::set<llvm::GlobalVariable *> kEmpty;
     return kEmpty;
 }
 
-bool AbstractCFG::getDefIndicator(NodeId block, llvm::GlobalVariable *gv) const {
-    auto it = defIndicator_.find(std::make_pair(block, gv));
-    if (it != defIndicator_.end()) {
+bool AbstractCFG::getEligDefIndicator(NodeId block,
+                                      llvm::GlobalVariable *gv) const {
+    auto it = eligDefIndicator_.find(std::make_pair(block, gv));
+    if (it != eligDefIndicator_.end()) {
         return it->second;
     }
     return false;
 }
 
-int AbstractCFG::getVMObjSizeBytes(llvm::GlobalVariable *gv) const {
-    auto it = vmObjSizeBytes_.find(gv);
-    if (it != vmObjSizeBytes_.end()) {
-        return it->second;
-    }
-    return 0;
-}
-
-const std::vector<llvm::GlobalVariable *> &
+const std::vector<llvm::Value *> &
 AbstractCFG::getIneligibleObjs() const {
     return ineligibleObjs_;
 }
 
-bool AbstractCFG::isIneligibleGlobal(llvm::GlobalVariable *gv) const {
-    return ineligibleObjSet_.count(gv) > 0;
+bool AbstractCFG::isIneligible(llvm::Value *v) const {
+    return ineligibleObjSet_.count(v) > 0;
+}
+
+const std::set<llvm::Value *> &
+AbstractCFG::getIneligLiveIn(NodeId block) const {
+    auto it = ineligLiveIn_.find(block);
+    if (it != ineligLiveIn_.end()) {
+        return it->second;
+    }
+    static const std::set<llvm::Value *> kEmpty;
+    return kEmpty;
+}
+
+bool AbstractCFG::getIneligDefIndicator(NodeId block,
+                                        llvm::Value *v) const {
+    auto it = ineligDefIndicator_.find(std::make_pair(block, v));
+    if (it != ineligDefIndicator_.end()) {
+        return it->second;
+    }
+    return false;
+}
+
+int AbstractCFG::getVarSizeBytes(llvm::Value *v) const {
+    auto it = varSizeBytes_.find(v);
+    if (it != varSizeBytes_.end()) {
+        return it->second;
+    }
+    return 0;
 }
 
 double AbstractCFG::getEBase(NodeId block) const {
@@ -348,17 +370,17 @@ double AbstractCFG::getENvm(NodeId block, llvm::GlobalVariable *gv) const {
     return 0.0;
 }
 
-double AbstractCFG::getESave(llvm::GlobalVariable *gv) const {
-    auto it = eSaveByGV_.find(gv);
-    if (it != eSaveByGV_.end()) {
+double AbstractCFG::getESave(llvm::Value *v) const {
+    auto it = eSaveByVar_.find(v);
+    if (it != eSaveByVar_.end()) {
         return it->second;
     }
     return 0.0;
 }
 
-double AbstractCFG::getERestore(llvm::GlobalVariable *gv) const {
-    auto it = eRestoreByGV_.find(gv);
-    if (it != eRestoreByGV_.end()) {
+double AbstractCFG::getERestore(llvm::Value *v) const {
+    auto it = eRestoreByVar_.find(v);
+    if (it != eRestoreByVar_.end()) {
         return it->second;
     }
     return 0.0;
@@ -387,20 +409,24 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     AbstractCFG &model = *out.model;
 
     model.params_ = energy.getParams();
+
+    // Stage 1: Copy eligible globals and their sizes/costs.
     model.vmObjs_ = state.getVMObjs();
     for (llvm::GlobalVariable *GV : model.vmObjs_) {
-        model.vmObjSizeBytes_[GV] =
-            static_cast<int>(state.getVMObjSizeBytes(GV));
-        model.eSaveByGV_[GV] = energy.getESave(GV);
-        model.eRestoreByGV_[GV] = energy.getERestore(GV);
+        model.varSizeBytes_[GV] =
+            static_cast<int>(state.getVarSizeBytes(GV));
+        model.eSaveByVar_[GV] = energy.getESave(GV);
+        model.eRestoreByVar_[GV] = energy.getERestore(GV);
     }
+
+    // Stage 1b: Copy ineligible objects (Value*) and their sizes/costs.
     model.ineligibleObjs_ = state.getIneligibleObjs();
-    for (llvm::GlobalVariable *GV : model.ineligibleObjs_) {
-        model.ineligibleObjSet_.insert(GV);
-        model.vmObjSizeBytes_[GV] =
-            static_cast<int>(state.getVMObjSizeBytes(GV));
-        model.eSaveByGV_[GV] = energy.getESave(GV);
-        model.eRestoreByGV_[GV] = energy.getERestore(GV);
+    for (llvm::Value *V : model.ineligibleObjs_) {
+        model.ineligibleObjSet_.insert(V);
+        model.varSizeBytes_[V] =
+            static_cast<int>(state.getVarSizeBytes(V));
+        model.eSaveByVar_[V] = energy.getESave(V);
+        model.eRestoreByVar_[V] = energy.getERestore(V);
     }
 
     std::map<std::string, double> blockEnergyByName;
@@ -471,32 +497,52 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             summarizedConcreteBlocks.insert(blockName);
         }
 
-        auto aggregateGV = [&](llvm::GlobalVariable *GV) {
+        // Aggregate eligible globals across path blocks.
+        auto aggregateEligGV = [&](llvm::GlobalVariable *GV) {
             double nvmSum = 0.0;
             bool hasDef = false;
             bool hasLiveIn = false;
 
             for (const std::string &blockName : agg.pathBlocks) {
                 nvmSum += energy.getENvm(blockName, GV);
-                hasDef |= state.getDefIndicator(blockName, GV);
-                hasLiveIn |= state.getVMObjLiveIn(blockName).count(GV) > 0;
+                hasDef |= state.getEligDefIndicator(blockName, GV);
+                hasLiveIn |= state.getEligLiveIn(blockName).count(GV) > 0;
             }
 
             if (nvmSum != 0.0) {
                 agg.eNvmByGV[GV] = nvmSum;
             }
             if (hasDef) {
-                agg.defGlobals.insert(GV);
+                agg.eligDefGlobals.insert(GV);
             }
             if (hasLiveIn) {
-                agg.liveIn.insert(GV);
+                agg.eligLiveIn.insert(GV);
             }
         };
 
         for (llvm::GlobalVariable *GV : model.vmObjs_)
-            aggregateGV(GV);
-        for (llvm::GlobalVariable *GV : model.ineligibleObjs_)
-            aggregateGV(GV);
+            aggregateEligGV(GV);
+
+        // Aggregate ineligible objects across path blocks.
+        auto aggregateIneligVar = [&](llvm::Value *V) {
+            bool hasDef = false;
+            bool hasLiveIn = false;
+
+            for (const std::string &blockName : agg.pathBlocks) {
+                hasDef |= state.getIneligDefIndicator(blockName, V);
+                hasLiveIn |= state.getIneligLiveIn(blockName).count(V) > 0;
+            }
+
+            if (hasDef) {
+                agg.ineligDefVars.insert(V);
+            }
+            if (hasLiveIn) {
+                agg.ineligLiveIn.insert(V);
+            }
+        };
+
+        for (llvm::Value *V : model.ineligibleObjs_)
+            aggregateIneligVar(V);
 
         summariesByNode[nodeName] = agg;
         out.stats.loopsSummarized++;
@@ -554,9 +600,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         }
     }
 
+    // Populate per-abstract-node data.
     std::map<std::string, double> blockEnergyByAbstract;
-    std::map<std::string, std::set<llvm::GlobalVariable *>> liveInByAbstract;
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> defByAbstract;
+    std::map<std::string, std::set<llvm::GlobalVariable *>> eligLiveInByAbstract;
+    std::map<std::pair<std::string, llvm::GlobalVariable *>, bool> eligDefByAbstract;
+    std::map<std::string, std::set<llvm::Value *>> ineligLiveInByAbstract;
+    std::map<std::pair<std::string, llvm::Value *>, bool> ineligDefByAbstract;
     std::map<std::pair<std::string, llvm::GlobalVariable *>, double> eNvmByAbstract;
     std::map<std::string, double> fEntryByAbstract;
 
@@ -566,41 +615,51 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             const LoopAggregate &agg = summaryIt->second;
             blockEnergyByAbstract[node] = agg.pathEnergy;
             fEntryByAbstract[node] = agg.fEntry;
-            liveInByAbstract[node] = agg.liveIn;
-            auto populateSummaryGV = [&](llvm::GlobalVariable *GV) {
-                if (agg.defGlobals.count(GV)) {
-                    defByAbstract[std::make_pair(node, GV)] = true;
+            eligLiveInByAbstract[node] = agg.eligLiveIn;
+            ineligLiveInByAbstract[node] = agg.ineligLiveIn;
+
+            // Eligible summary data.
+            for (llvm::GlobalVariable *GV : model.vmObjs_) {
+                if (agg.eligDefGlobals.count(GV)) {
+                    eligDefByAbstract[std::make_pair(node, GV)] = true;
                 }
                 auto eIt = agg.eNvmByGV.find(GV);
                 if (eIt != agg.eNvmByGV.end()) {
                     eNvmByAbstract[std::make_pair(node, GV)] = eIt->second;
                 }
-            };
-            for (llvm::GlobalVariable *GV : model.vmObjs_)
-                populateSummaryGV(GV);
-            for (llvm::GlobalVariable *GV : model.ineligibleObjs_)
-                populateSummaryGV(GV);
+            }
+            // Ineligible summary data.
+            for (llvm::Value *V : model.ineligibleObjs_) {
+                if (agg.ineligDefVars.count(V)) {
+                    ineligDefByAbstract[std::make_pair(node, V)] = true;
+                }
+            }
             continue;
         }
 
+        // Concrete (non-summarized) node.
         blockEnergyByAbstract[node] = cfg.getBlockInfo(node).energyCost;
         fEntryByAbstract[node] = energy.getFEntry(node);
-        liveInByAbstract[node] = state.getVMObjLiveIn(node);
-        auto populateConcreteGV = [&](llvm::GlobalVariable *GV) {
-            if (state.getDefIndicator(node, GV)) {
-                defByAbstract[std::make_pair(node, GV)] = true;
+        eligLiveInByAbstract[node] = state.getEligLiveIn(node);
+        ineligLiveInByAbstract[node] = state.getIneligLiveIn(node);
+
+        for (llvm::GlobalVariable *GV : model.vmObjs_) {
+            if (state.getEligDefIndicator(node, GV)) {
+                eligDefByAbstract[std::make_pair(node, GV)] = true;
             }
             double nvm = energy.getENvm(node, GV);
             if (nvm != 0.0) {
                 eNvmByAbstract[std::make_pair(node, GV)] = nvm;
             }
-        };
-        for (llvm::GlobalVariable *GV : model.vmObjs_)
-            populateConcreteGV(GV);
-        for (llvm::GlobalVariable *GV : model.ineligibleObjs_)
-            populateConcreteGV(GV);
+        }
+        for (llvm::Value *V : model.ineligibleObjs_) {
+            if (state.getIneligDefIndicator(node, V)) {
+                ineligDefByAbstract[std::make_pair(node, V)] = true;
+            }
+        }
     }
 
+    // Assign NodeIds and register blocks.
     std::map<std::string, NodeId> nodeIdByName;
     NodeId nextNodeId = 0;
     for (const std::string &nodeName : abstractBlocks) {
@@ -669,17 +728,35 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         }
     }
 
-    for (const auto &[name, gvs] : liveInByAbstract) {
+    // Eligible live-in by NodeId.
+    for (const auto &[name, gvs] : eligLiveInByAbstract) {
         auto it = nodeIdByName.find(name);
         if (it != nodeIdByName.end()) {
-            model.vmObjLiveIn_[it->second] = gvs;
+            model.eligLiveIn_[it->second] = gvs;
         }
     }
 
-    for (const auto &[key, val] : defByAbstract) {
+    // Ineligible live-in by NodeId.
+    for (const auto &[name, vals] : ineligLiveInByAbstract) {
+        auto it = nodeIdByName.find(name);
+        if (it != nodeIdByName.end()) {
+            model.ineligLiveIn_[it->second] = vals;
+        }
+    }
+
+    // Eligible def indicators by NodeId.
+    for (const auto &[key, val] : eligDefByAbstract) {
         auto it = nodeIdByName.find(key.first);
         if (it != nodeIdByName.end()) {
-            model.defIndicator_[std::make_pair(it->second, key.second)] = val;
+            model.eligDefIndicator_[std::make_pair(it->second, key.second)] = val;
+        }
+    }
+
+    // Ineligible def indicators by NodeId.
+    for (const auto &[key, val] : ineligDefByAbstract) {
+        auto it = nodeIdByName.find(key.first);
+        if (it != nodeIdByName.end()) {
+            model.ineligDefIndicator_[std::make_pair(it->second, key.second)] = val;
         }
     }
 

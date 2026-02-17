@@ -6,6 +6,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <cassert>
+#include <queue>
 #include <set>
 #include <vector>
 
@@ -58,10 +59,9 @@ void CheckpointInstrumenter::createShadowGlobals(
     shadowMap_.clear();
 
     // Collect candidate GVs that have placeInVm=true for at least one node.
-    // Skip ineligibles — they don't have placeInVm variables.
     std::set<llvm::GlobalVariable *> vmPlacedGVs;
     for (const auto &[key, placed] : solution.placeInVm) {
-        if (placed && !state.isIneligibleGlobal(key.second)) {
+        if (placed && !state.isIneligible(key.second)) {
             vmPlacedGVs.insert(key.second);
         }
     }
@@ -85,17 +85,33 @@ void CheckpointInstrumenter::createNVMBackupGlobals(
 
     nvmBackupMap_.clear();
 
-    // Create NVM backup for every ineligible global accessed in the function.
-    // Ineligibles always reside in VM (SRAM); their backup lives in NVM (.nvm).
-    for (llvm::GlobalVariable *GV : state.getIneligibleObjs()) {
+    unsigned ssaCounter = 0;
+    for (llvm::Value *V : state.getIneligibleObjs()) {
+        llvm::Type *backupType = nullptr;
+        std::string backupName;
+
+        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+            backupType = GV->getValueType();
+            backupName = "__nvm_backup_" + GV->getName().str();
+        } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
+            backupType = AI->getAllocatedType();
+            backupName = "__nvm_alloca_" + (AI->hasName()
+                             ? AI->getName().str()
+                             : std::to_string(ssaCounter++));
+        } else if (auto *Inst = llvm::dyn_cast<llvm::Instruction>(V)) {
+            backupType = Inst->getType();
+            backupName = "__nvm_ssa_" + std::to_string(ssaCounter++);
+        } else {
+            continue;
+        }
+
         auto *backup = new llvm::GlobalVariable(
-            M_, GV->getValueType(), /*isConstant=*/false,
+            M_, backupType, /*isConstant=*/false,
             llvm::GlobalValue::InternalLinkage,
-            llvm::Constant::getNullValue(GV->getValueType()),
-            "__nvm_backup_" + GV->getName().str());
+            llvm::Constant::getNullValue(backupType),
+            backupName);
         backup->setSection(".nvm");
-        backup->setAlignment(GV->getAlign());
-        nvmBackupMap_[GV] = backup;
+        nvmBackupMap_[V] = backup;
     }
 }
 
@@ -126,6 +142,35 @@ void CheckpointInstrumenter::rewriteAccessesInVMRegions(
             }
         }
     }
+}
+
+std::set<llvm::BasicBlock *> CheckpointInstrumenter::computeRegionBlocks(
+    llvm::BasicBlock *start,
+    const MILPSolution &solution,
+    const ICFGView &cfg) const {
+
+    std::set<llvm::BasicBlock *> region;
+    std::queue<llvm::BasicBlock *> worklist;
+    worklist.push(start);
+    region.insert(start);
+
+    while (!worklist.empty()) {
+        llvm::BasicBlock *BB = worklist.front();
+        worklist.pop();
+        for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
+            if (region.count(Succ))
+                continue;
+            // Stop at other region starts (don't include them).
+            NodeId succId = cfg.getNodeMap().getNodeId(Succ);
+            if (succId != kInvalidNodeId &&
+                solution.regionStarts.count(succId) &&
+                Succ != start)
+                continue;
+            region.insert(Succ);
+            worklist.push(Succ);
+        }
+    }
+    return region;
 }
 
 unsigned CheckpointInstrumenter::insertRegionBoundaries(
@@ -167,40 +212,62 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
 
         bool isEntryNode = nodeSet.count(entryNode) > 0;
 
+        // Track commit instructions so SSA use rewriting skips them.
+        std::set<llvm::Instruction *> commitInsts;
+
         // For b != b0, emit boundary-end code first.
-        // Order: commit stores → epilogue → prologue → restores
+        // Order: commit stores -> epilogue -> prologue -> restores
         if (!isEntryNode) {
             // Commit dirty data while the region is still active.
-            std::set<llvm::GlobalVariable *> commitGVs;
+            std::set<llvm::Value *> commitVars;
             for (const auto &[key, enabled] : solution.commit) {
-                if (!enabled) {
+                if (!enabled)
                     continue;
-                }
-                if (!nodeSet.count(key.first)) {
+                if (!nodeSet.count(key.first))
                     continue;
-                }
-                commitGVs.insert(key.second);
+                commitVars.insert(key.second);
             }
 
-            for (llvm::GlobalVariable *GV : commitGVs) {
-                unsigned sizeBytes = state.getVMObjSizeBytes(GV);
-                if (sizeBytes == 0) {
+            for (llvm::Value *V : commitVars) {
+                unsigned sizeBytes = state.getVarSizeBytes(V);
+                if (sizeBytes == 0)
                     continue;
-                }
-                llvm::Value *size = llvm::ConstantInt::get(
-                    llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-                auto shadowIt = shadowMap_.find(GV);
-                if (shadowIt != shadowMap_.end()) {
-                    // Eligible: copy shadow (VM/SRAM) -> original (NVM/FRAM)
-                    builder.CreateCall(storeMemFn_,
-                                       {GV, shadowIt->second, size});
-                } else {
-                    // Ineligible: copy SRAM original -> NVM backup
-                    auto backupIt = nvmBackupMap_.find(GV);
+
+                if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+                    llvm::Value *size = llvm::ConstantInt::get(
+                        llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
+                    auto shadowIt = shadowMap_.find(GV);
+                    if (shadowIt != shadowMap_.end()) {
+                        // Eligible: copy shadow (VM/SRAM) -> original (NVM/FRAM)
+                        auto *call = builder.CreateCall(storeMemFn_,
+                                           {GV, shadowIt->second, size});
+                        commitInsts.insert(call);
+                    } else {
+                        // Ineligible global: copy SRAM original -> NVM backup
+                        auto backupIt = nvmBackupMap_.find(GV);
+                        assert(backupIt != nvmBackupMap_.end() &&
+                               "ineligible commit requires an NVM backup");
+                        auto *call = builder.CreateCall(storeMemFn_,
+                                           {backupIt->second, GV, size});
+                        commitInsts.insert(call);
+                    }
+                } else if (llvm::isa<llvm::AllocaInst>(V)) {
+                    // Stack alloca -> NVM backup (memcpy)
+                    llvm::Value *size = llvm::ConstantInt::get(
+                        llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
+                    auto backupIt = nvmBackupMap_.find(V);
                     assert(backupIt != nvmBackupMap_.end() &&
-                           "ineligible commit requires an NVM backup");
-                    builder.CreateCall(storeMemFn_,
-                                       {backupIt->second, GV, size});
+                           "alloca commit requires an NVM backup");
+                    auto *call = builder.CreateCall(storeMemFn_,
+                                       {backupIt->second, V, size});
+                    commitInsts.insert(call);
+                } else {
+                    // SSA register -> NVM slot (typed store)
+                    auto backupIt = nvmBackupMap_.find(V);
+                    assert(backupIt != nvmBackupMap_.end() &&
+                           "SSA commit requires an NVM backup");
+                    auto *store = builder.CreateStore(V, backupIt->second);
+                    commitInsts.insert(store);
                 }
                 inserted++;
             }
@@ -214,22 +281,20 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         builder.CreateCall(prologueFn_);
         inserted++;
 
+        // Eligible restores (needRestore).
         std::set<llvm::GlobalVariable *> restoreGVs;
         for (const auto &[key, enabled] : solution.needRestore) {
-            if (!enabled) {
+            if (!enabled)
                 continue;
-            }
-            if (!nodeSet.count(key.first)) {
+            if (!nodeSet.count(key.first))
                 continue;
-            }
             restoreGVs.insert(key.second);
         }
 
         for (llvm::GlobalVariable *GV : restoreGVs) {
-            unsigned sizeBytes = state.getVMObjSizeBytes(GV);
-            if (sizeBytes == 0) {
+            unsigned sizeBytes = state.getVarSizeBytes(GV);
+            if (sizeBytes == 0)
                 continue;
-            }
             llvm::Value *size = llvm::ConstantInt::get(
                 llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
             // Restore: copy original (NVM/FRAM) -> shadow (VM/SRAM)
@@ -242,30 +307,69 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         }
 
         // Ineligible restores: unconditional at every region start where
-        // the global is live-in. No needRestore variable — always restore.
-        for (llvm::GlobalVariable *GV : state.getIneligibleObjs()) {
-            auto backupIt = nvmBackupMap_.find(GV);
+        // the object is live-in.
+        std::map<llvm::Value *, llvm::Value *> ssaRestoreMap;
+        for (llvm::Value *V : state.getIneligibleObjs()) {
+            auto backupIt = nvmBackupMap_.find(V);
             if (backupIt == nvmBackupMap_.end())
                 continue;
-            // Check if GV is live-in at any node mapped to this block.
+
+            // Check if V is live-in at any node mapped to this block.
             bool isLiveIn = false;
             for (NodeId node : nodes) {
-                if (stateView.getVMObjLiveIn(node).count(GV)) {
+                if (stateView.getIneligLiveIn(node).count(V)) {
                     isLiveIn = true;
                     break;
                 }
             }
             if (!isLiveIn)
                 continue;
-            unsigned sizeBytes = state.getVMObjSizeBytes(GV);
-            if (sizeBytes == 0)
-                continue;
-            llvm::Value *size = llvm::ConstantInt::get(
-                llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-            // Restore: copy NVM backup -> SRAM original
-            builder.CreateCall(restoreMemFn_,
-                               {GV, backupIt->second, size});
-            inserted++;
+
+            if (llvm::isa<llvm::GlobalVariable>(V) ||
+                llvm::isa<llvm::AllocaInst>(V)) {
+                // Memory object: memcpy from NVM backup.
+                unsigned sizeBytes = state.getVarSizeBytes(V);
+                if (sizeBytes == 0)
+                    continue;
+                llvm::Value *size = llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
+                // Restore: copy NVM backup -> SRAM original
+                builder.CreateCall(restoreMemFn_,
+                                   {V, backupIt->second, size});
+                inserted++;
+            } else {
+                // SSA register: typed load from NVM slot.
+                llvm::Value *restored =
+                    builder.CreateLoad(V->getType(), backupIt->second);
+                ssaRestoreMap[V] = restored;
+                inserted++;
+            }
+        }
+
+        // SSA use rewriting: replace uses of original SSA values with restored
+        // values within this region, but NOT in commit stores.
+        if (!ssaRestoreMap.empty()) {
+            std::set<llvm::BasicBlock *> regionBlocks =
+                computeRegionBlocks(&BB, solution, cfg);
+
+            for (auto &[origVal, restoredVal] : ssaRestoreMap) {
+                origVal->replaceUsesWithIf(restoredVal, [&](llvm::Use &U) {
+                    auto *I = llvm::dyn_cast<llvm::Instruction>(U.getUser());
+                    if (!I)
+                        return false;
+                    // Don't replace uses in our commit stores.
+                    if (commitInsts.count(I))
+                        return false;
+                    // For PHI nodes, the relevant block is the incoming block
+                    // (where the value must be live), not the PHI's parent.
+                    if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(I)) {
+                        llvm::BasicBlock *incomingBB =
+                            PHI->getIncomingBlock(U);
+                        return regionBlocks.count(incomingBB) != 0;
+                    }
+                    return regionBlocks.count(I->getParent()) != 0;
+                });
+            }
         }
     }
 

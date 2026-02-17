@@ -2,6 +2,7 @@
 
 #include "common/BlockUtils.h"
 
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
@@ -34,16 +35,16 @@ double EnergyModel::getENvm(const std::string &block,
     return 0.0;
 }
 
-double EnergyModel::getESave(llvm::GlobalVariable *gv) const {
-    auto it = eSaveByGV_.find(gv);
-    if (it != eSaveByGV_.end())
+double EnergyModel::getESave(llvm::Value *v) const {
+    auto it = eSaveByVar_.find(v);
+    if (it != eSaveByVar_.end())
         return it->second;
     return 0.0;
 }
 
-double EnergyModel::getERestore(llvm::GlobalVariable *gv) const {
-    auto it = eRestoreByGV_.find(gv);
-    if (it != eRestoreByGV_.end())
+double EnergyModel::getERestore(llvm::Value *v) const {
+    auto it = eRestoreByVar_.find(v);
+    if (it != eRestoreByVar_.end())
         return it->second;
     return 0.0;
 }
@@ -86,6 +87,7 @@ void EnergyModel::computeFrequencies(llvm::BlockFrequencyInfo &BFI,
 
 void EnergyModel::computeNvmPenalties() {
     // E_nvm[b,v] = (loads + stores to v in b) * nvm_access_penalty
+    // NVM penalties only apply to globals (eligible + ineligible globals).
     auto computeForGV = [&](llvm::GlobalVariable *GV,
                             const std::string &blockName) {
         unsigned loads = state_.getLoadCount(blockName, GV);
@@ -97,30 +99,37 @@ void EnergyModel::computeNvmPenalties() {
         }
     };
 
+    // Collect ineligible globals for NVM penalty computation.
+    std::vector<llvm::GlobalVariable *> ineligGlobals;
+    for (llvm::Value *V : state_.getIneligibleObjs()) {
+        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
+            ineligGlobals.push_back(GV);
+    }
+
     for (const auto &blockName : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjs())
             computeForGV(GV, blockName);
-        for (llvm::GlobalVariable *GV : state_.getIneligibleObjs())
+        for (llvm::GlobalVariable *GV : ineligGlobals)
             computeForGV(GV, blockName);
     }
 }
 
 void EnergyModel::computeSaveRestoreCosts() {
-    // E_sv[v], E_rst[v] for both candidate and ineligible globals.
-    auto computeForGV = [&](llvm::GlobalVariable *GV) {
-        unsigned sizeBytes = state_.getVMObjSizeBytes(GV);
+    // E_sv[v], E_rst[v] for all tracked variables (elig + inelig).
+    auto computeForVar = [&](llvm::Value *V) {
+        unsigned sizeBytes = state_.getVarSizeBytes(V);
         if (sizeBytes == 0)
             return;
-        eSaveByGV_[GV] =
+        eSaveByVar_[V] =
             static_cast<double>(sizeBytes) * params_.memStoreEnergyPerByte;
-        eRestoreByGV_[GV] =
+        eRestoreByVar_[V] =
             static_cast<double>(sizeBytes) * params_.memRestoreEnergyPerByte;
     };
 
     for (llvm::GlobalVariable *GV : state_.getVMObjs())
-        computeForGV(GV);
-    for (llvm::GlobalVariable *GV : state_.getIneligibleObjs())
-        computeForGV(GV);
+        computeForVar(GV);
+    for (llvm::Value *V : state_.getIneligibleObjs())
+        computeForVar(V);
 }
 
 // ---- Config parsing ----

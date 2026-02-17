@@ -4,6 +4,7 @@
 #include "milp/StateAnalysis.h"
 
 #include "llvm/Analysis/BlockFrequencyInfo.h"
+#include "llvm/IR/Value.h"
 
 #include <map>
 #include <optional>
@@ -50,11 +51,11 @@ public:
     double getENvm(const std::string &block,
                    llvm::GlobalVariable *gv) const;
 
-    /// E_sv[v]: energy cost of committing candidate global v to checkpoint.
-    double getESave(llvm::GlobalVariable *gv) const;
+    /// E_sv[v]: energy cost of committing variable v to checkpoint.
+    double getESave(llvm::Value *v) const;
 
-    /// E_rst[v]: energy cost of restoring candidate global v.
-    double getERestore(llvm::GlobalVariable *gv) const;
+    /// E_rst[v]: energy cost of restoring variable v.
+    double getERestore(llvm::Value *v) const;
 
     /// F_entry[b]: estimated entry frequency for block b.
     double getFEntry(const std::string &block) const;
@@ -70,8 +71,8 @@ private:
     // Precomputed values
     std::map<std::string, double> fEntry_;          // Block frequencies
     std::map<std::pair<std::string, llvm::GlobalVariable *>, double> eNvm_;
-    std::map<llvm::GlobalVariable *, double> eSaveByGV_;
-    std::map<llvm::GlobalVariable *, double> eRestoreByGV_;
+    std::map<llvm::Value *, double> eSaveByVar_;
+    std::map<llvm::Value *, double> eRestoreByVar_;
 
     void computeFrequencies(llvm::BlockFrequencyInfo &BFI, llvm::Function &F);
     void computeNvmPenalties();

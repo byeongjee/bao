@@ -9,6 +9,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <queue>
+
 namespace checkpoint {
 
 namespace {
@@ -59,6 +61,7 @@ static bool isWhitelistedHelperName(llvm::StringRef N) {
 
 // Static empty containers for safe reference returns
 const std::set<llvm::GlobalVariable *> StateAnalysis::emptyGVSet_;
+const std::set<llvm::Value *> StateAnalysis::emptyValueSet_;
 
 StateAnalysis::StateAnalysis(llvm::Function &F,
                              llvm::AAResults &AA,
@@ -67,21 +70,24 @@ StateAnalysis::StateAnalysis(llvm::Function &F,
     buildBlockMap();
     identifyVMObjs();
     identifyIneligibleObjs();
+    identifyIneligibleSSAValues();
     computeAccessMaps();
-    computeVMObjLiveness();
+    computeEligLiveness();
+    computeIneligGlobalAllocaLiveness();
+    computeIneligSSALiveness();
 }
 
 bool StateAnalysis::isCandidateGlobal(llvm::GlobalVariable *gv) const {
     return vmObjSet_.count(gv) > 0;
 }
 
-const std::vector<llvm::GlobalVariable *> &
+const std::vector<llvm::Value *> &
 StateAnalysis::getIneligibleObjs() const {
     return ineligibleObjs_;
 }
 
-bool StateAnalysis::isIneligibleGlobal(llvm::GlobalVariable *gv) const {
-    return ineligibleObjSet_.count(gv) > 0;
+bool StateAnalysis::isIneligible(llvm::Value *v) const {
+    return ineligibleObjSet_.count(v) > 0;
 }
 
 void StateAnalysis::printAnalysisErrors(llvm::raw_ostream &os) const {
@@ -91,27 +97,35 @@ void StateAnalysis::printAnalysisErrors(llvm::raw_ostream &os) const {
 }
 
 const std::set<llvm::GlobalVariable *> &
-StateAnalysis::getVMObjLiveIn(const std::string &block) const {
-    auto it = vmObjLiveIn_.find(block);
-    if (it != vmObjLiveIn_.end())
+StateAnalysis::getEligLiveIn(const std::string &block) const {
+    auto it = eligLiveIn_.find(block);
+    if (it != eligLiveIn_.end())
         return it->second;
     return emptyGVSet_;
 }
 
-const std::set<llvm::GlobalVariable *> &
-StateAnalysis::getDefGlobals(const std::string &block) const {
-    auto it = defGlobals_.find(block);
-    if (it != defGlobals_.end())
-        return it->second;
-    return emptyGVSet_;
-}
-
-bool StateAnalysis::getDefIndicator(const std::string &block,
-                                    llvm::GlobalVariable *gv) const {
-    auto it = defGlobals_.find(block);
-    if (it == defGlobals_.end())
+bool StateAnalysis::getEligDefIndicator(const std::string &block,
+                                        llvm::GlobalVariable *gv) const {
+    auto it = eligDefGlobals_.find(block);
+    if (it == eligDefGlobals_.end())
         return false;
     return it->second.count(gv) > 0;
+}
+
+const std::set<llvm::Value *> &
+StateAnalysis::getIneligLiveIn(const std::string &block) const {
+    auto it = ineligLiveIn_.find(block);
+    if (it != ineligLiveIn_.end())
+        return it->second;
+    return emptyValueSet_;
+}
+
+bool StateAnalysis::getIneligDefIndicator(const std::string &block,
+                                          llvm::Value *v) const {
+    auto it = ineligDefVars_.find(block);
+    if (it == ineligDefVars_.end())
+        return false;
+    return it->second.count(v) > 0;
 }
 
 unsigned StateAnalysis::getLoadCount(const std::string &block,
@@ -132,9 +146,9 @@ unsigned StateAnalysis::getStoreCount(const std::string &block,
     return 0;
 }
 
-unsigned StateAnalysis::getVMObjSizeBytes(llvm::GlobalVariable *gv) const {
-    auto it = vmObjSizeBytes_.find(gv);
-    if (it != vmObjSizeBytes_.end()) {
+unsigned StateAnalysis::getVarSizeBytes(llvm::Value *v) const {
+    auto it = varSizeBytes_.find(v);
+    if (it != varSizeBytes_.end()) {
         return it->second;
     }
     return 0;
@@ -215,7 +229,7 @@ void StateAnalysis::identifyVMObjs() {
         vmObjs_.push_back(&GV);
         vmObjSet_.insert(&GV);
         unsigned sizeBytes = DL.getTypeAllocSize(GV.getValueType());
-        vmObjSizeBytes_[&GV] = sizeBytes;
+        varSizeBytes_[&GV] = sizeBytes;
     }
 }
 
@@ -226,8 +240,8 @@ void StateAnalysis::identifyIneligibleObjs() {
 
     const llvm::DataLayout &DL = M->getDataLayout();
 
-    // Scan all instructions for loads/stores to non-candidate globals.
-    std::set<llvm::GlobalVariable *> seen;
+    // --- Ineligible globals: non-candidate globals accessed in the function ---
+    std::set<llvm::GlobalVariable *> seenGV;
     for (llvm::BasicBlock &BB : F_) {
         for (llvm::Instruction &I : BB) {
             const llvm::Value *Ptr = nullptr;
@@ -263,13 +277,89 @@ void StateAnalysis::identifyIneligibleObjs() {
             if (!GV->getValueType()->isSized())
                 continue;
 
-            if (!seen.insert(GV).second)
+            if (!seenGV.insert(GV).second)
                 continue;
 
             ineligibleObjs_.push_back(GV);
             ineligibleObjSet_.insert(GV);
             unsigned sizeBytes = DL.getTypeAllocSize(GV->getValueType());
-            vmObjSizeBytes_[GV] = sizeBytes;
+            varSizeBytes_[GV] = sizeBytes;
+        }
+    }
+
+    // --- Ineligible allocas: static stack allocations ---
+    for (llvm::BasicBlock &BB : F_) {
+        for (llvm::Instruction &I : BB) {
+            auto *AI = llvm::dyn_cast<llvm::AllocaInst>(&I);
+            if (!AI)
+                continue;
+
+            // Dynamic allocas have runtime-dependent sizes, so we cannot create
+            // fixed-size NVM backups or account for them in the MILP VM capacity
+            // constraint.
+            if (!llvm::isa<llvm::ConstantInt>(AI->getArraySize())) {
+                llvm::report_fatal_error(
+                    "MILP checkpoint pass: dynamic alloca '%" +
+                    AI->getName() + "' in function '" + F_.getName() +
+                    "' cannot be checkpointed (runtime-dependent size "
+                    "prevents fixed-size NVM backup and MILP capacity "
+                    "modeling)");
+            }
+
+            if (!AI->getAllocatedType()->isSized())
+                continue;
+
+            ineligibleObjs_.push_back(AI);
+            ineligibleObjSet_.insert(AI);
+            unsigned sizeBytes = DL.getTypeAllocSize(AI->getAllocatedType());
+            varSizeBytes_[AI] = sizeBytes;
+        }
+    }
+}
+
+void StateAnalysis::identifyIneligibleSSAValues() {
+    llvm::Module *M = F_.getParent();
+    if (!M)
+        return;
+
+    const llvm::DataLayout &DL = M->getDataLayout();
+
+    for (llvm::BasicBlock &BB : F_) {
+        for (llvm::Instruction &I : BB) {
+            // Skip void, alloca (already handled), and PHI nodes at this stage
+            // (PHIs are handled via liveness).
+            if (I.getType()->isVoidTy())
+                continue;
+            if (llvm::isa<llvm::AllocaInst>(&I))
+                continue;
+
+            // Unsized types (void, label, token, metadata) cannot be stored to
+            // memory and don't represent runtime data state — void produces no
+            // value, label/token are compile-time control flow constructs,
+            // metadata is stripped during codegen. Skipping them is both
+            // necessary (LLVM verifier rejects stores of these types) and
+            // correct (they don't need checkpointing).
+            if (!I.getType()->isSized())
+                continue;
+
+            // Check if any user is in a different block (cross-block use).
+            bool hasCrossBlockUse = false;
+            for (const llvm::User *U : I.users()) {
+                if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
+                    if (UI->getParent() != &BB) {
+                        hasCrossBlockUse = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!hasCrossBlockUse)
+                continue;
+
+            ineligibleObjs_.push_back(&I);
+            ineligibleObjSet_.insert(&I);
+            unsigned sizeBytes = DL.getTypeAllocSize(I.getType());
+            varSizeBytes_[&I] = sizeBytes;
         }
     }
 }
@@ -411,14 +501,21 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
 }
 
 void StateAnalysis::computeAccessMaps() {
+    // Collect ineligible globals for AA-based access tracking.
+    std::vector<llvm::GlobalVariable *> ineligGlobals;
+    for (llvm::Value *V : ineligibleObjs_) {
+        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
+            ineligGlobals.push_back(GV);
+    }
+
     for (llvm::BasicBlock &BB : F_) {
         std::string blockName = getBlockName(BB, F_);
 
         for (llvm::Instruction &I : BB) {
             validateInstructionForStrictMode(I);
 
-            // Process both candidate and ineligible globals.
-            auto processGV = [&](llvm::GlobalVariable *GV) {
+            // Process candidate globals (eligible).
+            auto processEligGV = [&](llvm::GlobalVariable *GV) {
                 auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
                 llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
                 auto key = std::make_pair(blockName, GV);
@@ -427,27 +524,60 @@ void StateAnalysis::computeAccessMaps() {
                     loadCounts_[key]++;
                 if (llvm::isModSet(MRI)) {
                     storeCounts_[key]++;
-                    defGlobals_[blockName].insert(GV);
+                    eligDefGlobals_[blockName].insert(GV);
                 }
             };
 
             for (llvm::GlobalVariable *GV : vmObjs_)
-                processGV(GV);
-            for (llvm::GlobalVariable *GV : ineligibleObjs_)
-                processGV(GV);
+                processEligGV(GV);
+
+            // Process ineligible globals (for NVM penalty and def tracking).
+            auto processIneligGV = [&](llvm::GlobalVariable *GV) {
+                auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
+                llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
+                auto key = std::make_pair(blockName, GV);
+
+                if (llvm::isRefSet(MRI))
+                    loadCounts_[key]++;
+                if (llvm::isModSet(MRI)) {
+                    storeCounts_[key]++;
+                    ineligDefVars_[blockName].insert(GV);
+                }
+            };
+
+            for (llvm::GlobalVariable *GV : ineligGlobals)
+                processIneligGV(GV);
         }
+    }
+
+    // Alloca def tracking: scan users of each ineligible AllocaInst.
+    for (llvm::Value *V : ineligibleObjs_) {
+        auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V);
+        if (!AI)
+            continue;
+        for (const llvm::User *U : AI->users()) {
+            if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(U)) {
+                if (SI->getPointerOperand()->stripPointerCasts() == AI) {
+                    std::string blockName = getBlockName(*SI->getParent(), F_);
+                    ineligDefVars_[blockName].insert(AI);
+                }
+            }
+        }
+    }
+
+    // SSA value def tracking: the defining instruction IS the def.
+    for (llvm::Value *V : ineligibleObjs_) {
+        auto *Inst = llvm::dyn_cast<llvm::Instruction>(V);
+        if (!Inst || llvm::isa<llvm::AllocaInst>(Inst))
+            continue;
+        std::string blockName = getBlockName(*Inst->getParent(), F_);
+        ineligDefVars_[blockName].insert(Inst);
     }
 }
 
-void StateAnalysis::computeVMObjLiveness() {
-    // Combine candidate and ineligible globals for unified liveness analysis.
-    std::vector<llvm::GlobalVariable *> allTracked;
-    allTracked.reserve(vmObjs_.size() + ineligibleObjs_.size());
-    allTracked.insert(allTracked.end(), vmObjs_.begin(), vmObjs_.end());
-    allTracked.insert(allTracked.end(), ineligibleObjs_.begin(),
-                      ineligibleObjs_.end());
-
-    if (allTracked.empty())
+void StateAnalysis::computeEligLiveness() {
+    // Load-before-store analysis for eligible (candidate) globals.
+    if (vmObjs_.empty())
         return;
 
     struct BlockGVInfo {
@@ -460,7 +590,7 @@ void StateAnalysis::computeVMObjLiveness() {
     for (llvm::BasicBlock &BB : F_) {
         std::string blockName = getBlockName(BB, F_);
 
-        for (llvm::GlobalVariable *GV : allTracked) {
+        for (llvm::GlobalVariable *GV : vmObjs_) {
             auto key = std::make_pair(blockName, GV);
             BlockGVInfo info;
             bool seenMustStore = false;
@@ -485,7 +615,7 @@ void StateAnalysis::computeVMObjLiveness() {
         }
     }
 
-    for (llvm::GlobalVariable *GV : allTracked) {
+    for (llvm::GlobalVariable *GV : vmObjs_) {
         std::map<std::string, bool> liveIn, liveOut;
         for (const auto &blockName : cfg_.getBlocks()) {
             liveIn[blockName] = false;
@@ -523,7 +653,182 @@ void StateAnalysis::computeVMObjLiveness() {
 
         for (const auto &blockName : cfg_.getBlocks()) {
             if (liveIn[blockName])
-                vmObjLiveIn_[blockName].insert(GV);
+                eligLiveIn_[blockName].insert(GV);
+        }
+    }
+}
+
+void StateAnalysis::computeIneligGlobalAllocaLiveness() {
+    // Load-before-store analysis for ineligible globals and allocas.
+    std::vector<llvm::Value *> globalAllocaIneligs;
+    for (llvm::Value *V : ineligibleObjs_) {
+        if (llvm::isa<llvm::GlobalVariable>(V) || llvm::isa<llvm::AllocaInst>(V))
+            globalAllocaIneligs.push_back(V);
+    }
+
+    if (globalAllocaIneligs.empty())
+        return;
+
+    struct BlockVarInfo {
+        bool loadBeforeMustStore = false;
+        bool hasMustStore = false;
+    };
+
+    std::map<std::pair<std::string, llvm::Value *>, BlockVarInfo> blockVarInfo;
+
+    for (llvm::BasicBlock &BB : F_) {
+        std::string blockName = getBlockName(BB, F_);
+
+        for (llvm::Value *V : globalAllocaIneligs) {
+            auto key = std::make_pair(blockName, V);
+            BlockVarInfo info;
+            bool seenMustStore = false;
+
+            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+                for (llvm::Instruction &I : BB) {
+                    auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
+                    llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
+
+                    if (llvm::isRefSet(MRI) && !seenMustStore)
+                        info.loadBeforeMustStore = true;
+
+                    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+                        llvm::Value *Ptr = SI->getPointerOperand()->stripPointerCasts();
+                        if (Ptr == GV) {
+                            info.hasMustStore = true;
+                            seenMustStore = true;
+                        }
+                    }
+                }
+            } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
+                for (llvm::Instruction &I : BB) {
+                    // Check loads from the alloca.
+                    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
+                        if (LI->getPointerOperand()->stripPointerCasts() == AI &&
+                            !seenMustStore)
+                            info.loadBeforeMustStore = true;
+                    }
+                    // Check stores to the alloca.
+                    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+                        if (SI->getPointerOperand()->stripPointerCasts() == AI) {
+                            info.hasMustStore = true;
+                            seenMustStore = true;
+                        }
+                    }
+                }
+            }
+
+            blockVarInfo[key] = info;
+        }
+    }
+
+    for (llvm::Value *V : globalAllocaIneligs) {
+        std::map<std::string, bool> liveIn, liveOut;
+        for (const auto &blockName : cfg_.getBlocks()) {
+            liveIn[blockName] = false;
+            liveOut[blockName] = false;
+        }
+
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto &blockName : cfg_.getBlocks()) {
+                auto key = std::make_pair(blockName, V);
+                const BlockVarInfo &info = blockVarInfo[key];
+
+                bool newLiveOut = false;
+                llvm::BasicBlock *BB = nameToBlock_[blockName];
+                for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
+                    std::string succName = getBlockName(*Succ, F_);
+                    if (liveIn[succName]) {
+                        newLiveOut = true;
+                        break;
+                    }
+                }
+
+                bool newLiveIn = info.loadBeforeMustStore ||
+                                 (newLiveOut && !info.hasMustStore);
+
+                if (newLiveIn != liveIn[blockName] ||
+                    newLiveOut != liveOut[blockName]) {
+                    liveIn[blockName] = newLiveIn;
+                    liveOut[blockName] = newLiveOut;
+                    changed = true;
+                }
+            }
+        }
+
+        for (const auto &blockName : cfg_.getBlocks()) {
+            if (liveIn[blockName])
+                ineligLiveIn_[blockName].insert(V);
+        }
+    }
+}
+
+void StateAnalysis::computeIneligSSALiveness() {
+    // Standard backward SSA liveness for cross-block SSA registers.
+    for (llvm::Value *V : ineligibleObjs_) {
+        auto *Inst = llvm::dyn_cast<llvm::Instruction>(V);
+        if (!Inst || llvm::isa<llvm::AllocaInst>(Inst))
+            continue;
+
+        llvm::BasicBlock *defBlock = Inst->getParent();
+        std::string defBlockName = getBlockName(*defBlock, F_);
+
+        // Collect use blocks (blocks containing users, excluding defBlock).
+        std::set<std::string> useBlocks;
+        for (const llvm::User *U : Inst->users()) {
+            if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
+                if (UI->getParent() != defBlock) {
+                    useBlocks.insert(getBlockName(*UI->getParent(), F_));
+                }
+            }
+        }
+
+        if (useBlocks.empty())
+            continue;
+
+        // Backward dataflow: V is live-in at B if:
+        //   - V is used in B (and B != defBlock), OR
+        //   - V is live-out from B (live-in at some successor) and B != defBlock
+        std::map<std::string, bool> liveIn, liveOut;
+        for (const auto &blockName : cfg_.getBlocks()) {
+            liveIn[blockName] = false;
+            liveOut[blockName] = false;
+        }
+
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto &blockName : cfg_.getBlocks()) {
+                if (blockName == defBlockName)
+                    continue;
+
+                bool newLiveOut = false;
+                llvm::BasicBlock *BB = nameToBlock_[blockName];
+                for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
+                    std::string succName = getBlockName(*Succ, F_);
+                    if (liveIn[succName]) {
+                        newLiveOut = true;
+                        break;
+                    }
+                }
+
+                bool isUsed = useBlocks.count(blockName) > 0;
+                bool newLiveIn = isUsed || newLiveOut;
+
+                if (newLiveIn != liveIn[blockName] ||
+                    newLiveOut != liveOut[blockName]) {
+                    liveIn[blockName] = newLiveIn;
+                    liveOut[blockName] = newLiveOut;
+                    changed = true;
+                }
+            }
+        }
+
+        for (const auto &blockName : cfg_.getBlocks()) {
+            if (liveIn[blockName])
+                ineligLiveIn_[blockName].insert(V);
         }
     }
 }
