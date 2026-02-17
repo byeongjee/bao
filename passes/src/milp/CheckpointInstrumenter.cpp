@@ -168,10 +168,9 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         bool isEntryNode = nodeSet.count(entryNode) > 0;
 
         // For b != b0, emit boundary-end code first.
+        // Order: commit stores → epilogue → prologue → restores
         if (!isEntryNode) {
-            builder.CreateCall(epilogueFn_);
-            inserted++;
-
+            // Commit dirty data while the region is still active.
             std::set<llvm::GlobalVariable *> commitGVs;
             for (const auto &[key, enabled] : solution.commit) {
                 if (!enabled) {
@@ -205,6 +204,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                 }
                 inserted++;
             }
+
+            // Finalize the old region after all commits are done.
+            builder.CreateCall(epilogueFn_);
+            inserted++;
         }
 
         // Then emit boundary-start code.
