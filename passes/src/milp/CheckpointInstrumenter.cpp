@@ -115,6 +115,39 @@ void CheckpointInstrumenter::createNVMBackupGlobals(
     }
 }
 
+/// Recursively replace occurrences of \p GV with \p Replacement inside a
+/// Constant (e.g. a ConstantExpr GEP that embeds a global pointer).
+/// Returns the rebuilt Constant on success, or nullptr if \p C does not
+/// reference \p GV.
+static llvm::Constant *replaceGVInConstant(llvm::Constant *C,
+                                            llvm::GlobalVariable *GV,
+                                            llvm::GlobalVariable *Replacement) {
+    if (C == GV)
+        return Replacement;
+
+    auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(C);
+    if (!CE)
+        return nullptr;
+
+    bool changed = false;
+    llvm::SmallVector<llvm::Constant *, 4> newOps;
+    for (unsigned i = 0; i < CE->getNumOperands(); ++i) {
+        llvm::Constant *op = CE->getOperand(i);
+        llvm::Constant *replaced = replaceGVInConstant(op, GV, Replacement);
+        if (replaced) {
+            newOps.push_back(replaced);
+            changed = true;
+        } else {
+            newOps.push_back(op);
+        }
+    }
+
+    if (!changed)
+        return nullptr;
+
+    return CE->getWithOperands(newOps);
+}
+
 void CheckpointInstrumenter::rewriteAccessesInVMRegions(
     llvm::Function &F,
     const MILPSolution &solution,
@@ -133,10 +166,18 @@ void CheckpointInstrumenter::rewriteAccessesInVMRegions(
                 continue;
 
             // Replace uses of GV in this block with shadow.
+            // Handles both direct operands and GV references nested
+            // inside ConstantExpr operands (e.g. constant-index GEPs
+            // created by loop unrolling at -O2).
             for (llvm::Instruction &I : BB) {
                 for (unsigned i = 0; i < I.getNumOperands(); ++i) {
                     if (I.getOperand(i) == GV) {
                         I.setOperand(i, shadow);
+                    } else if (auto *C = llvm::dyn_cast<llvm::Constant>(
+                                   I.getOperand(i))) {
+                        if (auto *replaced =
+                                replaceGVInConstant(C, GV, shadow))
+                            I.setOperand(i, replaced);
                     }
                 }
             }
