@@ -10,6 +10,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Format.h"
 
@@ -30,6 +31,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
 
     // Step 1: Obtain LLVM analyses
     auto &LI = AM.getResult<LoopAnalysis>(F);
+    auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
     auto &AA = AM.getResult<AAManager>(F);
     auto &BFI = AM.getResult<BlockFrequencyAnalysis>(F);
 
@@ -67,7 +69,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
 
     // Step 5: Build abstract MILP model (loop summaries) and check feasibility.
     AbstractCFGBuildResult abstractCFG =
-        buildAbstractCFG(F, LI, *ctx.cfg, *ctx.stateAnalysis, *ctx.energyModel);
+        buildAbstractCFG(F, LI, SE, *ctx.cfg, *ctx.stateAnalysis, *ctx.energyModel);
 
     MILPInput milpInput{*abstractCFG.model, *abstractCFG.model, *abstractCFG.model};
     CheckpointOptimizer optimizer(milpInput);

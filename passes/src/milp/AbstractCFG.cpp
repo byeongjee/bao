@@ -6,6 +6,8 @@
 #include "milp/StateAnalysis.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
 
@@ -60,17 +62,25 @@ static bool containsInvoke(const Loop *L) {
     return false;
 }
 
-static void collectInnermostFirst(Loop *L, std::vector<Loop *> &out) {
-    for (Loop *Sub : L->getSubLoops()) {
-        collectInnermostFirst(Sub, out);
-    }
-    out.push_back(L);
+static Loop *getDirectChildLoop(const Loop *Parent, const BasicBlock *BB,
+                                const LoopInfo &LI) {
+    Loop *Inner = LI.getLoopFor(BB);
+    if (!Inner || Inner == Parent) return nullptr;
+    while (Inner->getParentLoop() != Parent) Inner = Inner->getParentLoop();
+    return Inner;
 }
 
-static std::vector<Loop *> collectInnermostFirst(LoopInfo &LI) {
+static void collectOutermostFirst(Loop *L, std::vector<Loop *> &out) {
+    out.push_back(L);
+    for (Loop *Sub : L->getSubLoops()) {
+        collectOutermostFirst(Sub, out);
+    }
+}
+
+static std::vector<Loop *> collectOutermostFirst(LoopInfo &LI) {
     std::vector<Loop *> loops;
     for (Loop *L : LI) {
-        collectInnermostFirst(L, loops);
+        collectOutermostFirst(L, loops);
     }
     return loops;
 }
@@ -78,7 +88,9 @@ static std::vector<Loop *> collectInnermostFirst(LoopInfo &LI) {
 static PathSummary computeWorstCasePathSummary(
     Loop *L,
     const std::map<std::string, double> &blockEnergyByName,
-    const Function &F) {
+    const Function &F,
+    LoopInfo &LI,
+    ScalarEvolution &SE) {
     PathSummary result;
 
     BasicBlock *Header = L->getHeader();
@@ -88,12 +100,53 @@ static PathSummary computeWorstCasePathSummary(
         return result;
     }
 
-    auto getEnergy = [&](const BasicBlock *BB) -> double {
-        auto it = blockEnergyByName.find(getBlockName(*BB, F));
-        if (it == blockEnergyByName.end()) {
-            return 0.0;
+    // Step 1: Recursively compute total energy for each direct sub-loop.
+    DenseMap<const Loop *, double> subLoopTotal;
+    DenseMap<const Loop *, std::set<std::string>> subLoopBlocks;
+    for (Loop *SubL : L->getSubLoops()) {
+        auto subPath = computeWorstCasePathSummary(SubL, blockEnergyByName,
+                                                   F, LI, SE);
+        if (!subPath.ok) {
+            result.error = "sub-loop-energy-unavailable";
+            return result;
         }
-        return it->second;
+        unsigned tc = SE.getSmallConstantTripCount(SubL);
+        if (tc == 0) {
+            result.error = "sub-loop-unknown-trip-count";
+            return result;
+        }
+        subLoopTotal[SubL] = subPath.energy * static_cast<double>(tc);
+        for (const BasicBlock *BB : SubL->blocks())
+            subLoopBlocks[SubL].insert(getBlockName(*BB, F));
+    }
+
+    // Step 2: Block energy with sub-loop collapsing — inner-loop headers
+    // carry collapsed total energy; other blocks use per-block energy.
+    auto getEnergy = [&](const BasicBlock *BB) -> double {
+        Loop *ChildL = getDirectChildLoop(L, BB, LI);
+        if (ChildL && ChildL->getHeader() == BB) {
+            auto it = subLoopTotal.find(ChildL);
+            return (it != subLoopTotal.end()) ? it->second : 0.0;
+        }
+        auto it = blockEnergyByName.find(getBlockName(*BB, F));
+        return (it != blockEnergyByName.end()) ? it->second : 0.0;
+    };
+
+    // Step 3: Successor computation with sub-loop collapsing — inner-loop
+    // headers jump directly to exit blocks, skipping inner-loop bodies.
+    auto getSuccs = [&](const BasicBlock *BB) -> SmallVector<const BasicBlock *, 4> {
+        SmallVector<const BasicBlock *, 4> succs;
+        Loop *ChildL = getDirectChildLoop(L, BB, LI);
+        if (ChildL && ChildL->getHeader() == BB) {
+            SmallVector<BasicBlock *, 4> exits;
+            ChildL->getExitBlocks(exits);
+            for (BasicBlock *Exit : exits)
+                succs.push_back(Exit);
+        } else {
+            for (const BasicBlock *Succ : successors(BB))
+                succs.push_back(Succ);
+        }
+        return succs;
     };
 
     if (Header == Latch) {
@@ -126,7 +179,7 @@ static PathSummary computeWorstCasePathSummary(
         visitState[BB] = VisitState::Visiting;
         double bestSuccEnergy = -1.0;
         const BasicBlock *best = nullptr;
-        for (const BasicBlock *Succ : successors(BB)) {
+        for (const BasicBlock *Succ : getSuccs(BB)) {
             if (!L->contains(Succ)) {
                 continue;
             }
@@ -168,6 +221,15 @@ static PathSummary computeWorstCasePathSummary(
     const BasicBlock *cur = Header;
     while (cur) {
         pathBlocks.insert(getBlockName(*cur, F));
+        // If this block is an inner-loop header, expand pathBlocks to
+        // include all blocks in that sub-loop for NVM/def/liveIn aggregation.
+        Loop *ChildL = getDirectChildLoop(L, cur, LI);
+        if (ChildL && ChildL->getHeader() == cur) {
+            auto it = subLoopBlocks.find(ChildL);
+            if (it != subLoopBlocks.end()) {
+                pathBlocks.insert(it->second.begin(), it->second.end());
+            }
+        }
         if (cur == Latch) {
             break;
         }
@@ -307,6 +369,7 @@ double AbstractCFG::getQReboot() const {
 
 AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                                         llvm::LoopInfo &LI,
+                                        llvm::ScalarEvolution &SE,
                                         const CFGAnalysis &cfg,
                                         const StateAnalysis &state,
                                         const EnergyModel &energy) {
@@ -330,7 +393,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         usedNodeNames.insert(block);
     }
 
-    std::vector<Loop *> loops = collectInnermostFirst(LI);
+    std::vector<Loop *> loops = collectOutermostFirst(LI);
     std::set<std::string> summarizedConcreteBlocks;
     std::map<std::string, LoopAggregate> summariesByNode;
 
@@ -357,7 +420,8 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             continue;
         }
 
-        PathSummary path = computeWorstCasePathSummary(L, blockEnergyByName, F);
+        PathSummary path = computeWorstCasePathSummary(L, blockEnergyByName,
+                                                         F, LI, SE);
         if (!path.ok) {
             out.stats.skippedReasons[path.error]++;
             continue;
@@ -518,7 +582,14 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
 
         auto summaryIt = summariesByNode.find(nodeName);
         if (summaryIt != summariesByNode.end()) {
-            llvm::BasicBlock *rep = state.getBlock(summaryIt->second.headerName);
+            llvm::BasicBlock *header = state.getBlock(summaryIt->second.headerName);
+            // Use the preheader as the representative block: region boundaries on
+            // summary nodes should fire once per loop entry, not every iteration.
+            llvm::BasicBlock *rep = header;
+            if (llvm::Loop *L = LI.getLoopFor(header)) {
+                if (llvm::BasicBlock *PH = L->getLoopPreheader())
+                    rep = PH;
+            }
             model.nodeMap_.setSummaryRepresentative(nodeId, rep);
         } else {
             llvm::BasicBlock *bb = state.getBlock(nodeName);

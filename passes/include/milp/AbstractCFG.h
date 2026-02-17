@@ -4,6 +4,7 @@
 #include "milp/ModelViews.h"
 
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/Function.h"
 
 #include <map>
@@ -74,6 +75,7 @@ private:
     friend struct AbstractCFGBuildResult;
     friend AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                                                    llvm::LoopInfo &LI,
+                                                   llvm::ScalarEvolution &SE,
                                                    const CFGAnalysis &cfg,
                                                    const StateAnalysis &state,
                                                    const EnergyModel &energy);
@@ -108,6 +110,7 @@ struct AbstractCFGBuildResult {
 /// Build loop-collapsed abstract model used by MILP.
 AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                                         llvm::LoopInfo &LI,
+                                        llvm::ScalarEvolution &SE,
                                         const CFGAnalysis &cfg,
                                         const StateAnalysis &state,
                                         const EnergyModel &energy);
