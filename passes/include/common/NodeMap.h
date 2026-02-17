@@ -36,12 +36,19 @@ public:
         summaryRepresentative_[summaryNode] = representativeBB;
     }
 
+    void setSummaryMember(NodeId summaryNode, llvm::BasicBlock *BB) {
+        if (!BB) return;
+        reverseSummaryMembers_[BB] = summaryNode;
+    }
+
     NodeId getNodeId(const llvm::BasicBlock *BB) const {
         auto it = reverseConcrete_.find(BB);
-        if (it == reverseConcrete_.end()) {
-            return kInvalidNodeId;
-        }
-        return it->second;
+        if (it != reverseConcrete_.end())
+            return it->second;
+        auto it2 = reverseSummaryMembers_.find(BB);
+        if (it2 != reverseSummaryMembers_.end())
+            return it2->second;
+        return kInvalidNodeId;
     }
 
     llvm::BasicBlock *getConcreteBlock(NodeId node) const {
@@ -62,6 +69,7 @@ private:
     llvm::DenseMap<NodeId, llvm::WeakTrackingVH> concreteNodes_;
     llvm::DenseMap<const llvm::BasicBlock *, NodeId> reverseConcrete_;
     llvm::DenseMap<NodeId, llvm::WeakTrackingVH> summaryRepresentative_;
+    llvm::DenseMap<const llvm::BasicBlock *, NodeId> reverseSummaryMembers_;
 };
 
 } // namespace checkpoint

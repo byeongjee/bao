@@ -6,6 +6,8 @@
 
 #include "llvm/IR/Module.h"
 
+#include <map>
+
 namespace checkpoint {
 
 /// Instruments LLVM IR based on MILP solution.
@@ -27,7 +29,15 @@ private:
     llvm::FunctionCallee storeMemFn_;
     llvm::FunctionCallee restoreMemFn_;
 
+    /// Maps candidate globals to their SRAM shadow globals.
+    std::map<llvm::GlobalVariable *, llvm::GlobalVariable *> shadowMap_;
+
     void declareRuntimeFunctions();
+
+    void createShadowGlobals(llvm::Function &F, const MILPSolution &solution);
+    void rewriteAccessesInVMRegions(llvm::Function &F,
+                                    const MILPSolution &solution,
+                                    const ICFGView &cfg);
 
     unsigned insertRegionBoundaries(llvm::Function &F,
                                     const MILPSolution &solution,

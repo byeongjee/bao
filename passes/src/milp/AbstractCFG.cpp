@@ -591,6 +591,13 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                     rep = PH;
             }
             model.nodeMap_.setSummaryRepresentative(nodeId, rep);
+            // Register all loop-interior blocks → summary NodeId so the
+            // instrumenter can resolve any BB inside a summarized loop.
+            for (const std::string &blockName : summaryIt->second.loopBlocks) {
+                llvm::BasicBlock *loopBB = state.getBlock(blockName);
+                if (loopBB)
+                    model.nodeMap_.setSummaryMember(nodeId, loopBB);
+            }
         } else {
             llvm::BasicBlock *bb = state.getBlock(nodeName);
             model.nodeMap_.setConcreteNode(nodeId, bb);

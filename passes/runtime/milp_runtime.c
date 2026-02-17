@@ -46,10 +46,11 @@ void __checkpoint_store_reg(int32_t slot_id, int64_t value) {
 }
 
 void __checkpoint_store_mem(void *nvm_dst, void *vm_src, int32_t size) {
-    (void)nvm_dst;
-    (void)vm_src;
-    (void)size;
-    /* TODO */
+    uint8_t *dst = (uint8_t *)nvm_dst;
+    const uint8_t *src = (const uint8_t *)vm_src;
+    for (int32_t i = 0; i < size; i++) {
+        dst[i] = src[i];
+    }
 }
 
 void __restore_reg(int32_t slot_id, void *dest) {
@@ -59,8 +60,9 @@ void __restore_reg(int32_t slot_id, void *dest) {
 }
 
 void __restore_mem(void *vm_dst, void *nvm_src, int32_t size) {
-    (void)vm_dst;
-    (void)nvm_src;
-    (void)size;
-    /* TODO */
+    uint8_t *dst = (uint8_t *)vm_dst;
+    const uint8_t *src = (const uint8_t *)nvm_src;
+    for (int32_t i = 0; i < size; i++) {
+        dst[i] = src[i];
+    }
 }

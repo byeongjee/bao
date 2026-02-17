@@ -53,6 +53,7 @@ SCENARIOS=(
     "scenario_store_global:scenario_config.json:scenario_milp_config.json"
     "scenario_vm_hot:scenario_config.json:scenario_milp_config.json"
     "scenario_vm_overflow:scenario_vm_overflow_config.json:scenario_milp_vm_overflow_config.json"
+    "scenario_vm_nvm_enforcement:scenario_config.json:scenario_milp_config.json"
     "scenario_needvol:scenario_config.json:scenario_milp_config.json"
     "scenario_tight:scenario_tight_config.json:scenario_milp_tight_config.json"
     "scenario_infeasible:scenario_config.json:scenario_milp_config.json"

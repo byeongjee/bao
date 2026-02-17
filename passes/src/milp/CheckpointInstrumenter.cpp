@@ -5,6 +5,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <cassert>
 #include <set>
 #include <vector>
 
@@ -34,10 +35,71 @@ unsigned CheckpointInstrumenter::instrumentFunction(
     const ICFGView &cfg,
     const StateAnalysis &state) {
 
-    unsigned inserted = 0;
-    inserted += insertRegionBoundaries(F, solution, cfg, state);
     applyMemoryPlacement(state);
+    createShadowGlobals(F, solution);
+    rewriteAccessesInVMRegions(F, solution, cfg);
+    unsigned inserted = insertRegionBoundaries(F, solution, cfg, state);
     return inserted;
+}
+
+void CheckpointInstrumenter::applyMemoryPlacement(const StateAnalysis &state) {
+    for (llvm::GlobalVariable *GV : state.getVMObjs()) {
+        GV->setSection(".nvm");
+    }
+}
+
+void CheckpointInstrumenter::createShadowGlobals(
+    llvm::Function &F,
+    const MILPSolution &solution) {
+
+    shadowMap_.clear();
+
+    // Collect candidate GVs that have placeInVm=true for at least one node.
+    std::set<llvm::GlobalVariable *> vmPlacedGVs;
+    for (const auto &[key, placed] : solution.placeInVm) {
+        if (placed) {
+            vmPlacedGVs.insert(key.second);
+        }
+    }
+
+    for (llvm::GlobalVariable *GV : vmPlacedGVs) {
+        auto *shadow = new llvm::GlobalVariable(
+            M_, GV->getValueType(), /*isConstant=*/false,
+            llvm::GlobalValue::InternalLinkage,
+            llvm::Constant::getNullValue(GV->getValueType()),
+            "__vm_shadow_" + GV->getName().str());
+        shadow->setAlignment(GV->getAlign());
+        shadowMap_[GV] = shadow;
+    }
+}
+
+void CheckpointInstrumenter::rewriteAccessesInVMRegions(
+    llvm::Function &F,
+    const MILPSolution &solution,
+    const ICFGView &cfg) {
+
+    const NodeMap &nodeMap = cfg.getNodeMap();
+    for (llvm::BasicBlock &BB : F) {
+        NodeId nodeId = nodeMap.getNodeId(&BB);
+        if (nodeId == kInvalidNodeId)
+            continue;
+
+        for (auto &[GV, shadow] : shadowMap_) {
+            auto key = std::make_pair(nodeId, GV);
+            auto pvIt = solution.placeInVm.find(key);
+            if (pvIt == solution.placeInVm.end() || !pvIt->second)
+                continue;
+
+            // Replace uses of GV in this block with shadow.
+            for (llvm::Instruction &I : BB) {
+                for (unsigned i = 0; i < I.getNumOperands(); ++i) {
+                    if (I.getOperand(i) == GV) {
+                        I.setOperand(i, shadow);
+                    }
+                }
+            }
+        }
+    }
 }
 
 unsigned CheckpointInstrumenter::insertRegionBoundaries(
@@ -101,7 +163,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                 }
                 llvm::Value *size = llvm::ConstantInt::get(
                     llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-                builder.CreateCall(storeMemFn_, {GV, GV, size});
+                // Commit: copy shadow (VM/SRAM) -> original (NVM/FRAM)
+                auto shadowIt = shadowMap_.find(GV);
+                assert(shadowIt != shadowMap_.end() &&
+                       "commit requires a VM shadow for the global");
+                builder.CreateCall(storeMemFn_,
+                                   {GV, shadowIt->second, size});
                 inserted++;
             }
         }
@@ -128,18 +195,17 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
             }
             llvm::Value *size = llvm::ConstantInt::get(
                 llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-            builder.CreateCall(restoreMemFn_, {GV, GV, size});
+            // Restore: copy original (NVM/FRAM) -> shadow (VM/SRAM)
+            auto shadowIt = shadowMap_.find(GV);
+            assert(shadowIt != shadowMap_.end() &&
+                   "needRestore requires a VM shadow for the global");
+            builder.CreateCall(restoreMemFn_,
+                               {shadowIt->second, GV, size});
             inserted++;
         }
     }
 
     return inserted;
-}
-
-void CheckpointInstrumenter::applyMemoryPlacement(const StateAnalysis &state) {
-    for (llvm::GlobalVariable *GV : state.getVMObjs()) {
-        GV->setSection(".candidate");
-    }
 }
 
 } // namespace checkpoint
