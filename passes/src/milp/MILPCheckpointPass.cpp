@@ -11,6 +11,7 @@
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Format.h"
@@ -47,6 +48,21 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     }
 
     auto &ctx = *ctxResult.context;
+
+    // Step 2b: Hoist non-entry static allocas to the entry block.
+    // At -O2, inlining can leave constant-size allocas in non-entry blocks.
+    // StateAnalysis needs them in the entry block so they dominate all uses
+    // and liveness is computed correctly.
+    BasicBlock &entryBB = F.getEntryBlock();
+    for (BasicBlock &BB : F) {
+        if (&BB == &entryBB)
+            continue;
+        for (auto it = BB.begin(); it != BB.end(); ) {
+            auto *AI = dyn_cast<AllocaInst>(&*it++);
+            if (AI && isa<ConstantInt>(AI->getArraySize()))
+                AI->moveBefore(entryBB, entryBB.getFirstInsertionPt());
+        }
+    }
 
     // Step 3: Run StateAnalysis (Pass B)
     ctx.stateAnalysis = std::make_unique<StateAnalysis>(F, AA, *ctx.cfg);

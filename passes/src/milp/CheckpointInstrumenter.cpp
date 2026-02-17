@@ -183,6 +183,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         std::set<NodeId> nodeSet(nodes.begin(), nodes.end());
 
         llvm::BasicBlock::iterator insertIt = BB.getFirstNonPHIIt();
+        // Skip past allocas so runtime calls that reference alloca pointers
+        // are placed after the alloca definitions (dominance requirement).
+        while (insertIt != BB.end() && llvm::isa<llvm::AllocaInst>(&*insertIt))
+            ++insertIt;
         if (insertIt == BB.end()) {
             continue;
         }

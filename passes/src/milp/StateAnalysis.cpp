@@ -430,6 +430,7 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
             reportStrictError(I, "call target/effects are unresolved in strict mode");
             return false;
         }
+        return true;
     }
 
     if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {

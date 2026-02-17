@@ -164,6 +164,8 @@ static void insertLoopTripcountMarker(Loop *L, uint64_t tripCount) {
     auto *I32Ty = Type::getInt32Ty(Ctx);
     auto *MarkerTy = FunctionType::get(Type::getVoidTy(Ctx), {I32Ty}, false);
     FunctionCallee Marker = M->getOrInsertFunction("__loop_tripcount", MarkerTy);
+    if (auto *F = llvm::dyn_cast<llvm::Function>(Marker.getCallee()))
+        F->setDoesNotAccessMemory();
 
     uint64_t maxMarker = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
     uint64_t markerVal = std::min(tripCount, maxMarker);
