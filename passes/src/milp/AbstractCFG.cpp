@@ -475,7 +475,26 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         }
 
         out.stats.loopsEligible++;
-        if (!(path.energy < budget)) {
+
+        // Compute ineligible restore cost margin: these restore costs are
+        // unavoidable at any region start containing this summary node, but
+        // the basic budget (capacity - E_pro - E_epi) doesn't account for
+        // them.  Without this margin the MILP can become infeasible when
+        // pathEnergy is close to budget (e.g. cuckoo_filter at 10uF).
+        double ineligRestoreCost = 0.0;
+        {
+            std::set<llvm::Value *> seenInelig;
+            for (const std::string &blockName : path.blocksOnPath) {
+                for (llvm::Value *V : state.getIneligLiveIn(blockName)) {
+                    if (seenInelig.insert(V).second) {
+                        ineligRestoreCost += energy.getERestore(V);
+                    }
+                }
+            }
+        }
+
+        const double effectiveBudget = budget - ineligRestoreCost;
+        if (effectiveBudget <= 0.0 || !(path.energy < effectiveBudget)) {
             out.stats.skippedReasons["loop-unit-exceeds-budget"]++;
             continue;
         }
