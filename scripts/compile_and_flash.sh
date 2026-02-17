@@ -300,17 +300,22 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             compile_to_ir
 
             # RockClimb pass
-            PASS_OUTPUT=$($OPT -load-pass-plugin="$PASS_LIB" \
+            PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
+            if $OPT -load-pass-plugin="$PASS_LIB" \
                 -passes=rockclimb \
                 -energy-config="$ESTIMATOR_CONFIG" \
                 -rockclimb-config="$ROCKCLIMB_CONFIG" \
                 -rockclimb-memory-ckpt="$MEMORY_CKPT" \
-                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" 2>&1)
-
-            if [[ "$VERBOSE" == "true" ]]; then
-                echo "$PASS_OUTPUT"
+                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" \
+                >"$PASS_LOG" 2>&1; then
+                if [[ "$VERBOSE" == "true" ]]; then
+                    cat "$PASS_LOG"
+                else
+                    grep -E "^(Region|Memory|Inserted|===)" "$PASS_LOG" | head -10
+                fi
             else
-                echo "$PASS_OUTPUT" | grep -E "^(Region|Memory|Inserted|===)" | head -10
+                cat "$PASS_LOG" >&2
+                error "RockClimb pass failed (see output above)"
             fi
 
             # Run energy-validate pass if requested
@@ -354,16 +359,21 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             compile_to_ir
 
             # MILP pass
-            PASS_OUTPUT=$($OPT -load-pass-plugin="$PASS_LIB" \
+            PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
+            if $OPT -load-pass-plugin="$PASS_LIB" \
                 -passes=milp \
                 -energy-config="$ESTIMATOR_CONFIG" \
                 -milp-config="$MILP_CONFIG" \
-                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" 2>&1)
-
-            if [[ "$VERBOSE" == "true" ]]; then
-                echo "$PASS_OUTPUT"
+                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" \
+                >"$PASS_LOG" 2>&1; then
+                if [[ "$VERBOSE" == "true" ]]; then
+                    cat "$PASS_LOG"
+                else
+                    head -10 "$PASS_LOG"
+                fi
             else
-                echo "$PASS_OUTPUT" | head -10
+                cat "$PASS_LOG" >&2
+                error "MILP pass failed (see output above)"
             fi
 
             # Run energy-validate pass if requested
