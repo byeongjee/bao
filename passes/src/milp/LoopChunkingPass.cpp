@@ -83,26 +83,6 @@ struct LoopChunkingStats {
     std::vector<std::pair<std::string, uint64_t>> chosenKByHeader;
 };
 
-static void collectInnermostLoopHeaders(const Loop *L,
-                                        std::vector<WeakTrackingVH> &out) {
-    for (const Loop *Sub : L->getSubLoops()) {
-        collectInnermostLoopHeaders(Sub, out);
-    }
-    if (L->getSubLoops().empty()) {
-        if (BasicBlock *Header = L->getHeader()) {
-            out.emplace_back(Header);
-        }
-    }
-}
-
-static std::vector<WeakTrackingVH> collectInnermostLoopHeaders(
-    const LoopInfo &LI) {
-    std::vector<WeakTrackingVH> headers;
-    for (const Loop *L : LI) {
-        collectInnermostLoopHeaders(L, headers);
-    }
-    return headers;
-}
 
 static bool containsInvoke(const Loop *L) {
     for (BasicBlock *BB : L->blocks()) {
@@ -124,9 +104,39 @@ static bool isLoopTripcountCall(const Instruction &I) {
     return Callee && Callee->getName() == "__loop_tripcount";
 }
 
-static void removeLoopTripcountMarkers(Loop *L) {
+static Loop *getDirectChildLoop(const Loop *Parent, const BasicBlock *BB,
+                                const LoopInfo &LI) {
+    Loop *Inner = LI.getLoopFor(BB);
+    if (!Inner || Inner == Parent) return nullptr;
+    while (Inner->getParentLoop() != Parent) Inner = Inner->getParentLoop();
+    return Inner;
+}
+
+static bool isDirectlyInLoop(const BasicBlock *BB, const Loop *L,
+                             const LoopInfo &LI) {
+    return LI.getLoopFor(BB) == L;
+}
+
+static std::optional<uint64_t> getMarkerTripCount(const Loop *L) {
+    BasicBlock *Header = L->getHeader();
+    if (!Header) return std::nullopt;
+    for (const Instruction &I : *Header) {
+        if (auto *CI = dyn_cast<CallInst>(&I)) {
+            if (auto *Callee = CI->getCalledFunction()) {
+                if (Callee->getName() == "__loop_tripcount") {
+                    if (auto *C = dyn_cast<ConstantInt>(CI->getArgOperand(0)))
+                        return C->getZExtValue();
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+static void removeLoopTripcountMarkers(Loop *L, LoopInfo &LI) {
     SmallVector<Instruction *, 8> toErase;
     for (BasicBlock *BB : L->blocks()) {
+        if (!isDirectlyInLoop(BB, L, LI)) continue;
         for (Instruction &I : *BB) {
             if (isLoopTripcountCall(I)) {
                 toErase.push_back(&I);
@@ -162,9 +172,15 @@ static void insertLoopTripcountMarker(Loop *L, uint64_t tripCount) {
     B.CreateCall(Marker, {ConstantInt::get(I32Ty, markerVal)});
 }
 
+static std::optional<uint64_t> getConstantTripCount(Loop *L,
+                                                    ScalarEvolution &SE,
+                                                    const BasicBlock *ExitingBlock);
+
 static EnergyPathResult computeWorstCaseIterationEnergy(
     Loop *L,
-    const DenseMap<const BasicBlock *, double> &blockEnergy) {
+    const DenseMap<const BasicBlock *, double> &blockEnergy,
+    LoopInfo &LI,
+    ScalarEvolution &SE) {
     EnergyPathResult result;
 
     BasicBlock *Header = L->getHeader();
@@ -174,12 +190,63 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
         return result;
     }
 
-    auto getEnergy = [&](const BasicBlock *BB) -> double {
-        auto it = blockEnergy.find(BB);
-        if (it == blockEnergy.end()) {
-            return 0.0;
+    // Step 1: Recursively compute total energy for each direct sub-loop
+    DenseMap<const Loop *, double> subLoopTotal;
+    for (Loop *SubL : L->getSubLoops()) {
+        std::optional<uint64_t> scevTC;
+        SmallVector<BasicBlock *, 8> subExiting;
+        SubL->getExitingBlocks(subExiting);
+        if (subExiting.size() == 1)
+            scevTC = getConstantTripCount(SubL, SE, subExiting.front());
+        auto markerTC = getMarkerTripCount(SubL);
+
+        std::optional<uint64_t> subTC;
+        if (scevTC && markerTC)
+            subTC = std::min(*scevTC, *markerTC);
+        else if (scevTC)
+            subTC = scevTC;
+        else
+            subTC = markerTC;
+
+        if (!subTC) {
+            result.error = "sub-loop-unknown-trip-count";
+            return result;
         }
-        return it->second;
+
+        auto subIter = computeWorstCaseIterationEnergy(SubL, blockEnergy, LI, SE);
+        if (!subIter.ok) {
+            result.error = "sub-loop-energy-unavailable";
+            return result;
+        }
+
+        subLoopTotal[SubL] = subIter.energy * static_cast<double>(*subTC);
+    }
+
+    // Step 2: Block energy with sub-loop collapsing
+    auto getEnergy = [&](const BasicBlock *BB) -> double {
+        Loop *ChildL = getDirectChildLoop(L, BB, LI);
+        if (ChildL && ChildL->getHeader() == BB) {
+            auto it = subLoopTotal.find(ChildL);
+            return (it != subLoopTotal.end()) ? it->second : 0.0;
+        }
+        auto it = blockEnergy.find(BB);
+        return (it != blockEnergy.end()) ? it->second : 0.0;
+    };
+
+    // Step 3: Successor computation with sub-loop collapsing
+    auto getSuccs = [&](const BasicBlock *BB) -> SmallVector<const BasicBlock *, 4> {
+        SmallVector<const BasicBlock *, 4> succs;
+        Loop *ChildL = getDirectChildLoop(L, BB, LI);
+        if (ChildL && ChildL->getHeader() == BB) {
+            SmallVector<BasicBlock *, 4> exits;
+            ChildL->getExitBlocks(exits);
+            for (BasicBlock *Exit : exits)
+                succs.push_back(Exit);
+        } else {
+            for (const BasicBlock *Succ : successors(BB))
+                succs.push_back(Succ);
+        }
+        return succs;
     };
 
     if (Header == Latch) {
@@ -209,7 +276,7 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
 
         visitState[BB] = VisitState::Visiting;
         double bestSucc = -1.0;
-        for (const BasicBlock *Succ : successors(BB)) {
+        for (const BasicBlock *Succ : getSuccs(BB)) {
             if (!L->contains(Succ)) {
                 continue;
             }
@@ -296,7 +363,8 @@ static PlanResult buildRewritePlan(
     Loop *L,
     ScalarEvolution &SE,
     const DenseMap<const BasicBlock *, double> &blockEnergy,
-    const checkpoint::MILPEnergyParams &params) {
+    const checkpoint::MILPEnergyParams &params,
+    LoopInfo &LI) {
     PlanResult result;
     result.skipReason = "unknown";
 
@@ -351,7 +419,7 @@ static PlanResult buildRewritePlan(
     }
 
     EnergyPathResult iterEnergy =
-        computeWorstCaseIterationEnergy(L, blockEnergy);
+        computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok) {
         result.skipReason = iterEnergy.error;
         return result;
@@ -391,6 +459,54 @@ static PlanResult buildRewritePlan(
     return result;
 }
 
+static void selectInNest(
+    Loop *L, ScalarEvolution &SE,
+    const DenseMap<const BasicBlock *, double> &blockEnergy,
+    const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+    std::vector<std::pair<Loop *, LoopRewritePlan>> &out,
+    LoopChunkingStats &stats) {
+
+    stats.loopsSeen++;
+    PlanResult pr = buildRewritePlan(L, SE, blockEnergy, params, LI);
+
+    if (pr.plan) {
+        out.emplace_back(L, *pr.plan);
+        return;
+    }
+
+    if (LoopChunkingVerboseOpt) {
+        BasicBlock *Header = L->getHeader();
+        const Function *F = Header ? Header->getParent() : nullptr;
+        std::string headerName = (Header && F)
+            ? checkpoint::getBlockName(*Header, *F) : "<unknown>";
+        std::string funcName = F ? F->getName().str() : "<unknown>";
+        errs() << "LoopChunkingPass: skip " << funcName << "::"
+               << headerName << " reason=" << pr.skipReason << "\n";
+    }
+
+    if (pr.skipReason == "k-covers-entire-loop") {
+        stats.skippedReasons[pr.skipReason]++;
+        return;
+    }
+
+    stats.skippedReasons[pr.skipReason]++;
+    for (Loop *SubL : L->getSubLoops()) {
+        selectInNest(SubL, SE, blockEnergy, params, LI, out, stats);
+    }
+}
+
+static std::vector<std::pair<Loop *, LoopRewritePlan>> selectLoopsToChunk(
+    LoopInfo &LI, ScalarEvolution &SE,
+    const DenseMap<const BasicBlock *, double> &blockEnergy,
+    const checkpoint::MILPEnergyParams &params,
+    LoopChunkingStats &stats) {
+    std::vector<std::pair<Loop *, LoopRewritePlan>> selected;
+    for (Loop *L : LI) {
+        selectInNest(L, SE, blockEnergy, params, LI, selected, stats);
+    }
+    return selected;
+}
+
 static bool rewriteLoopWithChunkSize(const LoopRewritePlan &plan,
                                      LoopInfo &LI,
                                      ScalarEvolution &SE,
@@ -422,11 +538,11 @@ static bool rewriteLoopWithChunkSize(const LoopRewritePlan &plan,
         uint64_t mainTrip = plan.N / plan.K;
         uint64_t remTrip = plan.N % plan.K;
 
-        removeLoopTripcountMarkers(plan.L);
+        removeLoopTripcountMarkers(plan.L, LI);
         insertLoopTripcountMarker(plan.L, mainTrip);
 
         if (remainderLoop) {
-            removeLoopTripcountMarkers(remainderLoop);
+            removeLoopTripcountMarkers(remainderLoop, LI);
             insertLoopTripcountMarker(remainderLoop, remTrip);
         }
     }
@@ -436,7 +552,7 @@ static bool rewriteLoopWithChunkSize(const LoopRewritePlan &plan,
 
 static void printSummary(const Function &F, const LoopChunkingStats &stats) {
     errs() << "=== Loop Chunking: " << F.getName() << " ===\n";
-    errs() << "  Innermost loops seen:            " << stats.loopsSeen << "\n";
+    errs() << "  Loops considered:                " << stats.loopsSeen << "\n";
     errs() << "  Eligible loops:                  " << stats.loopsEligible << "\n";
     errs() << "  Rewritten loops:                 " << stats.loopsRewritten << "\n";
 
@@ -523,13 +639,17 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
     LoopChunkingStats stats;
     bool changed = false;
 
-    // Intentionally snapshot only the original innermost loop headers.
-    // Rewrites can create new loops (e.g., unroll remainders), but we do not
-    // re-queue those in the same pass run.
-    std::vector<WeakTrackingVH> worklist = collectInnermostLoopHeaders(LI);
-    stats.loopsSeen = static_cast<unsigned>(worklist.size());
+    // Select loops to chunk (outermost-first within each nest).
+    // Snapshot headers as WeakTrackingVH so we can detect invalidation
+    // from prior rewrites that may restructure the CFG.
+    auto selected = selectLoopsToChunk(LI, SE, blockEnergy, *milpParamsOpt, stats);
+    std::vector<std::pair<WeakTrackingVH, LoopRewritePlan>> worklist;
+    worklist.reserve(selected.size());
+    for (auto &[L, plan] : selected) {
+        worklist.emplace_back(WeakTrackingVH(L->getHeader()), plan);
+    }
 
-    for (const WeakTrackingVH &headerHandle : worklist) {
+    for (auto &[headerHandle, plan] : worklist) {
         BasicBlock *Header = dyn_cast_or_null<BasicBlock>(headerHandle);
         if (!Header) {
             stats.skippedReasons["loop-header-erased-after-prior-rewrite"]++;
@@ -542,24 +662,9 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
             stats.skippedReasons["loop-unresolvable-from-header"]++;
             continue;
         }
-        if (!L->getSubLoops().empty()) {
-            stats.skippedReasons["loop-no-longer-innermost-after-prior-rewrite"]++;
-            continue;
-        }
 
-        PlanResult planResult =
-            buildRewritePlan(L, SE, blockEnergy, *milpParamsOpt);
-        if (!planResult.plan) {
-            stats.skippedReasons[planResult.skipReason]++;
-            if (LoopChunkingVerboseOpt) {
-                errs() << "LoopChunkingPass: skip " << F.getName() << "::"
-                       << headerName << " reason=" << planResult.skipReason << "\n";
-            }
-            continue;
-        }
-
+        plan.L = L;
         stats.loopsEligible++;
-        const LoopRewritePlan &plan = *planResult.plan;
 
         bool rewritten =
             rewriteLoopWithChunkSize(plan, LI, SE, DT, AC, AA, TTI);
