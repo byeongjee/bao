@@ -7,8 +7,8 @@
  * The optimizer should prefer placing frequently-accessed globals in VM.
  */
 
-int frequently_accessed;
-int rarely_accessed;
+int frequently_accessed __attribute__((annotate("milp_candidate")));
+int rarely_accessed __attribute__((annotate("milp_candidate")));
 
 int test_vm_nvm_placement(int x) {
     // Frequent accesses to first global

@@ -3,7 +3,11 @@
  * Blocks large enough to force a boundary.
  * Expected: VM-placed globals: 4/5; one global gets .nvm section. */
 
-int g_a, g_b, g_c, g_d, g_e;
+int g_a __attribute__((annotate("milp_candidate"))),
+    g_b __attribute__((annotate("milp_candidate"))),
+    g_c __attribute__((annotate("milp_candidate"))),
+    g_d __attribute__((annotate("milp_candidate"))),
+    g_e __attribute__((annotate("milp_candidate")));
 volatile int barrier;
 
 int main(void) {

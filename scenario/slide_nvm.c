@@ -4,8 +4,8 @@
  * g_cold is accessed once → low frequency → placed in NVM.
  * Expected: g_hot in VM, g_cold in NVM (.nvm section). */
 
-int g_hot;
-int g_cold;
+int g_hot __attribute__((annotate("milp_candidate")));
+int g_cold __attribute__((annotate("milp_candidate")));
 volatile int barrier;
 
 int main(void) {

@@ -38,13 +38,13 @@ static const unsigned char PLAINTEXT[] =
 #define CYPHERTEXT_SIZE (NUM_PLAINTEXT_BLOCKS * NUM_DIGITS)
 
 // --- Global Buffers ---
-digit_t g_A[NUM_DIGITS];
-digit_t g_B[NUM_DIGITS];
-digit_t g_product[NUM_DIGITS * 2];
-digit_t g_base[NUM_DIGITS * 2];
-digit_t g_block[NUM_DIGITS * 2];
-digit_t g_cyphertext[CYPHERTEXT_SIZE];
-unsigned g_cyphertext_len = 0;
+digit_t g_A[NUM_DIGITS] __attribute__((annotate("milp_candidate")));
+digit_t g_B[NUM_DIGITS] __attribute__((annotate("milp_candidate")));
+digit_t g_product[NUM_DIGITS * 2] __attribute__((annotate("milp_candidate")));
+digit_t g_base[NUM_DIGITS * 2] __attribute__((annotate("milp_candidate")));
+digit_t g_block[NUM_DIGITS * 2] __attribute__((annotate("milp_candidate")));
+digit_t g_cyphertext[CYPHERTEXT_SIZE] __attribute__((annotate("milp_candidate")));
+unsigned g_cyphertext_len __attribute__((annotate("milp_candidate"))) = 0;
 
 // --- Helper Functions ---
 

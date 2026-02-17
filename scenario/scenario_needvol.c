@@ -3,7 +3,7 @@
  * force a boundary.
  * Expected: __restore_mem call at boundary in the instrumented IR. */
 
-int g_vol;
+int g_vol __attribute__((annotate("milp_candidate")));
 volatile int barrier;
 
 int main(void) {

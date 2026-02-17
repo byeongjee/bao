@@ -3,7 +3,7 @@
  * depends on how many boundaries have needs_vol_restore.
  * Expected: g_rare placed in VM (store once, restore cost amortized). */
 
-int g_rare;
+int g_rare __attribute__((annotate("milp_candidate")));
 volatile int barrier;
 
 int main(void) {

@@ -3,7 +3,7 @@
  * to avoid NVM access penalty.
  * Expected: VM-placed globals: 1/1. */
 
-int g_hot;
+int g_hot __attribute__((annotate("milp_candidate")));
 
 int main(void) {
     int n = 10;
