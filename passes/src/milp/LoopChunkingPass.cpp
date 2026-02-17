@@ -2,6 +2,7 @@
 
 #include "common/AnnotationUtils.h"
 #include "common/BlockUtils.h"
+#include "common/LoopTripCount.h"
 #include "estimator/EnergyEstimatorFactory.h"
 #include "milp/EnergyModel.h"
 
@@ -119,21 +120,7 @@ static bool isDirectlyInLoop(const BasicBlock *BB, const Loop *L,
     return LI.getLoopFor(BB) == L;
 }
 
-static std::optional<uint64_t> getMarkerTripCount(const Loop *L) {
-    BasicBlock *Header = L->getHeader();
-    if (!Header) return std::nullopt;
-    for (const Instruction &I : *Header) {
-        if (auto *CI = dyn_cast<CallInst>(&I)) {
-            if (auto *Callee = CI->getCalledFunction()) {
-                if (Callee->getName() == "__loop_tripcount") {
-                    if (auto *C = dyn_cast<ConstantInt>(CI->getArgOperand(0)))
-                        return C->getZExtValue();
-                }
-            }
-        }
-    }
-    return std::nullopt;
-}
+using checkpoint::getMarkerTripCount;
 
 static void removeLoopTripcountMarkers(Loop *L, LoopInfo &LI) {
     SmallVector<Instruction *, 8> toErase;

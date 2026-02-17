@@ -2,6 +2,7 @@
 
 #include "common/BlockUtils.h"
 #include "common/CFGAnalysis.h"
+#include "common/LoopTripCount.h"
 #include "milp/EnergyModel.h"
 #include "milp/StateAnalysis.h"
 
@@ -112,8 +113,16 @@ static PathSummary computeWorstCasePathSummary(
             result.error = "sub-loop-energy-unavailable";
             return result;
         }
-        unsigned tc = SE.getSmallConstantTripCount(SubL);
-        if (tc == 0) {
+        unsigned scevTC = SE.getSmallConstantTripCount(SubL);
+        auto markerTC = getMarkerTripCount(SubL);
+        unsigned tc;
+        if (scevTC > 0 && markerTC)
+            tc = std::min(scevTC, static_cast<unsigned>(*markerTC));
+        else if (scevTC > 0)
+            tc = scevTC;
+        else if (markerTC)
+            tc = static_cast<unsigned>(*markerTC);
+        else {
             result.error = "sub-loop-unknown-trip-count";
             return result;
         }

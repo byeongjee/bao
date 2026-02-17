@@ -54,4 +54,21 @@ LoopTripCount::extractBounds(llvm::Function &F, llvm::LoopInfo &LI) {
     return bounds;
 }
 
+std::optional<uint64_t> getMarkerTripCount(const llvm::Loop *L) {
+    llvm::BasicBlock *Header = L->getHeader();
+    if (!Header) return std::nullopt;
+    for (const llvm::Instruction &I : *Header) {
+        if (auto *CI = llvm::dyn_cast<llvm::CallInst>(&I)) {
+            if (auto *Callee = CI->getCalledFunction()) {
+                if (Callee->getName() == "__loop_tripcount") {
+                    if (auto *C = llvm::dyn_cast<llvm::ConstantInt>(
+                            CI->getArgOperand(0)))
+                        return C->getZExtValue();
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace checkpoint

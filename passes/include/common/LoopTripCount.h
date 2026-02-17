@@ -4,6 +4,7 @@
 #include "llvm/IR/Function.h"
 
 #include <map>
+#include <optional>
 
 namespace checkpoint {
 
@@ -20,5 +21,9 @@ public:
     static std::map<const llvm::Loop*, unsigned>
     extractBounds(llvm::Function &F, llvm::LoopInfo &LI);
 };
+
+/// Return the __loop_tripcount(N) marker value from a loop's header block,
+/// or std::nullopt if no marker is present.
+std::optional<uint64_t> getMarkerTripCount(const llvm::Loop *L);
 
 } // namespace checkpoint
