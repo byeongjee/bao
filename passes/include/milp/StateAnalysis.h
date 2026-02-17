@@ -33,6 +33,12 @@ public:
     const std::vector<llvm::GlobalVariable *> &getVMObjs() const { return vmObjs_; }
     bool isCandidateGlobal(llvm::GlobalVariable *gv) const;
 
+    // -- Ineligible globals (V_inelig) --
+
+    /// Non-candidate globals accessed in the function (always in VM/SRAM).
+    const std::vector<llvm::GlobalVariable *> &getIneligibleObjs() const;
+    bool isIneligibleGlobal(llvm::GlobalVariable *gv) const;
+
     // -- Strict-analysis diagnostics --
 
     bool hasAnalysisErrors() const { return !analysisErrors_.empty(); }
@@ -81,6 +87,10 @@ private:
     std::vector<std::string> analysisErrors_;
     std::map<llvm::GlobalVariable *, unsigned> vmObjSizeBytes_;
 
+    // Ineligible globals (V_inelig)
+    std::vector<llvm::GlobalVariable *> ineligibleObjs_;
+    std::set<llvm::GlobalVariable *> ineligibleObjSet_;
+
     // Liveness
     std::map<std::string, std::set<llvm::GlobalVariable *>> vmObjLiveIn_;
     std::map<std::string, std::set<llvm::GlobalVariable *>> defGlobals_;
@@ -101,6 +111,7 @@ private:
     void reportStrictError(const llvm::Instruction &I, const std::string &reason);
 
     void identifyVMObjs();
+    void identifyIneligibleObjs();
     void buildBlockMap();
     void computeAccessMaps();
     void computeVMObjLiveness();

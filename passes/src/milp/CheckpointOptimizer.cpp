@@ -159,6 +159,7 @@ void CheckpointOptimizer::addVariables() {
             "is_region_start_" + nodeToken(cfg_, block));
     }
 
+    // Eligible (candidate) variables: placeInVm, pending, vmPending.
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             BlockGVKey key = std::make_pair(block, GV);
@@ -174,12 +175,27 @@ void CheckpointOptimizer::addVariables() {
         }
     }
 
+    // Ineligible variables: pending only (no placeInVm, no vmPending).
+    for (NodeId block : cfg_.getBlocks()) {
+        for (llvm::GlobalVariable *GV : state_.getIneligibleObjs()) {
+            BlockGVKey key = std::make_pair(block, GV);
+            pending_[key] = model_.addVar(
+                0.0, 1.0, 0.0, GRB_BINARY,
+                makeVarName(cfg_, "pending", block, GV));
+        }
+    }
+
+    // needRestore (eligible only) + commit (both elig and inelig live-ins).
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjLiveIn(block)) {
             BlockGVKey key = std::make_pair(block, GV);
-            needRestore_[key] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                makeVarName(cfg_, "need_restore", block, GV));
+            if (!state_.isIneligibleGlobal(GV)) {
+                // Eligible: needRestore + commit
+                needRestore_[key] = model_.addVar(
+                    0.0, 1.0, 0.0, GRB_BINARY,
+                    makeVarName(cfg_, "need_restore", block, GV));
+            }
+            // Both eligible and ineligible: commit (for b != entry)
             if (block != entry) {
                 commit_[key] = model_.addVar(
                     0.0, 1.0, 0.0, GRB_BINARY,
@@ -248,8 +264,16 @@ void CheckpointOptimizer::addC1_EntryRegionStart() {
 }
 
 void CheckpointOptimizer::addC3_VMCapacity() {
-    if (state_.getVMObjs().empty())
+    if (state_.getVMObjs().empty() && state_.getIneligibleObjs().empty())
         return;
+
+    // Ineligible globals always occupy VM — compute their constant size.
+    double ineligibleSize = 0;
+    for (llvm::GlobalVariable *GV : state_.getIneligibleObjs()) {
+        int sizeBytes = state_.getVMObjSizeBytes(GV);
+        if (sizeBytes > 0)
+            ineligibleSize += static_cast<double>(sizeBytes);
+    }
 
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr vmUsage = 0;
@@ -261,8 +285,10 @@ void CheckpointOptimizer::addC3_VMCapacity() {
             vmUsage += static_cast<double>(sizeBytes) *
                        placeInVm_[std::make_pair(block, GV)];
         }
-        model_.addConstr(vmUsage <= static_cast<double>(params_.vmCapacityBytes),
-                         "C3_vm_capacity_" + nodeToken(cfg_, block));
+        model_.addConstr(
+            vmUsage + ineligibleSize <=
+                static_cast<double>(params_.vmCapacityBytes),
+            "C3_vm_capacity_" + nodeToken(cfg_, block));
     }
 }
 
@@ -302,9 +328,17 @@ void CheckpointOptimizer::addC5_PlacementPropagation() {
 void CheckpointOptimizer::addC6_PendingPropagation() {
     auto preds = buildPredecessorMap(cfg_);
 
+    // Build combined list of all tracked globals (elig + inelig).
+    std::vector<llvm::GlobalVariable *> allTracked;
+    allTracked.insert(allTracked.end(),
+                      state_.getVMObjs().begin(), state_.getVMObjs().end());
+    allTracked.insert(allTracked.end(),
+                      state_.getIneligibleObjs().begin(),
+                      state_.getIneligibleObjs().end());
+
     // (1), (3), (4)
     for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        for (llvm::GlobalVariable *GV : allTracked) {
             BlockGVKey key = std::make_pair(block, GV);
             GRBVar p = pending_[key];
             double def = state_.getDefIndicator(block, GV) ? 1.0 : 0.0;
@@ -326,7 +360,7 @@ void CheckpointOptimizer::addC6_PendingPropagation() {
     // (2)
     unsigned idx = 0;
     for (const auto &[pred, succ] : cfg_.getEdges()) {
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        for (llvm::GlobalVariable *GV : allTracked) {
             model_.addConstr(
                 pending_[std::make_pair(succ, GV)] >=
                     pending_[std::make_pair(pred, GV)] - isRegionStart_[succ],
@@ -339,7 +373,7 @@ void CheckpointOptimizer::addC6_PendingPropagation() {
 void CheckpointOptimizer::addC7_CommitModel() {
     auto preds = buildPredecessorMap(cfg_);
 
-    // vm_pending[b,v] = pending[b,v] AND place_in_vm[b,v]
+    // C7.0: vm_pending[b,v] = pending[b,v] AND place_in_vm[b,v] — eligibles only
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             BlockGVKey key = std::make_pair(block, GV);
@@ -361,20 +395,39 @@ void CheckpointOptimizer::addC7_CommitModel() {
         std::string suffix =
             nodeToken(cfg_, block) + "_" + sanitizeToken(GV->getName());
 
-        model_.addConstr(commitVar <= isRegionStart_[block], "C7d_commit_le_x_" + suffix);
+        model_.addConstr(commitVar <= isRegionStart_[block],
+                         "C7d_commit_le_x_" + suffix);
 
-        GRBLinExpr predVmPending = 0;
-        for (NodeId pred : preds[block]) {
-            predVmPending += vmPending_[std::make_pair(pred, GV)];
-        }
-        model_.addConstr(commitVar <= predVmPending,
-                         "C7e_commit_le_preds_" + suffix);
-
-        for (NodeId pred : preds[block]) {
-            model_.addConstr(
-                commitVar >= isRegionStart_[block] +
-                                 vmPending_[std::make_pair(pred, GV)] - 1,
-                "C7f_commit_ge_pred_" + nodeToken(cfg_, pred) + "_" + suffix);
+        if (state_.isIneligibleGlobal(GV)) {
+            // C7.1: Ineligible commit — uses pending directly (always in VM).
+            GRBLinExpr predPending = 0;
+            for (NodeId pred : preds[block]) {
+                predPending += pending_[std::make_pair(pred, GV)];
+            }
+            model_.addConstr(commitVar <= predPending,
+                             "C7e_inelig_commit_le_preds_" + suffix);
+            for (NodeId pred : preds[block]) {
+                model_.addConstr(
+                    commitVar >= isRegionStart_[block] +
+                                     pending_[std::make_pair(pred, GV)] - 1,
+                    "C7f_inelig_commit_ge_pred_" + nodeToken(cfg_, pred) +
+                        "_" + suffix);
+            }
+        } else {
+            // C7.2: Eligible commit — uses vmPending.
+            GRBLinExpr predVmPending = 0;
+            for (NodeId pred : preds[block]) {
+                predVmPending += vmPending_[std::make_pair(pred, GV)];
+            }
+            model_.addConstr(commitVar <= predVmPending,
+                             "C7e_commit_le_preds_" + suffix);
+            for (NodeId pred : preds[block]) {
+                model_.addConstr(
+                    commitVar >= isRegionStart_[block] +
+                                     vmPending_[std::make_pair(pred, GV)] - 1,
+                    "C7f_commit_ge_pred_" + nodeToken(cfg_, pred) + "_" +
+                        suffix);
+            }
         }
     }
 }
@@ -437,10 +490,23 @@ GRBLinExpr CheckpointOptimizer::buildEBlk(NodeId block) {
 
 GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
     GRBLinExpr expr = 0;
-    expr += params_.E_pro * isRegionStart_[block];
-
     double qb = energy_.getQReboot();
+
+    // Ineligible restore cost: unconditional at region start (constant coeff).
+    double ineligRestoreCost = 0;
     for (llvm::GlobalVariable *GV : state_.getVMObjLiveIn(block)) {
+        if (!state_.isIneligibleGlobal(GV))
+            continue;
+        double eRestore = energy_.getERestore(GV);
+        if (eRestore > 0.0)
+            ineligRestoreCost += eRestore;
+    }
+    expr += (params_.E_pro + qb * ineligRestoreCost) * isRegionStart_[block];
+
+    // Eligible restore cost: variable (depends on needRestore).
+    for (llvm::GlobalVariable *GV : state_.getVMObjLiveIn(block)) {
+        if (state_.isIneligibleGlobal(GV))
+            continue;
         auto it = needRestore_.find(std::make_pair(block, GV));
         if (it == needRestore_.end())
             continue;

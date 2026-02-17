@@ -323,6 +323,15 @@ int AbstractCFG::getVMObjSizeBytes(llvm::GlobalVariable *gv) const {
     return 0;
 }
 
+const std::vector<llvm::GlobalVariable *> &
+AbstractCFG::getIneligibleObjs() const {
+    return ineligibleObjs_;
+}
+
+bool AbstractCFG::isIneligibleGlobal(llvm::GlobalVariable *gv) const {
+    return ineligibleObjSet_.count(gv) > 0;
+}
+
 double AbstractCFG::getEBase(NodeId block) const {
     auto it = blockEnergyCost_.find(block);
     if (it != blockEnergyCost_.end()) {
@@ -380,6 +389,14 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     model.params_ = energy.getParams();
     model.vmObjs_ = state.getVMObjs();
     for (llvm::GlobalVariable *GV : model.vmObjs_) {
+        model.vmObjSizeBytes_[GV] =
+            static_cast<int>(state.getVMObjSizeBytes(GV));
+        model.eSaveByGV_[GV] = energy.getESave(GV);
+        model.eRestoreByGV_[GV] = energy.getERestore(GV);
+    }
+    model.ineligibleObjs_ = state.getIneligibleObjs();
+    for (llvm::GlobalVariable *GV : model.ineligibleObjs_) {
+        model.ineligibleObjSet_.insert(GV);
         model.vmObjSizeBytes_[GV] =
             static_cast<int>(state.getVMObjSizeBytes(GV));
         model.eSaveByGV_[GV] = energy.getESave(GV);
@@ -454,7 +471,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             summarizedConcreteBlocks.insert(blockName);
         }
 
-        for (llvm::GlobalVariable *GV : model.vmObjs_) {
+        auto aggregateGV = [&](llvm::GlobalVariable *GV) {
             double nvmSum = 0.0;
             bool hasDef = false;
             bool hasLiveIn = false;
@@ -474,7 +491,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             if (hasLiveIn) {
                 agg.liveIn.insert(GV);
             }
-        }
+        };
+
+        for (llvm::GlobalVariable *GV : model.vmObjs_)
+            aggregateGV(GV);
+        for (llvm::GlobalVariable *GV : model.ineligibleObjs_)
+            aggregateGV(GV);
 
         summariesByNode[nodeName] = agg;
         out.stats.loopsSummarized++;
@@ -545,7 +567,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             blockEnergyByAbstract[node] = agg.pathEnergy;
             fEntryByAbstract[node] = agg.fEntry;
             liveInByAbstract[node] = agg.liveIn;
-            for (llvm::GlobalVariable *GV : model.vmObjs_) {
+            auto populateSummaryGV = [&](llvm::GlobalVariable *GV) {
                 if (agg.defGlobals.count(GV)) {
                     defByAbstract[std::make_pair(node, GV)] = true;
                 }
@@ -553,14 +575,18 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                 if (eIt != agg.eNvmByGV.end()) {
                     eNvmByAbstract[std::make_pair(node, GV)] = eIt->second;
                 }
-            }
+            };
+            for (llvm::GlobalVariable *GV : model.vmObjs_)
+                populateSummaryGV(GV);
+            for (llvm::GlobalVariable *GV : model.ineligibleObjs_)
+                populateSummaryGV(GV);
             continue;
         }
 
         blockEnergyByAbstract[node] = cfg.getBlockInfo(node).energyCost;
         fEntryByAbstract[node] = energy.getFEntry(node);
         liveInByAbstract[node] = state.getVMObjLiveIn(node);
-        for (llvm::GlobalVariable *GV : model.vmObjs_) {
+        auto populateConcreteGV = [&](llvm::GlobalVariable *GV) {
             if (state.getDefIndicator(node, GV)) {
                 defByAbstract[std::make_pair(node, GV)] = true;
             }
@@ -568,7 +594,11 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             if (nvm != 0.0) {
                 eNvmByAbstract[std::make_pair(node, GV)] = nvm;
             }
-        }
+        };
+        for (llvm::GlobalVariable *GV : model.vmObjs_)
+            populateConcreteGV(GV);
+        for (llvm::GlobalVariable *GV : model.ineligibleObjs_)
+            populateConcreteGV(GV);
     }
 
     std::map<std::string, NodeId> nodeIdByName;

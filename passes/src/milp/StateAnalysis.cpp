@@ -66,12 +66,22 @@ StateAnalysis::StateAnalysis(llvm::Function &F,
     : F_(F), AA_(AA), cfg_(cfg) {
     buildBlockMap();
     identifyVMObjs();
+    identifyIneligibleObjs();
     computeAccessMaps();
     computeVMObjLiveness();
 }
 
 bool StateAnalysis::isCandidateGlobal(llvm::GlobalVariable *gv) const {
     return vmObjSet_.count(gv) > 0;
+}
+
+const std::vector<llvm::GlobalVariable *> &
+StateAnalysis::getIneligibleObjs() const {
+    return ineligibleObjs_;
+}
+
+bool StateAnalysis::isIneligibleGlobal(llvm::GlobalVariable *gv) const {
+    return ineligibleObjSet_.count(gv) > 0;
 }
 
 void StateAnalysis::printAnalysisErrors(llvm::raw_ostream &os) const {
@@ -206,6 +216,61 @@ void StateAnalysis::identifyVMObjs() {
         vmObjSet_.insert(&GV);
         unsigned sizeBytes = DL.getTypeAllocSize(GV.getValueType());
         vmObjSizeBytes_[&GV] = sizeBytes;
+    }
+}
+
+void StateAnalysis::identifyIneligibleObjs() {
+    llvm::Module *M = F_.getParent();
+    if (!M)
+        return;
+
+    const llvm::DataLayout &DL = M->getDataLayout();
+
+    // Scan all instructions for loads/stores to non-candidate globals.
+    std::set<llvm::GlobalVariable *> seen;
+    for (llvm::BasicBlock &BB : F_) {
+        for (llvm::Instruction &I : BB) {
+            const llvm::Value *Ptr = nullptr;
+            if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I))
+                Ptr = LI->getPointerOperand();
+            else if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I))
+                Ptr = SI->getPointerOperand();
+            else
+                continue;
+
+            const llvm::Value *Obj =
+                llvm::getUnderlyingObject(Ptr->stripPointerCasts());
+            auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(
+                const_cast<llvm::Value *>(Obj));
+            if (!GV)
+                continue;
+
+            // Skip candidates — they're already in vmObjs_.
+            if (vmObjSet_.count(GV))
+                continue;
+
+            // Structural filters (same as identifyVMObjs).
+            if (GV->isDeclaration())
+                continue;
+            if (GV->isConstant())
+                continue;
+            if (GV->getName().starts_with("llvm."))
+                continue;
+            if (GV->getName().starts_with("__nvm_"))
+                continue;
+            if (GV->getName().starts_with("__vm_shadow_"))
+                continue;
+            if (!GV->getValueType()->isSized())
+                continue;
+
+            if (!seen.insert(GV).second)
+                continue;
+
+            ineligibleObjs_.push_back(GV);
+            ineligibleObjSet_.insert(GV);
+            unsigned sizeBytes = DL.getTypeAllocSize(GV->getValueType());
+            vmObjSizeBytes_[GV] = sizeBytes;
+        }
     }
 }
 
@@ -352,7 +417,8 @@ void StateAnalysis::computeAccessMaps() {
         for (llvm::Instruction &I : BB) {
             validateInstructionForStrictMode(I);
 
-            for (llvm::GlobalVariable *GV : vmObjs_) {
+            // Process both candidate and ineligible globals.
+            auto processGV = [&](llvm::GlobalVariable *GV) {
                 auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
                 llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
                 auto key = std::make_pair(blockName, GV);
@@ -363,13 +429,25 @@ void StateAnalysis::computeAccessMaps() {
                     storeCounts_[key]++;
                     defGlobals_[blockName].insert(GV);
                 }
-            }
+            };
+
+            for (llvm::GlobalVariable *GV : vmObjs_)
+                processGV(GV);
+            for (llvm::GlobalVariable *GV : ineligibleObjs_)
+                processGV(GV);
         }
     }
 }
 
 void StateAnalysis::computeVMObjLiveness() {
-    if (vmObjs_.empty())
+    // Combine candidate and ineligible globals for unified liveness analysis.
+    std::vector<llvm::GlobalVariable *> allTracked;
+    allTracked.reserve(vmObjs_.size() + ineligibleObjs_.size());
+    allTracked.insert(allTracked.end(), vmObjs_.begin(), vmObjs_.end());
+    allTracked.insert(allTracked.end(), ineligibleObjs_.begin(),
+                      ineligibleObjs_.end());
+
+    if (allTracked.empty())
         return;
 
     struct BlockGVInfo {
@@ -382,7 +460,7 @@ void StateAnalysis::computeVMObjLiveness() {
     for (llvm::BasicBlock &BB : F_) {
         std::string blockName = getBlockName(BB, F_);
 
-        for (llvm::GlobalVariable *GV : vmObjs_) {
+        for (llvm::GlobalVariable *GV : allTracked) {
             auto key = std::make_pair(blockName, GV);
             BlockGVInfo info;
             bool seenMustStore = false;
@@ -407,7 +485,7 @@ void StateAnalysis::computeVMObjLiveness() {
         }
     }
 
-    for (llvm::GlobalVariable *GV : vmObjs_) {
+    for (llvm::GlobalVariable *GV : allTracked) {
         std::map<std::string, bool> liveIn, liveOut;
         for (const auto &blockName : cfg_.getBlocks()) {
             liveIn[blockName] = false;

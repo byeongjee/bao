@@ -34,6 +34,8 @@ public:
     virtual ~IStateView() = default;
 
     virtual const std::vector<llvm::GlobalVariable *> &getVMObjs() const = 0;
+    virtual const std::vector<llvm::GlobalVariable *> &getIneligibleObjs() const = 0;
+    virtual bool isIneligibleGlobal(llvm::GlobalVariable *gv) const = 0;
     virtual const std::set<llvm::GlobalVariable *> &
     getVMObjLiveIn(NodeId block) const = 0;
     virtual bool getDefIndicator(NodeId block, llvm::GlobalVariable *gv) const = 0;

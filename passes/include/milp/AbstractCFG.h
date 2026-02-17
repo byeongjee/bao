@@ -56,6 +56,8 @@ public:
     const std::vector<llvm::GlobalVariable *> &getVMObjs() const override {
         return vmObjs_;
     }
+    const std::vector<llvm::GlobalVariable *> &getIneligibleObjs() const override;
+    bool isIneligibleGlobal(llvm::GlobalVariable *gv) const override;
     const std::set<llvm::GlobalVariable *> &
     getVMObjLiveIn(NodeId block) const override;
     bool getDefIndicator(NodeId block,
@@ -91,6 +93,8 @@ private:
     std::map<NodeId, double> blockEnergyCost_;
 
     std::vector<llvm::GlobalVariable *> vmObjs_;
+    std::vector<llvm::GlobalVariable *> ineligibleObjs_;
+    std::set<llvm::GlobalVariable *> ineligibleObjSet_;
     std::map<NodeId, std::set<llvm::GlobalVariable *>> vmObjLiveIn_;
     std::map<BlockGVKey, bool> defIndicator_;
     std::map<llvm::GlobalVariable *, int> vmObjSizeBytes_;

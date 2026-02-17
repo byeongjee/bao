@@ -108,6 +108,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     CheckpointInstrumenter instrumenter(*F.getParent());
     unsigned inserted =
         instrumenter.instrumentFunction(F, solution, *abstractCFG.model,
+                                        *abstractCFG.model,
                                         *ctx.stateAnalysis);
 
     unsigned commitCount = 0;

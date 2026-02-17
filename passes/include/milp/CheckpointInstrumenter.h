@@ -19,6 +19,7 @@ public:
     unsigned instrumentFunction(llvm::Function &F,
                                 const MILPSolution &solution,
                                 const ICFGView &cfg,
+                                const IStateView &stateView,
                                 const StateAnalysis &state);
 
 private:
@@ -32,9 +33,17 @@ private:
     /// Maps candidate globals to their SRAM shadow globals.
     std::map<llvm::GlobalVariable *, llvm::GlobalVariable *> shadowMap_;
 
+    /// Maps ineligible globals to their NVM backup globals.
+    std::map<llvm::GlobalVariable *, llvm::GlobalVariable *> nvmBackupMap_;
+
     void declareRuntimeFunctions();
 
-    void createShadowGlobals(llvm::Function &F, const MILPSolution &solution);
+    void createShadowGlobals(llvm::Function &F, const MILPSolution &solution,
+                             const StateAnalysis &state);
+    void createNVMBackupGlobals(llvm::Function &F,
+                                const MILPSolution &solution,
+                                const StateAnalysis &state,
+                                const ICFGView &cfg);
     void rewriteAccessesInVMRegions(llvm::Function &F,
                                     const MILPSolution &solution,
                                     const ICFGView &cfg);
@@ -42,6 +51,7 @@ private:
     unsigned insertRegionBoundaries(llvm::Function &F,
                                     const MILPSolution &solution,
                                     const ICFGView &cfg,
+                                    const IStateView &stateView,
                                     const StateAnalysis &state);
     void applyMemoryPlacement(const StateAnalysis &state);
 };

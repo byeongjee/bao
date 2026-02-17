@@ -86,31 +86,41 @@ void EnergyModel::computeFrequencies(llvm::BlockFrequencyInfo &BFI,
 
 void EnergyModel::computeNvmPenalties() {
     // E_nvm[b,v] = (loads + stores to v in b) * nvm_access_penalty
-    for (const auto &blockName : cfg_.getBlocks()) {
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-            unsigned loads = state_.getLoadCount(blockName, GV);
-            unsigned stores = state_.getStoreCount(blockName, GV);
-            if (loads + stores > 0) {
-                double penalty =
-                    static_cast<double>(loads + stores) * params_.nvmAccessPenalty;
-                eNvm_[std::make_pair(blockName, GV)] = penalty;
-            }
+    auto computeForGV = [&](llvm::GlobalVariable *GV,
+                            const std::string &blockName) {
+        unsigned loads = state_.getLoadCount(blockName, GV);
+        unsigned stores = state_.getStoreCount(blockName, GV);
+        if (loads + stores > 0) {
+            double penalty =
+                static_cast<double>(loads + stores) * params_.nvmAccessPenalty;
+            eNvm_[std::make_pair(blockName, GV)] = penalty;
         }
+    };
+
+    for (const auto &blockName : cfg_.getBlocks()) {
+        for (llvm::GlobalVariable *GV : state_.getVMObjs())
+            computeForGV(GV, blockName);
+        for (llvm::GlobalVariable *GV : state_.getIneligibleObjs())
+            computeForGV(GV, blockName);
     }
 }
 
 void EnergyModel::computeSaveRestoreCosts() {
-    // E_sv[v], E_rst[v] are modeled for candidate globals only.
-    for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+    // E_sv[v], E_rst[v] for both candidate and ineligible globals.
+    auto computeForGV = [&](llvm::GlobalVariable *GV) {
         unsigned sizeBytes = state_.getVMObjSizeBytes(GV);
         if (sizeBytes == 0)
-            continue;
-
+            return;
         eSaveByGV_[GV] =
             static_cast<double>(sizeBytes) * params_.memStoreEnergyPerByte;
         eRestoreByGV_[GV] =
             static_cast<double>(sizeBytes) * params_.memRestoreEnergyPerByte;
-    }
+    };
+
+    for (llvm::GlobalVariable *GV : state_.getVMObjs())
+        computeForGV(GV);
+    for (llvm::GlobalVariable *GV : state_.getIneligibleObjs())
+        computeForGV(GV);
 }
 
 // ---- Config parsing ----

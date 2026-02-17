@@ -33,12 +33,14 @@ unsigned CheckpointInstrumenter::instrumentFunction(
     llvm::Function &F,
     const MILPSolution &solution,
     const ICFGView &cfg,
+    const IStateView &stateView,
     const StateAnalysis &state) {
 
     applyMemoryPlacement(state);
-    createShadowGlobals(F, solution);
+    createShadowGlobals(F, solution, state);
+    createNVMBackupGlobals(F, solution, state, cfg);
     rewriteAccessesInVMRegions(F, solution, cfg);
-    unsigned inserted = insertRegionBoundaries(F, solution, cfg, state);
+    unsigned inserted = insertRegionBoundaries(F, solution, cfg, stateView, state);
     return inserted;
 }
 
@@ -50,14 +52,16 @@ void CheckpointInstrumenter::applyMemoryPlacement(const StateAnalysis &state) {
 
 void CheckpointInstrumenter::createShadowGlobals(
     llvm::Function &F,
-    const MILPSolution &solution) {
+    const MILPSolution &solution,
+    const StateAnalysis &state) {
 
     shadowMap_.clear();
 
     // Collect candidate GVs that have placeInVm=true for at least one node.
+    // Skip ineligibles — they don't have placeInVm variables.
     std::set<llvm::GlobalVariable *> vmPlacedGVs;
     for (const auto &[key, placed] : solution.placeInVm) {
-        if (placed) {
+        if (placed && !state.isIneligibleGlobal(key.second)) {
             vmPlacedGVs.insert(key.second);
         }
     }
@@ -70,6 +74,28 @@ void CheckpointInstrumenter::createShadowGlobals(
             "__vm_shadow_" + GV->getName().str());
         shadow->setAlignment(GV->getAlign());
         shadowMap_[GV] = shadow;
+    }
+}
+
+void CheckpointInstrumenter::createNVMBackupGlobals(
+    llvm::Function &F,
+    const MILPSolution &solution,
+    const StateAnalysis &state,
+    const ICFGView &cfg) {
+
+    nvmBackupMap_.clear();
+
+    // Create NVM backup for every ineligible global accessed in the function.
+    // Ineligibles always reside in VM (SRAM); their backup lives in NVM (.nvm).
+    for (llvm::GlobalVariable *GV : state.getIneligibleObjs()) {
+        auto *backup = new llvm::GlobalVariable(
+            M_, GV->getValueType(), /*isConstant=*/false,
+            llvm::GlobalValue::InternalLinkage,
+            llvm::Constant::getNullValue(GV->getValueType()),
+            "__nvm_backup_" + GV->getName().str());
+        backup->setSection(".nvm");
+        backup->setAlignment(GV->getAlign());
+        nvmBackupMap_[GV] = backup;
     }
 }
 
@@ -106,6 +132,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
     llvm::Function &F,
     const MILPSolution &solution,
     const ICFGView &cfg,
+    const IStateView &stateView,
     const StateAnalysis &state) {
 
     unsigned inserted = 0;
@@ -163,12 +190,19 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                 }
                 llvm::Value *size = llvm::ConstantInt::get(
                     llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-                // Commit: copy shadow (VM/SRAM) -> original (NVM/FRAM)
                 auto shadowIt = shadowMap_.find(GV);
-                assert(shadowIt != shadowMap_.end() &&
-                       "commit requires a VM shadow for the global");
-                builder.CreateCall(storeMemFn_,
-                                   {GV, shadowIt->second, size});
+                if (shadowIt != shadowMap_.end()) {
+                    // Eligible: copy shadow (VM/SRAM) -> original (NVM/FRAM)
+                    builder.CreateCall(storeMemFn_,
+                                       {GV, shadowIt->second, size});
+                } else {
+                    // Ineligible: copy SRAM original -> NVM backup
+                    auto backupIt = nvmBackupMap_.find(GV);
+                    assert(backupIt != nvmBackupMap_.end() &&
+                           "ineligible commit requires an NVM backup");
+                    builder.CreateCall(storeMemFn_,
+                                       {backupIt->second, GV, size});
+                }
                 inserted++;
             }
         }
@@ -201,6 +235,33 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                    "needRestore requires a VM shadow for the global");
             builder.CreateCall(restoreMemFn_,
                                {shadowIt->second, GV, size});
+            inserted++;
+        }
+
+        // Ineligible restores: unconditional at every region start where
+        // the global is live-in. No needRestore variable — always restore.
+        for (llvm::GlobalVariable *GV : state.getIneligibleObjs()) {
+            auto backupIt = nvmBackupMap_.find(GV);
+            if (backupIt == nvmBackupMap_.end())
+                continue;
+            // Check if GV is live-in at any node mapped to this block.
+            bool isLiveIn = false;
+            for (NodeId node : nodes) {
+                if (stateView.getVMObjLiveIn(node).count(GV)) {
+                    isLiveIn = true;
+                    break;
+                }
+            }
+            if (!isLiveIn)
+                continue;
+            unsigned sizeBytes = state.getVMObjSizeBytes(GV);
+            if (sizeBytes == 0)
+                continue;
+            llvm::Value *size = llvm::ConstantInt::get(
+                llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
+            // Restore: copy NVM backup -> SRAM original
+            builder.CreateCall(restoreMemFn_,
+                               {GV, backupIt->second, size});
             inserted++;
         }
     }
