@@ -4,9 +4,9 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/SSAUpdater.h"
 
 #include <cassert>
-#include <queue>
 #include <set>
 #include <vector>
 
@@ -144,35 +144,6 @@ void CheckpointInstrumenter::rewriteAccessesInVMRegions(
     }
 }
 
-std::set<llvm::BasicBlock *> CheckpointInstrumenter::computeRegionBlocks(
-    llvm::BasicBlock *start,
-    const MILPSolution &solution,
-    const ICFGView &cfg) const {
-
-    std::set<llvm::BasicBlock *> region;
-    std::queue<llvm::BasicBlock *> worklist;
-    worklist.push(start);
-    region.insert(start);
-
-    while (!worklist.empty()) {
-        llvm::BasicBlock *BB = worklist.front();
-        worklist.pop();
-        for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-            if (region.count(Succ))
-                continue;
-            // Stop at other region starts (don't include them).
-            NodeId succId = cfg.getNodeMap().getNodeId(Succ);
-            if (succId != kInvalidNodeId &&
-                solution.regionStarts.count(succId) &&
-                Succ != start)
-                continue;
-            region.insert(Succ);
-            worklist.push(Succ);
-        }
-    }
-    return region;
-}
-
 unsigned CheckpointInstrumenter::insertRegionBoundaries(
     llvm::Function &F,
     const MILPSolution &solution,
@@ -194,6 +165,14 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         nodesByBlock[BB].push_back(node);
     }
 
+    // Accumulated across all boundary blocks for Phase 2 SSA rewriting.
+    std::map<llvm::Value *,
+             std::vector<std::pair<llvm::BasicBlock *, llvm::Value *>>>
+        ssaRestoreDefs;
+    std::set<llvm::Instruction *> allCommitInsts;
+
+    // Phase 1: Insert commit stores, epilogues, prologues, and restore loads
+    // at each boundary block. Accumulate SSA restore definitions for Phase 2.
     for (llvm::BasicBlock &BB : F) {
         auto itNodeVec = nodesByBlock.find(&BB);
         if (itNodeVec == nodesByBlock.end()) {
@@ -308,7 +287,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
 
         // Ineligible restores: unconditional at every region start where
         // the object is live-in.
-        std::map<llvm::Value *, llvm::Value *> ssaRestoreMap;
         for (llvm::Value *V : state.getIneligibleObjs()) {
             auto backupIt = nvmBackupMap_.find(V);
             if (backupIt == nvmBackupMap_.end())
@@ -341,36 +319,50 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                 // SSA register: typed load from NVM slot.
                 llvm::Value *restored =
                     builder.CreateLoad(V->getType(), backupIt->second);
-                ssaRestoreMap[V] = restored;
+                ssaRestoreDefs[V].emplace_back(&BB, restored);
                 inserted++;
             }
         }
 
-        // SSA use rewriting: replace uses of original SSA values with restored
-        // values within this region, but NOT in commit stores.
-        if (!ssaRestoreMap.empty()) {
-            std::set<llvm::BasicBlock *> regionBlocks =
-                computeRegionBlocks(&BB, solution, cfg);
+        allCommitInsts.insert(commitInsts.begin(), commitInsts.end());
+    }
 
-            for (auto &[origVal, restoredVal] : ssaRestoreMap) {
-                origVal->replaceUsesWithIf(restoredVal, [&](llvm::Use &U) {
-                    auto *I = llvm::dyn_cast<llvm::Instruction>(U.getUser());
-                    if (!I)
-                        return false;
-                    // Don't replace uses in our commit stores.
-                    if (commitInsts.count(I))
-                        return false;
-                    // For PHI nodes, the relevant block is the incoming block
-                    // (where the value must be live), not the PHI's parent.
-                    if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(I)) {
-                        llvm::BasicBlock *incomingBB =
-                            PHI->getIncomingBlock(U);
-                        return regionBlocks.count(incomingBB) != 0;
-                    }
-                    return regionBlocks.count(I->getParent()) != 0;
-                });
-            }
+    // Phase 2: Use SSAUpdater for each ineligible SSA value to correctly
+    // handle multi-definition reaching and insert PHI nodes at merge points.
+    for (auto &[origVal, defs] : ssaRestoreDefs) {
+        llvm::SSAUpdater updater;
+        updater.Initialize(origVal->getType(), origVal->getName());
+
+        // The original definition is available in its defining block.
+        if (auto *I = llvm::dyn_cast<llvm::Instruction>(origVal))
+            updater.AddAvailableValue(I->getParent(), origVal);
+
+        // Each boundary's restore load is available in its block.
+        for (auto &[block, restoredVal] : defs)
+            updater.AddAvailableValue(block, restoredVal);
+
+        // Collect uses to rewrite (can't modify use-list while iterating).
+        llvm::SmallVector<llvm::Use *, 16> usesToRewrite;
+        for (auto &U : origVal->uses()) {
+            auto *I = llvm::dyn_cast<llvm::Instruction>(U.getUser());
+            if (!I)
+                continue;
+            // Skip commit stores — they correctly use the original value
+            // during normal (non-restart) execution.
+            if (allCommitInsts.count(I))
+                continue;
+            usesToRewrite.push_back(&U);
         }
+
+        // Use RewriteUseAfterInsertions (GetValueAtEndOfBlock) rather than
+        // RewriteUse (GetValueInMiddleOfBlock).  GetValueInMiddleOfBlock
+        // treats the available value as defined mid-block and walks to
+        // predecessors for same-block uses — returning poison for the
+        // entry block (no predecessors).  GetValueAtEndOfBlock returns the
+        // available value directly, which is correct because all original
+        // instructions come after the inserted restore loads.
+        for (llvm::Use *U : usesToRewrite)
+            updater.RewriteUseAfterInsertions(*U);
     }
 
     return inserted;

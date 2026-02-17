@@ -8,7 +8,6 @@
 #include "llvm/IR/Value.h"
 
 #include <map>
-#include <set>
 
 namespace checkpoint {
 
@@ -56,12 +55,6 @@ private:
                                     const IStateView &stateView,
                                     const StateAnalysis &state);
     void applyMemoryPlacement(const StateAnalysis &state);
-
-    /// Compute the set of blocks in the same region as `start`.
-    std::set<llvm::BasicBlock *> computeRegionBlocks(
-        llvm::BasicBlock *start,
-        const MILPSolution &solution,
-        const ICFGView &cfg) const;
 };
 
 } // namespace checkpoint
