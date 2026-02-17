@@ -45,6 +45,7 @@ include_directories(
 # Build as a shared module (not using add_llvm_pass_plugin to avoid linking LLVM)
 add_library(CheckpointPass MODULE
     # Common utilities
+    src/common/AnnotationUtils.cpp
     src/common/CFGAnalysis.cpp
     src/common/EnergyValidatorPass.cpp
     src/common/LoopTripCount.cpp

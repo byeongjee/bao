@@ -1,5 +1,6 @@
 #include "milp/LoopChunkingPass.h"
 
+#include "common/AnnotationUtils.h"
 #include "common/BlockUtils.h"
 #include "estimator/EnergyEstimatorFactory.h"
 #include "milp/EnergyModel.h"
@@ -12,6 +13,7 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -361,6 +363,156 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
     return backedgeValue;
 }
 
+/// Compute a conservative upper bound on the ineligible restore cost for
+/// objects relevant to loop \p L.  This mirrors the classification in
+/// StateAnalysis but is scoped to the loop so the estimate is tighter than
+/// a whole-function sum.  The result is an upper bound because it counts
+/// every potentially-ineligible object touching the loop regardless of
+/// simultaneous liveness.
+static double estimateIneligRestoreUpperBound(
+    Loop *L, const checkpoint::MILPEnergyParams &params) {
+    Function *F = L->getHeader()->getParent();
+    Module *M = F->getParent();
+    const DataLayout &DL = M->getDataLayout();
+    double total = 0.0;
+
+    // --- Non-candidate globals accessed in the loop ---
+    std::set<GlobalVariable *> seenGV;
+    for (BasicBlock *BB : L->blocks()) {
+        for (Instruction &I : *BB) {
+            const Value *Ptr = nullptr;
+            if (auto *LI = dyn_cast<LoadInst>(&I))
+                Ptr = LI->getPointerOperand();
+            else if (auto *SI = dyn_cast<StoreInst>(&I))
+                Ptr = SI->getPointerOperand();
+            else
+                continue;
+
+            const Value *Obj =
+                getUnderlyingObject(Ptr->stripPointerCasts());
+            auto *GV = dyn_cast<GlobalVariable>(const_cast<Value *>(Obj));
+            if (!GV)
+                continue;
+
+            if (GV->isDeclaration())
+                continue;
+            if (GV->isConstant())
+                continue;
+            if (GV->getName().starts_with("llvm."))
+                continue;
+            if (GV->getName().starts_with("__nvm_"))
+                continue;
+            if (GV->getName().starts_with("__vm_shadow_"))
+                continue;
+            if (!GV->getValueType()->isSized())
+                continue;
+            if (checkpoint::isMilpCandidateAnnotated(GV, M))
+                continue;
+
+            if (!seenGV.insert(GV).second)
+                continue;
+
+            total += static_cast<double>(DL.getTypeAllocSize(GV->getValueType()))
+                     * params.memRestoreEnergyPerByte;
+        }
+    }
+
+    // --- Stack allocas used in the loop ---
+    std::set<AllocaInst *> seenAlloca;
+    BasicBlock &EntryBB = F->getEntryBlock();
+    for (Instruction &I : EntryBB) {
+        auto *AI = dyn_cast<AllocaInst>(&I);
+        if (!AI)
+            continue;
+        if (!AI->getAllocatedType()->isSized())
+            continue;
+
+        bool usedInLoop = false;
+        for (const User *U : AI->users()) {
+            if (auto *UI = dyn_cast<Instruction>(U)) {
+                if (L->contains(UI->getParent())) {
+                    usedInLoop = true;
+                    break;
+                }
+            }
+        }
+        if (!usedInLoop)
+            continue;
+        if (!seenAlloca.insert(AI).second)
+            continue;
+
+        total += static_cast<double>(DL.getTypeAllocSize(AI->getAllocatedType()))
+                 * params.memRestoreEnergyPerByte;
+    }
+
+    // --- SSA values defined inside the loop with cross-block uses ---
+    for (BasicBlock *BB : L->blocks()) {
+        for (Instruction &I : *BB) {
+            if (I.getType()->isVoidTy())
+                continue;
+            if (isa<AllocaInst>(&I))
+                continue;
+            if (!I.getType()->isSized())
+                continue;
+
+            bool hasCrossBlockUse = false;
+            for (const User *U : I.users()) {
+                if (auto *UI = dyn_cast<Instruction>(U)) {
+                    if (UI->getParent() != BB) {
+                        hasCrossBlockUse = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasCrossBlockUse)
+                continue;
+
+            total += static_cast<double>(DL.getTypeAllocSize(I.getType()))
+                     * params.memRestoreEnergyPerByte;
+        }
+    }
+
+    // --- SSA values defined outside the loop but used inside ---
+    std::set<Value *> seenLiveIn;
+    for (BasicBlock *BB : L->blocks()) {
+        for (Instruction &I : *BB) {
+            for (Use &Op : I.operands()) {
+                auto *DefI = dyn_cast<Instruction>(Op.get());
+                if (!DefI)
+                    continue;
+                if (L->contains(DefI->getParent()))
+                    continue;
+                if (isa<AllocaInst>(DefI))
+                    continue;
+                if (DefI->getType()->isVoidTy())
+                    continue;
+                if (!DefI->getType()->isSized())
+                    continue;
+
+                bool hasCrossBlockUse = false;
+                for (const User *U : DefI->users()) {
+                    if (auto *UI = dyn_cast<Instruction>(U)) {
+                        if (UI->getParent() != DefI->getParent()) {
+                            hasCrossBlockUse = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hasCrossBlockUse)
+                    continue;
+
+                if (!seenLiveIn.insert(static_cast<Value *>(DefI)).second)
+                    continue;
+
+                total += static_cast<double>(DL.getTypeAllocSize(DefI->getType()))
+                         * params.memRestoreEnergyPerByte;
+            }
+        }
+    }
+
+    return total;
+}
+
 static PlanResult buildRewritePlan(
     Loop *L,
     ScalarEvolution &SE,
@@ -420,6 +572,15 @@ static PlanResult buildRewritePlan(
         return result;
     }
 
+    // Tighten budget by the upper-bound ineligible restore cost so the
+    // unrolled loop is more likely to pass the AbstractCFG feasibility gate.
+    double ineligMargin = estimateIneligRestoreUpperBound(L, params);
+    double effectiveBudget = budget - ineligMargin;
+    if (effectiveBudget <= 0.0) {
+        result.skipReason = "nonpositive-effective-budget";
+        return result;
+    }
+
     EnergyPathResult iterEnergy =
         computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok) {
@@ -431,7 +592,7 @@ static PlanResult buildRewritePlan(
         return result;
     }
 
-    double rawK = std::floor(budget / iterEnergy.energy);
+    double rawK = std::floor(effectiveBudget / iterEnergy.energy);
     if (!std::isfinite(rawK) || rawK <= 0.0) {
         result.skipReason = "k-zero";
         return result;
