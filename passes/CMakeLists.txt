@@ -56,6 +56,7 @@ add_library(CheckpointPass MODULE
     src/estimator/EnergyEstimatorFactory.cpp
     # MILP checkpoint insertion
     src/milp/StateAnalysis.cpp
+    src/milp/LivenessAnalysis.cpp
     src/milp/EnergyModel.cpp
     src/milp/LoopChunkingPass.cpp
     src/milp/AbstractCFG.cpp

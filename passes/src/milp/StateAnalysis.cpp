@@ -1,4 +1,5 @@
 #include "milp/StateAnalysis.h"
+#include "milp/LivenessAnalysis.h"
 
 #include "common/AnnotationUtils.h"
 
@@ -518,261 +519,22 @@ void StateAnalysis::computeAccessMaps() {
 }
 
 void StateAnalysis::computeEligLiveness() {
-    // Load-before-store analysis for eligible (candidate) globals.
-    if (vmObjs_.empty())
-        return;
-
-    struct BlockGVInfo {
-        bool loadBeforeMustStore = false;
-        bool hasMustStore = false;
-    };
-
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, BlockGVInfo> blockGVInfo;
-
-    for (llvm::BasicBlock &BB : F_) {
-        std::string blockName = getBlockName(BB, F_);
-
-        for (llvm::GlobalVariable *GV : vmObjs_) {
-            auto key = std::make_pair(blockName, GV);
-            BlockGVInfo info;
-            bool seenMustStore = false;
-
-            for (llvm::Instruction &I : BB) {
-                auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
-                llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
-
-                if (llvm::isRefSet(MRI) && !seenMustStore)
-                    info.loadBeforeMustStore = true;
-
-                if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-                    llvm::Value *Ptr = SI->getPointerOperand()->stripPointerCasts();
-                    if (Ptr == GV) {
-                        info.hasMustStore = true;
-                        seenMustStore = true;
-                    }
-                }
-            }
-
-            blockGVInfo[key] = info;
-        }
-    }
-
-    for (llvm::GlobalVariable *GV : vmObjs_) {
-        std::map<std::string, bool> liveIn, liveOut;
-        for (const auto &blockName : cfg_.getBlocks()) {
-            liveIn[blockName] = false;
-            liveOut[blockName] = false;
-        }
-
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (const auto &blockName : cfg_.getBlocks()) {
-                auto key = std::make_pair(blockName, GV);
-                const BlockGVInfo &info = blockGVInfo[key];
-
-                bool newLiveOut = false;
-                llvm::BasicBlock *BB = nameToBlock_[blockName];
-                for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                    std::string succName = getBlockName(*Succ, F_);
-                    if (liveIn[succName]) {
-                        newLiveOut = true;
-                        break;
-                    }
-                }
-
-                bool newLiveIn = info.loadBeforeMustStore ||
-                                 (newLiveOut && !info.hasMustStore);
-
-                if (newLiveIn != liveIn[blockName] ||
-                    newLiveOut != liveOut[blockName]) {
-                    liveIn[blockName] = newLiveIn;
-                    liveOut[blockName] = newLiveOut;
-                    changed = true;
-                }
-            }
-        }
-
-        for (const auto &blockName : cfg_.getBlocks()) {
-            if (liveIn[blockName])
-                eligLiveIn_[blockName].insert(GV);
-        }
-    }
+    eligLiveIn_ = checkpoint::computeEligibleLiveness(
+        F_, AA_, cfg_, vmObjs_, nameToBlock_);
 }
 
 void StateAnalysis::computeIneligGlobalAllocaLiveness() {
-    // Load-before-store analysis for ineligible globals and allocas.
-    std::vector<llvm::Value *> globalAllocaIneligs;
-    for (llvm::Value *V : ineligibleObjs_) {
-        if (llvm::isa<llvm::GlobalVariable>(V) || llvm::isa<llvm::AllocaInst>(V))
-            globalAllocaIneligs.push_back(V);
-    }
-
-    if (globalAllocaIneligs.empty())
-        return;
-
-    struct BlockVarInfo {
-        bool loadBeforeMustStore = false;
-        bool hasMustStore = false;
-    };
-
-    std::map<std::pair<std::string, llvm::Value *>, BlockVarInfo> blockVarInfo;
-
-    for (llvm::BasicBlock &BB : F_) {
-        std::string blockName = getBlockName(BB, F_);
-
-        for (llvm::Value *V : globalAllocaIneligs) {
-            auto key = std::make_pair(blockName, V);
-            BlockVarInfo info;
-            bool seenMustStore = false;
-
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-                for (llvm::Instruction &I : BB) {
-                    auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
-                    llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
-
-                    if (llvm::isRefSet(MRI) && !seenMustStore)
-                        info.loadBeforeMustStore = true;
-
-                    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-                        llvm::Value *Ptr = SI->getPointerOperand()->stripPointerCasts();
-                        if (Ptr == GV) {
-                            info.hasMustStore = true;
-                            seenMustStore = true;
-                        }
-                    }
-                }
-            } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-                for (llvm::Instruction &I : BB) {
-                    // Check loads from the alloca.
-                    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
-                        if (LI->getPointerOperand()->stripPointerCasts() == AI &&
-                            !seenMustStore)
-                            info.loadBeforeMustStore = true;
-                    }
-                    // Check stores to the alloca.
-                    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-                        if (SI->getPointerOperand()->stripPointerCasts() == AI) {
-                            info.hasMustStore = true;
-                            seenMustStore = true;
-                        }
-                    }
-                }
-            }
-
-            blockVarInfo[key] = info;
-        }
-    }
-
-    for (llvm::Value *V : globalAllocaIneligs) {
-        std::map<std::string, bool> liveIn, liveOut;
-        for (const auto &blockName : cfg_.getBlocks()) {
-            liveIn[blockName] = false;
-            liveOut[blockName] = false;
-        }
-
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (const auto &blockName : cfg_.getBlocks()) {
-                auto key = std::make_pair(blockName, V);
-                const BlockVarInfo &info = blockVarInfo[key];
-
-                bool newLiveOut = false;
-                llvm::BasicBlock *BB = nameToBlock_[blockName];
-                for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                    std::string succName = getBlockName(*Succ, F_);
-                    if (liveIn[succName]) {
-                        newLiveOut = true;
-                        break;
-                    }
-                }
-
-                bool newLiveIn = info.loadBeforeMustStore ||
-                                 (newLiveOut && !info.hasMustStore);
-
-                if (newLiveIn != liveIn[blockName] ||
-                    newLiveOut != liveOut[blockName]) {
-                    liveIn[blockName] = newLiveIn;
-                    liveOut[blockName] = newLiveOut;
-                    changed = true;
-                }
-            }
-        }
-
-        for (const auto &blockName : cfg_.getBlocks()) {
-            if (liveIn[blockName])
-                ineligLiveIn_[blockName].insert(V);
-        }
-    }
+    auto gaLive = checkpoint::computeIneligGlobalAllocaLiveness(
+        F_, AA_, cfg_, ineligibleObjs_, nameToBlock_);
+    for (auto &[block, vals] : gaLive)
+        ineligLiveIn_[block].insert(vals.begin(), vals.end());
 }
 
 void StateAnalysis::computeIneligSSALiveness() {
-    // Standard backward SSA liveness for cross-block SSA registers.
-    for (llvm::Value *V : ineligibleObjs_) {
-        auto *Inst = llvm::dyn_cast<llvm::Instruction>(V);
-        if (!Inst || llvm::isa<llvm::AllocaInst>(Inst))
-            continue;
-
-        llvm::BasicBlock *defBlock = Inst->getParent();
-        std::string defBlockName = getBlockName(*defBlock, F_);
-
-        // Collect use blocks (blocks containing users, excluding defBlock).
-        std::set<std::string> useBlocks;
-        for (const llvm::User *U : Inst->users()) {
-            if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
-                if (UI->getParent() != defBlock) {
-                    useBlocks.insert(getBlockName(*UI->getParent(), F_));
-                }
-            }
-        }
-
-        if (useBlocks.empty())
-            continue;
-
-        // Backward dataflow: V is live-in at B if:
-        //   - V is used in B (and B != defBlock), OR
-        //   - V is live-out from B (live-in at some successor) and B != defBlock
-        std::map<std::string, bool> liveIn, liveOut;
-        for (const auto &blockName : cfg_.getBlocks()) {
-            liveIn[blockName] = false;
-            liveOut[blockName] = false;
-        }
-
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (const auto &blockName : cfg_.getBlocks()) {
-                if (blockName == defBlockName)
-                    continue;
-
-                bool newLiveOut = false;
-                llvm::BasicBlock *BB = nameToBlock_[blockName];
-                for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                    std::string succName = getBlockName(*Succ, F_);
-                    if (liveIn[succName]) {
-                        newLiveOut = true;
-                        break;
-                    }
-                }
-
-                bool isUsed = useBlocks.count(blockName) > 0;
-                bool newLiveIn = isUsed || newLiveOut;
-
-                if (newLiveIn != liveIn[blockName] ||
-                    newLiveOut != liveOut[blockName]) {
-                    liveIn[blockName] = newLiveIn;
-                    liveOut[blockName] = newLiveOut;
-                    changed = true;
-                }
-            }
-        }
-
-        for (const auto &blockName : cfg_.getBlocks()) {
-            if (liveIn[blockName])
-                ineligLiveIn_[blockName].insert(V);
-        }
-    }
+    auto ssaLive = checkpoint::computeIneligSSALiveness(
+        F_, cfg_, ineligibleObjs_, nameToBlock_);
+    for (auto &[block, vals] : ssaLive)
+        ineligLiveIn_[block].insert(vals.begin(), vals.end());
 }
 
 } // namespace checkpoint

@@ -481,6 +481,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
 
             if (addDebugMarkers_) {
                 llvm::Value *valAsI64 = convertToI64(commitBuilder, reaching);
+                // Mark conversion instructions (ptrtoint, zext, etc.) as
+                // commit-related so Phase 3 restore rewriting skips them.
+                // Otherwise SSAUpdater may rewrite their operand to the
+                // restore load which is positioned after them in the block.
+                if (auto *convInst = llvm::dyn_cast<llvm::Instruction>(valAsI64))
+                    allCommitInsts.insert(convInst);
                 auto *slotId = llvm::ConstantInt::get(
                     llvm::Type::getInt32Ty(M_.getContext()), slotCounter_++);
                 auto *call = commitBuilder.CreateCall(storeRegFn_,
