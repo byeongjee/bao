@@ -359,11 +359,16 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             compile_to_ir
 
             # MILP pass
+            MILP_EXTRA_FLAGS=""
+            if [[ "$RUNTIME_TYPE" == "mock-counter" ]]; then
+                MILP_EXTRA_FLAGS="-add-debug-markers"
+            fi
             PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
             if $OPT -load-pass-plugin="$PASS_LIB" \
                 -passes=milp \
                 -energy-config="$ESTIMATOR_CONFIG" \
                 -milp-config="$MILP_CONFIG" \
+                $MILP_EXTRA_FLAGS \
                 -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" \
                 >"$PASS_LOG" 2>&1; then
                 if [[ "$VERBOSE" == "true" ]]; then
