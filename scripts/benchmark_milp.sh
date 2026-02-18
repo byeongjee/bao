@@ -4,7 +4,10 @@
 # and capacitor sizes. Outputs a CSV summary.
 #
 # Usage:
-#   ./scripts/benchmark_milp.sh [-o output.csv] [-v|--verbose]
+#   ./scripts/benchmark_milp.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#
+# If benchmark names are given, only those are run (matched by filename without .c).
+# Example: ./scripts/benchmark_milp.sh crc chacha20 rsa
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,13 +15,15 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 OUTPUT_CSV="$PROJECT_DIR/benchmarks/milp_benchmark_summary.csv"
 VERBOSE=0
+FILTER_BENCHMARKS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) OUTPUT_CSV="$2"; shift 2 ;;
         -v|--verbose) VERBOSE=1; shift ;;
-        -h|--help) echo "Usage: $0 [-o output.csv] [-v|--verbose]"; exit 0 ;;
-        *) echo "Unknown option: $1" >&2; exit 1 ;;
+        -h|--help) echo "Usage: $0 [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
+        -*) echo "Unknown option: $1" >&2; exit 1 ;;
+        *) FILTER_BENCHMARKS+=("$1"); shift ;;
     esac
 done
 
@@ -31,14 +36,25 @@ CAPACITOR_CONFIGS=(
     "100uF:$PROJECT_DIR/benchmarks/sample_milp_config_100uF.json"
 )
 
-# Find all .c benchmarks
+# Find benchmarks
 BENCHMARKS=()
-for f in "$PROJECT_DIR"/benchmarks/intermittent/*.c; do
-    [[ -f "$f" ]] && BENCHMARKS+=("$f")
-done
+if [[ ${#FILTER_BENCHMARKS[@]} -gt 0 ]]; then
+    for name in "${FILTER_BENCHMARKS[@]}"; do
+        f="$PROJECT_DIR/benchmarks/intermittent/${name}.c"
+        if [[ -f "$f" ]]; then
+            BENCHMARKS+=("$f")
+        else
+            echo "Warning: Benchmark not found: $f" >&2
+        fi
+    done
+else
+    for f in "$PROJECT_DIR"/benchmarks/intermittent/*.c; do
+        [[ -f "$f" ]] && BENCHMARKS+=("$f")
+    done
+fi
 
 if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
-    echo "Error: No .c files found in benchmarks/intermittent/" >&2
+    echo "Error: No benchmarks to run" >&2
     exit 1
 fi
 
