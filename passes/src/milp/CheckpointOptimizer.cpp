@@ -261,15 +261,17 @@ void CheckpointOptimizer::addObjective() {
     }
 
     // Term 2: expected region-start overhead.
+    // Use fBoundary (= preheader freq for summary nodes) so boundary costs
+    // are weighted by loop entry frequency, not per-iteration frequency.
     for (NodeId block : cfg_.getBlocks()) {
-        objective += energy_.getFEntry(block) * buildEStart(block);
+        objective += energy_.getFBoundary(block) * buildEStart(block);
     }
 
     // Term 3: expected region-end overhead (excluding entry).
     for (NodeId block : cfg_.getBlocks()) {
         if (block == entry)
             continue;
-        objective += energy_.getFEntry(block) * buildEEnd(block);
+        objective += energy_.getFBoundary(block) * buildEEnd(block);
     }
 
     model_.setObjective(objective, GRB_MINIMIZE);

@@ -81,6 +81,7 @@ public:
     double getESave(llvm::Value *v) const override;
     double getERestore(llvm::Value *v) const override;
     double getFEntry(NodeId block) const override;
+    double getFBoundary(NodeId block) const override;
     double getQReboot() const override;
 
 private:
@@ -121,6 +122,7 @@ private:
     std::map<llvm::Value *, double> eSaveByVar_;
     std::map<llvm::Value *, double> eRestoreByVar_;
     std::map<NodeId, double> fEntry_;
+    std::map<NodeId, double> fBoundary_;
 };
 
 struct AbstractCFGBuildResult {

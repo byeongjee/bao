@@ -69,6 +69,10 @@ public:
     virtual double getESave(llvm::Value *v) const = 0;
     virtual double getERestore(llvm::Value *v) const = 0;
     virtual double getFEntry(NodeId block) const = 0;
+    /// Frequency for boundary (region start/end) cost weighting.
+    /// For concrete nodes, equals getFEntry. For summary nodes, equals the
+    /// loop entry frequency (preheader), not the per-iteration header frequency.
+    virtual double getFBoundary(NodeId block) const = 0;
     virtual double getQReboot() const = 0;
 };
 

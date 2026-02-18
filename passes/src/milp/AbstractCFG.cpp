@@ -403,6 +403,14 @@ double AbstractCFG::getFEntry(NodeId block) const {
     return 1.0;
 }
 
+double AbstractCFG::getFBoundary(NodeId block) const {
+    auto it = fBoundary_.find(block);
+    if (it != fBoundary_.end()) {
+        return it->second;
+    }
+    return 1.0;
+}
+
 double AbstractCFG::getQReboot() const {
     return params_.qRebootProb;
 }
@@ -641,6 +649,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     std::map<std::pair<std::string, llvm::Value *>, bool> ineligDefByAbstract;
     std::map<std::pair<std::string, llvm::GlobalVariable *>, double> eNvmByAbstract;
     std::map<std::string, double> fEntryByAbstract;
+    std::map<std::string, double> fBoundaryByAbstract;
 
     for (const std::string &node : abstractBlocks) {
         auto summaryIt = summariesByNode.find(node);
@@ -648,6 +657,19 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             const LoopAggregate &agg = summaryIt->second;
             blockEnergyByAbstract[node] = agg.pathEnergy;
             fEntryByAbstract[node] = agg.fEntry;
+
+            // Loop entry frequency for boundary costing: use preheader freq
+            // so boundary start/end costs fire once per loop entry, not per iteration.
+            double fBound = agg.fEntry;  // fallback: same as fEntry
+            if (llvm::BasicBlock *header = state.getBlock(agg.headerName)) {
+                if (llvm::Loop *L = LI.getLoopFor(header)) {
+                    if (llvm::BasicBlock *PH = L->getLoopPreheader()) {
+                        std::string phName = getBlockName(*PH, F);
+                        fBound = energy.getFEntry(phName);
+                    }
+                }
+            }
+            fBoundaryByAbstract[node] = fBound;
             eligLiveInByAbstract[node] = agg.eligLiveIn;
             ineligLiveInByAbstract[node] = agg.ineligLiveIn;
 
@@ -673,6 +695,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         // Concrete (non-summarized) node.
         blockEnergyByAbstract[node] = cfg.getBlockInfo(node).energyCost;
         fEntryByAbstract[node] = energy.getFEntry(node);
+        fBoundaryByAbstract[node] = energy.getFEntry(node);
         eligLiveInByAbstract[node] = state.getEligLiveIn(node);
         ineligLiveInByAbstract[node] = state.getIneligLiveIn(node);
 
@@ -758,6 +781,13 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         auto it = nodeIdByName.find(name);
         if (it != nodeIdByName.end()) {
             model.fEntry_[it->second] = val;
+        }
+    }
+
+    for (const auto &[name, val] : fBoundaryByAbstract) {
+        auto it = nodeIdByName.find(name);
+        if (it != nodeIdByName.end()) {
+            model.fBoundary_[it->second] = val;
         }
     }
 
