@@ -525,14 +525,19 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             summarizedConcreteBlocks.insert(blockName);
         }
 
-        // Aggregate eligible globals across path blocks.
+        // Aggregate eligible globals across loop blocks.
+        // Energy/NVM costs use pathBlocks (one-iteration cost estimate),
+        // but def indicators and liveness must scan ALL loop blocks so that
+        // values defined in off-path branches are correctly tracked.
         auto aggregateEligGV = [&](llvm::GlobalVariable *GV) {
             double nvmSum = 0.0;
-            bool hasDef = false;
-            bool hasLiveIn = false;
-
             for (const std::string &blockName : agg.pathBlocks) {
                 nvmSum += energy.getENvm(blockName, GV);
+            }
+
+            bool hasDef = false;
+            bool hasLiveIn = false;
+            for (const std::string &blockName : agg.loopBlocks) {
                 hasDef |= state.getEligDefIndicator(blockName, GV);
                 hasLiveIn |= state.getEligLiveIn(blockName).count(GV) > 0;
             }
@@ -551,12 +556,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         for (llvm::GlobalVariable *GV : model.vmObjs_)
             aggregateEligGV(GV);
 
-        // Aggregate ineligible objects across path blocks.
+        // Aggregate ineligible objects across all loop blocks.
         auto aggregateIneligVar = [&](llvm::Value *V) {
             bool hasDef = false;
             bool hasLiveIn = false;
 
-            for (const std::string &blockName : agg.pathBlocks) {
+            for (const std::string &blockName : agg.loopBlocks) {
                 hasDef |= state.getIneligDefIndicator(blockName, V);
                 hasLiveIn |= state.getIneligLiveIn(blockName).count(V) > 0;
             }
