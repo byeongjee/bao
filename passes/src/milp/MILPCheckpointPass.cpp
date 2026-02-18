@@ -24,6 +24,7 @@ using namespace llvm;
 extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<std::string> MILPConfigOpt;
 extern cl::opt<bool> AcceptFeasibleOpt;
+extern cl::opt<bool> AddDebugMarkersOpt;
 
 namespace checkpoint {
 
@@ -122,7 +123,9 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     }
 
     // Step 7: Instrument IR (Pass F)
-    CheckpointInstrumenter instrumenter(*F.getParent());
+    bool addDebugMarkers =
+        AddDebugMarkersOpt.getValue() || ctx.milpParams.addDebugMarkers;
+    CheckpointInstrumenter instrumenter(*F.getParent(), addDebugMarkers);
     unsigned inserted =
         instrumenter.instrumentFunction(F, solution, *abstractCFG.model,
                                         *abstractCFG.model,

@@ -26,6 +26,7 @@ struct MILPEnergyParams {
     unsigned vmCapacityBytes;      // VM (SRAM) capacity in bytes
     double qRebootProb;            // Probability of reboot at boundary
     bool loopChunkingEnabled = false; // Enable loop chunking pass
+    bool addDebugMarkers = false;    // Emit debug marker calls for register save/restore
 };
 
 /// Computes all energy parameters needed by the MILP (spec Sections 4 + 8).

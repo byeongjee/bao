@@ -12,7 +12,9 @@
 
 namespace checkpoint {
 
-CheckpointInstrumenter::CheckpointInstrumenter(llvm::Module &M) : M_(M) {
+CheckpointInstrumenter::CheckpointInstrumenter(llvm::Module &M,
+                                               bool addDebugMarkers)
+    : M_(M), addDebugMarkers_(addDebugMarkers) {
     declareRuntimeFunctions();
 }
 
@@ -20,14 +22,23 @@ void CheckpointInstrumenter::declareRuntimeFunctions() {
     llvm::LLVMContext &Ctx = M_.getContext();
     llvm::Type *VoidTy = llvm::Type::getVoidTy(Ctx);
     llvm::Type *I32Ty = llvm::Type::getInt32Ty(Ctx);
-    llvm::Type *PtrTy = llvm::PointerType::get(Ctx, 0);
+    llvm::Type *PtrTy = llvm::PointerType::getUnqual(Ctx);
 
     prologueFn_ = M_.getOrInsertFunction("__region_prologue", VoidTy);
     epilogueFn_ = M_.getOrInsertFunction("__region_epilogue", VoidTy);
-    storeMemFn_ = M_.getOrInsertFunction(
-        "__checkpoint_store_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-    restoreMemFn_ = M_.getOrInsertFunction(
-        "__restore_mem", VoidTy, PtrTy, PtrTy, I32Ty);
+
+    if (addDebugMarkers_) {
+        // Debug mode: declare memory call functions + register debug markers
+        llvm::Type *I64Ty = llvm::Type::getInt64Ty(Ctx);
+        storeMemFn_ = M_.getOrInsertFunction(
+            "__checkpoint_store_mem", VoidTy, PtrTy, PtrTy, I32Ty);
+        restoreMemFn_ = M_.getOrInsertFunction(
+            "__restore_mem", VoidTy, PtrTy, PtrTy, I32Ty);
+        storeRegFn_ = M_.getOrInsertFunction(
+            "__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
+        restoreRegFn_ = M_.getOrInsertFunction(
+            "__restore_reg", VoidTy, I32Ty, PtrTy);
+    }
 }
 
 unsigned CheckpointInstrumenter::instrumentFunction(
@@ -271,17 +282,33 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                     auto shadowIt = shadowMap_.find(GV);
                     if (shadowIt != shadowMap_.end()) {
                         // Eligible: copy shadow (VM/SRAM) -> original (NVM/FRAM)
-                        auto *call = builder.CreateCall(storeMemFn_,
-                                           {GV, shadowIt->second, size});
-                        commitInsts.insert(call);
+                        if (addDebugMarkers_) {
+                            auto *call = builder.CreateCall(storeMemFn_,
+                                               {GV, shadowIt->second, size});
+                            commitInsts.insert(call);
+                        } else {
+                            auto *mc = builder.CreateMemCpy(
+                                GV, GV->getAlign(),
+                                shadowIt->second, shadowIt->second->getAlign(),
+                                size);
+                            commitInsts.insert(mc);
+                        }
                     } else {
                         // Ineligible global: copy SRAM original -> NVM backup
                         auto backupIt = nvmBackupMap_.find(GV);
                         assert(backupIt != nvmBackupMap_.end() &&
                                "ineligible commit requires an NVM backup");
-                        auto *call = builder.CreateCall(storeMemFn_,
-                                           {backupIt->second, GV, size});
-                        commitInsts.insert(call);
+                        if (addDebugMarkers_) {
+                            auto *call = builder.CreateCall(storeMemFn_,
+                                               {backupIt->second, GV, size});
+                            commitInsts.insert(call);
+                        } else {
+                            auto *mc = builder.CreateMemCpy(
+                                backupIt->second, backupIt->second->getAlign(),
+                                GV, GV->getAlign(),
+                                size);
+                            commitInsts.insert(mc);
+                        }
                     }
                 } else if (llvm::isa<llvm::AllocaInst>(V)) {
                     // Stack alloca -> NVM backup (memcpy)
@@ -290,9 +317,18 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                     auto backupIt = nvmBackupMap_.find(V);
                     assert(backupIt != nvmBackupMap_.end() &&
                            "alloca commit requires an NVM backup");
-                    auto *call = builder.CreateCall(storeMemFn_,
-                                       {backupIt->second, V, size});
-                    commitInsts.insert(call);
+                    if (addDebugMarkers_) {
+                        auto *call = builder.CreateCall(storeMemFn_,
+                                           {backupIt->second, V, size});
+                        commitInsts.insert(call);
+                    } else {
+                        auto *AI = llvm::cast<llvm::AllocaInst>(V);
+                        auto *mc = builder.CreateMemCpy(
+                            backupIt->second, backupIt->second->getAlign(),
+                            AI, AI->getAlign(),
+                            size);
+                        commitInsts.insert(mc);
+                    }
                 } else {
                     // SSA register: defer — direct store may violate dominance.
                     // Phase 2 will use SSAUpdater to find the reaching def.
@@ -338,8 +374,15 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
             auto shadowIt = shadowMap_.find(GV);
             assert(shadowIt != shadowMap_.end() &&
                    "needRestore requires a VM shadow for the global");
-            builder.CreateCall(restoreMemFn_,
-                               {shadowIt->second, GV, size});
+            if (addDebugMarkers_) {
+                builder.CreateCall(restoreMemFn_,
+                                   {shadowIt->second, GV, size});
+            } else {
+                builder.CreateMemCpy(
+                    shadowIt->second, shadowIt->second->getAlign(),
+                    GV, GV->getAlign(),
+                    size);
+            }
             inserted++;
         }
 
@@ -370,8 +413,23 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                 llvm::Value *size = llvm::ConstantInt::get(
                     llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
                 // Restore: copy NVM backup -> SRAM original
-                builder.CreateCall(restoreMemFn_,
-                                   {V, backupIt->second, size});
+                if (addDebugMarkers_) {
+                    builder.CreateCall(restoreMemFn_,
+                                       {V, backupIt->second, size});
+                } else {
+                    if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+                        builder.CreateMemCpy(
+                            GV, GV->getAlign(),
+                            backupIt->second, backupIt->second->getAlign(),
+                            size);
+                    } else {
+                        auto *AI = llvm::cast<llvm::AllocaInst>(V);
+                        builder.CreateMemCpy(
+                            AI, AI->getAlign(),
+                            backupIt->second, backupIt->second->getAlign(),
+                            size);
+                    }
+                }
                 inserted++;
             } else {
                 // SSA register: typed load from NVM slot.
@@ -379,6 +437,13 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                     builder.CreateLoad(V->getType(), backupIt->second);
                 ssaRestoreDefs[V].emplace_back(&BB, restored);
                 inserted++;
+
+                if (addDebugMarkers_) {
+                    auto *slotId = llvm::ConstantInt::get(
+                        llvm::Type::getInt32Ty(M_.getContext()), slotCounter_++);
+                    builder.CreateCall(restoreRegFn_,
+                                       {slotId, backupIt->second});
+                }
             }
         }
 
@@ -413,6 +478,15 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                 insertBefore->getParent(), insertBefore->getIterator());
             auto *store = commitBuilder.CreateStore(reaching, nvmBackup);
             allCommitInsts.insert(store);
+
+            if (addDebugMarkers_) {
+                llvm::Value *valAsI64 = convertToI64(commitBuilder, reaching);
+                auto *slotId = llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(M_.getContext()), slotCounter_++);
+                auto *call = commitBuilder.CreateCall(storeRegFn_,
+                                                      {slotId, valAsI64});
+                allCommitInsts.insert(call);
+            }
         }
 
         // Mark new PHIs as commit-related so Phase 3 restore rewriting
@@ -460,6 +534,34 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
     }
 
     return inserted;
+}
+
+llvm::Value *CheckpointInstrumenter::convertToI64(llvm::IRBuilder<> &builder,
+                                                   llvm::Value *V) {
+    llvm::Type *Ty = V->getType();
+    llvm::Type *I64Ty = llvm::Type::getInt64Ty(M_.getContext());
+
+    if (Ty->isIntegerTy()) {
+        unsigned bits = Ty->getIntegerBitWidth();
+        if (bits < 64)
+            return builder.CreateZExt(V, I64Ty);
+        if (bits == 64)
+            return V;
+        // Wider than 64-bit: truncate (unlikely but safe fallback)
+        return builder.CreateTrunc(V, I64Ty);
+    }
+    if (Ty->isPointerTy())
+        return builder.CreatePtrToInt(V, I64Ty);
+    if (Ty->isFloatTy()) {
+        llvm::Value *asI32 = builder.CreateBitCast(
+            V, llvm::Type::getInt32Ty(M_.getContext()));
+        return builder.CreateZExt(asI32, I64Ty);
+    }
+    if (Ty->isDoubleTy())
+        return builder.CreateBitCast(V, I64Ty);
+
+    // Fallback for unsupported types
+    return llvm::ConstantInt::get(I64Ty, 0);
 }
 
 } // namespace checkpoint

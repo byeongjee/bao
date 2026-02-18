@@ -199,6 +199,15 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
         }
         params.loopChunkingEnabled = config["loop_chunking_enabled"].get<bool>();
     }
+    params.addDebugMarkers = false;
+    if (config.contains("add_debug_markers")) {
+        if (!config["add_debug_markers"].is_boolean()) {
+            llvm::errs() << "Error: Field 'add_debug_markers' must be boolean"
+                         << " in MILP config: " << configPath << "\n";
+            return std::nullopt;
+        }
+        params.addDebugMarkers = config["add_debug_markers"].get<bool>();
+    }
 
     return params;
 }

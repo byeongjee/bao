@@ -35,6 +35,11 @@ cl::opt<bool> LoopChunkingEnabledOpt(
     cl::desc("Enable loop chunking before MILP passes"),
     cl::init(false));
 
+cl::opt<bool> AddDebugMarkersOpt(
+    "add-debug-markers",
+    cl::desc("Emit runtime function calls for register save/restore (for mock counter debugging)"),
+    cl::init(false));
+
 // Plugin registration for new pass manager
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {

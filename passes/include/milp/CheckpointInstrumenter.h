@@ -4,6 +4,7 @@
 #include "milp/ModelViews.h"
 #include "milp/StateAnalysis.h"
 
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
 
@@ -14,7 +15,8 @@ namespace checkpoint {
 /// Instruments LLVM IR based on MILP solution.
 class CheckpointInstrumenter {
 public:
-    explicit CheckpointInstrumenter(llvm::Module &M);
+    explicit CheckpointInstrumenter(llvm::Module &M,
+                                    bool addDebugMarkers = false);
 
     /// Instrument a function using the MILP solution and state analysis.
     unsigned instrumentFunction(llvm::Function &F,
@@ -25,11 +27,16 @@ public:
 
 private:
     llvm::Module &M_;
+    bool addDebugMarkers_;
 
     llvm::FunctionCallee prologueFn_;
     llvm::FunctionCallee epilogueFn_;
     llvm::FunctionCallee storeMemFn_;
     llvm::FunctionCallee restoreMemFn_;
+    llvm::FunctionCallee storeRegFn_;
+    llvm::FunctionCallee restoreRegFn_;
+
+    unsigned slotCounter_ = 0;
 
     /// Maps candidate globals to their SRAM shadow globals.
     std::map<llvm::GlobalVariable *, llvm::GlobalVariable *> shadowMap_;
@@ -55,6 +62,8 @@ private:
                                     const IStateView &stateView,
                                     const StateAnalysis &state);
     void applyMemoryPlacement(const StateAnalysis &state);
+
+    llvm::Value *convertToI64(llvm::IRBuilder<> &builder, llvm::Value *V);
 };
 
 } // namespace checkpoint
