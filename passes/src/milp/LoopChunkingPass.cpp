@@ -688,6 +688,13 @@ static bool rewriteLoopWithChunkSize(const LoopRewritePlan &plan,
         uint64_t mainTrip = plan.N / plan.K;
         uint64_t remTrip = plan.N % plan.K;
 
+        // When there is no separate remainder loop, LLVM integrates the
+        // remainder into the main loop body via a breakout trip (early
+        // exit mid-body on the last partial iteration).  The main loop
+        // then runs ceil(N/K) times, not floor(N/K).
+        if (!remainderLoop && remTrip != 0)
+            mainTrip += 1;
+
         removeLoopTripcountMarkers(plan.L, LI);
         insertLoopTripcountMarker(plan.L, mainTrip);
 
