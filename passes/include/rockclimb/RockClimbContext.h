@@ -14,6 +14,7 @@ struct RockClimbParams {
     double E_restore_per_reg;      // Energy to restore one register
     bool distributedCheckpointing; // Enable distributed register checkpointing
     bool memoryCheckpointing;      // Enable memory (alloca/global) checkpointing
+    double checkpoint_store_energy = 0.0; // Energy cost per checkpoint store (for CkptCycles)
 
     /// Calculate E_safe = E_input - E_restore.
     double calculateESafe() const {

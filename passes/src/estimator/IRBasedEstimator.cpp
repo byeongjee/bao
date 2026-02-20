@@ -178,10 +178,14 @@ double IRBasedEstimator::getInstructionCost(unsigned Opcode) const {
     return 1; // Ultimate fallback
 }
 
+double IRBasedEstimator::getInstructionCost(const llvm::Instruction &I) {
+    return getInstructionCost(I.getOpcode());
+}
+
 EnergyEstimate IRBasedEstimator::estimate(const llvm::BasicBlock &BB) {
     double totalCost = 0.0;
     for (const llvm::Instruction &I : BB) {
-        totalCost += getInstructionCost(I.getOpcode());
+        totalCost += getInstructionCost(I);
     }
     return EnergyEstimate{totalCost, "ir-instruction-sum"};
 }

@@ -39,6 +39,12 @@ public:
     /// Implementations can override to perform function-level cleanup.
     /// @param F The function that was processed.
     virtual void finalizeFunction(const llvm::Function &F) {}
+
+    /// Get the energy cost of a single instruction.
+    /// Default returns 0 (subclasses should override for block splitting support).
+    /// @param I The instruction to estimate energy for.
+    /// @return Energy cost for the instruction.
+    virtual double getInstructionCost(const llvm::Instruction &I) { return 0.0; }
 };
 
 using EnergyEstimatorPtr = std::unique_ptr<EnergyEstimator>;

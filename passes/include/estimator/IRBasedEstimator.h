@@ -19,6 +19,7 @@ public:
 
     EnergyEstimate estimate(const llvm::BasicBlock &BB) override;
     std::string getName() const override;
+    double getInstructionCost(const llvm::Instruction &I) override;
 
 private:
     /// Private constructor - use create() factory method.

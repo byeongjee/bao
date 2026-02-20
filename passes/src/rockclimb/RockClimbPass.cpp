@@ -5,10 +5,15 @@
 #include "rockclimb/RockClimbOptimizer.h"
 
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/JSON.h"
+#include "llvm/Transforms/Utils/UnrollLoop.h"
+#include "llvm/Transforms/Utils/LoopSimplify.h"
 
 #include <fstream>
 #include <sstream>
@@ -47,12 +52,17 @@ static cl::opt<bool> MemoryCkptOpt(
     cl::desc("Enable memory checkpointing (allocas and globals) in addition to registers"),
     cl::init(false));
 
+static cl::opt<bool> LoopUnrollOpt(
+    "rockclimb-loop-unroll",
+    cl::desc("Enable loop unrolling optimization before partitioning (default: true)"),
+    cl::init(true));
+
 } // anonymous namespace
 
 namespace checkpoint {
 
 // Parse RockClimb-specific parameters from flat JSON config.
-// All fields are required except memory_checkpointing (defaults to false).
+// All fields are required except memory_checkpointing and checkpoint_store_energy.
 bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     std::ifstream file(configPath.str());
     if (!file.is_open()) {
@@ -119,7 +129,85 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     }
     params.memoryCheckpointing = *memCkpt;
 
+    // Optional: checkpoint_store_energy (defaults to 0)
+    auto ckptStoreEnergy = root->getNumber("checkpoint_store_energy");
+    if (ckptStoreEnergy) {
+        params.checkpoint_store_energy = *ckptStoreEnergy;
+    }
+
     return true;
+}
+
+/// Try to unroll loops whose body energy fits within E_safe.
+/// Paper Section IV-C.a: maximize region size by unrolling short loops.
+static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
+                           DominatorTree &DT, AssumptionCache &AC,
+                           EnergyEstimator &estimator, double E_safe) {
+    bool changed = false;
+
+    // Collect loops first (unrolling modifies LoopInfo)
+    SmallVector<Loop *, 4> loops;
+    for (Loop *L : LI) {
+        // Collect all loops including nested (innermost first)
+        SmallVector<Loop *, 4> worklist;
+        worklist.push_back(L);
+        while (!worklist.empty()) {
+            Loop *curr = worklist.pop_back_val();
+            // Process innermost loops first
+            if (curr->getSubLoops().empty()) {
+                loops.push_back(curr);
+            }
+            for (Loop *sub : *curr) {
+                worklist.push_back(sub);
+            }
+        }
+    }
+
+    for (Loop *L : loops) {
+        // Only unroll loops with known trip count
+        unsigned tripCount = SE.getSmallConstantTripCount(L);
+        if (tripCount == 0) continue;
+
+        // Compute body energy: sum of all blocks in the loop
+        double bodyEnergy = 0.0;
+        for (BasicBlock *BB : L->getBlocks()) {
+            bodyEnergy += estimator.estimate(*BB).cost;
+        }
+
+        if (bodyEnergy >= E_safe) continue;  // Loop body already too big
+
+        // Calculate unroll factor: how many iterations fit in E_safe
+        unsigned maxUnroll = static_cast<unsigned>(E_safe / bodyEnergy);
+        if (maxUnroll <= 1) continue;
+
+        unsigned unrollFactor = std::min(maxUnroll, tripCount);
+        if (unrollFactor <= 1) continue;
+
+        // Set up unroll options
+        UnrollLoopOptions ULO;
+        ULO.Count = unrollFactor;
+        ULO.Force = true;
+        ULO.Runtime = false;
+        ULO.AllowExpensiveTripCount = false;
+        ULO.UnrollRemainder = (unrollFactor == tripCount);
+        ULO.ForgetAllSCEV = true;
+
+        errs() << "  Unrolling loop at "
+               << L->getHeader()->getName()
+               << " (trip count: " << tripCount
+               << ", body energy: " << bodyEnergy
+               << ", factor: " << unrollFactor << ")\n";
+
+        LoopUnrollResult res = UnrollLoop(L, ULO, &LI, &SE, &DT, &AC,
+                                          /*TTI=*/nullptr,
+                                          /*ORE=*/nullptr,
+                                          /*PreserveLCSSA=*/true);
+        if (res != LoopUnrollResult::Unmodified) {
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 PreservedAnalyses RockClimbPass::run(Function &F,
@@ -158,9 +246,27 @@ PreservedAnalyses RockClimbPass::run(Function &F,
            << (useDistributedCkpt ? "enabled" : "disabled") << "\n";
     errs() << "  Memory checkpointing: "
            << (useMemoryCkpt ? "enabled" : "disabled") << "\n";
+    if (ctx.params.checkpoint_store_energy > 0) {
+        errs() << "  Checkpoint store energy: "
+               << ctx.params.checkpoint_store_energy << "\n";
+    }
+
+    // Fix 5: Loop unrolling optimization (before partitioning)
+    if (LoopUnrollOpt) {
+        auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
+        auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
+        auto &AC = AM.getResult<AssumptionAnalysis>(F);
+
+        if (tryUnrollLoops(F, LI, SE, DT, AC, *ctx.estimator, ctx.E_safe)) {
+            errs() << "  Loop unrolling applied, rebuilding CFG...\n";
+            // Rebuild CFG analysis after unrolling
+            ctx.cfg = std::make_unique<CFGAnalysis>(F, LI, *ctx.estimator);
+        }
+    }
 
     // Check feasibility - blocks that exceed E_safe individually
-    RockClimbOptimizer optimizer(*ctx.cfg, ctx.E_safe, LI);
+    RockClimbOptimizer optimizer(*ctx.cfg, ctx.E_safe, LI, F,
+                                 ctx.estimator.get());
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
         errs() << "Error: The following blocks exceed E_safe:\n";
@@ -172,11 +278,74 @@ PreservedAnalyses RockClimbPass::run(Function &F,
         return PreservedAnalyses::all();
     }
 
-    // Run region partitioning
-    auto result = optimizer.optimize();
-    if (!result.feasible) {
-        errs() << "Region partitioning failed: " << result.errorMessage << "\n";
-        return PreservedAnalyses::all();
+    // Fix 2: Iterative partition-then-adjust loop
+    // Partition, analyze checkpoint stores, compute CkptCycles, re-partition
+    RockClimbOptimizer::Result result;
+    std::vector<CheckpointPoint> checkpointPoints;
+
+    static const int MAX_REFINEMENT_ITERATIONS = 3;
+    for (int iteration = 0; iteration <= MAX_REFINEMENT_ITERATIONS; ++iteration) {
+        result = optimizer.optimize();
+        if (!result.feasible) {
+            errs() << "Region partitioning failed: " << result.errorMessage << "\n";
+            return PreservedAnalyses::all();
+        }
+
+        // If no checkpoint store energy configured, no need to iterate
+        if (ctx.params.checkpoint_store_energy <= 0 || !useDistributedCkpt) {
+            break;
+        }
+
+        // Run distributed checkpointing analysis to find checkpoint points
+        DistributedCheckpointing distCkptAnalysis(F, result.regions,
+                                                   result.regionBoundaries);
+        auto currentCkptPoints = distCkptAnalysis.analyze();
+
+        // Compute CkptCycles per block: count checkpoints per block * store energy
+        std::map<std::string, double> CkptCycles;
+        for (const auto &ckpt : currentCkptPoints) {
+            if (ckpt.afterInst) {
+                BasicBlock *BB = ckpt.afterInst->getParent();
+                std::string blockName = BB->getName().str();
+                if (blockName.empty()) {
+                    size_t idx = 0;
+                    for (BasicBlock &B : F) {
+                        if (&B == BB) {
+                            blockName = "bb" + std::to_string(idx);
+                            break;
+                        }
+                        ++idx;
+                    }
+                }
+                CkptCycles[blockName] += ctx.params.checkpoint_store_energy;
+            }
+        }
+
+        // Check if CkptCycles changed from last iteration
+        // (convergence check)
+        bool converged = true;
+        auto prevExtra = optimizer.getInfeasibleBlocks(); // side-effect free check
+
+        // Simple convergence: same number of boundaries as last iteration
+        auto prevBoundaryCount = result.regionBoundaries.size();
+
+        // Apply CkptCycles and re-partition
+        optimizer.setExtraBlockCosts(CkptCycles);
+
+        if (iteration < MAX_REFINEMENT_ITERATIONS) {
+            auto newResult = optimizer.optimize();
+            if (newResult.regionBoundaries.size() == prevBoundaryCount) {
+                // Converged — use the result from this iteration
+                result = newResult;
+                checkpointPoints = currentCkptPoints;
+                break;
+            }
+            result = newResult;
+            checkpointPoints = currentCkptPoints;
+        } else {
+            // Max iterations reached, use current result
+            checkpointPoints = currentCkptPoints;
+        }
     }
 
     errs() << "\nRegion boundaries (" << result.regionBoundaries.size() << "):\n";
@@ -192,13 +361,16 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     }
 
     // Distributed checkpointing analysis (registers and optionally memory)
-    std::vector<CheckpointPoint> checkpointPoints;
     MemoryCheckpointResult memCheckpoints;
 
     DistributedCheckpointing distCkpt(F, result.regions, result.regionBoundaries);
 
     if (useDistributedCkpt) {
-        checkpointPoints = distCkpt.analyze();
+        // Use checkpointPoints from iterative refinement if available,
+        // otherwise compute fresh
+        if (checkpointPoints.empty()) {
+            checkpointPoints = distCkpt.analyze();
+        }
 
         errs() << "\nDistributed register checkpoints (" << checkpointPoints.size() << "):\n";
         for (const auto &ckpt : checkpointPoints) {
