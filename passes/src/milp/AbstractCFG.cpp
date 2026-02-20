@@ -493,6 +493,21 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
 
         out.stats.loopsEligible++;
 
+        // Compute loop trip count for total energy check.
+        unsigned scevTC = SE.getSmallConstantTripCount(L);
+        auto markerTC = getMarkerTripCount(L);
+        unsigned loopTC;
+        if (scevTC > 0 && markerTC)
+            loopTC = std::min(scevTC, static_cast<unsigned>(*markerTC));
+        else if (scevTC > 0)
+            loopTC = scevTC;
+        else if (markerTC)
+            loopTC = static_cast<unsigned>(*markerTC);
+        else {
+            out.stats.skippedReasons["unknown-loop-trip-count"]++;
+            continue;
+        }
+
         // Compute ineligible restore cost margin: these restore costs are
         // unavoidable at any region start containing this summary node, but
         // the basic budget (capacity - E_pro - E_epi) doesn't account for
@@ -511,8 +526,9 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         }
 
         const double effectiveBudget = budget - ineligRestoreCost;
-        if (effectiveBudget <= 0.0 || !(path.energy < effectiveBudget)) {
-            out.stats.skippedReasons["loop-unit-exceeds-budget"]++;
+        double totalEnergy = path.energy * static_cast<double>(loopTC);
+        if (effectiveBudget <= 0.0 || !(totalEnergy < effectiveBudget)) {
+            out.stats.skippedReasons["loop-total-exceeds-budget"]++;
             continue;
         }
 
@@ -524,8 +540,13 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         agg.nodeName = nodeName;
         agg.headerName = headerName;
         agg.pathBlocks = path.blocksOnPath;
-        agg.pathEnergy = path.energy;
-        agg.fEntry = energy.getFEntry(headerName);
+        agg.pathEnergy = totalEnergy;
+        // Summary represents all iterations — entered once per loop invocation.
+        if (BasicBlock *PH = L->getLoopPreheader()) {
+            agg.fEntry = energy.getFEntry(getBlockName(*PH, F));
+        } else {
+            agg.fEntry = energy.getFEntry(headerName);
+        }
 
         for (const BasicBlock *BB : L->blocks()) {
             std::string blockName = getBlockName(*BB, F);
@@ -551,7 +572,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             }
 
             if (nvmSum != 0.0) {
-                agg.eNvmByGV[GV] = nvmSum;
+                agg.eNvmByGV[GV] = nvmSum * static_cast<double>(loopTC);
             }
             if (hasDef) {
                 agg.eligDefGlobals.insert(GV);
