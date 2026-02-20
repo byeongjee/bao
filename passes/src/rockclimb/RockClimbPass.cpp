@@ -12,6 +12,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
@@ -19,6 +20,8 @@
 
 #include <fstream>
 #include <sstream>
+
+#define DEBUG_TYPE "rockclimb"
 
 using namespace llvm;
 
@@ -367,15 +370,17 @@ PreservedAnalyses RockClimbPass::run(Function &F,
         checkpointPoints = distCkpt.analyze();
 
         errs() << "\nDistributed register checkpoints (" << checkpointPoints.size() << "):\n";
-        for (const auto &ckpt : checkpointPoints) {
-            errs() << "  Reg " << ckpt.regId << " in region "
-                   << getBlockName(*ckpt.regionStart, F);
-            if (ckpt.afterInst) {
-                errs() << " after instruction: ";
-                ckpt.afterInst->print(errs());
+        LLVM_DEBUG({
+            for (const auto &ckpt : checkpointPoints) {
+                dbgs() << "  Reg " << ckpt.regId << " in region "
+                       << getBlockName(*ckpt.regionStart, F);
+                if (ckpt.afterInst) {
+                    dbgs() << " after instruction: ";
+                    ckpt.afterInst->print(dbgs());
+                }
+                dbgs() << "\n";
             }
-            errs() << "\n";
-        }
+        });
     }
 
     // Convert boundaries to pointer set for instrumenter
