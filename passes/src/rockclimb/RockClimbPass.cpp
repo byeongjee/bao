@@ -201,6 +201,16 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
 static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
                            DominatorTree &DT, AssumptionCache &AC,
                            EnergyEstimator &estimator, double E_safe) {
+    struct UnrollStats {
+        unsigned loopsSeen = 0;
+        unsigned skippedNotSimplify = 0;
+        unsigned skippedUnknownTrip = 0;
+        unsigned skippedBodyTooLarge = 0;
+        unsigned skippedFactorTooSmall = 0;
+        unsigned skippedLLVMRejected = 0;
+        unsigned unrolled = 0;
+    } stats;
+
     bool changed = false;
     bool madeProgress = true;
     while (madeProgress) {
@@ -213,8 +223,19 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
             collectInnermostLoops(L, loops);
         }
 
+        // Only count on the first pass (re-collections after unrolls
+        // would double-count surviving loops).
+        if (!changed) {
+            stats.loopsSeen = loops.size();
+        }
+
         for (Loop *L : loops) {
+            StringRef headerName = L->getHeader()->getName();
+
             if (!L->isLoopSimplifyForm()) {
+                stats.skippedNotSimplify++;
+                LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName
+                                  << " (not in LoopSimplify form)\n");
                 continue;
             }
 
@@ -227,6 +248,9 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
             // Only unroll loops with known trip count.
             unsigned tripCount = SE.getSmallConstantTripCount(L);
             if (tripCount == 0) {
+                stats.skippedUnknownTrip++;
+                LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName
+                                  << " (unknown trip count)\n");
                 continue;
             }
 
@@ -237,17 +261,22 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
             }
 
             if (bodyEnergy >= E_safe) {
-                continue;  // Loop body already too big.
+                stats.skippedBodyTooLarge++;
+                LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName
+                                  << " (body energy " << bodyEnergy
+                                  << " >= E_safe " << E_safe << ")\n");
+                continue;
             }
 
             // Calculate unroll factor: how many iterations fit in E_safe.
             unsigned maxUnroll = static_cast<unsigned>(E_safe / bodyEnergy);
-            if (maxUnroll <= 1) {
-                continue;
-            }
-
             unsigned unrollFactor = std::min(maxUnroll, tripCount);
             if (unrollFactor <= 1) {
+                stats.skippedFactorTooSmall++;
+                LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName
+                                  << " (unroll factor " << unrollFactor
+                                  << " from maxUnroll=" << maxUnroll
+                                  << ", tripCount=" << tripCount << ")\n");
                 continue;
             }
 
@@ -260,24 +289,56 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
             ULO.UnrollRemainder = (unrollFactor == tripCount);
             ULO.ForgetAllSCEV = true;
 
-            errs() << "  Unrolling loop at "
-                   << L->getHeader()->getName()
+            errs() << "  Unrolling loop at " << headerName
                    << " (trip count: " << tripCount
                    << ", body energy: " << bodyEnergy
-                   << ", factor: " << unrollFactor << ")\n";
+                   << ", factor: " << unrollFactor
+                   << (ULO.UnrollRemainder ? ", full" : ", partial")
+                   << ")\n";
 
             LoopUnrollResult res = UnrollLoop(L, ULO, &LI, &SE, &DT, &AC,
                                               /*TTI=*/nullptr,
                                               /*ORE=*/nullptr,
                                               /*PreserveLCSSA=*/true);
             if (res == LoopUnrollResult::Unmodified) {
+                stats.skippedLLVMRejected++;
+                errs() << "  Loop unroll: LLVM rejected unroll of "
+                       << headerName << "\n";
                 continue;
             }
 
+            stats.unrolled++;
             changed = true;
             madeProgress = true;
             break;
         }
+    }
+
+    // Print summary (always visible, like LoopChunkingPass)
+    unsigned skippedTotal = stats.skippedNotSimplify + stats.skippedUnknownTrip +
+                            stats.skippedBodyTooLarge + stats.skippedFactorTooSmall +
+                            stats.skippedLLVMRejected;
+    errs() << "=== Loop Unroll: " << F.getName() << " ===\n";
+    errs() << "  Innermost loops seen:            " << stats.loopsSeen << "\n";
+    errs() << "  Loops unrolled:                  " << stats.unrolled << "\n";
+    errs() << "  Skipped loops:                   " << skippedTotal << "\n";
+    if (skippedTotal > 0) {
+        errs() << "  Skip reason breakdown:\n";
+        if (stats.skippedNotSimplify)
+            errs() << "    - not LoopSimplify form:       "
+                   << stats.skippedNotSimplify << "\n";
+        if (stats.skippedUnknownTrip)
+            errs() << "    - unknown trip count:           "
+                   << stats.skippedUnknownTrip << "\n";
+        if (stats.skippedBodyTooLarge)
+            errs() << "    - body energy >= E_safe:        "
+                   << stats.skippedBodyTooLarge << "\n";
+        if (stats.skippedFactorTooSmall)
+            errs() << "    - unroll factor <= 1:           "
+                   << stats.skippedFactorTooSmall << "\n";
+        if (stats.skippedLLVMRejected)
+            errs() << "    - LLVM UnrollLoop rejected:     "
+                   << stats.skippedLLVMRejected << "\n";
     }
 
     return changed;
