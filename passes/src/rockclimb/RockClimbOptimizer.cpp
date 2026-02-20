@@ -35,21 +35,27 @@ static bool blockHasCallSite(const llvm::BasicBlock &BB) {
 
 } // namespace
 
+llvm::BasicBlock *RockClimbOptimizer::resolveBlock(
+    const llvm::WeakTrackingVH &handle) {
+    auto *BB = llvm::cast_or_null<llvm::BasicBlock>(handle);
+    assert(BB && "WeakTrackingVH resolved to null — block was deleted");
+    return BB;
+}
+
 RockClimbOptimizer::RockClimbOptimizer(const CFGAnalysis &cfg,
                                        double E_safe,
                                        llvm::LoopInfo &LI,
                                        llvm::Function &F,
                                        EnergyEstimator *estimator)
     : cfg_(cfg), E_safe_(E_safe), LI_(LI), F_(F), estimator_(estimator) {
-    // Build block name to BasicBlock* mapping
+    // Build energyCosts_ from CFGAnalysis (one-time string lookup)
     for (llvm::BasicBlock &BB : F_) {
         std::string name = getBlockName(BB, F_);
-        blockMap_[name] = &BB;
+        energyCosts_[&BB] = cfg_.getBlockInfo(name).energyCost;
     }
 
     identifyLoopHeaders();
     identifyCallSiteBlocks();
-    buildAdjacencyMaps();
     computeTopologicalOrder();
 }
 
@@ -64,8 +70,7 @@ void RockClimbOptimizer::identifyLoopHeaders() {
 
             llvm::BasicBlock *header = current->getHeader();
             if (header) {
-                std::string name = getBlockName(*header, F_);
-                loopHeaders_.insert(name);
+                loopHeaders_.insert(header);
             }
 
             for (llvm::Loop *subLoop : *current) {
@@ -79,58 +84,46 @@ void RockClimbOptimizer::identifyCallSiteBlocks() {
     callSiteBlocks_.clear();
     for (llvm::BasicBlock &BB : F_) {
         if (blockHasCallSite(BB)) {
-            std::string name = getBlockName(BB, F_);
-            callSiteBlocks_.insert(name);
+            callSiteBlocks_.insert(&BB);
         }
     }
 }
 
-void RockClimbOptimizer::buildAdjacencyMaps() {
-    successors_.clear();
-
-    // Initialize empty lists for all blocks
-    for (const auto &block : cfg_.getBlocks()) {
-        successors_[block] = {};
-    }
-
-    for (const auto &edge : cfg_.getEdges()) {
-        successors_[edge.first].push_back(edge.second);
-    }
-}
-
 void RockClimbOptimizer::computeTopologicalOrder() {
+    using namespace llvm;
     topoOrder_.clear();
 
-    const auto &blocks = cfg_.getBlocks();
-    if (blocks.empty()) return;
+    if (F_.empty()) return;
 
-    std::string entry = cfg_.getEntryBlock();
+    BasicBlock *entry = &F_.getEntryBlock();
 
-    // Build in-degree map from edges
-    std::map<std::string, int> inDegree;
-    for (const auto &block : blocks) {
-        inDegree[block] = 0;
+    // Build in-degree from LLVM successors
+    DenseMap<BasicBlock*, int> inDegree;
+    for (BasicBlock &BB : F_) {
+        inDegree[&BB] = 0;
     }
-    for (const auto &edge : cfg_.getEdges()) {
-        inDegree[edge.second]++;
+    for (BasicBlock &BB : F_) {
+        for (BasicBlock *succ : successors(&BB)) {
+            inDegree[succ]++;
+        }
     }
 
     // Kahn's algorithm with BFS from entry
     // Note: CFG may have cycles (loops), handle by allowing negative in-degree
-    std::queue<std::string> queue;
-    std::set<std::string> visited;
+    std::queue<BasicBlock*> queue;
+    SmallPtrSet<BasicBlock*, 32> visited;
 
     queue.push(entry);
 
     while (!queue.empty()) {
-        std::string curr = queue.front();
+        BasicBlock *curr = queue.front();
         queue.pop();
 
         if (visited.count(curr)) continue;
         visited.insert(curr);
-        topoOrder_.push_back(curr);
+        topoOrder_.push_back(WeakTrackingVH(curr));
 
-        for (const auto &succ : successors_[curr]) {
+        for (BasicBlock *succ : successors(curr)) {
             inDegree[succ]--;
             if (inDegree[succ] <= 0 && !visited.count(succ)) {
                 queue.push(succ);
@@ -139,33 +132,34 @@ void RockClimbOptimizer::computeTopologicalOrder() {
     }
 
     // Add any remaining unreachable blocks
-    for (const auto &block : blocks) {
-        if (!visited.count(block)) {
-            topoOrder_.push_back(block);
+    for (BasicBlock &BB : F_) {
+        if (!visited.count(&BB)) {
+            topoOrder_.push_back(WeakTrackingVH(&BB));
         }
     }
 }
 
-double RockClimbOptimizer::getBlockCost(const std::string &block) const {
-    double baseCost = cfg_.getBlockInfo(block).energyCost;
-    auto it = extraBlockCosts_.find(block);
-    if (it != extraBlockCosts_.end()) {
-        baseCost += it->second;
+double RockClimbOptimizer::getBlockCost(llvm::BasicBlock *BB) const {
+    auto it = energyCosts_.find(BB);
+    if (it != energyCosts_.end()) {
+        return it->second;
     }
-    return baseCost;
+    return 0.0;
 }
 
 void RockClimbOptimizer::setExtraBlockCosts(
-    const std::map<std::string, double> &costs) {
-    extraBlockCosts_ = costs;
+    const llvm::DenseMap<llvm::BasicBlock*, double> &costs) {
+    for (const auto &entry : costs) {
+        energyCosts_[entry.first] += entry.second;
+    }
 }
 
-std::vector<std::string> RockClimbOptimizer::getInfeasibleBlocks() const {
-    std::vector<std::string> infeasible;
-    for (const auto &block : cfg_.getBlocks()) {
-        double energy = getBlockCost(block);
+std::vector<llvm::BasicBlock*> RockClimbOptimizer::getInfeasibleBlocks() const {
+    std::vector<llvm::BasicBlock*> infeasible;
+    for (llvm::BasicBlock &BB : F_) {
+        double energy = getBlockCost(&BB);
         if (energy >= E_safe_) {
-            infeasible.push_back(block);
+            infeasible.push_back(&BB);
         }
     }
     return infeasible;
@@ -176,6 +170,7 @@ RockClimbOptimizer::Result RockClimbOptimizer::optimize() {
 }
 
 RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
+    using namespace llvm;
     Result result;
     result.feasible = true;
 
@@ -186,29 +181,30 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
     // Algorithm 1 from RockClimb paper: path-aware region partitioning
     //
     // Lines 1-4: Initialize IncomeCycle_bbi = 0 for all blocks
-    std::map<std::string, double> incomeCycle;
-    for (const auto &block : topoOrder_) {
-        incomeCycle[block] = 0.0;
+    DenseMap<BasicBlock*, double> incomeCycle;
+    for (const auto &handle : topoOrder_) {
+        incomeCycle[resolveBlock(handle)] = 0.0;
     }
 
     // Track which blocks are region boundaries
-    std::set<std::string> boundarySet;
+    SmallPtrSet<BasicBlock*, 16> boundarySet;
     // Entry block always starts a region
-    boundarySet.insert(topoOrder_[0]);
+    BasicBlock *entryBB = resolveBlock(topoOrder_[0]);
+    boundarySet.insert(entryBB);
 
     // Lines 5-16: Process blocks in topological order
     for (size_t i = 0; i < topoOrder_.size(); ++i) {
-        const std::string &block = topoOrder_[i];
-        double Cycle_bbi = getBlockCost(block);
+        BasicBlock *BB = resolveBlock(topoOrder_[i]);
+        double Cycle_bbi = getBlockCost(BB);
 
         // Check mandatory boundaries: loop headers and function call sites
-        if (block != topoOrder_[0]) {  // Entry already handled
-            if (loopHeaders_.count(block) || callSiteBlocks_.count(block)) {
-                boundarySet.insert(block);
+        if (BB != entryBB) {  // Entry already handled
+            if (loopHeaders_.count(BB) || callSiteBlocks_.count(BB)) {
+                boundarySet.insert(BB);
             }
         }
 
-        bool isBoundary = boundarySet.count(block) > 0;
+        bool isBoundary = boundarySet.count(BB) > 0;
 
         double accum_cycle;
         // Lines 6-10: Compute accum_cycle
@@ -217,13 +213,13 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
             accum_cycle = Cycle_bbi;
         } else {
             // Line 9: accum_cycle = Cycle_bbi + IncomeCycle_bbi
-            accum_cycle = Cycle_bbi + incomeCycle[block];
+            accum_cycle = Cycle_bbi + incomeCycle[BB];
         }
 
         // Lines 11-15: if accum_cycle >= threshold, place boundary / split
         if (accum_cycle >= E_safe_ && !isBoundary) {
             // Place boundary at this block
-            boundarySet.insert(block);
+            boundarySet.insert(BB);
             // Reset: this block starts a new region
             accum_cycle = Cycle_bbi;
         }
@@ -231,34 +227,32 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
         // After boundary placement, if single block still exceeds threshold,
         // try splitting (Algorithm 1 while loop, lines 11-15)
         while (accum_cycle >= E_safe_ && estimator_) {
-            std::string newBlock = splitBlock(block, E_safe_, i);
-            if (newBlock.empty()) {
+            BasicBlock *newBB = splitBlock(BB, E_safe_, i);
+            if (!newBB) {
                 // Can't split further — mark infeasible
                 result.feasible = false;
-                result.errorMessage = "Block '" + block +
+                result.errorMessage = "Block '" +
+                    getBlockName(*BB, F_) +
                     "' exceeds E_safe and cannot be split further";
                 return result;
             }
 
             // After splitting:
-            // - 'block' (topoOrder_[i]) is now the first half (smaller)
-            // - 'newBlock' is inserted at topoOrder_[i+1] (second half)
+            // - BB (topoOrder_[i]) is now the first half (smaller)
+            // - newBB is inserted at topoOrder_[i+1] (second half)
             // Recalculate cost for first half (current block)
-            Cycle_bbi = getBlockCost(block);
+            Cycle_bbi = getBlockCost(BB);
             accum_cycle = Cycle_bbi;
             // The while loop will re-check; the second half will be processed
             // in the next iteration of the outer for loop
         }
 
         // Propagate to successors: IncomeCycle_succ = max(IncomeCycle_succ, accum_cycle)
-        auto succIt = successors_.find(block);
-        if (succIt != successors_.end()) {
-            for (const auto &succ : succIt->second) {
-                if (incomeCycle.find(succ) == incomeCycle.end()) {
-                    incomeCycle[succ] = 0.0;
-                }
-                incomeCycle[succ] = std::max(incomeCycle[succ], accum_cycle);
+        for (BasicBlock *succ : successors(BB)) {
+            if (incomeCycle.find(succ) == incomeCycle.end()) {
+                incomeCycle[succ] = 0.0;
             }
+            incomeCycle[succ] = std::max(incomeCycle[succ], accum_cycle);
         }
     }
 
@@ -266,12 +260,13 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
     result.regionBoundaries.clear();
     result.regions.clear();
 
-    std::string currentRegionStart;
-    std::vector<std::string> currentRegionBlocks;
+    WeakTrackingVH currentRegionStart;
+    std::vector<WeakTrackingVH> currentRegionBlocks;
     double currentRegionEnergy = 0.0;
 
-    for (const auto &block : topoOrder_) {
-        if (boundarySet.count(block)) {
+    for (const auto &handle : topoOrder_) {
+        BasicBlock *BB = resolveBlock(handle);
+        if (boundarySet.count(BB)) {
             // Finish previous region (if any)
             if (!currentRegionBlocks.empty()) {
                 RegionInfo region;
@@ -282,14 +277,14 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
             }
 
             // Start new region
-            result.regionBoundaries.push_back(block);
-            currentRegionStart = block;
+            result.regionBoundaries.push_back(handle);
+            currentRegionStart = handle;
             currentRegionBlocks.clear();
             currentRegionEnergy = 0.0;
         }
 
-        currentRegionBlocks.push_back(block);
-        currentRegionEnergy += getBlockCost(block);
+        currentRegionBlocks.push_back(handle);
+        currentRegionEnergy += getBlockCost(BB);
     }
 
     // Finish last region
@@ -304,15 +299,11 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
     return result;
 }
 
-std::string RockClimbOptimizer::splitBlock(const std::string &blockName,
-                                            double threshold,
-                                            size_t insertIdx) {
-    if (!estimator_) return "";
-
-    auto it = blockMap_.find(blockName);
-    if (it == blockMap_.end()) return "";
-
-    llvm::BasicBlock *BB = it->second;
+llvm::BasicBlock *RockClimbOptimizer::splitBlock(llvm::BasicBlock *BB,
+                                                  double threshold,
+                                                  size_t insertIdx) {
+    if (!estimator_) return nullptr;
+    if (!BB) return nullptr;
 
     // Find the split point: accumulate per-instruction energy until threshold
     double accumulated = 0.0;
@@ -339,64 +330,39 @@ std::string RockClimbOptimizer::splitBlock(const std::string &blockName,
         }
     }
 
-    if (!splitPoint) return "";  // Can't split (block too small or all PHIs)
+    if (!splitPoint) return nullptr;  // Can't split (block too small or all PHIs)
 
     // Split after splitPoint — the next instruction becomes the start of the new block
     llvm::Instruction *splitBefore = splitPoint->getNextNode();
     if (!splitBefore || splitBefore->isTerminator()) {
         // Nothing meaningful to split off
         // If the terminator is the only thing left, try splitting before splitPoint
-        if (splitPoint->isTerminator()) return "";
+        if (splitPoint->isTerminator()) return nullptr;
         splitBefore = splitPoint;
     }
 
     // Perform the split
+    std::string blockName = getBlockName(*BB, F_);
     llvm::BasicBlock *newBB = BB->splitBasicBlock(splitBefore,
                                                    blockName + ".split");
 
-    // Update local data structures
-    std::string newName = getBlockName(*newBB, F_);
-    blockMap_[newName] = newBB;
-
-    // Update blockMap for original block (pointer unchanged but name mapping still valid)
-    blockMap_[blockName] = BB;
-
-    // Update adjacency: old successors of blockName now belong to newName
-    // blockName's only successor is now newName (due to splitBasicBlock adding br)
-    auto oldSuccessors = successors_[blockName];
-    successors_[blockName] = {newName};
-    successors_[newName] = oldSuccessors;
+    // Update energyCosts_ for both halves directly
+    energyCosts_[BB] = estimator_->estimate(*BB).cost;
+    energyCosts_[newBB] = estimator_->estimate(*newBB).cost;
 
     // Insert new block into topological order right after current block
     topoOrder_.insert(topoOrder_.begin() + static_cast<long>(insertIdx) + 1,
-                      newName);
+                      llvm::WeakTrackingVH(newBB));
 
-    // The new block inherits boundary status from original if it had call sites
     // Re-check for call sites in both halves
     bool origHasCall = blockHasCallSite(*BB);
     bool newHasCall = blockHasCallSite(*newBB);
 
     // Update call site blocks
-    if (!origHasCall) callSiteBlocks_.erase(blockName);
-    if (newHasCall) callSiteBlocks_.insert(newName);
+    if (!origHasCall) callSiteBlocks_.erase(BB);
+    if (newHasCall) callSiteBlocks_.insert(newBB);
 
-    // Recalculate energy costs for both halves using estimator
-    // Store as extra costs that override the original CFG cost
-    double origNewCost = estimator_->estimate(*BB).cost;
-    double splitNewCost = estimator_->estimate(*newBB).cost;
-
-    // The original CFG still has the old cost for blockName.
-    // We use extraBlockCosts_ to adjust: effective cost = cfg_cost + extra
-    // We want effective cost = origNewCost + any existing extra
-    // So extra = origNewCost - cfg_original_cost
-    double cfgOrigCost = cfg_.getBlockInfo(blockName).energyCost;
-    extraBlockCosts_[blockName] = origNewCost - cfgOrigCost;
-
-    // For the new block, CFGAnalysis returns default 0.0 base cost.
-    // Store the full split block energy as extra.
-    extraBlockCosts_[newName] = splitNewCost;
-
-    return newName;
+    return newBB;
 }
 
 } // namespace checkpoint

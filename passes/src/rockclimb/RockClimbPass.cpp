@@ -85,19 +85,17 @@ static void printPassConfig(const Function &F,
     }
 }
 
-static std::map<std::string, double> computeCheckpointStoreCycles(
+static DenseMap<BasicBlock*, double> computeCheckpointStoreCycles(
     const std::vector<CheckpointPoint> &checkpointPoints,
-    Function &F,
     double storeEnergyPerCheckpoint) {
-    std::map<std::string, double> checkpointStoreCycles;
+    DenseMap<BasicBlock*, double> checkpointStoreCycles;
     for (const auto &ckpt : checkpointPoints) {
         if (!ckpt.afterInst) {
             continue;
         }
 
         BasicBlock *BB = ckpt.afterInst->getParent();
-        std::string blockName = getBlockName(*BB, F);
-        checkpointStoreCycles[blockName] += storeEnergyPerCheckpoint;
+        checkpointStoreCycles[BB] += storeEnergyPerCheckpoint;
     }
     return checkpointStoreCycles;
 }
@@ -333,10 +331,10 @@ PreservedAnalyses RockClimbPass::run(Function &F,
             return PreservedAnalyses::all();
         }
 
-        DistributedCheckpointing prelimCkpt(F, prelimResult.regions);
+        DistributedCheckpointing prelimCkpt(prelimResult.regions);
         auto prelimPoints = prelimCkpt.analyze();
         auto checkpointStoreCycles = computeCheckpointStoreCycles(
-            prelimPoints, F, ctx.params.checkpoint_store_energy);
+            prelimPoints, ctx.params.checkpoint_store_energy);
         optimizer.setExtraBlockCosts(checkpointStoreCycles);
     }
 
@@ -349,26 +347,29 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     std::vector<CheckpointPoint> checkpointPoints;
 
     errs() << "\nRegion boundaries (" << result.regionBoundaries.size() << "):\n";
-    for (const auto &boundary : result.regionBoundaries) {
-        errs() << "  " << boundary << "\n";
+    for (const auto &handle : result.regionBoundaries) {
+        BasicBlock *BB = RockClimbOptimizer::resolveBlock(handle);
+        errs() << "  " << getBlockName(*BB, F) << "\n";
     }
 
     errs() << "\nRegions (" << result.regions.size() << "):\n";
     for (const auto &region : result.regions) {
-        errs() << "  Region starting at " << region.startBlock
+        BasicBlock *startBB = RockClimbOptimizer::resolveBlock(region.startBlock);
+        errs() << "  Region starting at " << getBlockName(*startBB, F)
                << " (energy: " << region.totalEnergy
                << ", blocks: " << region.blocks.size() << ")\n";
     }
 
     // Distributed checkpointing analysis (register checkpoints)
-    DistributedCheckpointing distCkpt(F, result.regions);
+    DistributedCheckpointing distCkpt(result.regions);
 
     if (useDistributedCkpt) {
         checkpointPoints = distCkpt.analyze();
 
         errs() << "\nDistributed register checkpoints (" << checkpointPoints.size() << "):\n";
         for (const auto &ckpt : checkpointPoints) {
-            errs() << "  Reg " << ckpt.regId << " in region " << ckpt.regionName;
+            errs() << "  Reg " << ckpt.regId << " in region "
+                   << getBlockName(*ckpt.regionStart, F);
             if (ckpt.afterInst) {
                 errs() << " after instruction: ";
                 ckpt.afterInst->print(errs());
@@ -377,15 +378,15 @@ PreservedAnalyses RockClimbPass::run(Function &F,
         }
     }
 
-    // Convert boundaries to set for instrumenter
-    std::set<std::string> boundarySet(result.regionBoundaries.begin(),
-                                       result.regionBoundaries.end());
+    // Convert boundaries to pointer set for instrumenter
+    SmallPtrSet<BasicBlock*, 16> boundarySet;
+    for (const auto &handle : result.regionBoundaries) {
+        boundarySet.insert(RockClimbOptimizer::resolveBlock(handle));
+    }
 
     // Skip entry block from voltage checks (first boundary is always entry)
     // Entry doesn't need a voltage check since execution just started
-    if (!boundarySet.empty()) {
-        boundarySet.erase(ctx.cfg->getEntryBlock());
-    }
+    boundarySet.erase(&F.getEntryBlock());
 
     // Instrument the function
     RockClimbInstrumenter instrumenter(

@@ -2,12 +2,11 @@
 
 #include "rockclimb/DistributedCheckpointing.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/ADT/StringRef.h"
 
-#include <set>
-#include <string>
 #include <vector>
 
 namespace checkpoint {
@@ -39,13 +38,13 @@ public:
 
     /// Full instrumentation: boundaries + optional distributed checkpoints.
     /// @param F The function to instrument.
-    /// @param boundaries Set of block names where boundaries exist.
+    /// @param boundaries Set of block pointers where boundaries exist.
     /// @param checkpoints Vector of checkpoint points for distributed checkpointing.
     /// @param enableDistributedCkpt If false, skip register checkpoints.
     /// @return Number of instrumentations inserted.
     unsigned instrumentFunction(
         llvm::Function &F,
-        const std::set<std::string> &boundaries,
+        const llvm::SmallPtrSet<llvm::BasicBlock*, 16> &boundaries,
         const std::vector<CheckpointPoint> &checkpoints,
         bool enableDistributedCkpt);
 

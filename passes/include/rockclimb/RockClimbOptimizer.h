@@ -3,11 +3,14 @@
 #include "common/CFGAnalysis.h"
 #include "estimator/EnergyEstimator.h"
 
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/ValueHandle.h"
 
-#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -16,10 +19,10 @@ namespace checkpoint {
 
 /// Information about a region formed by RockClimb partitioning.
 struct RegionInfo {
-    std::string startBlock;                    // First block of the region
-    std::vector<std::string> blocks;           // All blocks in the region
-    std::set<llvm::Value*> liveOutRegisters;   // Registers live at region exit
-    double totalEnergy;                        // Total energy of the region
+    llvm::WeakTrackingVH startBlock;               // First block of the region
+    std::vector<llvm::WeakTrackingVH> blocks;      // All blocks in the region
+    std::set<llvm::Value*> liveOutRegisters;        // Registers live at region exit
+    double totalEnergy;                             // Total energy of the region
 };
 
 /// RockClimb optimizer: greedy region partitioning.
@@ -30,7 +33,7 @@ class RockClimbOptimizer {
 public:
     /// Result of optimization.
     struct Result {
-        std::vector<std::string> regionBoundaries;  // Blocks starting new regions
+        std::vector<llvm::WeakTrackingVH> regionBoundaries;  // Blocks starting new regions
         std::vector<RegionInfo> regions;            // Detailed region information
         bool feasible;                              // True if partitioning succeeded
         std::string errorMessage;                   // Error description if not feasible
@@ -50,13 +53,18 @@ public:
     Result optimize();
 
     /// Get blocks that exceed E_safe individually (infeasible).
-    std::vector<std::string> getInfeasibleBlocks() const;
+    std::vector<llvm::BasicBlock*> getInfeasibleBlocks() const;
 
-    /// Set extra block costs from checkpoint stores (CkptCycles_bbi).
-    /// Applied before Algorithm 1 traversal so effective per-block cost is
-    /// Cycle_ori + CkptCycles.
-    /// @param costs Map from block name to additional energy cost.
-    void setExtraBlockCosts(const std::map<std::string, double> &costs);
+    /// Add extra block costs from checkpoint stores (CkptCycles_bbi).
+    /// Additive: each call accumulates into energyCosts_. Call at most once
+    /// per optimization run. Applied before Algorithm 1 traversal so
+    /// effective per-block cost is Cycle_ori + CkptCycles.
+    /// @param costs Map from block pointer to additional energy cost.
+    void setExtraBlockCosts(const llvm::DenseMap<llvm::BasicBlock*, double> &costs);
+
+    /// Resolve a WeakTrackingVH to a BasicBlock pointer.
+    /// Asserts if the handle has been invalidated (block deleted).
+    static llvm::BasicBlock *resolveBlock(const llvm::WeakTrackingVH &handle);
 
 private:
     const CFGAnalysis &cfg_;
@@ -66,22 +74,16 @@ private:
     EnergyEstimator *estimator_;
 
     /// Topologically sorted blocks.
-    std::vector<std::string> topoOrder_;
-
-    /// Map from block name to its BasicBlock*.
-    std::map<std::string, llvm::BasicBlock*> blockMap_;
+    std::vector<llvm::WeakTrackingVH> topoOrder_;
 
     /// Loop headers (mandatory region boundaries).
-    std::set<std::string> loopHeaders_;
+    llvm::SmallPtrSet<llvm::BasicBlock*, 8> loopHeaders_;
 
     /// Blocks containing function calls (mandatory region boundaries).
-    std::set<std::string> callSiteBlocks_;
+    llvm::SmallPtrSet<llvm::BasicBlock*, 8> callSiteBlocks_;
 
-    /// Extra block costs from checkpoint stores (CkptCycles_bbi).
-    std::map<std::string, double> extraBlockCosts_;
-
-    /// Successor adjacency map (block -> list of successors).
-    std::map<std::string, std::vector<std::string>> successors_;
+    /// Per-block energy costs (replaces CFGAnalysis lookups + extraBlockCosts_).
+    llvm::DenseMap<llvm::BasicBlock*, double> energyCosts_;
 
     /// Build topological order of blocks.
     void computeTopologicalOrder();
@@ -92,11 +94,8 @@ private:
     /// Identify blocks containing function calls to non-intrinsic functions.
     void identifyCallSiteBlocks();
 
-    /// Build successor adjacency map from CFG edges.
-    void buildAdjacencyMaps();
-
-    /// Get effective block cost: Cycle_ori + CkptCycles.
-    double getBlockCost(const std::string &block) const;
+    /// Get effective block cost.
+    double getBlockCost(llvm::BasicBlock *BB) const;
 
     /// Main partitioning algorithm (Algorithm 1 from RockClimb paper).
     Result partitionRegions();
@@ -104,12 +103,12 @@ private:
     /// Split a block when its cost exceeds threshold (Algorithm 1 while loop).
     /// Splits the LLVM BasicBlock at the instruction where accumulated cost
     /// reaches the threshold, updates local data structures.
-    /// @param blockName Name of the block to split.
+    /// @param BB The block to split.
     /// @param threshold Energy threshold (E_safe).
     /// @param insertIdx Index in topoOrder_ after which the new block is inserted.
-    /// @return Name of the new (second half) block, or empty if split not possible.
-    std::string splitBlock(const std::string &blockName, double threshold,
-                           size_t insertIdx);
+    /// @return Pointer to the new (second half) block, or nullptr if split not possible.
+    llvm::BasicBlock *splitBlock(llvm::BasicBlock *BB, double threshold,
+                                 size_t insertIdx);
 };
 
 } // namespace checkpoint

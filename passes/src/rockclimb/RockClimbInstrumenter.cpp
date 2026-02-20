@@ -169,7 +169,7 @@ void RockClimbInstrumenter::insertRegisterCheckpoint(
 
 unsigned RockClimbInstrumenter::instrumentFunction(
     llvm::Function &F,
-    const std::set<std::string> &boundaries,
+    const llvm::SmallPtrSet<llvm::BasicBlock*, 16> &boundaries,
     const std::vector<CheckpointPoint> &checkpoints,
     bool enableDistributedCkpt) {
 
@@ -184,8 +184,7 @@ unsigned RockClimbInstrumenter::instrumentFunction(
 
     // Insert boundary checks
     for (llvm::BasicBlock &BB : F) {
-        std::string blockName = getBlockName(BB, F);
-        if (boundaries.count(blockName)) {
+        if (boundaries.count(&BB)) {
             insertBoundaryCheck(BB);
             ++count;
         }

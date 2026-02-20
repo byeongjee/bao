@@ -5,38 +5,28 @@
 #include <algorithm>
 
 namespace checkpoint {
-namespace {
-
-static std::set<std::string> makeRegionBlockSet(const RegionInfo &region) {
-    return std::set<std::string>(region.blocks.begin(), region.blocks.end());
-}
-
-} // namespace
 
 DistributedCheckpointing::DistributedCheckpointing(
-    llvm::Function &F,
     const std::vector<RegionInfo> &regions)
-    : F_(F), regions_(regions) {
-    buildBlockMap();
+    : regions_(regions) {
 }
 
-void DistributedCheckpointing::buildBlockMap() {
-    blockMap_.clear();
-    for (llvm::BasicBlock &BB : F_) {
-        std::string name = getBlockName(BB, F_);
-        blockMap_[name] = &BB;
+llvm::SmallPtrSet<llvm::BasicBlock*, 8>
+DistributedCheckpointing::makeRegionBlockSet(const RegionInfo &region) {
+    llvm::SmallPtrSet<llvm::BasicBlock*, 8> blockSet;
+    for (const auto &handle : region.blocks) {
+        llvm::BasicBlock *BB = RockClimbOptimizer::resolveBlock(handle);
+        blockSet.insert(BB);
     }
+    return blockSet;
 }
 
 std::set<llvm::Value*> DistributedCheckpointing::computeDefs(
     const RegionInfo &region) {
     std::set<llvm::Value*> defs;
 
-    for (const auto &blockName : region.blocks) {
-        auto it = blockMap_.find(blockName);
-        if (it == blockMap_.end()) continue;
-
-        llvm::BasicBlock *BB = it->second;
+    for (const auto &handle : region.blocks) {
+        llvm::BasicBlock *BB = RockClimbOptimizer::resolveBlock(handle);
         for (llvm::Instruction &I : *BB) {
             // Skip void-returning instructions (no definition)
             if (I.getType()->isVoidTy()) continue;
@@ -65,7 +55,7 @@ std::set<llvm::Value*> DistributedCheckpointing::computeLiveOut(
     // 2. It has uses outside the region
 
     // First, collect all blocks in the region
-    std::set<std::string> regionBlockSet = makeRegionBlockSet(region);
+    auto regionBlockSet = makeRegionBlockSet(region);
 
     // For each definition in the region, check if any use is outside
     std::set<llvm::Value*> defs = computeDefs(region);
@@ -74,10 +64,9 @@ std::set<llvm::Value*> DistributedCheckpointing::computeLiveOut(
         for (llvm::User *user : def->users()) {
             if (auto *userInst = llvm::dyn_cast<llvm::Instruction>(user)) {
                 llvm::BasicBlock *userBB = userInst->getParent();
-                std::string userBlockName = getBlockName(*userBB, F_);
 
                 // If the use is in a block outside this region, value is live-out
-                if (!regionBlockSet.count(userBlockName)) {
+                if (!regionBlockSet.count(userBB)) {
                     liveOut.insert(def);
                     break;  // No need to check other uses
                 }
@@ -86,27 +75,6 @@ std::set<llvm::Value*> DistributedCheckpointing::computeLiveOut(
     }
 
     return liveOut;
-}
-
-llvm::Instruction* DistributedCheckpointing::findLastDef(
-    llvm::Value *reg,
-    const RegionInfo &region) {
-    // The register IS the instruction that defines it in LLVM IR
-    // So we just need to verify it's in this region and return it
-    auto *inst = llvm::dyn_cast<llvm::Instruction>(reg);
-    if (!inst) return nullptr;
-
-    llvm::BasicBlock *BB = inst->getParent();
-    std::string blockName = getBlockName(*BB, F_);
-
-    // Verify it's in this region
-    for (const auto &b : region.blocks) {
-        if (b == blockName) {
-            return inst;
-        }
-    }
-
-    return nullptr;
 }
 
 unsigned DistributedCheckpointing::assignRegId(llvm::Value *reg) {
@@ -138,14 +106,16 @@ std::vector<CheckpointPoint> DistributedCheckpointing::analyze() {
         }
 
         // For each register to checkpoint, find its definition point
+        auto regionBlockSet = makeRegionBlockSet(region);
         for (llvm::Value *reg : toCheckpoint) {
-            llvm::Instruction *defInst = findLastDef(reg, region);
-            if (defInst) {
+            auto *inst = llvm::dyn_cast<llvm::Instruction>(reg);
+            if (inst && regionBlockSet.count(inst->getParent())) {
                 CheckpointPoint ckpt;
-                ckpt.afterInst = defInst;
+                ckpt.afterInst = inst;
                 ckpt.reg = reg;
                 ckpt.regId = assignRegId(reg);
-                ckpt.regionName = region.startBlock;
+                ckpt.regionStart = RockClimbOptimizer::resolveBlock(
+                    region.startBlock);
                 checkpoints.push_back(ckpt);
             }
         }

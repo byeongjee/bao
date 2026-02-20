@@ -2,8 +2,9 @@
 
 #include "rockclimb/RockClimbOptimizer.h"
 
-#include "llvm/IR/Function.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/ValueHandle.h"
 
 #include <map>
 #include <set>
@@ -17,7 +18,7 @@ struct CheckpointPoint {
     llvm::Instruction *afterInst;  // Insert checkpoint store after this instruction
     llvm::Value *reg;              // The register (SSA value) to save
     unsigned regId;                // Register ID for NVM storage offset
-    std::string regionName;        // Name of the region this belongs to
+    llvm::BasicBlock *regionStart; // Start block of the region this belongs to
 };
 
 /// Distributed checkpointing analysis.
@@ -26,11 +27,9 @@ struct CheckpointPoint {
 /// This is in contrast to boundary checkpointing which saves at region starts.
 class DistributedCheckpointing {
 public:
-    /// Construct analyzer for a function and its regions.
-    /// @param F The function being analyzed.
+    /// Construct analyzer for regions.
     /// @param regions Region information from RockClimbOptimizer.
-    DistributedCheckpointing(llvm::Function &F,
-                             const std::vector<RegionInfo> &regions);
+    explicit DistributedCheckpointing(const std::vector<RegionInfo> &regions);
 
     /// Analyze and compute checkpoint points for distributed checkpointing.
     /// For each region r:
@@ -44,25 +43,18 @@ public:
     unsigned getCheckpointedRegisterCount() const { return nextRegId_; }
 
 private:
-    llvm::Function &F_;
     const std::vector<RegionInfo> &regions_;
     unsigned nextRegId_ = 0;
 
-    /// Map from block name to BasicBlock*.
-    std::map<std::string, llvm::BasicBlock*> blockMap_;
-
-    /// Build block name to pointer mapping.
-    void buildBlockMap();
+    /// Build a set of BasicBlock* from a region's WeakTrackingVH block list.
+    static llvm::SmallPtrSet<llvm::BasicBlock*, 8>
+    makeRegionBlockSet(const RegionInfo &region);
 
     /// Compute registers defined in a region.
     std::set<llvm::Value*> computeDefs(const RegionInfo &region);
 
     /// Compute registers live at region exit.
     std::set<llvm::Value*> computeLiveOut(const RegionInfo &region);
-
-    /// Find the last definition point of a register within a region.
-    /// @return The instruction defining the register, or nullptr if not in region.
-    llvm::Instruction* findLastDef(llvm::Value *reg, const RegionInfo &region);
 
     /// Assign a unique register ID for NVM storage.
     unsigned assignRegId(llvm::Value *reg);
