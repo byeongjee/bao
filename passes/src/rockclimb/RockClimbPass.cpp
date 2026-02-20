@@ -15,6 +15,7 @@
 #include "llvm/Support/JSON.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
 
 #include <fstream>
 #include <sstream>
@@ -99,6 +100,16 @@ static std::map<std::string, double> computeCheckpointStoreCycles(
         checkpointStoreCycles[blockName] += storeEnergyPerCheckpoint;
     }
     return checkpointStoreCycles;
+}
+
+static void collectInnermostLoops(Loop *L, SmallVectorImpl<Loop *> &out) {
+    if (L->getSubLoops().empty()) {
+        out.push_back(L);
+        return;
+    }
+    for (Loop *sub : *L) {
+        collectInnermostLoops(sub, out);
+    }
 }
 
 } // namespace
@@ -190,66 +201,81 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
                            DominatorTree &DT, AssumptionCache &AC,
                            EnergyEstimator &estimator, double E_safe) {
     bool changed = false;
+    bool madeProgress = true;
+    while (madeProgress) {
+        madeProgress = false;
 
-    // Collect loops first (unrolling modifies LoopInfo)
-    SmallVector<Loop *, 4> loops;
-    for (Loop *L : LI) {
-        // Collect all loops including nested (innermost first)
-        SmallVector<Loop *, 4> worklist;
-        worklist.push_back(L);
-        while (!worklist.empty()) {
-            Loop *curr = worklist.pop_back_val();
-            // Process innermost loops first
-            if (curr->getSubLoops().empty()) {
-                loops.push_back(curr);
-            }
-            for (Loop *sub : *curr) {
-                worklist.push_back(sub);
-            }
-        }
-    }
-
-    for (Loop *L : loops) {
-        // Only unroll loops with known trip count
-        unsigned tripCount = SE.getSmallConstantTripCount(L);
-        if (tripCount == 0) continue;
-
-        // Compute body energy: sum of all blocks in the loop
-        double bodyEnergy = 0.0;
-        for (BasicBlock *BB : L->getBlocks()) {
-            bodyEnergy += estimator.estimate(*BB).cost;
+        // Re-collect loops after each successful unroll, because LoopInfo
+        // changes can invalidate previously collected Loop* handles.
+        SmallVector<Loop *, 8> loops;
+        for (Loop *L : LI) {
+            collectInnermostLoops(L, loops);
         }
 
-        if (bodyEnergy >= E_safe) continue;  // Loop body already too big
+        for (Loop *L : loops) {
+            if (!L->isLoopSimplifyForm()) {
+                continue;
+            }
 
-        // Calculate unroll factor: how many iterations fit in E_safe
-        unsigned maxUnroll = static_cast<unsigned>(E_safe / bodyEnergy);
-        if (maxUnroll <= 1) continue;
+            // UnrollLoop with PreserveLCSSA requires the whole nest to already
+            // satisfy LCSSA; enforce it defensively for robustness.
+            if (!L->isRecursivelyLCSSAForm(DT, LI)) {
+                formLCSSARecursively(*L, DT, &LI, &SE);
+            }
 
-        unsigned unrollFactor = std::min(maxUnroll, tripCount);
-        if (unrollFactor <= 1) continue;
+            // Only unroll loops with known trip count.
+            unsigned tripCount = SE.getSmallConstantTripCount(L);
+            if (tripCount == 0) {
+                continue;
+            }
 
-        // Set up unroll options
-        UnrollLoopOptions ULO;
-        ULO.Count = unrollFactor;
-        ULO.Force = true;
-        ULO.Runtime = false;
-        ULO.AllowExpensiveTripCount = false;
-        ULO.UnrollRemainder = (unrollFactor == tripCount);
-        ULO.ForgetAllSCEV = true;
+            // Compute body energy: sum of all blocks in the loop.
+            double bodyEnergy = 0.0;
+            for (BasicBlock *BB : L->getBlocks()) {
+                bodyEnergy += estimator.estimate(*BB).cost;
+            }
 
-        errs() << "  Unrolling loop at "
-               << L->getHeader()->getName()
-               << " (trip count: " << tripCount
-               << ", body energy: " << bodyEnergy
-               << ", factor: " << unrollFactor << ")\n";
+            if (bodyEnergy >= E_safe) {
+                continue;  // Loop body already too big.
+            }
 
-        LoopUnrollResult res = UnrollLoop(L, ULO, &LI, &SE, &DT, &AC,
-                                          /*TTI=*/nullptr,
-                                          /*ORE=*/nullptr,
-                                          /*PreserveLCSSA=*/true);
-        if (res != LoopUnrollResult::Unmodified) {
+            // Calculate unroll factor: how many iterations fit in E_safe.
+            unsigned maxUnroll = static_cast<unsigned>(E_safe / bodyEnergy);
+            if (maxUnroll <= 1) {
+                continue;
+            }
+
+            unsigned unrollFactor = std::min(maxUnroll, tripCount);
+            if (unrollFactor <= 1) {
+                continue;
+            }
+
+            // Set up unroll options.
+            UnrollLoopOptions ULO;
+            ULO.Count = unrollFactor;
+            ULO.Force = true;
+            ULO.Runtime = false;
+            ULO.AllowExpensiveTripCount = false;
+            ULO.UnrollRemainder = (unrollFactor == tripCount);
+            ULO.ForgetAllSCEV = true;
+
+            errs() << "  Unrolling loop at "
+                   << L->getHeader()->getName()
+                   << " (trip count: " << tripCount
+                   << ", body energy: " << bodyEnergy
+                   << ", factor: " << unrollFactor << ")\n";
+
+            LoopUnrollResult res = UnrollLoop(L, ULO, &LI, &SE, &DT, &AC,
+                                              /*TTI=*/nullptr,
+                                              /*ORE=*/nullptr,
+                                              /*PreserveLCSSA=*/true);
+            if (res == LoopUnrollResult::Unmodified) {
+                continue;
+            }
+
             changed = true;
+            madeProgress = true;
+            break;
         }
     }
 
