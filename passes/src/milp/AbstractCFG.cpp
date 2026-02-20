@@ -30,15 +30,15 @@ namespace {
 struct PathSummary {
     bool ok = false;
     double energy = 0.0;
-    std::set<std::string> blocksOnPath;
+    SmallPtrSet<const BasicBlock *, 16> blocksOnPath;
     std::string error;
 };
 
 struct LoopAggregate {
     std::string nodeName;
-    std::string headerName;
-    std::set<std::string> loopBlocks;
-    std::set<std::string> pathBlocks;
+    const BasicBlock *headerBB = nullptr;
+    SmallPtrSet<const BasicBlock *, 16> loopBlocks;
+    SmallPtrSet<const BasicBlock *, 16> pathBlocks;
     double pathEnergy = 0.0;
     std::map<llvm::GlobalVariable *, double> eNvmByGV;
     std::set<llvm::GlobalVariable *> eligLiveIn;
@@ -90,8 +90,7 @@ static std::vector<Loop *> collectOutermostFirst(LoopInfo &LI) {
 
 static PathSummary computeWorstCasePathSummary(
     Loop *L,
-    const std::map<std::string, double> &blockEnergyByName,
-    const Function &F,
+    const DenseMap<const BasicBlock *, double> &blockEnergyByBB,
     LoopInfo &LI,
     ScalarEvolution &SE) {
     PathSummary result;
@@ -105,10 +104,10 @@ static PathSummary computeWorstCasePathSummary(
 
     // Step 1: Recursively compute total energy for each direct sub-loop.
     DenseMap<const Loop *, double> subLoopTotal;
-    DenseMap<const Loop *, std::set<std::string>> subLoopBlocks;
+    DenseMap<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
     for (Loop *SubL : L->getSubLoops()) {
-        auto subPath = computeWorstCasePathSummary(SubL, blockEnergyByName,
-                                                   F, LI, SE);
+        auto subPath = computeWorstCasePathSummary(SubL, blockEnergyByBB,
+                                                   LI, SE);
         if (!subPath.ok) {
             result.error = "sub-loop-energy-unavailable";
             return result;
@@ -128,7 +127,7 @@ static PathSummary computeWorstCasePathSummary(
         }
         subLoopTotal[SubL] = subPath.energy * static_cast<double>(tc);
         for (const BasicBlock *BB : SubL->blocks())
-            subLoopBlocks[SubL].insert(getBlockName(*BB, F));
+            subLoopBlocks[SubL].insert(BB);
     }
 
     // Step 2: Block energy with sub-loop collapsing — inner-loop headers
@@ -139,8 +138,8 @@ static PathSummary computeWorstCasePathSummary(
             auto it = subLoopTotal.find(ChildL);
             return (it != subLoopTotal.end()) ? it->second : 0.0;
         }
-        auto it = blockEnergyByName.find(getBlockName(*BB, F));
-        return (it != blockEnergyByName.end()) ? it->second : 0.0;
+        auto it = blockEnergyByBB.find(BB);
+        return (it != blockEnergyByBB.end()) ? it->second : 0.0;
     };
 
     // Step 3: Successor computation with sub-loop collapsing — inner-loop
@@ -163,7 +162,7 @@ static PathSummary computeWorstCasePathSummary(
     if (Header == Latch) {
         result.ok = true;
         result.energy = getEnergy(Header);
-        result.blocksOnPath.insert(getBlockName(*Header, F));
+        result.blocksOnPath.insert(Header);
         return result;
     }
 
@@ -228,10 +227,10 @@ static PathSummary computeWorstCasePathSummary(
         return result;
     }
 
-    std::set<std::string> pathBlocks;
+    SmallPtrSet<const BasicBlock *, 16> pathBlocks;
     const BasicBlock *cur = Header;
     while (cur) {
-        pathBlocks.insert(getBlockName(*cur, F));
+        pathBlocks.insert(cur);
         // If this block is an inner-loop header, expand pathBlocks to
         // include all blocks in that sub-loop for NVM/def/liveIn aggregation.
         Loop *ChildL = getDirectChildLoop(L, cur, LI);
@@ -252,7 +251,7 @@ static PathSummary computeWorstCasePathSummary(
         cur = it->second;
     }
 
-    if (pathBlocks.empty() || !pathBlocks.count(getBlockName(*Latch, F))) {
+    if (pathBlocks.empty() || !pathBlocks.count(Latch)) {
         result.error = "path-reconstruction-failed";
         return result;
     }
@@ -264,10 +263,9 @@ static PathSummary computeWorstCasePathSummary(
 }
 
 static bool overlapsSelected(Loop *L,
-                             const std::set<std::string> &selectedBlocks,
-                             const Function &F) {
+                             const SmallPtrSetImpl<const BasicBlock *> &selectedBlocks) {
     for (const BasicBlock *BB : L->blocks()) {
-        if (selectedBlocks.count(getBlockName(*BB, F))) {
+        if (selectedBlocks.count(BB)) {
             return true;
         }
     }
@@ -446,15 +444,17 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         model.eRestoreByVar_[V] = energy.getERestore(V);
     }
 
-    std::map<std::string, double> blockEnergyByName;
+    // Build per-BB energy map from CFGAnalysis.
+    DenseMap<const BasicBlock *, double> blockEnergyByBB;
     std::set<std::string> usedNodeNames;
-    for (const std::string &block : cfg.getBlocks()) {
-        blockEnergyByName[block] = cfg.getBlockInfo(block).energyCost;
-        usedNodeNames.insert(block);
+    for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+        blockEnergyByBB[BB] = cfg.getBlockInfo(BB).energyCost;
+        usedNodeNames.insert(cfg.getBlockInfo(BB).name);
     }
 
     std::vector<Loop *> loops = collectOutermostFirst(LI);
-    std::set<std::string> summarizedConcreteBlocks;
+    SmallPtrSet<const BasicBlock *, 32> summarizedConcreteBlocks;
+    // summaryNodeName -> LoopAggregate
     std::map<std::string, LoopAggregate> summariesByNode;
 
     const double budget =
@@ -475,13 +475,13 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             out.stats.skippedReasons["contains-invoke"]++;
             continue;
         }
-        if (overlapsSelected(L, summarizedConcreteBlocks, F)) {
+        if (overlapsSelected(L, summarizedConcreteBlocks)) {
             out.stats.skippedReasons["overlaps-summarized-loop"]++;
             continue;
         }
 
-        PathSummary path = computeWorstCasePathSummary(L, blockEnergyByName,
-                                                         F, LI, SE);
+        PathSummary path = computeWorstCasePathSummary(L, blockEnergyByBB,
+                                                         LI, SE);
         if (!path.ok) {
             out.stats.skippedReasons[path.error]++;
             continue;
@@ -508,16 +508,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             continue;
         }
 
-        // Compute ineligible restore cost margin: these restore costs are
-        // unavoidable at any region start containing this summary node, but
-        // the basic budget (capacity - E_pro - E_epi) doesn't account for
-        // them.  Without this margin the MILP can become infeasible when
-        // pathEnergy is close to budget (e.g. cuckoo_filter at 10uF).
+        // Compute ineligible restore cost margin.
         double ineligRestoreCost = 0.0;
         {
             std::set<llvm::Value *> seenInelig;
-            for (const std::string &blockName : path.blocksOnPath) {
-                for (llvm::Value *V : state.getIneligLiveIn(blockName)) {
+            for (const BasicBlock *BB : path.blocksOnPath) {
+                for (llvm::Value *V : state.getIneligLiveIn(BB)) {
                     if (seenInelig.insert(V).second) {
                         ineligRestoreCost += energy.getERestore(V);
                     }
@@ -532,43 +528,40 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             continue;
         }
 
-        std::string headerName = getBlockName(*L->getHeader(), F);
+        BasicBlock *headerBB = L->getHeader();
+        std::string headerName = getBlockName(*headerBB, F);
         std::string nodeName = makeUniqueSummaryNodeName(headerName, usedNodeNames);
         usedNodeNames.insert(nodeName);
 
         LoopAggregate agg;
         agg.nodeName = nodeName;
-        agg.headerName = headerName;
-        agg.pathBlocks = path.blocksOnPath;
+        agg.headerBB = headerBB;
+        agg.pathBlocks = std::move(path.blocksOnPath);
         agg.pathEnergy = totalEnergy;
         // Summary represents all iterations — entered once per loop invocation.
         if (BasicBlock *PH = L->getLoopPreheader()) {
-            agg.fEntry = energy.getFEntry(getBlockName(*PH, F));
+            agg.fEntry = energy.getFEntry(PH);
         } else {
-            agg.fEntry = energy.getFEntry(headerName);
+            agg.fEntry = energy.getFEntry(headerBB);
         }
 
         for (const BasicBlock *BB : L->blocks()) {
-            std::string blockName = getBlockName(*BB, F);
-            agg.loopBlocks.insert(blockName);
-            summarizedConcreteBlocks.insert(blockName);
+            agg.loopBlocks.insert(BB);
+            summarizedConcreteBlocks.insert(BB);
         }
 
         // Aggregate eligible globals across loop blocks.
-        // Energy/NVM costs use pathBlocks (one-iteration cost estimate),
-        // but def indicators and liveness must scan ALL loop blocks so that
-        // values defined in off-path branches are correctly tracked.
         auto aggregateEligGV = [&](llvm::GlobalVariable *GV) {
             double nvmSum = 0.0;
-            for (const std::string &blockName : agg.pathBlocks) {
-                nvmSum += energy.getENvm(blockName, GV);
+            for (const BasicBlock *BB : agg.pathBlocks) {
+                nvmSum += energy.getENvm(BB, GV);
             }
 
             bool hasDef = false;
             bool hasLiveIn = false;
-            for (const std::string &blockName : agg.loopBlocks) {
-                hasDef |= state.getEligDefIndicator(blockName, GV);
-                hasLiveIn |= state.getEligLiveIn(blockName).count(GV) > 0;
+            for (const BasicBlock *BB : agg.loopBlocks) {
+                hasDef |= state.getEligDefIndicator(BB, GV);
+                hasLiveIn |= state.getEligLiveIn(BB).count(GV) > 0;
             }
 
             if (nvmSum != 0.0) {
@@ -590,9 +583,9 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             bool hasDef = false;
             bool hasLiveIn = false;
 
-            for (const std::string &blockName : agg.loopBlocks) {
-                hasDef |= state.getIneligDefIndicator(blockName, V);
-                hasLiveIn |= state.getIneligLiveIn(blockName).count(V) > 0;
+            for (const BasicBlock *BB : agg.loopBlocks) {
+                hasDef |= state.getIneligDefIndicator(BB, V);
+                hasLiveIn |= state.getIneligLiveIn(BB).count(V) > 0;
             }
 
             if (hasDef) {
@@ -606,26 +599,30 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         for (llvm::Value *V : model.ineligibleObjs_)
             aggregateIneligVar(V);
 
-        summariesByNode[nodeName] = agg;
+        summariesByNode[nodeName] = std::move(agg);
         out.stats.loopsSummarized++;
     }
 
-    std::map<std::string, std::string> concreteToAbstract;
-    for (const std::string &block : cfg.getBlocks()) {
-        concreteToAbstract[block] = block;
+    // Build concrete-to-abstract mapping.
+    // Each concrete BB maps to either itself (if not summarized) or its
+    // summary node name.
+    DenseMap<const BasicBlock *, std::string> concreteToAbstract;
+    for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+        concreteToAbstract[BB] = cfg.getBlockInfo(BB).name;
     }
     for (const auto &[nodeName, agg] : summariesByNode) {
         (void)nodeName;
-        for (const std::string &block : agg.loopBlocks) {
-            concreteToAbstract[block] = agg.nodeName;
+        for (const BasicBlock *BB : agg.loopBlocks) {
+            concreteToAbstract[BB] = agg.nodeName;
         }
     }
 
+    // Build ordered list of abstract block names (preserving function order).
     std::vector<std::string> abstractBlocks;
     {
         std::set<std::string> seenNodes;
-        for (const std::string &block : cfg.getBlocks()) {
-            const std::string &node = concreteToAbstract[block];
+        for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+            const std::string &node = concreteToAbstract[BB];
             if (seenNodes.insert(node).second) {
                 abstractBlocks.push_back(node);
             }
@@ -638,10 +635,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     {
         std::set<std::pair<std::string, std::string>> edgeSet;
         for (const auto &[src, dst] : cfg.getEdges()) {
-            std::string aSrc = concreteToAbstract[src];
-            std::string aDst = concreteToAbstract[dst];
+            const std::string &aSrc = concreteToAbstract[src];
+            const std::string &aDst = concreteToAbstract[dst];
             bool isUncollapsedConcreteSelfEdge =
-                (src == dst) && (aSrc == src) && (aDst == dst);
+                (src == dst) &&
+                (aSrc == cfg.getBlockInfo(src).name) &&
+                (aDst == cfg.getBlockInfo(dst).name);
             if (aSrc == aDst && !isUncollapsedConcreteSelfEdge) {
                 continue;
             }
@@ -654,11 +653,19 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     std::vector<std::string> abstractExitBlocks;
     {
         std::set<std::string> exitSeen;
-        for (const std::string &exitBlock : cfg.getExitBlocks()) {
-            std::string node = concreteToAbstract[exitBlock];
+        for (const llvm::BasicBlock *exitBlock : cfg.getExitBlocks()) {
+            const std::string &node = concreteToAbstract[exitBlock];
             if (exitSeen.insert(node).second) {
                 abstractExitBlocks.push_back(node);
             }
+        }
+    }
+
+    // Build reverse lookup: node name -> BasicBlock* for non-summarized blocks.
+    std::map<std::string, const BasicBlock *> nameToBBConcrete;
+    for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+        if (!summarizedConcreteBlocks.count(BB)) {
+            nameToBBConcrete[cfg.getBlockInfo(BB).name] = BB;
         }
     }
 
@@ -679,15 +686,11 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             blockEnergyByAbstract[node] = agg.pathEnergy;
             fEntryByAbstract[node] = agg.fEntry;
 
-            // Loop entry frequency for boundary costing: use preheader freq
-            // so boundary start/end costs fire once per loop entry, not per iteration.
-            double fBound = agg.fEntry;  // fallback: same as fEntry
-            if (llvm::BasicBlock *header = state.getBlock(agg.headerName)) {
-                if (llvm::Loop *L = LI.getLoopFor(header)) {
-                    if (llvm::BasicBlock *PH = L->getLoopPreheader()) {
-                        std::string phName = getBlockName(*PH, F);
-                        fBound = energy.getFEntry(phName);
-                    }
+            // Loop entry frequency for boundary costing.
+            double fBound = agg.fEntry;
+            if (llvm::Loop *L = LI.getLoopFor(agg.headerBB)) {
+                if (llvm::BasicBlock *PH = L->getLoopPreheader()) {
+                    fBound = energy.getFEntry(PH);
                 }
             }
             fBoundaryByAbstract[node] = fBound;
@@ -713,30 +716,34 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             continue;
         }
 
-        // Concrete (non-summarized) node.
-        blockEnergyByAbstract[node] = cfg.getBlockInfo(node).energyCost;
-        fEntryByAbstract[node] = energy.getFEntry(node);
-        fBoundaryByAbstract[node] = energy.getFEntry(node);
-        eligLiveInByAbstract[node] = state.getEligLiveIn(node);
-        ineligLiveInByAbstract[node] = state.getIneligLiveIn(node);
+        // Concrete (non-summarized) node — look up BB via reverse map.
+        auto concreteIt = nameToBBConcrete.find(node);
+        if (concreteIt == nameToBBConcrete.end())
+            continue;
+        const llvm::BasicBlock *concreteBB = concreteIt->second;
+
+        blockEnergyByAbstract[node] = cfg.getBlockInfo(concreteBB).energyCost;
+        fEntryByAbstract[node] = energy.getFEntry(concreteBB);
+        fBoundaryByAbstract[node] = energy.getFEntry(concreteBB);
+        eligLiveInByAbstract[node] = state.getEligLiveIn(concreteBB);
+        ineligLiveInByAbstract[node] = state.getIneligLiveIn(concreteBB);
 
         for (llvm::GlobalVariable *GV : model.vmObjs_) {
-            if (state.getEligDefIndicator(node, GV)) {
+            if (state.getEligDefIndicator(concreteBB, GV)) {
                 eligDefByAbstract[std::make_pair(node, GV)] = true;
             }
-            double nvm = energy.getENvm(node, GV);
+            double nvm = energy.getENvm(concreteBB, GV);
             if (nvm != 0.0) {
                 eNvmByAbstract[std::make_pair(node, GV)] = nvm;
             }
         }
         for (llvm::Value *V : model.ineligibleObjs_) {
-            if (state.getIneligDefIndicator(node, V)) {
+            if (state.getIneligDefIndicator(concreteBB, V)) {
                 ineligDefByAbstract[std::make_pair(node, V)] = true;
             }
         }
     }
 
-    // Assign NodeIds and register blocks.
     std::map<std::string, NodeId> nodeIdByName;
     NodeId nextNodeId = 0;
     for (const std::string &nodeName : abstractBlocks) {
@@ -748,25 +755,27 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
 
         auto summaryIt = summariesByNode.find(nodeName);
         if (summaryIt != summariesByNode.end()) {
-            llvm::BasicBlock *header = state.getBlock(summaryIt->second.headerName);
-            // Use the preheader as the representative block: region boundaries on
-            // summary nodes should fire once per loop entry, not every iteration.
+            const LoopAggregate &agg = summaryIt->second;
+            llvm::BasicBlock *header =
+                const_cast<llvm::BasicBlock *>(agg.headerBB);
+            // Use the preheader as the representative block.
             llvm::BasicBlock *rep = header;
             if (llvm::Loop *L = LI.getLoopFor(header)) {
                 if (llvm::BasicBlock *PH = L->getLoopPreheader())
                     rep = PH;
             }
             model.nodeMap_.setSummaryRepresentative(nodeId, rep);
-            // Register all loop-interior blocks → summary NodeId so the
-            // instrumenter can resolve any BB inside a summarized loop.
-            for (const std::string &blockName : summaryIt->second.loopBlocks) {
-                llvm::BasicBlock *loopBB = state.getBlock(blockName);
-                if (loopBB)
-                    model.nodeMap_.setSummaryMember(nodeId, loopBB);
+            // Register all loop-interior blocks → summary NodeId.
+            for (const BasicBlock *loopBB : agg.loopBlocks) {
+                model.nodeMap_.setSummaryMember(
+                    nodeId, const_cast<llvm::BasicBlock *>(loopBB));
             }
         } else {
-            llvm::BasicBlock *bb = state.getBlock(nodeName);
-            model.nodeMap_.setConcreteNode(nodeId, bb);
+            auto cIt = nameToBBConcrete.find(nodeName);
+            if (cIt != nameToBBConcrete.end()) {
+                model.nodeMap_.setConcreteNode(
+                    nodeId, const_cast<llvm::BasicBlock *>(cIt->second));
+            }
         }
     }
 

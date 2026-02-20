@@ -2,6 +2,7 @@
 #include "milp/LivenessAnalysis.h"
 
 #include "common/AnnotationUtils.h"
+#include "common/BlockUtils.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
@@ -37,7 +38,6 @@ StateAnalysis::StateAnalysis(llvm::Function &F,
                              llvm::AAResults &AA,
                              const CFGAnalysis &cfg)
     : F_(F), AA_(AA), cfg_(cfg) {
-    buildBlockMap();
     identifyVMObjs();
     identifyIneligibleObjs();
     identifyIneligibleSSAValues();
@@ -67,49 +67,49 @@ void StateAnalysis::printAnalysisErrors(llvm::raw_ostream &os) const {
 }
 
 const std::set<llvm::GlobalVariable *> &
-StateAnalysis::getEligLiveIn(const std::string &block) const {
-    auto it = eligLiveIn_.find(block);
+StateAnalysis::getEligLiveIn(const llvm::BasicBlock *BB) const {
+    auto it = eligLiveIn_.find(BB);
     if (it != eligLiveIn_.end())
         return it->second;
     return emptyGVSet_;
 }
 
-bool StateAnalysis::getEligDefIndicator(const std::string &block,
+bool StateAnalysis::getEligDefIndicator(const llvm::BasicBlock *BB,
                                         llvm::GlobalVariable *gv) const {
-    auto it = eligDefGlobals_.find(block);
+    auto it = eligDefGlobals_.find(BB);
     if (it == eligDefGlobals_.end())
         return false;
     return it->second.count(gv) > 0;
 }
 
 const std::set<llvm::Value *> &
-StateAnalysis::getIneligLiveIn(const std::string &block) const {
-    auto it = ineligLiveIn_.find(block);
+StateAnalysis::getIneligLiveIn(const llvm::BasicBlock *BB) const {
+    auto it = ineligLiveIn_.find(BB);
     if (it != ineligLiveIn_.end())
         return it->second;
     return emptyValueSet_;
 }
 
-bool StateAnalysis::getIneligDefIndicator(const std::string &block,
+bool StateAnalysis::getIneligDefIndicator(const llvm::BasicBlock *BB,
                                           llvm::Value *v) const {
-    auto it = ineligDefVars_.find(block);
+    auto it = ineligDefVars_.find(BB);
     if (it == ineligDefVars_.end())
         return false;
     return it->second.count(v) > 0;
 }
 
-unsigned StateAnalysis::getLoadCount(const std::string &block,
+unsigned StateAnalysis::getLoadCount(const llvm::BasicBlock *BB,
                                      llvm::GlobalVariable *gv) const {
-    auto key = std::make_pair(block, gv);
+    auto key = std::make_pair(BB, gv);
     auto it = loadCounts_.find(key);
     if (it != loadCounts_.end())
         return it->second;
     return 0;
 }
 
-unsigned StateAnalysis::getStoreCount(const std::string &block,
+unsigned StateAnalysis::getStoreCount(const llvm::BasicBlock *BB,
                                       llvm::GlobalVariable *gv) const {
-    auto key = std::make_pair(block, gv);
+    auto key = std::make_pair(BB, gv);
     auto it = storeCounts_.find(key);
     if (it != storeCounts_.end())
         return it->second;
@@ -124,21 +124,7 @@ unsigned StateAnalysis::getVarSizeBytes(llvm::Value *v) const {
     return 0;
 }
 
-llvm::BasicBlock *StateAnalysis::getBlock(const std::string &name) const {
-    auto it = nameToBlock_.find(name);
-    if (it != nameToBlock_.end())
-        return it->second;
-    return nullptr;
-}
-
 // ---- Private implementation ----
-
-void StateAnalysis::buildBlockMap() {
-    for (llvm::BasicBlock &BB : F_) {
-        std::string name = getBlockName(BB, F_);
-        nameToBlock_[name] = &BB;
-    }
-}
 
 bool StateAnalysis::isMilpCandidateAnnotated(llvm::GlobalVariable *GV) const {
     return checkpoint::isMilpCandidateAnnotated(GV, F_.getParent());
@@ -452,7 +438,7 @@ void StateAnalysis::computeAccessMaps() {
     }
 
     for (llvm::BasicBlock &BB : F_) {
-        std::string blockName = getBlockName(BB, F_);
+        const llvm::BasicBlock *BBKey = &BB;
 
         for (llvm::Instruction &I : BB) {
             validateInstructionForStrictMode(I);
@@ -461,13 +447,13 @@ void StateAnalysis::computeAccessMaps() {
             auto processEligGV = [&](llvm::GlobalVariable *GV) {
                 auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
                 llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
-                auto key = std::make_pair(blockName, GV);
+                auto key = std::make_pair(BBKey, GV);
 
                 if (llvm::isRefSet(MRI))
                     loadCounts_[key]++;
                 if (llvm::isModSet(MRI)) {
                     storeCounts_[key]++;
-                    eligDefGlobals_[blockName].insert(GV);
+                    eligDefGlobals_[BBKey].insert(GV);
                 }
             };
 
@@ -478,13 +464,13 @@ void StateAnalysis::computeAccessMaps() {
             auto processIneligGV = [&](llvm::GlobalVariable *GV) {
                 auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
                 llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
-                auto key = std::make_pair(blockName, GV);
+                auto key = std::make_pair(BBKey, GV);
 
                 if (llvm::isRefSet(MRI))
                     loadCounts_[key]++;
                 if (llvm::isModSet(MRI)) {
                     storeCounts_[key]++;
-                    ineligDefVars_[blockName].insert(GV);
+                    ineligDefVars_[BBKey].insert(GV);
                 }
             };
 
@@ -501,8 +487,8 @@ void StateAnalysis::computeAccessMaps() {
         for (const llvm::User *U : AI->users()) {
             if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(U)) {
                 if (SI->getPointerOperand()->stripPointerCasts() == AI) {
-                    std::string blockName = getBlockName(*SI->getParent(), F_);
-                    ineligDefVars_[blockName].insert(AI);
+                    const llvm::BasicBlock *BBKey = SI->getParent();
+                    ineligDefVars_[BBKey].insert(AI);
                 }
             }
         }
@@ -513,28 +499,28 @@ void StateAnalysis::computeAccessMaps() {
         auto *Inst = llvm::dyn_cast<llvm::Instruction>(V);
         if (!Inst || llvm::isa<llvm::AllocaInst>(Inst))
             continue;
-        std::string blockName = getBlockName(*Inst->getParent(), F_);
-        ineligDefVars_[blockName].insert(Inst);
+        const llvm::BasicBlock *BBKey = Inst->getParent();
+        ineligDefVars_[BBKey].insert(Inst);
     }
 }
 
 void StateAnalysis::computeEligLiveness() {
     eligLiveIn_ = checkpoint::computeEligibleLiveness(
-        F_, AA_, cfg_, vmObjs_, nameToBlock_);
+        F_, AA_, cfg_, vmObjs_);
 }
 
 void StateAnalysis::computeIneligGlobalAllocaLiveness() {
     auto gaLive = checkpoint::computeIneligGlobalAllocaLiveness(
-        F_, AA_, cfg_, ineligibleObjs_, nameToBlock_);
-    for (auto &[block, vals] : gaLive)
-        ineligLiveIn_[block].insert(vals.begin(), vals.end());
+        F_, AA_, cfg_, ineligibleObjs_);
+    for (auto &[BB, vals] : gaLive)
+        ineligLiveIn_[BB].insert(vals.begin(), vals.end());
 }
 
 void StateAnalysis::computeIneligSSALiveness() {
     auto ssaLive = checkpoint::computeIneligSSALiveness(
-        F_, cfg_, ineligibleObjs_, nameToBlock_);
-    for (auto &[block, vals] : ssaLive)
-        ineligLiveIn_[block].insert(vals.begin(), vals.end());
+        F_, cfg_, ineligibleObjs_);
+    for (auto &[BB, vals] : ssaLive)
+        ineligLiveIn_[BB].insert(vals.begin(), vals.end());
 }
 
 } // namespace checkpoint

@@ -1,19 +1,21 @@
 #include "milp/LivenessAnalysis.h"
 
-#include "llvm/IR/Constants.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
+
+#include <map>
 
 namespace checkpoint {
 
-std::map<std::string, std::set<llvm::GlobalVariable *>>
+llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>>
 computeEligibleLiveness(
     llvm::Function &F,
     llvm::AAResults &AA,
     const CFGAnalysis &cfg,
-    const std::vector<llvm::GlobalVariable *> &vmObjs,
-    const std::map<std::string, llvm::BasicBlock *> &nameToBlock) {
+    const std::vector<llvm::GlobalVariable *> &vmObjs) {
 
-    std::map<std::string, std::set<llvm::GlobalVariable *>> result;
+    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>>
+        result;
 
     if (vmObjs.empty())
         return result;
@@ -23,13 +25,15 @@ computeEligibleLiveness(
         bool hasMustStore = false;
     };
 
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, BlockGVInfo> blockGVInfo;
+    std::map<std::pair<const llvm::BasicBlock *, llvm::GlobalVariable *>,
+             BlockGVInfo>
+        blockGVInfo;
 
+    // Phase 1: Per-instruction scan (iterate F for non-const access).
     for (llvm::BasicBlock &BB : F) {
-        std::string blockName = getBlockName(BB, F);
-
         for (llvm::GlobalVariable *GV : vmObjs) {
-            auto key = std::make_pair(blockName, GV);
+            auto key = std::make_pair(
+                static_cast<const llvm::BasicBlock *>(&BB), GV);
             BlockGVInfo info;
             bool seenMustStore = false;
 
@@ -53,25 +57,24 @@ computeEligibleLiveness(
         }
     }
 
+    // Phase 2: Dataflow iteration.
     for (llvm::GlobalVariable *GV : vmObjs) {
-        std::map<std::string, bool> liveIn, liveOut;
-        for (const auto &blockName : cfg.getBlocks()) {
-            liveIn[blockName] = false;
-            liveOut[blockName] = false;
+        llvm::DenseMap<const llvm::BasicBlock *, bool> liveIn, liveOut;
+        for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+            liveIn[BB] = false;
+            liveOut[BB] = false;
         }
 
         bool changed = true;
         while (changed) {
             changed = false;
-            for (const auto &blockName : cfg.getBlocks()) {
-                auto key = std::make_pair(blockName, GV);
+            for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+                auto key = std::make_pair(BB, GV);
                 const BlockGVInfo &info = blockGVInfo[key];
 
                 bool newLiveOut = false;
-                llvm::BasicBlock *BB = nameToBlock.at(blockName);
-                for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                    std::string succName = getBlockName(*Succ, F);
-                    if (liveIn[succName]) {
+                for (const llvm::BasicBlock *Succ : llvm::successors(BB)) {
+                    if (liveIn[Succ]) {
                         newLiveOut = true;
                         break;
                     }
@@ -80,33 +83,32 @@ computeEligibleLiveness(
                 bool newLiveIn = info.loadBeforeMustStore ||
                                  (newLiveOut && !info.hasMustStore);
 
-                if (newLiveIn != liveIn[blockName] ||
-                    newLiveOut != liveOut[blockName]) {
-                    liveIn[blockName] = newLiveIn;
-                    liveOut[blockName] = newLiveOut;
+                if (newLiveIn != liveIn[BB] ||
+                    newLiveOut != liveOut[BB]) {
+                    liveIn[BB] = newLiveIn;
+                    liveOut[BB] = newLiveOut;
                     changed = true;
                 }
             }
         }
 
-        for (const auto &blockName : cfg.getBlocks()) {
-            if (liveIn[blockName])
-                result[blockName].insert(GV);
+        for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+            if (liveIn[BB])
+                result[BB].insert(GV);
         }
     }
 
     return result;
 }
 
-std::map<std::string, std::set<llvm::Value *>>
+llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
 computeIneligGlobalAllocaLiveness(
     llvm::Function &F,
     llvm::AAResults &AA,
     const CFGAnalysis &cfg,
-    const std::vector<llvm::Value *> &ineligibleObjs,
-    const std::map<std::string, llvm::BasicBlock *> &nameToBlock) {
+    const std::vector<llvm::Value *> &ineligibleObjs) {
 
-    std::map<std::string, std::set<llvm::Value *>> result;
+    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>> result;
 
     std::vector<llvm::Value *> globalAllocaIneligs;
     for (llvm::Value *V : ineligibleObjs) {
@@ -122,13 +124,14 @@ computeIneligGlobalAllocaLiveness(
         bool hasMustStore = false;
     };
 
-    std::map<std::pair<std::string, llvm::Value *>, BlockVarInfo> blockVarInfo;
+    std::map<std::pair<const llvm::BasicBlock *, llvm::Value *>, BlockVarInfo>
+        blockVarInfo;
 
+    // Phase 1: Per-instruction scan (iterate F for non-const access).
     for (llvm::BasicBlock &BB : F) {
-        std::string blockName = getBlockName(BB, F);
-
         for (llvm::Value *V : globalAllocaIneligs) {
-            auto key = std::make_pair(blockName, V);
+            auto key = std::make_pair(
+                static_cast<const llvm::BasicBlock *>(&BB), V);
             BlockVarInfo info;
             bool seenMustStore = false;
 
@@ -168,25 +171,24 @@ computeIneligGlobalAllocaLiveness(
         }
     }
 
+    // Phase 2: Dataflow iteration.
     for (llvm::Value *V : globalAllocaIneligs) {
-        std::map<std::string, bool> liveIn, liveOut;
-        for (const auto &blockName : cfg.getBlocks()) {
-            liveIn[blockName] = false;
-            liveOut[blockName] = false;
+        llvm::DenseMap<const llvm::BasicBlock *, bool> liveIn, liveOut;
+        for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+            liveIn[BB] = false;
+            liveOut[BB] = false;
         }
 
         bool changed = true;
         while (changed) {
             changed = false;
-            for (const auto &blockName : cfg.getBlocks()) {
-                auto key = std::make_pair(blockName, V);
+            for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+                auto key = std::make_pair(BB, V);
                 const BlockVarInfo &info = blockVarInfo[key];
 
                 bool newLiveOut = false;
-                llvm::BasicBlock *BB = nameToBlock.at(blockName);
-                for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                    std::string succName = getBlockName(*Succ, F);
-                    if (liveIn[succName]) {
+                for (const llvm::BasicBlock *Succ : llvm::successors(BB)) {
+                    if (liveIn[Succ]) {
                         newLiveOut = true;
                         break;
                     }
@@ -195,61 +197,59 @@ computeIneligGlobalAllocaLiveness(
                 bool newLiveIn = info.loadBeforeMustStore ||
                                  (newLiveOut && !info.hasMustStore);
 
-                if (newLiveIn != liveIn[blockName] ||
-                    newLiveOut != liveOut[blockName]) {
-                    liveIn[blockName] = newLiveIn;
-                    liveOut[blockName] = newLiveOut;
+                if (newLiveIn != liveIn[BB] ||
+                    newLiveOut != liveOut[BB]) {
+                    liveIn[BB] = newLiveIn;
+                    liveOut[BB] = newLiveOut;
                     changed = true;
                 }
             }
         }
 
-        for (const auto &blockName : cfg.getBlocks()) {
-            if (liveIn[blockName])
-                result[blockName].insert(V);
+        for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+            if (liveIn[BB])
+                result[BB].insert(V);
         }
     }
 
     return result;
 }
 
-std::map<std::string, std::set<llvm::Value *>>
+llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
 computeIneligSSALiveness(
     llvm::Function &F,
     const CFGAnalysis &cfg,
-    const std::vector<llvm::Value *> &ineligibleObjs,
-    const std::map<std::string, llvm::BasicBlock *> &nameToBlock) {
+    const std::vector<llvm::Value *> &ineligibleObjs) {
 
-    std::map<std::string, std::set<llvm::Value *>> result;
+    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>> result;
 
     for (llvm::Value *V : ineligibleObjs) {
         auto *Inst = llvm::dyn_cast<llvm::Instruction>(V);
         if (!Inst || llvm::isa<llvm::AllocaInst>(Inst))
             continue;
 
-        llvm::BasicBlock *defBlock = Inst->getParent();
-        std::string defBlockName = getBlockName(*defBlock, F);
+        const llvm::BasicBlock *defBlock = Inst->getParent();
 
         // Collect PHI incoming edges and non-PHI use blocks.
         // phiIncoming: PHI_block -> {incoming blocks that carry V}
-        std::map<std::string, std::set<std::string>> phiIncoming;
-        std::set<std::string> useBlocks;
+        llvm::DenseMap<const llvm::BasicBlock *,
+                       llvm::SmallPtrSet<const llvm::BasicBlock *, 4>>
+            phiIncoming;
+        llvm::SmallPtrSet<const llvm::BasicBlock *, 8> useBlocks;
         for (const llvm::User *U : Inst->users()) {
             if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
                 if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(UI)) {
-                    std::string phiBlock =
-                        getBlockName(*PHI->getParent(), F);
+                    const llvm::BasicBlock *phiBlock = PHI->getParent();
                     for (unsigned i = 0; i < PHI->getNumIncomingValues();
                          ++i) {
                         if (PHI->getIncomingValue(i) == Inst) {
-                            llvm::BasicBlock *incBB =
+                            const llvm::BasicBlock *incBB =
                                 PHI->getIncomingBlock(i);
-                            phiIncoming[phiBlock].insert(
-                                getBlockName(*incBB, F));
+                            phiIncoming[phiBlock].insert(incBB);
                         }
                     }
                 } else if (UI->getParent() != defBlock) {
-                    useBlocks.insert(getBlockName(*UI->getParent(), F));
+                    useBlocks.insert(UI->getParent());
                 }
             }
         }
@@ -265,58 +265,56 @@ computeIneligSSALiveness(
         //   liveOut[B]:    V is live-out at B if a successor has
         //                  realLiveIn OR a successor's PHI receives V
         //                  specifically from B.
-        std::map<std::string, bool> realLiveIn, liveOut;
-        std::set<std::string> phiLiveInBlocks;
+        llvm::DenseMap<const llvm::BasicBlock *, bool> realLiveIn, liveOut;
+        llvm::SmallPtrSet<const llvm::BasicBlock *, 8> phiLiveInBlocks;
         for (const auto &[phiBlock, _] : phiIncoming)
             phiLiveInBlocks.insert(phiBlock);
 
-        for (const auto &blockName : cfg.getBlocks()) {
-            realLiveIn[blockName] = false;
-            liveOut[blockName] = false;
+        for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+            realLiveIn[BB] = false;
+            liveOut[BB] = false;
         }
 
         bool changed = true;
         while (changed) {
             changed = false;
-            for (const auto &blockName : cfg.getBlocks()) {
-                if (blockName == defBlockName)
+            for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+                if (BB == defBlock)
                     continue;
 
                 bool newLiveOut = false;
-                llvm::BasicBlock *BB = nameToBlock.at(blockName);
-                for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                    std::string succName = getBlockName(*Succ, F);
-                    if (realLiveIn[succName]) {
+                for (const llvm::BasicBlock *Succ : llvm::successors(BB)) {
+                    if (realLiveIn[Succ]) {
                         newLiveOut = true;
                         break;
                     }
                     // PHI edge: only propagate if PHI at Succ
                     // receives V from this block.
-                    auto it = phiIncoming.find(succName);
+                    auto it = phiIncoming.find(Succ);
                     if (it != phiIncoming.end() &&
-                        it->second.count(blockName)) {
+                        it->second.count(BB)) {
                         newLiveOut = true;
                         break;
                     }
                 }
 
-                bool isUsed = useBlocks.count(blockName) > 0;
+                bool isUsed = useBlocks.count(BB) > 0;
                 bool newRealLiveIn = isUsed || newLiveOut;
 
-                if (newRealLiveIn != realLiveIn[blockName] ||
-                    newLiveOut != liveOut[blockName]) {
-                    realLiveIn[blockName] = newRealLiveIn;
-                    liveOut[blockName] = newLiveOut;
+                if (newRealLiveIn != realLiveIn[BB] ||
+                    newLiveOut != liveOut[BB]) {
+                    realLiveIn[BB] = newRealLiveIn;
+                    liveOut[BB] = newLiveOut;
                     changed = true;
                 }
             }
         }
 
         // V is live-in if it has real or PHI liveness.
-        for (const auto &blockName : cfg.getBlocks()) {
-            if (realLiveIn[blockName] ||
-                phiLiveInBlocks.count(blockName))
-                result[blockName].insert(V);
+        for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+            if (realLiveIn[BB] ||
+                phiLiveInBlocks.count(BB))
+                result[BB].insert(V);
         }
     }
 

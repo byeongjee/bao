@@ -1,7 +1,5 @@
 #include "milp/EnergyModel.h"
 
-#include "common/BlockUtils.h"
-
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
@@ -23,13 +21,13 @@ EnergyModel::EnergyModel(const CFGAnalysis &cfg,
     computeSaveRestoreCosts();
 }
 
-double EnergyModel::getEBase(const std::string &block) const {
-    return cfg_.getBlockInfo(block).energyCost;
+double EnergyModel::getEBase(const llvm::BasicBlock *BB) const {
+    return cfg_.getBlockInfo(BB).energyCost;
 }
 
-double EnergyModel::getENvm(const std::string &block,
+double EnergyModel::getENvm(const llvm::BasicBlock *BB,
                              llvm::GlobalVariable *gv) const {
-    auto key = std::make_pair(block, gv);
+    auto key = std::make_pair(BB, gv);
     auto it = eNvm_.find(key);
     if (it != eNvm_.end())
         return it->second;
@@ -50,8 +48,8 @@ double EnergyModel::getERestore(llvm::Value *v) const {
     return 0.0;
 }
 
-double EnergyModel::getFEntry(const std::string &block) const {
-    auto it = fEntry_.find(block);
+double EnergyModel::getFEntry(const llvm::BasicBlock *BB) const {
+    auto it = fEntry_.find(BB);
     if (it != fEntry_.end())
         return it->second;
     return 1.0;
@@ -74,7 +72,6 @@ void EnergyModel::computeFrequencies(llvm::BlockFrequencyInfo &BFI,
         entryFreq = 1;
 
     for (llvm::BasicBlock &BB : F) {
-        std::string blockName = getBlockName(BB, F);
         uint64_t freq = BFI.getBlockFreq(&BB).getFrequency();
         // Normalize so entry block has frequency 1.0
         double normalized = static_cast<double>(freq) /
@@ -82,7 +79,7 @@ void EnergyModel::computeFrequencies(llvm::BlockFrequencyInfo &BFI,
         // Ensure minimum frequency of 1.0 (entry-level)
         if (normalized < 1.0)
             normalized = 1.0;
-        fEntry_[blockName] = normalized;
+        fEntry_[&BB] = normalized;
     }
 }
 
@@ -90,13 +87,13 @@ void EnergyModel::computeNvmPenalties() {
     // E_nvm[b,v] = (loads + stores to v in b) * nvm_access_penalty
     // NVM penalties only apply to globals (eligible + ineligible globals).
     auto computeForGV = [&](llvm::GlobalVariable *GV,
-                            const std::string &blockName) {
-        unsigned loads = state_.getLoadCount(blockName, GV);
-        unsigned stores = state_.getStoreCount(blockName, GV);
+                            const llvm::BasicBlock *BB) {
+        unsigned loads = state_.getLoadCount(BB, GV);
+        unsigned stores = state_.getStoreCount(BB, GV);
         if (loads + stores > 0) {
             double penalty =
                 static_cast<double>(loads + stores) * params_.nvmAccessPenalty;
-            eNvm_[std::make_pair(blockName, GV)] = penalty;
+            eNvm_[std::make_pair(BB, GV)] = penalty;
         }
     };
 
@@ -107,11 +104,11 @@ void EnergyModel::computeNvmPenalties() {
             ineligGlobals.push_back(GV);
     }
 
-    for (const auto &blockName : cfg_.getBlocks()) {
+    for (const llvm::BasicBlock *BB : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjs())
-            computeForGV(GV, blockName);
+            computeForGV(GV, BB);
         for (llvm::GlobalVariable *GV : ineligGlobals)
-            computeForGV(GV, blockName);
+            computeForGV(GV, BB);
     }
 }
 

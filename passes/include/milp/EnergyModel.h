@@ -46,10 +46,10 @@ public:
 
     /// E_base[b]: base energy cost of block b (from estimator, same as
     /// BlockInfo::energyCost).
-    double getEBase(const std::string &block) const;
+    double getEBase(const llvm::BasicBlock *BB) const;
 
     /// E_nvm[b,v]: NVM access penalty for global v in block b.
-    double getENvm(const std::string &block,
+    double getENvm(const llvm::BasicBlock *BB,
                    llvm::GlobalVariable *gv) const;
 
     /// E_sv[v]: energy cost of committing variable v to checkpoint.
@@ -59,7 +59,7 @@ public:
     double getERestore(llvm::Value *v) const;
 
     /// F_entry[b]: estimated entry frequency for block b.
-    double getFEntry(const std::string &block) const;
+    double getFEntry(const llvm::BasicBlock *BB) const;
 
     /// q_reboot: uniform reboot probability (= q_reboot_prob parameter).
     double getQReboot() const;
@@ -70,8 +70,8 @@ private:
     const MILPEnergyParams &params_;
 
     // Precomputed values
-    std::map<std::string, double> fEntry_;          // Block frequencies
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, double> eNvm_;
+    llvm::DenseMap<const llvm::BasicBlock *, double> fEntry_;
+    std::map<std::pair<const llvm::BasicBlock *, llvm::GlobalVariable *>, double> eNvm_;
     std::map<llvm::Value *, double> eSaveByVar_;
     std::map<llvm::Value *, double> eRestoreByVar_;
 

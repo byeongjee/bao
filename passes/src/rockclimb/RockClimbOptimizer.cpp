@@ -49,10 +49,9 @@ RockClimbOptimizer::RockClimbOptimizer(const CFGAnalysis &cfg,
                                        llvm::Function &F,
                                        EnergyEstimator *estimator)
     : cfg_(cfg), E_safe_(E_safe), LI_(LI), F_(F), estimator_(estimator) {
-    // Build energyCosts_ from CFGAnalysis (one-time string lookup)
+    // Build energyCosts_ from CFGAnalysis
     for (llvm::BasicBlock &BB : F_) {
-        std::string name = getBlockName(BB, F_);
-        energyCosts_[&BB] = cfg_.getBlockInfo(name).energyCost;
+        energyCosts_[&BB] = cfg_.getBlockInfo(&BB).energyCost;
     }
 
     identifyLoopHeaders();

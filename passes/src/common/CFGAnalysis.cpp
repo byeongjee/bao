@@ -11,8 +11,8 @@ CFGAnalysis::CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI,
     analyze(F, LI, estimator);
 }
 
-const BlockInfo &CFGAnalysis::getBlockInfo(const std::string &name) const {
-    auto it = blockInfo_.find(name);
+const BlockInfo &CFGAnalysis::getBlockInfo(const llvm::BasicBlock *BB) const {
+    auto it = blockInfo_.find(BB);
     if (it == blockInfo_.end()) {
         static BlockInfo empty{"", 0.0};
         return empty;
@@ -26,31 +26,30 @@ void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI,
     for (llvm::BasicBlock &BB : F) {
         std::string name = getBlockName(BB, F);
 
-        blocks_.push_back(name);
+        blocks_.push_back(&BB);
 
         // Calculate energy cost using estimator
         EnergyEstimate estimate = estimator.estimate(BB);
         double energyCost = estimate.cost;
 
         BlockInfo info{name, energyCost};
-        blockInfo_[name] = info;
+        blockInfo_[&BB] = info;
 
         // Set entry block
         if (&BB == &F.getEntryBlock()) {
-            entryBlock_ = name;
+            entryBlock_ = &BB;
         }
 
         // Add edges to successors
         bool hasSuccessors = false;
         for (llvm::BasicBlock *Succ : llvm::successors(&BB)) {
             hasSuccessors = true;
-            std::string succName = getBlockName(Succ, F);
-            edges_.emplace_back(name, succName);
+            edges_.emplace_back(&BB, Succ);
         }
 
         // Track exit blocks (no successors)
         if (!hasSuccessors) {
-            exitBlocks_.push_back(name);
+            exitBlocks_.push_back(&BB);
         }
     }
 }

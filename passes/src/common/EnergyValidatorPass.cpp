@@ -282,10 +282,8 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
 
     // Step 7: For each basic block, compute adjusted energy and insert fsub
     for (BasicBlock &BB : F) {
-        std::string blockName = getBlockName(BB, F);
-
         // Get base energy from CFG analysis
-        double baseEnergy = ctx.cfg->getBlockInfo(blockName).energyCost;
+        double baseEnergy = ctx.cfg->getBlockInfo(&BB).energyCost;
 
         // Subtract energy for excluded calls (runtime handles those)
         unsigned numExcludedCalls = countExcludedCalls(BB, excludedFns);
@@ -316,6 +314,7 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
 
         // Verbose output: print remaining energy after subtraction
         if (ValidateVerboseOpt) {
+            std::string blockName = getBlockName(BB, F);
             Value *funcName = builder.CreateGlobalString(F.getName(), "ev.fn");
             Value *blkName = builder.CreateGlobalString(blockName, "ev.bn");
             builder.CreateCall(verboseFn, {funcName, blkName, newRemaining});

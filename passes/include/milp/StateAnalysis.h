@@ -1,8 +1,8 @@
 #pragma once
 
-#include "common/BlockUtils.h"
 #include "common/CFGAnalysis.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -42,10 +42,10 @@ public:
     // -- Eligible live-in/def --
 
     /// Candidate globals live-in at block b.
-    const std::set<llvm::GlobalVariable *> &getEligLiveIn(const std::string &block) const;
+    const std::set<llvm::GlobalVariable *> &getEligLiveIn(const llvm::BasicBlock *BB) const;
 
     /// D_{b,v}: 1 if eligible v may be defined in block b.
-    bool getEligDefIndicator(const std::string &block, llvm::GlobalVariable *gv) const;
+    bool getEligDefIndicator(const llvm::BasicBlock *BB, llvm::GlobalVariable *gv) const;
 
     // -- Ineligible objects (V_inelig) --
 
@@ -54,10 +54,10 @@ public:
     bool isIneligible(llvm::Value *v) const;
 
     /// Ineligible objects live-in at block b.
-    const std::set<llvm::Value *> &getIneligLiveIn(const std::string &block) const;
+    const std::set<llvm::Value *> &getIneligLiveIn(const llvm::BasicBlock *BB) const;
 
     /// D_{b,v}: 1 if ineligible v may be defined in block b.
-    bool getIneligDefIndicator(const std::string &block, llvm::Value *v) const;
+    bool getIneligDefIndicator(const llvm::BasicBlock *BB, llvm::Value *v) const;
 
     // -- Strict-analysis diagnostics --
 
@@ -70,11 +70,11 @@ public:
     // -- Access maps (for energy model) --
 
     /// Number of loads from global v in block b.
-    unsigned getLoadCount(const std::string &block,
+    unsigned getLoadCount(const llvm::BasicBlock *BB,
                           llvm::GlobalVariable *gv) const;
 
     /// Number of stores to global v in block b.
-    unsigned getStoreCount(const std::string &block,
+    unsigned getStoreCount(const llvm::BasicBlock *BB,
                            llvm::GlobalVariable *gv) const;
 
     // -- Mappings --
@@ -82,9 +82,6 @@ public:
     /// Get variable size in bytes (works for candidates, ineligible globals,
     /// allocas, and SSA values). Returns 0 for unknown.
     unsigned getVarSizeBytes(llvm::Value *v) const;
-
-    /// Get the LLVM BasicBlock* for a block name.
-    llvm::BasicBlock *getBlock(const std::string &name) const;
 
 private:
     llvm::Function &F_;
@@ -104,19 +101,16 @@ private:
     std::map<llvm::Value *, unsigned> varSizeBytes_;
 
     // Eligible liveness
-    std::map<std::string, std::set<llvm::GlobalVariable *>> eligLiveIn_;
-    std::map<std::string, std::set<llvm::GlobalVariable *>> eligDefGlobals_;
+    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>> eligLiveIn_;
+    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>> eligDefGlobals_;
 
     // Ineligible liveness
-    std::map<std::string, std::set<llvm::Value *>> ineligLiveIn_;
-    std::map<std::string, std::set<llvm::Value *>> ineligDefVars_;
+    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>> ineligLiveIn_;
+    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>> ineligDefVars_;
 
     // Access maps: (block, globalVar) -> count (for NVM penalty computation)
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, unsigned> loadCounts_;
-    std::map<std::pair<std::string, llvm::GlobalVariable *>, unsigned> storeCounts_;
-
-    // Block name -> BasicBlock mapping
-    std::map<std::string, llvm::BasicBlock *> nameToBlock_;
+    std::map<std::pair<const llvm::BasicBlock *, llvm::GlobalVariable *>, unsigned> loadCounts_;
+    std::map<std::pair<const llvm::BasicBlock *, llvm::GlobalVariable *>, unsigned> storeCounts_;
 
     // Empty sets for returning references
     static const std::set<llvm::GlobalVariable *> emptyGVSet_;
@@ -130,7 +124,6 @@ private:
     void identifyVMObjs();
     void identifyIneligibleObjs();
     void identifyIneligibleSSAValues();
-    void buildBlockMap();
     void computeAccessMaps();
     void computeEligLiveness();
     void computeIneligGlobalAllocaLiveness();
