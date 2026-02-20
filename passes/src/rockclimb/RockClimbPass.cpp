@@ -410,19 +410,21 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     }
     std::vector<CheckpointPoint> checkpointPoints;
 
-    errs() << "\nRegion boundaries (" << result.regionBoundaries.size() << "):\n";
-    for (const auto &handle : result.regionBoundaries) {
-        BasicBlock *BB = RockClimbOptimizer::resolveBlock(handle);
-        errs() << "  " << getBlockName(*BB, F) << "\n";
-    }
+    LLVM_DEBUG({
+        dbgs() << "\nRegion boundaries (" << result.regionBoundaries.size() << "):\n";
+        for (const auto &handle : result.regionBoundaries) {
+            BasicBlock *BB = RockClimbOptimizer::resolveBlock(handle);
+            dbgs() << "  " << getBlockName(*BB, F) << "\n";
+        }
 
-    errs() << "\nRegions (" << result.regions.size() << "):\n";
-    for (const auto &region : result.regions) {
-        BasicBlock *startBB = RockClimbOptimizer::resolveBlock(region.startBlock);
-        errs() << "  Region starting at " << getBlockName(*startBB, F)
-               << " (energy: " << region.totalEnergy
-               << ", blocks: " << region.blocks.size() << ")\n";
-    }
+        dbgs() << "\nRegions (" << result.regions.size() << "):\n";
+        for (const auto &region : result.regions) {
+            BasicBlock *startBB = RockClimbOptimizer::resolveBlock(region.startBlock);
+            dbgs() << "  Region starting at " << getBlockName(*startBB, F)
+                   << " (energy: " << region.totalEnergy
+                   << ", blocks: " << region.blocks.size() << ")\n";
+        }
+    });
 
     // Distributed checkpointing analysis (register checkpoints)
     DistributedCheckpointing distCkpt(result.regions);
@@ -430,8 +432,8 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     if (useDistributedCkpt) {
         checkpointPoints = distCkpt.analyze();
 
-        errs() << "\nDistributed register checkpoints (" << checkpointPoints.size() << "):\n";
         LLVM_DEBUG({
+            dbgs() << "\nDistributed register checkpoints (" << checkpointPoints.size() << "):\n";
             for (const auto &ckpt : checkpointPoints) {
                 dbgs() << "  Reg " << ckpt.regId << " in region "
                        << getBlockName(*ckpt.regionStart, F);
@@ -457,12 +459,9 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     // Instrument the function
     RockClimbInstrumenter instrumenter(
         *F.getParent(), CheckFnOpt, SaveRegFnOpt, addDebugMarkers);
-    unsigned count = instrumenter.instrumentFunction(
+    instrumenter.instrumentFunction(
         F, boundarySet, checkpointPoints, useDistributedCkpt);
 
-    errs() << "\nInserted " << count << " instrumentation point(s)\n";
-
-    // Print comparison metrics
     errs() << "\n=== RockClimb Metrics ===\n";
     errs() << "  Regions: " << result.regions.size() << "\n";
     errs() << "  Boundary checks: " << boundarySet.size() << "\n";
