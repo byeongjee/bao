@@ -13,7 +13,7 @@ struct RockClimbParams {
     unsigned N_reg;                // Number of registers
     double E_restore_per_reg;      // Energy to restore one register
     bool distributedCheckpointing; // Enable distributed register checkpointing
-    bool memoryCheckpointing;      // Enable memory (alloca/global) checkpointing
+    bool addDebugMarkers = false;  // Emit debug marker calls for runtime counters
     double checkpoint_store_energy = 0.0; // Energy cost per checkpoint store (for CkptCycles)
 
     /// Calculate E_safe = E_input - E_restore.
@@ -86,11 +86,6 @@ inline RockClimbContextResult createRockClimbContext(
     }
 
     auto &base = *baseResult.context;
-
-    // Skip generated restore functions (from memory checkpointing)
-    if (F.getName().starts_with("__restore_boundary_")) {
-        return RockClimbContextResult::skip();
-    }
 
     // Parse RockClimb-specific parameters
     RockClimbParams params;

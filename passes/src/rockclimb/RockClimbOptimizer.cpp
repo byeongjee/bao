@@ -1,9 +1,6 @@
 #include "rockclimb/RockClimbOptimizer.h"
 #include "common/BlockUtils.h"
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/PostOrderIterator.h"
-#include "llvm/ADT/SCCIterator.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -12,6 +9,31 @@
 #include <queue>
 
 namespace checkpoint {
+namespace {
+
+static bool isCallSite(const llvm::Instruction &I) {
+    const auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+    if (!CB) {
+        return false;
+    }
+    if (llvm::isa<llvm::IntrinsicInst>(&I) || CB->isInlineAsm()) {
+        return false;
+    }
+
+    llvm::Function *callee = CB->getCalledFunction();
+    return !callee || !callee->isIntrinsic();
+}
+
+static bool blockHasCallSite(const llvm::BasicBlock &BB) {
+    for (const llvm::Instruction &I : BB) {
+        if (isCallSite(I)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
 
 RockClimbOptimizer::RockClimbOptimizer(const CFGAnalysis &cfg,
                                        double E_safe,
@@ -56,23 +78,9 @@ void RockClimbOptimizer::identifyLoopHeaders() {
 void RockClimbOptimizer::identifyCallSiteBlocks() {
     callSiteBlocks_.clear();
     for (llvm::BasicBlock &BB : F_) {
-        for (llvm::Instruction &I : BB) {
-            llvm::CallBase *CB = llvm::dyn_cast<llvm::CallBase>(&I);
-            if (!CB) continue;
-
-            // Skip intrinsics (dbg info, lifetime markers, etc.)
-            if (llvm::isa<llvm::IntrinsicInst>(&I)) continue;
-
-            // Skip inline assembly
-            if (CB->isInlineAsm()) continue;
-
-            llvm::Function *callee = CB->getCalledFunction();
-            // Indirect calls are also call sites
-            if (!callee || !callee->isIntrinsic()) {
-                std::string name = getBlockName(BB, F_);
-                callSiteBlocks_.insert(name);
-                break;  // One call is enough to mark the block
-            }
+        if (blockHasCallSite(BB)) {
+            std::string name = getBlockName(BB, F_);
+            callSiteBlocks_.insert(name);
         }
     }
 }
@@ -156,7 +164,7 @@ std::vector<std::string> RockClimbOptimizer::getInfeasibleBlocks() const {
     std::vector<std::string> infeasible;
     for (const auto &block : cfg_.getBlocks()) {
         double energy = getBlockCost(block);
-        if (energy > E_safe_) {
+        if (energy >= E_safe_) {
             infeasible.push_back(block);
         }
     }
@@ -178,9 +186,9 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
     // Algorithm 1 from RockClimb paper: path-aware region partitioning
     //
     // Lines 1-4: Initialize IncomeCycle_bbi = 0 for all blocks
-    std::map<std::string, double> IncomeCycle;
+    std::map<std::string, double> incomeCycle;
     for (const auto &block : topoOrder_) {
-        IncomeCycle[block] = 0.0;
+        incomeCycle[block] = 0.0;
     }
 
     // Track which blocks are region boundaries
@@ -188,19 +196,14 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
     // Entry block always starts a region
     boundarySet.insert(topoOrder_[0]);
 
-    // Store accum_cycle per block for successor propagation
-    std::map<std::string, double> accumCycleMap;
-
     // Lines 5-16: Process blocks in topological order
     for (size_t i = 0; i < topoOrder_.size(); ++i) {
         const std::string &block = topoOrder_[i];
         double Cycle_bbi = getBlockCost(block);
 
         // Check mandatory boundaries: loop headers and function call sites
-        bool isMandatoryBoundary = false;
         if (block != topoOrder_[0]) {  // Entry already handled
             if (loopHeaders_.count(block) || callSiteBlocks_.count(block)) {
-                isMandatoryBoundary = true;
                 boundarySet.insert(block);
             }
         }
@@ -214,11 +217,11 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
             accum_cycle = Cycle_bbi;
         } else {
             // Line 9: accum_cycle = Cycle_bbi + IncomeCycle_bbi
-            accum_cycle = Cycle_bbi + IncomeCycle[block];
+            accum_cycle = Cycle_bbi + incomeCycle[block];
         }
 
-        // Lines 11-15: While accum_cycle > threshold, place boundary / split
-        if (accum_cycle > E_safe_ && !isBoundary) {
+        // Lines 11-15: if accum_cycle >= threshold, place boundary / split
+        if (accum_cycle >= E_safe_ && !isBoundary) {
             // Place boundary at this block
             boundarySet.insert(block);
             // Reset: this block starts a new region
@@ -227,7 +230,7 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
 
         // After boundary placement, if single block still exceeds threshold,
         // try splitting (Algorithm 1 while loop, lines 11-15)
-        while (accum_cycle > E_safe_ && estimator_) {
+        while (accum_cycle >= E_safe_ && estimator_) {
             std::string newBlock = splitBlock(block, E_safe_, i);
             if (newBlock.empty()) {
                 // Can't split further — mark infeasible
@@ -247,17 +250,14 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
             // in the next iteration of the outer for loop
         }
 
-        // Store accum_cycle for propagation
-        accumCycleMap[block] = accum_cycle;
-
         // Propagate to successors: IncomeCycle_succ = max(IncomeCycle_succ, accum_cycle)
         auto succIt = successors_.find(block);
         if (succIt != successors_.end()) {
             for (const auto &succ : succIt->second) {
-                if (IncomeCycle.find(succ) == IncomeCycle.end()) {
-                    IncomeCycle[succ] = 0.0;
+                if (incomeCycle.find(succ) == incomeCycle.end()) {
+                    incomeCycle[succ] = 0.0;
                 }
-                IncomeCycle[succ] = std::max(IncomeCycle[succ], accum_cycle);
+                incomeCycle[succ] = std::max(incomeCycle[succ], accum_cycle);
             }
         }
     }
@@ -325,7 +325,7 @@ std::string RockClimbOptimizer::splitBlock(const std::string &blockName,
 
         double instCost = estimator_->getInstructionCost(I);
 
-        if (accumulated + instCost > threshold && splitPoint) {
+        if (accumulated + instCost >= threshold && splitPoint) {
             // Split before this instruction
             break;
         }
@@ -373,29 +373,8 @@ std::string RockClimbOptimizer::splitBlock(const std::string &blockName,
 
     // The new block inherits boundary status from original if it had call sites
     // Re-check for call sites in both halves
-    bool origHasCall = false, newHasCall = false;
-    for (llvm::Instruction &I : *BB) {
-        if (auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            if (!llvm::isa<llvm::IntrinsicInst>(&I) && !CB->isInlineAsm()) {
-                llvm::Function *callee = CB->getCalledFunction();
-                if (!callee || !callee->isIntrinsic()) {
-                    origHasCall = true;
-                    break;
-                }
-            }
-        }
-    }
-    for (llvm::Instruction &I : *newBB) {
-        if (auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            if (!llvm::isa<llvm::IntrinsicInst>(&I) && !CB->isInlineAsm()) {
-                llvm::Function *callee = CB->getCalledFunction();
-                if (!callee || !callee->isIntrinsic()) {
-                    newHasCall = true;
-                    break;
-                }
-            }
-        }
-    }
+    bool origHasCall = blockHasCallSite(*BB);
+    bool newHasCall = blockHasCallSite(*newBB);
 
     // Update call site blocks
     if (!origHasCall) callSiteBlocks_.erase(blockName);
@@ -413,10 +392,8 @@ std::string RockClimbOptimizer::splitBlock(const std::string &blockName,
     double cfgOrigCost = cfg_.getBlockInfo(blockName).energyCost;
     extraBlockCosts_[blockName] = origNewCost - cfgOrigCost;
 
-    // For the new block, cfg_ doesn't know about it, so getBlockInfo would fail.
-    // We store the full cost as extra, and getBlockCost will handle it.
-    // But getBlockCost calls cfg_.getBlockInfo which will fail for new blocks.
-    // We need to handle this case.
+    // For the new block, CFGAnalysis returns default 0.0 base cost.
+    // Store the full split block energy as extra.
     extraBlockCosts_[newName] = splitNewCost;
 
     return newName;

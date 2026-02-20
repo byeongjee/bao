@@ -7,7 +7,6 @@
 #
 # Options:
 #   --mode <mode>    Checkpoint mode: none, rockclimb, milp (default: none)
-#   --memory         Enable memory checkpointing (for rockclimb)
 #   --runtime <type> Runtime variant: real (default), mock-counter, energy-validate
 #   --local          Compile for host machine instead of MSP430 (run locally)
 #   --debug          Enable DEBUG output via UART
@@ -48,7 +47,6 @@ SIZE="msp430-elf-size"
 
 # Defaults
 MODE="none"
-MEMORY_CKPT="false"
 RUNTIME_TYPE="real"
 RUNTIME_SET="false"
 LOCAL_MODE="false"
@@ -171,7 +169,6 @@ compile_to_ir() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode) MODE="$2"; shift 2 ;;
-        --memory) MEMORY_CKPT="true"; shift ;;
         --runtime) RUNTIME_TYPE="$2"; RUNTIME_SET="true"; shift 2 ;;
         --local) LOCAL_MODE="true"; shift ;;
         --debug) DEBUG_MODE="true"; shift ;;
@@ -300,12 +297,16 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             compile_to_ir
 
             # RockClimb pass
+            ROCKCLIMB_EXTRA_FLAGS=""
+            if [[ "$RUNTIME_TYPE" == "mock-counter" ]]; then
+                ROCKCLIMB_EXTRA_FLAGS="-add-debug-markers"
+            fi
             PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
             if $OPT -load-pass-plugin="$PASS_LIB" \
                 -passes=rockclimb \
                 -energy-config="$ESTIMATOR_CONFIG" \
                 -rockclimb-config="$ROCKCLIMB_CONFIG" \
-                -rockclimb-memory-ckpt="$MEMORY_CKPT" \
+                $ROCKCLIMB_EXTRA_FLAGS \
                 -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" \
                 >"$PASS_LOG" 2>&1; then
                 if [[ "$VERBOSE" == "true" ]]; then

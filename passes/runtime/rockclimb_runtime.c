@@ -80,6 +80,20 @@ void __rockclimb_save_reg(uint8_t reg_id, uint16_t value) {
     }
 }
 
+void __region_prologue(void) {}
+
+void __region_epilogue(void) {}
+
+void __checkpoint_store_reg(int32_t slot_id, int64_t value) {
+    (void)slot_id;
+    (void)value;
+}
+
+/* No-op stub for loop trip-count annotations in instrumented IR. */
+void __loop_tripcount(int max_iterations) {
+    (void)max_iterations;
+}
+
 void __rockclimb_init(void) {
     /* Stop watchdog timer */
     WDTCTL = WDTPW | WDTHOLD;

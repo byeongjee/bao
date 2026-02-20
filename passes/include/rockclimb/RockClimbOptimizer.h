@@ -53,7 +53,8 @@ public:
     std::vector<std::string> getInfeasibleBlocks() const;
 
     /// Set extra block costs from checkpoint stores (CkptCycles_bbi).
-    /// Used for iterative refinement: partition -> analyze ckpts -> add costs -> re-partition.
+    /// Applied before Algorithm 1 traversal so effective per-block cost is
+    /// Cycle_ori + CkptCycles.
     /// @param costs Map from block name to additional energy cost.
     void setExtraBlockCosts(const std::map<std::string, double> &costs);
 

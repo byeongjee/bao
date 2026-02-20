@@ -107,6 +107,11 @@ void __rockclimb_save_reg(int reg_id, int value) {
     __ev_energy_remaining -= __ev_reg_store;
 }
 
+/* No-op stub for loop trip-count annotations that survive into final IR. */
+void __loop_tripcount(int max_iterations) {
+    (void)max_iterations;
+}
+
 /* ============================================================================
  * Generic checkpoint API
  * ============================================================================ */

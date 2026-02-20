@@ -83,6 +83,14 @@ void __rockclimb_check(void);
  */
 void __rockclimb_save_reg(uint8_t reg_id, uint16_t value);
 
+/*
+ * Optional debug marker API (MILP-style counters).
+ * Emitted when add_debug_markers / -add-debug-markers is enabled.
+ */
+void __region_prologue(void);
+void __region_epilogue(void);
+void __checkpoint_store_reg(int32_t slot_id, int64_t value);
+
 /**
  * Initialize the RockClimb runtime.
  *
