@@ -1,7 +1,6 @@
 {
   "E_input": 4860.0,
   "N_reg": 16,
-  "E_restore_per_reg": 0.5,
   "reg_store_energy": 1.89,
   "reg_restore_energy": 1.90,
   "E_check": 12.0,

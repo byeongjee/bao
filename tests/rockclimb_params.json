@@ -1,7 +1,7 @@
 {
   "E_input": 507.87,
   "N_reg": 16,
-  "E_restore_per_reg": 0.5,
+  "reg_restore_energy": 2.0,
   "distributed_checkpointing": true,
   "add_debug_markers": false
 }

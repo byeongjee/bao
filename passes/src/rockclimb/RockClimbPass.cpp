@@ -157,9 +157,9 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
                << configPath << "\n";
         return false;
     }
-    auto E_restore_per_reg = root->getNumber("E_restore_per_reg");
-    if (!E_restore_per_reg) {
-        errs() << "Error: Missing required field 'E_restore_per_reg' in RockClimb config: "
+    auto reg_restore_energy = root->getNumber("reg_restore_energy");
+    if (!reg_restore_energy) {
+        errs() << "Error: Missing required field 'reg_restore_energy' in RockClimb config: "
                << configPath << "\n";
         return false;
     }
@@ -172,7 +172,7 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
 
     params.E_input = *E_input;
     params.N_reg = static_cast<unsigned>(*N_reg);
-    params.E_restore_per_reg = *E_restore_per_reg;
+    params.reg_restore_energy = *reg_restore_energy;
     params.distributedCheckpointing = *distributed;
 
     // Optional: checkpoint_store_energy (defaults to 0)

@@ -254,6 +254,6 @@ The default configuration matches RockClimb checkpoint insertion parameters:
 
 To match a specific E_safe value from RockClimb:
 ```
-E_safe = 0.5 * C_buf_uF * (V_max² - V_min²) - N_reg * E_restore_per_reg
+E_safe = 0.5 * C_buf_uF * (V_max² - V_min²) - N_reg * reg_restore_energy
 C_buf_uF = (E_safe + 8) / 4.86
 ```
