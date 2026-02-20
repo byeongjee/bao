@@ -1,6 +1,7 @@
 #include "rockclimb/RockClimbOptimizer.h"
 #include "common/BlockUtils.h"
 
+#include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -95,43 +96,17 @@ void RockClimbOptimizer::computeTopologicalOrder() {
 
     if (F_.empty()) return;
 
-    BasicBlock *entry = &F_.getEntryBlock();
-
-    // Build in-degree from LLVM successors
-    DenseMap<BasicBlock*, int> inDegree;
-    for (BasicBlock &BB : F_) {
-        inDegree[&BB] = 0;
-    }
-    for (BasicBlock &BB : F_) {
-        for (BasicBlock *succ : successors(&BB)) {
-            inDegree[succ]++;
-        }
-    }
-
-    // Kahn's algorithm with BFS from entry
-    // Note: CFG may have cycles (loops), handle by allowing negative in-degree
-    std::queue<BasicBlock*> queue;
+    // Reverse post-order guarantees all predecessors (modulo back-edges)
+    // are visited before each block. Back-edges are safe to ignore because
+    // loop headers are forced boundaries that reset energy accumulation.
     SmallPtrSet<BasicBlock*, 32> visited;
-
-    queue.push(entry);
-
-    while (!queue.empty()) {
-        BasicBlock *curr = queue.front();
-        queue.pop();
-
-        if (visited.count(curr)) continue;
-        visited.insert(curr);
-        topoOrder_.push_back(WeakTrackingVH(curr));
-
-        for (BasicBlock *succ : successors(curr)) {
-            inDegree[succ]--;
-            if (inDegree[succ] <= 0 && !visited.count(succ)) {
-                queue.push(succ);
-            }
-        }
+    ReversePostOrderTraversal<Function*> RPOT(&F_);
+    for (BasicBlock *BB : RPOT) {
+        topoOrder_.push_back(WeakTrackingVH(BB));
+        visited.insert(BB);
     }
 
-    // Add any remaining unreachable blocks
+    // Add any unreachable blocks not covered by RPO
     for (BasicBlock &BB : F_) {
         if (!visited.count(&BB)) {
             topoOrder_.push_back(WeakTrackingVH(&BB));
