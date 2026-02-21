@@ -105,14 +105,22 @@ void RockClimbInstrumenter::insertRegisterCheckpoint(
 
     // Insert AFTER the instruction that defines the register
     llvm::Instruction *afterInst = ckpt.afterInst;
-    llvm::BasicBlock::iterator insertPt(afterInst);
-    ++insertPt;  // Move to after the instruction
 
     // Handle case where instruction is terminator
     if (afterInst->isTerminator()) {
         // Can't insert after terminator in same block
         // This shouldn't happen for normal definitions, but handle gracefully
         return;
+    }
+
+    llvm::BasicBlock::iterator insertPt;
+    if (llvm::isa<llvm::PHINode>(afterInst)) {
+        // PHIs must stay grouped at block start; insert after the last PHI
+        insertPt = afterInst->getParent()->getFirstNonPHIIt();
+    } else {
+        llvm::BasicBlock::iterator it(afterInst);
+        ++it;
+        insertPt = it;
     }
 
     llvm::IRBuilder<> Builder(&*insertPt);
