@@ -55,15 +55,17 @@ llvmGetPassPluginInfo() {
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                   if (Name == "checkpoint") {
-                    FPM.addPass(checkpoint::TripCountAnnotationPass());
                     FPM.addPass(LoopSimplifyPass());
                     FPM.addPass(LCSSAPass());
                     FPM.addPass(checkpoint::LoopStripMiningPass());
                     FPM.addPass(checkpoint::MILPCheckpointPass());
                     return true;
                   }
-                  if (Name == "milp") {
+                  if (Name == "tripcount-annotation") {
                     FPM.addPass(checkpoint::TripCountAnnotationPass());
+                    return true;
+                  }
+                  if (Name == "milp") {
                     FPM.addPass(LoopSimplifyPass());
                     FPM.addPass(LCSSAPass());
                     FPM.addPass(checkpoint::LoopStripMiningPass());

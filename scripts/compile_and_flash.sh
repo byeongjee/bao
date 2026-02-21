@@ -357,7 +357,28 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             info "Compiling with MILP..."
             [[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
 
+            # Run TripCountAnnotationPass before frontend-level -O optimizations.
+            # This preserves loop marker placement before canonical LLVM passes
+            # (unroll/peel/rotate) can move or erase source loops.
+            MILP_FRONTEND_OPT_LEVEL="$CLANG_OPT_LEVEL"
+            CLANG_OPT_LEVEL="0"
             compile_to_ir
+            CLANG_OPT_LEVEL="$MILP_FRONTEND_OPT_LEVEL"
+
+            if ! $OPT -load-pass-plugin="$PASS_LIB" \
+                -passes=tripcount-annotation \
+                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/tripcount.ll"; then
+                error "TripCountAnnotation pass failed"
+            fi
+
+            MILP_INPUT_LL="$TMP_DIR/tripcount.ll"
+            if [[ "$MILP_FRONTEND_OPT_LEVEL" != "0" ]]; then
+                if ! $OPT -passes="default<O$MILP_FRONTEND_OPT_LEVEL>" \
+                    -S "$TMP_DIR/tripcount.ll" -o "$TMP_DIR/input_optimized.ll"; then
+                    error "IR optimization pipeline failed at -O$MILP_FRONTEND_OPT_LEVEL"
+                fi
+                MILP_INPUT_LL="$TMP_DIR/input_optimized.ll"
+            fi
 
             # MILP pass
             MILP_EXTRA_FLAGS=""
@@ -370,7 +391,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 -energy-config="$ESTIMATOR_CONFIG" \
                 -milp-config="$MILP_CONFIG" \
                 $MILP_EXTRA_FLAGS \
-                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" \
+                -S "$MILP_INPUT_LL" -o "$TMP_DIR/ckpt.ll" \
                 >"$PASS_LOG" 2>&1; then
                 if [[ "$VERBOSE" == "true" ]]; then
                     cat "$PASS_LOG"
