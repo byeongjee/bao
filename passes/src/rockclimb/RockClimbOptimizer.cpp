@@ -22,6 +22,8 @@ static bool isCallSite(const llvm::Instruction &I) {
     }
 
     llvm::Function *callee = CB->getCalledFunction();
+    // __loop_tripcount is a metadata annotation, not a real call site
+    if (callee && callee->getName() == "__loop_tripcount") return false;
     return !callee || !callee->isIntrinsic();
 }
 
