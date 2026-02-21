@@ -108,6 +108,8 @@ bool CheckpointOptimizer::solve() {
     }
 
     buildModel();
+    if (timeLimit_ > 0.0)
+        model_.set(GRB_DoubleParam_TimeLimit, timeLimit_);
     model_.optimize();
     solved_ = true;
 
