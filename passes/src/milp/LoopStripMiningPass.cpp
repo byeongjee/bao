@@ -507,10 +507,15 @@ static PlanResult buildRewritePlan(
         return result;
     }
 
-    // Tighten budget by the upper-bound ineligible restore cost so the
-    // strip-mined loop is more likely to pass the AbstractCFG feasibility gate.
+    // Tighten budget by:
+    // (1) upper-bound ineligible restore cost, and
+    // (2) user-configured capacitor margin for strip-mining.
+    // This keeps chosen K conservative so summarized loop chunks are more
+    // likely to remain MILP-feasible.
     double ineligMargin = estimateIneligRestoreUpperBound(L, params);
-    double effectiveBudget = budget - ineligMargin;
+    double stripMiningMargin =
+        params.capacity * (params.loopStripMiningMarginPercent / 100.0);
+    double effectiveBudget = budget - ineligMargin - stripMiningMargin;
     if (effectiveBudget <= 0.0) {
         result.skipReason = "nonpositive-effective-budget";
         return result;

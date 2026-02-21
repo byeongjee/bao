@@ -6,6 +6,7 @@
 
 #define JSON_NOEXCEPTION
 #include <nlohmann/json.hpp>
+#include <cmath>
 #include <fstream>
 
 namespace checkpoint {
@@ -195,6 +196,24 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
             return std::nullopt;
         }
         params.loopStripMiningEnabled = config["loop_strip_mining_enabled"].get<bool>();
+    }
+    params.loopStripMiningMarginPercent = 0.0;
+    if (config.contains("loop_strip_mining_margin_percent")) {
+        if (!config["loop_strip_mining_margin_percent"].is_number()) {
+            llvm::errs()
+                << "Error: Field 'loop_strip_mining_margin_percent' must be numeric"
+                << " in MILP config: " << configPath << "\n";
+            return std::nullopt;
+        }
+        double marginPercent = config["loop_strip_mining_margin_percent"].get<double>();
+        if (!std::isfinite(marginPercent) || marginPercent < 0.0 ||
+            marginPercent > 100.0) {
+            llvm::errs()
+                << "Error: Field 'loop_strip_mining_margin_percent' must be in [0, 100]"
+                << " in MILP config: " << configPath << "\n";
+            return std::nullopt;
+        }
+        params.loopStripMiningMarginPercent = marginPercent;
     }
     params.addDebugMarkers = false;
     if (config.contains("add_debug_markers")) {

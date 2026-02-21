@@ -126,29 +126,46 @@ bool CheckpointOptimizer::solve() {
                  << ", solutions found=" << solCount << ")\n";
 
     if (status == GRB_INFEASIBLE) {
-        LLVM_DEBUG({
-            llvm::dbgs() << "Computing IIS...\n";
-            model_.computeIIS();
-            auto constrs = model_.getConstrs();
-            for (int i = 0; i < model_.get(GRB_IntAttr_NumConstrs); i++) {
-                if (constrs[i].get(GRB_IntAttr_IISConstr)) {
-                    llvm::dbgs() << "  IIS constr: "
-                                 << constrs[i].get(GRB_StringAttr_ConstrName)
-                                 << "\n";
-                }
+        llvm::errs() << "Optimization infeasible; computing IIS diagnostics...\n";
+        model_.computeIIS();
+        model_.write("milp_infeasible.lp");
+        model_.write("milp_infeasible.ilp");
+        llvm::errs() << "  Wrote model: milp_infeasible.lp\n";
+        llvm::errs() << "  Wrote IIS:   milp_infeasible.ilp\n";
+
+        auto constrs = model_.getConstrs();
+        int numConstrs = model_.get(GRB_IntAttr_NumConstrs);
+        int printedConstrs = 0;
+        for (int i = 0; i < numConstrs; i++) {
+            if (!constrs[i].get(GRB_IntAttr_IISConstr))
+                continue;
+            llvm::errs() << "  IIS constr: "
+                         << constrs[i].get(GRB_StringAttr_ConstrName) << "\n";
+            printedConstrs++;
+            if (printedConstrs >= 200) {
+                llvm::errs() << "  IIS constr: ... truncated at 200 entries\n";
+                break;
             }
-            auto vars = model_.getVars();
-            for (int i = 0; i < model_.get(GRB_IntAttr_NumVars); i++) {
-                if (vars[i].get(GRB_IntAttr_IISLB) ||
-                    vars[i].get(GRB_IntAttr_IISUB)) {
-                    llvm::dbgs() << "  IIS var bound: "
-                                 << vars[i].get(GRB_StringAttr_VarName)
-                                 << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
-                                 << " UB=" << vars[i].get(GRB_IntAttr_IISUB)
-                                 << "\n";
-                }
+        }
+
+        auto vars = model_.getVars();
+        int numVars = model_.get(GRB_IntAttr_NumVars);
+        int printedVarBounds = 0;
+        for (int i = 0; i < numVars; i++) {
+            if (!vars[i].get(GRB_IntAttr_IISLB) &&
+                !vars[i].get(GRB_IntAttr_IISUB))
+                continue;
+            llvm::errs() << "  IIS var bound: "
+                         << vars[i].get(GRB_StringAttr_VarName)
+                         << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
+                         << " UB=" << vars[i].get(GRB_IntAttr_IISUB) << "\n";
+            printedVarBounds++;
+            if (printedVarBounds >= 200) {
+                llvm::errs()
+                    << "  IIS var bound: ... truncated at 200 entries\n";
+                break;
             }
-        });
+        }
     }
 
     if (acceptFeasible_ && solCount > 0) {
