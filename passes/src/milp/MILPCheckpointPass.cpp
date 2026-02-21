@@ -24,6 +24,7 @@ using namespace llvm;
 extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<std::string> MILPConfigOpt;
 extern cl::opt<bool> AcceptFeasibleOpt;
+extern cl::opt<double> MILPTimeLimitOpt;
 extern cl::opt<bool> AddDebugMarkersOpt;
 
 namespace checkpoint {
@@ -92,6 +93,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     MILPInput milpInput{*abstractCFG.model, *abstractCFG.model, *abstractCFG.model};
     CheckpointOptimizer optimizer(milpInput);
     optimizer.setAcceptFeasible(AcceptFeasibleOpt);
+    optimizer.setTimeLimit(MILPTimeLimitOpt);
 
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {

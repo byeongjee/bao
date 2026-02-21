@@ -60,6 +60,7 @@ public:
     bool solve();
 
     void setAcceptFeasible(bool accept) { acceptFeasible_ = accept; }
+    void setTimeLimit(double seconds) { timeLimit_ = seconds; }
 
     const MILPSolution &getSolution() const { return solution_; }
 
@@ -84,6 +85,7 @@ private:
     MILPSolution solution_;
     bool solved_ = false;
     bool acceptFeasible_ = false;
+    double timeLimit_ = 600.0;
 
     using BlockGVKey = std::pair<NodeId, llvm::GlobalVariable *>;
     using BlockVarKey = std::pair<NodeId, llvm::Value *>;

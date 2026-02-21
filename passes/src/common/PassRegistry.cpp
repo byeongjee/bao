@@ -30,6 +30,12 @@ cl::opt<bool> AcceptFeasibleOpt(
     cl::desc("Accept feasible (non-optimal) MILP solutions (e.g., from time limit)"),
     cl::init(false));
 
+cl::opt<double> MILPTimeLimitOpt(
+    "milp-time-limit",
+    cl::desc("Time limit for MILP solver in seconds (default: 600)"),
+    cl::value_desc("seconds"),
+    cl::init(600.0));
+
 cl::opt<bool> LoopChunkingEnabledOpt(
     "loop-chunking-enabled",
     cl::desc("Enable loop chunking before MILP passes"),
