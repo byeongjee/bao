@@ -1,29 +1,21 @@
 #pragma once
 
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/IR/Function.h"
 
-#include <map>
 #include <optional>
 
 namespace checkpoint {
 
-/// Extracts loop trip count bounds from __loop_tripcount() marker calls.
-class LoopTripCount {
-public:
-    /// Extract trip counts from __loop_tripcount() calls in a function.
-    /// Scans for calls to __loop_tripcount(N) and uses LoopInfo to determine
-    /// which loop contains each call.
-    ///
-    /// @param F The function to analyze.
-    /// @param LI Loop information for the function.
-    /// @return Map from Loop* to the annotated trip count.
-    static std::map<const llvm::Loop*, unsigned>
-    extractBounds(llvm::Function &F, llvm::LoopInfo &LI);
-};
-
-/// Return the __loop_tripcount(N) marker value from a loop's header block,
-/// or std::nullopt if no marker is present.
+/// Return the trip count from !llvm.loop metadata (llvm.loop.tripcount.upper),
+/// or std::nullopt if no such metadata is present.
 std::optional<uint64_t> getMarkerTripCount(const llvm::Loop *L);
+
+/// Attach (or replace) a llvm.loop.tripcount.upper entry in the loop's
+/// !llvm.loop metadata.  Preserves any other existing metadata entries.
+void setLoopTripCountMetadata(llvm::Loop *L, uint64_t tripCount);
+
+/// Remove the llvm.loop.tripcount.upper entry from the loop's !llvm.loop
+/// metadata.  If that was the only entry, the loop ID is cleared entirely.
+void removeLoopTripCountMetadata(llvm::Loop *L);
 
 } // namespace checkpoint

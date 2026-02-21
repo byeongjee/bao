@@ -1,4 +1,5 @@
 #include "common/EnergyValidatorPass.h"
+#include "common/TripCountAnnotationPass.h"
 #include "milp/MILPCheckpointPass.h"
 #include "milp/LoopChunkingPass.h"
 #include "rockclimb/RockClimbPass.h"
@@ -58,6 +59,7 @@ llvmGetPassPluginInfo() {
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                     if (Name == "checkpoint") {
+                        FPM.addPass(checkpoint::TripCountAnnotationPass());
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(checkpoint::LoopChunkingPass());
@@ -65,6 +67,7 @@ llvmGetPassPluginInfo() {
                         return true;
                     }
                     if (Name == "milp") {
+                        FPM.addPass(checkpoint::TripCountAnnotationPass());
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(checkpoint::LoopChunkingPass());
