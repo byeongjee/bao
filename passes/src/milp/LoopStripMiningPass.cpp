@@ -22,13 +22,12 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Utils/UnrollLoop.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
 
 #include <cmath>
 #include <cstdint>
@@ -605,51 +604,206 @@ static std::vector<std::pair<Loop *, LoopRewritePlan>> selectLoopsToStripMine(
 }
 
 static bool stripMineLoop(const LoopRewritePlan &plan,
-                                     LoopInfo &LI,
-                                     ScalarEvolution &SE,
-                                     DominatorTree &DT,
-                                     AssumptionCache &AC,
-                                     AAResults &AA,
-                                     const TargetTransformInfo &TTI) {
-    UnrollLoopOptions opts;
-    opts.Count = static_cast<unsigned>(plan.K);
-    opts.Force = true;
-    opts.Runtime = false;
-    opts.AllowExpensiveTripCount = true;
-    opts.UnrollRemainder = true;
-    opts.ForgetAllSCEV = true;
-    opts.Heart = nullptr;
-    opts.SCEVExpansionBudget = 32;
-    opts.RuntimeUnrollMultiExit = false;
-    opts.AddAdditionalAccumulators = false;
+                          LoopInfo &LI,
+                          ScalarEvolution &SE,
+                          DominatorTree &DT,
+                          AssumptionCache &AC,
+                          AAResults &AA,
+                          const TargetTransformInfo &TTI) {
+    // ── Phase 1: Extract and validate loop components ──
+    Loop *L = plan.L;
+    uint64_t N = plan.N, K = plan.K;
 
-    Loop *remainderLoop = nullptr;
-    LoopUnrollResult unrollResult =
-        UnrollLoop(plan.L, opts, &LI, &SE, &DT, &AC, &TTI, nullptr,
-                   /*PreserveLCSSA=*/true, &remainderLoop, &AA);
-    if (unrollResult == LoopUnrollResult::Unmodified) {
+    BasicBlock *Preheader = L->getLoopPreheader();
+    BasicBlock *Header    = L->getHeader();
+    BasicBlock *Latch     = L->getLoopLatch();
+    BasicBlock *ExitBlock = L->getExitBlock();
+    BasicBlock *ExitingBB = L->getExitingBlock();
+    Function *F = Header->getParent();
+    LLVMContext &Ctx = F->getContext();
+
+    if (!Preheader || !Header || !Latch || !ExitBlock || !ExitingBB)
         return false;
+
+    PHINode *IV = L->getCanonicalInductionVariable();
+    if (!IV) return false;
+    Type *IVTy = IV->getType();
+
+    // ── Phase 2: Find exit condition ──
+    BranchInst *ExitBr = dyn_cast<BranchInst>(ExitingBB->getTerminator());
+    if (!ExitBr || !ExitBr->isConditional()) return false;
+
+    ICmpInst *ExitCmp = dyn_cast<ICmpInst>(ExitBr->getCondition());
+    if (!ExitCmp) return false;
+
+    Value *CmpOp0 = ExitCmp->getOperand(0);
+    Value *CmpOp1 = ExitCmp->getOperand(1);
+    BasicBlock *BackedgeBB = nullptr, *IncomingBB = nullptr;
+    if (!L->getIncomingAndBackEdge(IncomingBB, BackedgeBB)) return false;
+    Value *IVNext = IV->getIncomingValueForBlock(BackedgeBB);
+
+    int boundOperandIdx = -1;
+    if (CmpOp0 == IV || CmpOp0 == IVNext) boundOperandIdx = 1;
+    else if (CmpOp1 == IV || CmpOp1 == IVNext) boundOperandIdx = 0;
+    else return false;
+
+    auto *OrigBound = dyn_cast<ConstantInt>(ExitCmp->getOperand(boundOperandIdx));
+    if (!OrigBound || OrigBound->getZExtValue() != N) return false;
+
+    // Collect LCSSA PHIs in ExitBlock before any modifications
+    SmallVector<PHINode *, 4> lcssaPhis;
+    for (PHINode &PN : ExitBlock->phis())
+        lcssaPhis.push_back(&PN);
+
+    // ── Phase 3: Create outer loop blocks ──
+    BasicBlock *OuterHeader = BasicBlock::Create(Ctx, "outer.header", F, Header);
+    BasicBlock *OuterLatch  = BasicBlock::Create(Ctx, "outer.latch", F, ExitBlock);
+
+    // ── Phase 4: Build OuterHeader ──
+    IRBuilder<> OHB(OuterHeader);
+    PHINode *OuterIV = OHB.CreatePHI(IVTy, 2, "outer.iv");
+
+    // Forward non-IV Header PHIs through the outer loop
+    struct HeaderPhiInfo {
+        PHINode *headerPhi;
+        PHINode *outerPhi;
+        Value   *initVal;
+    };
+    SmallVector<HeaderPhiInfo, 4> headerPhiForwarding;
+    for (PHINode &PN : Header->phis()) {
+        if (&PN == IV) continue;
+        Value *InitVal = PN.getIncomingValueForBlock(Preheader);
+        PHINode *OHP = OHB.CreatePHI(PN.getType(), 2, PN.getName() + ".outer");
+        headerPhiForwarding.push_back({&PN, OHP, InitVal});
     }
 
-    if (unrollResult == LoopUnrollResult::PartiallyUnrolled) {
-        uint64_t mainTrip = plan.N / plan.K;
-        uint64_t remTrip = plan.N % plan.K;
+    // Inner limit: min(outer.iv + K, N)
+    Value *OuterIVPlusK = OHB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K),
+                                        "outer.iv.plus.k");
+    Value *NVal = ConstantInt::get(IVTy, N);
+    Value *Cmp = OHB.CreateICmpULT(OuterIVPlusK, NVal, "min.cmp");
+    Value *InnerLimit = OHB.CreateSelect(Cmp, OuterIVPlusK, NVal, "inner.limit");
 
-        // When there is no separate remainder loop, LLVM integrates the
-        // remainder into the main loop body via a breakout trip (early
-        // exit mid-body on the last partial iteration).  The main loop
-        // then runs ceil(N/K) times, not floor(N/K).
-        if (!remainderLoop && remTrip != 0)
-            mainTrip += 1;
+    OHB.CreateBr(Header);
 
-        removeLoopTripCountMetadata(plan.L);
-        setLoopTripCountMetadata(plan.L, mainTrip);
+    // ── Phase 5: Rewire Preheader → OuterHeader + update Header PHIs ──
+    Preheader->getTerminator()->replaceSuccessorWith(Header, OuterHeader);
 
-        if (remainderLoop) {
-            removeLoopTripCountMetadata(remainderLoop);
-            setLoopTripCountMetadata(remainderLoop, remTrip);
+    for (PHINode &PN : Header->phis()) {
+        int idx = PN.getBasicBlockIndex(Preheader);
+        if (idx >= 0) {
+            PN.setIncomingBlock(idx, OuterHeader);
+            if (&PN == IV) {
+                PN.setIncomingValue(idx, OuterIV);
+            } else {
+                for (auto &info : headerPhiForwarding) {
+                    if (info.headerPhi == &PN) {
+                        PN.setIncomingValue(idx, info.outerPhi);
+                        break;
+                    }
+                }
+            }
         }
     }
+
+    // ── Phase 6: Modify inner loop exit ──
+    ExitCmp->setOperand(boundOperandIdx, InnerLimit);
+    ExitBr->replaceSuccessorWith(ExitBlock, OuterLatch);
+
+    // ── Phase 7: Build OuterLatch ──
+    IRBuilder<> OLB(OuterLatch);
+
+    // Forwarding PHIs for LCSSA values escaping to ExitBlock
+    SmallVector<PHINode *, 4> outerLatchPhis;
+    for (PHINode *LCPhi : lcssaPhis) {
+        Value *IncomingVal = LCPhi->getIncomingValueForBlock(ExitingBB);
+        PHINode *OLP = OLB.CreatePHI(LCPhi->getType(), 1,
+                                     LCPhi->getName() + ".ol");
+        OLP->addIncoming(IncomingVal, ExitingBB);
+        outerLatchPhis.push_back(OLP);
+    }
+
+    // Forwarding PHIs for non-IV Header PHIs (loop-carried state)
+    SmallVector<PHINode *, 4> headerForwardPhis;
+    for (auto &info : headerPhiForwarding) {
+        Value *ForwardVal;
+        if (ExitingBB == Header) {
+            ForwardVal = info.headerPhi;
+        } else {
+            ForwardVal = info.headerPhi->getIncomingValueForBlock(Latch);
+        }
+        PHINode *FP = OLB.CreatePHI(info.headerPhi->getType(), 1,
+                                    info.headerPhi->getName() + ".fwd");
+        FP->addIncoming(ForwardVal, ExitingBB);
+        headerForwardPhis.push_back(FP);
+    }
+
+    // Next outer IV
+    Value *NextOuterIV = OLB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K),
+                                       "outer.iv.next");
+
+    // Outer exit condition: outer runs ceil(N/K) times
+    uint64_t outerTripCount = (N + K - 1) / K;
+    Value *OuterContinue = OLB.CreateICmpULT(NextOuterIV,
+                                             ConstantInt::get(IVTy, N),
+                                             "outer.cmp");
+    OLB.CreateCondBr(OuterContinue, OuterHeader, ExitBlock);
+
+    // Complete OuterIV PHI
+    OuterIV->addIncoming(ConstantInt::get(IVTy, 0), Preheader);
+    OuterIV->addIncoming(NextOuterIV, OuterLatch);
+
+    // Complete non-IV OuterHeader PHIs
+    for (unsigned i = 0; i < headerPhiForwarding.size(); i++) {
+        auto &info = headerPhiForwarding[i];
+        info.outerPhi->addIncoming(info.initVal, Preheader);
+        info.outerPhi->addIncoming(headerForwardPhis[i], OuterLatch);
+    }
+
+    // ── Phase 8: Update ExitBlock PHIs ──
+    for (unsigned i = 0; i < lcssaPhis.size(); i++) {
+        int idx = lcssaPhis[i]->getBasicBlockIndex(ExitingBB);
+        lcssaPhis[i]->setIncomingBlock(idx, OuterLatch);
+        lcssaPhis[i]->setIncomingValue(idx, outerLatchPhis[i]);
+    }
+
+    // ── Phase 9: Update LoopInfo ──
+    Loop *ParentLoop = L->getParentLoop();
+    Loop *OuterLoop = LI.AllocateLoop();
+
+    if (ParentLoop) {
+        for (auto I = ParentLoop->begin(); I != ParentLoop->end(); ++I) {
+            if (*I == L) { ParentLoop->removeChildLoop(I); break; }
+        }
+        ParentLoop->addChildLoop(OuterLoop);
+    } else {
+        for (auto I = LI.begin(); I != LI.end(); ++I) {
+            if (*I == L) { LI.removeLoop(I); break; }
+        }
+        LI.addTopLevelLoop(OuterLoop);
+    }
+    OuterLoop->addChildLoop(L);
+
+    OuterLoop->addBasicBlockToLoop(OuterHeader, LI);
+    OuterLoop->addBasicBlockToLoop(OuterLatch, LI);
+
+    for (BasicBlock *BB : L->blocks())
+        OuterLoop->addBlockEntry(BB);
+
+    OuterLoop->moveToHeader(OuterHeader);
+
+    // ── Phase 10: Rebuild DominatorTree ──
+    DT.recalculate(*F);
+
+    // ── Phase 11: Tripcount markers, LCSSA repair, SCEV invalidation ──
+    removeLoopTripcountMarkers(L, LI);
+    insertLoopTripcountMarker(L, K);
+
+    insertLoopTripcountMarker(OuterLoop, outerTripCount);
+
+    formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
+
+    SE.forgetLoop(L);
 
     return true;
 }
