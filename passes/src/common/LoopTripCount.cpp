@@ -5,6 +5,53 @@
 
 namespace checkpoint {
 
+namespace {
+
+constexpr llvm::StringLiteral kTripCountTag = "llvm.loop.tripcount.upper";
+constexpr llvm::StringLiteral kStripMinedTag = "checkpoint.loop.stripmined";
+
+static bool isLoopMetadataTag(const llvm::MDNode *Op,
+                              llvm::StringRef TagName) {
+    if (!Op || Op->getNumOperands() < 1)
+        return false;
+    auto *Tag = llvm::dyn_cast<llvm::MDString>(Op->getOperand(0));
+    return Tag && Tag->getString() == TagName;
+}
+
+static void removeLoopMetadataTag(llvm::Loop *L, llvm::StringRef TagName) {
+    llvm::MDNode *LoopID = L->getLoopID();
+    if (!LoopID)
+        return;
+
+    llvm::LLVMContext &Ctx = L->getHeader()->getContext();
+    llvm::SmallVector<llvm::Metadata *, 4> MDs;
+    MDs.push_back(nullptr); // self-ref placeholder
+
+    bool found = false;
+    for (unsigned i = 1; i < LoopID->getNumOperands(); i++) {
+        auto *Op = llvm::dyn_cast<llvm::MDNode>(LoopID->getOperand(i));
+        if (isLoopMetadataTag(Op, TagName)) {
+            found = true;
+            continue;
+        }
+        MDs.push_back(LoopID->getOperand(i));
+    }
+
+    if (!found)
+        return;
+
+    if (MDs.size() == 1) {
+        L->setLoopID(nullptr);
+        return;
+    }
+
+    llvm::MDNode *NewLoopID = llvm::MDNode::getDistinct(Ctx, MDs);
+    NewLoopID->replaceOperandWith(0, NewLoopID);
+    L->setLoopID(NewLoopID);
+}
+
+} // namespace
+
 std::optional<uint64_t> getMarkerTripCount(const llvm::Loop *L) {
     llvm::MDNode *LoopID = L->getLoopID();
     if (!LoopID)
@@ -13,8 +60,7 @@ std::optional<uint64_t> getMarkerTripCount(const llvm::Loop *L) {
         auto *Op = llvm::dyn_cast<llvm::MDNode>(LoopID->getOperand(i));
         if (!Op || Op->getNumOperands() < 2)
             continue;
-        auto *Tag = llvm::dyn_cast<llvm::MDString>(Op->getOperand(0));
-        if (Tag && Tag->getString() == "llvm.loop.tripcount.upper") {
+        if (isLoopMetadataTag(Op, kTripCountTag)) {
             auto *Val = llvm::mdconst::dyn_extract<llvm::ConstantInt>(
                 Op->getOperand(1));
             if (Val)
@@ -38,7 +84,7 @@ void setLoopTripCountMetadata(llvm::Loop *L, uint64_t tripCount) {
             auto *Op = llvm::dyn_cast<llvm::MDNode>(LoopID->getOperand(i));
             if (Op && Op->getNumOperands() >= 1) {
                 auto *Tag = llvm::dyn_cast<llvm::MDString>(Op->getOperand(0));
-                if (Tag && Tag->getString() == "llvm.loop.tripcount.upper")
+                if (Tag && Tag->getString() == kTripCountTag)
                     continue;
             }
             MDs.push_back(LoopID->getOperand(i));
@@ -47,7 +93,7 @@ void setLoopTripCountMetadata(llvm::Loop *L, uint64_t tripCount) {
 
     // Append the new tripcount entry.
     llvm::Metadata *TCOps[] = {
-        llvm::MDString::get(Ctx, "llvm.loop.tripcount.upper"),
+        llvm::MDString::get(Ctx, kTripCountTag),
         llvm::ConstantAsMetadata::get(
             llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), tripCount))};
     MDs.push_back(llvm::MDNode::get(Ctx, TCOps));
@@ -58,39 +104,52 @@ void setLoopTripCountMetadata(llvm::Loop *L, uint64_t tripCount) {
 }
 
 void removeLoopTripCountMetadata(llvm::Loop *L) {
+    removeLoopMetadataTag(L, kTripCountTag);
+}
+
+bool hasStripMinedLoopMetadata(const llvm::Loop *L) {
     llvm::MDNode *LoopID = L->getLoopID();
     if (!LoopID)
-        return;
+        return false;
 
-    llvm::LLVMContext &Ctx = L->getHeader()->getContext();
-    llvm::SmallVector<llvm::Metadata *, 4> MDs;
-    MDs.push_back(nullptr); // self-ref placeholder
-
-    bool found = false;
     for (unsigned i = 1; i < LoopID->getNumOperands(); i++) {
         auto *Op = llvm::dyn_cast<llvm::MDNode>(LoopID->getOperand(i));
-        if (Op && Op->getNumOperands() >= 1) {
-            auto *Tag = llvm::dyn_cast<llvm::MDString>(Op->getOperand(0));
-            if (Tag && Tag->getString() == "llvm.loop.tripcount.upper") {
-                found = true;
-                continue;
-            }
+        if (isLoopMetadataTag(Op, kStripMinedTag)) {
+            return true;
         }
-        MDs.push_back(LoopID->getOperand(i));
+    }
+    return false;
+}
+
+void setStripMinedLoopMetadata(llvm::Loop *L) {
+    llvm::LLVMContext &Ctx = L->getHeader()->getContext();
+    llvm::MDNode *LoopID = L->getLoopID();
+
+    llvm::SmallVector<llvm::Metadata *, 4> MDs;
+    MDs.push_back(nullptr);
+
+    if (LoopID) {
+        for (unsigned i = 1; i < LoopID->getNumOperands(); i++) {
+            auto *Op = llvm::dyn_cast<llvm::MDNode>(LoopID->getOperand(i));
+            if (isLoopMetadataTag(Op, kStripMinedTag))
+                continue;
+            MDs.push_back(LoopID->getOperand(i));
+        }
     }
 
-    if (!found)
-        return;
-
-    if (MDs.size() == 1) {
-        // Only self-reference left — remove the loop ID entirely.
-        L->setLoopID(nullptr);
-        return;
-    }
+    llvm::Metadata *StripMinedOps[] = {
+        llvm::MDString::get(Ctx, kStripMinedTag),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(llvm::Type::getInt1Ty(Ctx), 1))};
+    MDs.push_back(llvm::MDNode::get(Ctx, StripMinedOps));
 
     llvm::MDNode *NewLoopID = llvm::MDNode::getDistinct(Ctx, MDs);
     NewLoopID->replaceOperandWith(0, NewLoopID);
     L->setLoopID(NewLoopID);
+}
+
+void removeStripMinedLoopMetadata(llvm::Loop *L) {
+    removeLoopMetadataTag(L, kStripMinedTag);
 }
 
 } // namespace checkpoint
