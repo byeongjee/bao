@@ -99,6 +99,7 @@ ROCKCLIMB_TESTS=(
     "test_rockclimb_nested:Nested loops - multiple loop boundaries:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
     "test_rockclimb_diamond:Diamond CFG - branching within regions:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
     "test_rockclimb_liveout:Live-out registers - distributed checkpointing:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
+    "test_rockclimb_phi_liveout:PHI-defined live-out - runtime checkpoint check:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:phi_runtime"
 )
 
 # Collect tests to run
@@ -222,6 +223,18 @@ run_test() {
                 echo -e "${GREEN}  PASS${NC}"
             else
                 echo -e "${RED}  FAIL${NC}"
+            fi
+            ;;
+        phi_runtime)
+            # Runtime test: compile to IR, mem2reg, instrument, link with driver, run
+            if [[ -x "$SCRIPT_DIR/${test_name}.sh" ]]; then
+                if "$SCRIPT_DIR/${test_name}.sh"; then
+                    echo -e "${GREEN}  PASS${NC}"
+                else
+                    echo -e "${RED}  FAIL${NC}"
+                fi
+            else
+                echo -e "${RED}  SKIP: ${test_name}.sh not found or not executable${NC}"
             fi
             ;;
     esac

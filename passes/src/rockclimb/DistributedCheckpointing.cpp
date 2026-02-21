@@ -31,10 +31,6 @@ std::set<llvm::Value*> DistributedCheckpointing::computeDefs(
             // Skip void-returning instructions (no definition)
             if (I.getType()->isVoidTy()) continue;
 
-            // Skip PHI nodes - they don't represent new definitions
-            // in the same sense (they're merge points)
-            if (llvm::isa<llvm::PHINode>(&I)) continue;
-
             // Skip allocas - they're stack slots, not registers
             if (llvm::isa<llvm::AllocaInst>(&I)) continue;
 
