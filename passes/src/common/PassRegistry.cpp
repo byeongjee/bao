@@ -73,6 +73,8 @@ llvmGetPassPluginInfo() {
                     return true;
                   }
                   if (Name == "rockclimb") {
+                    FPM.addPass(LoopSimplifyPass());
+                    FPM.addPass(LCSSAPass());
                     FPM.addPass(checkpoint::RockClimbPass());
                     return true;
                   }
