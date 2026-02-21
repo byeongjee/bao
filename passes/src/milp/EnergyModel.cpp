@@ -187,14 +187,14 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
     params.memRestoreEnergyPerByte = config["mem_restore_energy_per_byte"].get<double>();
     params.vmCapacityBytes = config["vm_capacity_bytes"].get<unsigned>();
     params.qRebootProb = config["q_reboot_probability"].get<double>();
-    params.loopChunkingEnabled = false;
-    if (config.contains("loop_chunking_enabled")) {
-        if (!config["loop_chunking_enabled"].is_boolean()) {
-            llvm::errs() << "Error: Field 'loop_chunking_enabled' must be boolean"
+    params.loopStripMiningEnabled = false;
+    if (config.contains("loop_strip_mining_enabled")) {
+        if (!config["loop_strip_mining_enabled"].is_boolean()) {
+            llvm::errs() << "Error: Field 'loop_strip_mining_enabled' must be boolean"
                          << " in MILP config: " << configPath << "\n";
             return std::nullopt;
         }
-        params.loopChunkingEnabled = config["loop_chunking_enabled"].get<bool>();
+        params.loopStripMiningEnabled = config["loop_strip_mining_enabled"].get<bool>();
     }
     params.addDebugMarkers = false;
     if (config.contains("add_debug_markers")) {

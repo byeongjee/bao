@@ -1,4 +1,4 @@
-#include "milp/LoopChunkingPass.h"
+#include "milp/LoopStripMiningPass.h"
 
 #include "common/AnnotationUtils.h"
 #include "common/BlockUtils.h"
@@ -45,13 +45,13 @@ using namespace llvm;
 // Defined in src/common/PassRegistry.cpp
 extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<std::string> MILPConfigOpt;
-extern cl::opt<bool> LoopChunkingEnabledOpt;
+extern cl::opt<bool> LoopStripMiningEnabledOpt;
 
 namespace {
 
-static cl::opt<bool> LoopChunkingVerboseOpt(
-    "loop-chunking-verbose",
-    cl::desc("Print per-loop chunking decisions"),
+static cl::opt<bool> LoopStripMiningVerboseOpt(
+    "loop-strip-mining-verbose",
+    cl::desc("Print per-loop strip-mining decisions"),
     cl::init(false));
 
 struct LoopRewritePlan {
@@ -78,7 +78,7 @@ enum class VisitState {
     Visited,
 };
 
-struct LoopChunkingStats {
+struct LoopStripMiningStats {
     unsigned loopsSeen = 0;
     unsigned loopsEligible = 0;
     unsigned loopsRewritten = 0;
@@ -275,7 +275,7 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
     }
 
     if (backedgeCount.getActiveBits() > 64) {
-        errs() << "LoopChunkingPass warning: backedge count for loop "
+        errs() << "LoopStripMiningPass warning: backedge count for loop "
                << loopId << " exceeds 64 bits; skipping loop\n";
         return std::nullopt;
     }
@@ -284,7 +284,7 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
     bool exitAtLatch = (ExitingBlock == L->getLoopLatch());
     if (exitAtLatch &&
         backedgeValue == std::numeric_limits<uint64_t>::max()) {
-        errs() << "LoopChunkingPass warning: backedge count for loop "
+        errs() << "LoopStripMiningPass warning: backedge count for loop "
                << loopId << " cannot be incremented safely; skipping loop\n";
         return std::nullopt;
     }
@@ -507,7 +507,7 @@ static PlanResult buildRewritePlan(
     }
 
     // Tighten budget by the upper-bound ineligible restore cost so the
-    // unrolled loop is more likely to pass the AbstractCFG feasibility gate.
+    // strip-mined loop is more likely to pass the AbstractCFG feasibility gate.
     double ineligMargin = estimateIneligRestoreUpperBound(L, params);
     double effectiveBudget = budget - ineligMargin;
     if (effectiveBudget <= 0.0) {
@@ -561,7 +561,7 @@ static void selectInNest(
     const DenseMap<const BasicBlock *, double> &blockEnergy,
     const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
     std::vector<std::pair<Loop *, LoopRewritePlan>> &out,
-    LoopChunkingStats &stats) {
+    LoopStripMiningStats &stats) {
 
     stats.loopsSeen++;
     PlanResult pr = buildRewritePlan(L, SE, blockEnergy, params, LI);
@@ -571,13 +571,13 @@ static void selectInNest(
         return;
     }
 
-    if (LoopChunkingVerboseOpt) {
+    if (LoopStripMiningVerboseOpt) {
         BasicBlock *Header = L->getHeader();
         const Function *F = Header ? Header->getParent() : nullptr;
         std::string headerName = (Header && F)
             ? checkpoint::getBlockName(*Header, *F) : "<unknown>";
         std::string funcName = F ? F->getName().str() : "<unknown>";
-        errs() << "LoopChunkingPass: skip " << funcName << "::"
+        errs() << "LoopStripMiningPass: skip " << funcName << "::"
                << headerName << " reason=" << pr.skipReason << "\n";
     }
 
@@ -592,11 +592,11 @@ static void selectInNest(
     }
 }
 
-static std::vector<std::pair<Loop *, LoopRewritePlan>> selectLoopsToChunk(
+static std::vector<std::pair<Loop *, LoopRewritePlan>> selectLoopsToStripMine(
     LoopInfo &LI, ScalarEvolution &SE,
     const DenseMap<const BasicBlock *, double> &blockEnergy,
     const checkpoint::MILPEnergyParams &params,
-    LoopChunkingStats &stats) {
+    LoopStripMiningStats &stats) {
     std::vector<std::pair<Loop *, LoopRewritePlan>> selected;
     for (Loop *L : LI) {
         selectInNest(L, SE, blockEnergy, params, LI, selected, stats);
@@ -604,7 +604,7 @@ static std::vector<std::pair<Loop *, LoopRewritePlan>> selectLoopsToChunk(
     return selected;
 }
 
-static bool rewriteLoopWithChunkSize(const LoopRewritePlan &plan,
+static bool stripMineLoop(const LoopRewritePlan &plan,
                                      LoopInfo &LI,
                                      ScalarEvolution &SE,
                                      DominatorTree &DT,
@@ -654,8 +654,8 @@ static bool rewriteLoopWithChunkSize(const LoopRewritePlan &plan,
     return true;
 }
 
-static void printSummary(const Function &F, const LoopChunkingStats &stats) {
-    errs() << "=== Loop Chunking: " << F.getName() << " ===\n";
+static void printSummary(const Function &F, const LoopStripMiningStats &stats) {
+    errs() << "=== Loop Strip-Mining: " << F.getName() << " ===\n";
     errs() << "  Loops considered:                " << stats.loopsSeen << "\n";
     errs() << "  Eligible loops:                  " << stats.loopsEligible << "\n";
     errs() << "  Rewritten loops:                 " << stats.loopsRewritten << "\n";
@@ -685,15 +685,15 @@ static void printSummary(const Function &F, const LoopChunkingStats &stats) {
 
 namespace checkpoint {
 
-PreservedAnalyses LoopChunkingPass::run(Function &F,
+PreservedAnalyses LoopStripMiningPass::run(Function &F,
                                         FunctionAnalysisManager &AM) {
     if (F.isDeclaration()) {
         return PreservedAnalyses::all();
     }
 
     if (MILPConfigOpt.getValue().empty()) {
-        if (LoopChunkingEnabledOpt) {
-            errs() << "LoopChunkingPass: missing -milp-config; skipping "
+        if (LoopStripMiningEnabledOpt) {
+            errs() << "LoopStripMiningPass: missing -milp-config; skipping "
                    << F.getName() << "\n";
         }
         return PreservedAnalyses::all();
@@ -701,18 +701,18 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
 
     auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
     if (!milpParamsOpt) {
-        errs() << "LoopChunkingPass: failed to parse MILP config for "
+        errs() << "LoopStripMiningPass: failed to parse MILP config for "
                << F.getName() << "; skipping\n";
         return PreservedAnalyses::all();
     }
-    bool loopChunkingEnabled =
-        LoopChunkingEnabledOpt.getValue() || milpParamsOpt->loopChunkingEnabled;
-    if (!loopChunkingEnabled) {
+    bool loopStripMiningEnabled =
+        LoopStripMiningEnabledOpt.getValue() || milpParamsOpt->loopStripMiningEnabled;
+    if (!loopStripMiningEnabled) {
         return PreservedAnalyses::all();
     }
 
     if (EnergyConfigOpt.getValue().empty()) {
-        errs() << "LoopChunkingPass: missing -energy-config; skipping "
+        errs() << "LoopStripMiningPass: missing -energy-config; skipping "
                << F.getName() << "\n";
         return PreservedAnalyses::all();
     }
@@ -721,7 +721,7 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
     std::unique_ptr<EnergyEstimator> estimator =
         factory.createFromConfig(EnergyConfigOpt.getValue());
     if (!estimator) {
-        errs() << "LoopChunkingPass: failed to create estimator for "
+        errs() << "LoopStripMiningPass: failed to create estimator for "
                << F.getName() << "; skipping\n";
         return PreservedAnalyses::all();
     }
@@ -740,13 +740,13 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
     auto &AA = AM.getResult<AAManager>(F);
     auto &TTI = AM.getResult<TargetIRAnalysis>(F);
 
-    LoopChunkingStats stats;
+    LoopStripMiningStats stats;
     bool changed = false;
 
-    // Select loops to chunk (outermost-first within each nest).
+    // Select loops to strip-mine (outermost-first within each nest).
     // Snapshot headers as WeakTrackingVH so we can detect invalidation
     // from prior rewrites that may restructure the CFG.
-    auto selected = selectLoopsToChunk(LI, SE, blockEnergy, *milpParamsOpt, stats);
+    auto selected = selectLoopsToStripMine(LI, SE, blockEnergy, *milpParamsOpt, stats);
     std::vector<std::pair<WeakTrackingVH, LoopRewritePlan>> worklist;
     worklist.reserve(selected.size());
     for (auto &[L, plan] : selected) {
@@ -771,11 +771,11 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
         stats.loopsEligible++;
 
         bool rewritten =
-            rewriteLoopWithChunkSize(plan, LI, SE, DT, AC, AA, TTI);
+            stripMineLoop(plan, LI, SE, DT, AC, AA, TTI);
         if (!rewritten) {
             stats.skippedReasons["rewrite-utility-failed"]++;
-            if (LoopChunkingVerboseOpt) {
-                errs() << "LoopChunkingPass: rewrite failed " << F.getName()
+            if (LoopStripMiningVerboseOpt) {
+                errs() << "LoopStripMiningPass: rewrite failed " << F.getName()
                        << "::" << headerName << " K=" << plan.K << "\n";
             }
             continue;
@@ -784,15 +784,15 @@ PreservedAnalyses LoopChunkingPass::run(Function &F,
         changed = true;
         stats.loopsRewritten++;
         stats.chosenKByHeader.emplace_back(headerName, plan.K);
-        if (LoopChunkingVerboseOpt) {
-            errs() << "LoopChunkingPass: rewritten " << F.getName() << "::"
+        if (LoopStripMiningVerboseOpt) {
+            errs() << "LoopStripMiningPass: rewritten " << F.getName() << "::"
                    << headerName << " N=" << plan.N << " K=" << plan.K
                    << " E_iter_wc=" << plan.iterEnergy << "\n";
         }
     }
 
     if (verifyFunction(F, &errs())) {
-        errs() << "LoopChunkingPass: verifier reported errors in "
+        errs() << "LoopStripMiningPass: verifier reported errors in "
                << F.getName() << "\n";
     }
 

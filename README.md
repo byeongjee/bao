@@ -28,7 +28,7 @@ checkpoint-insertion/
 │   │   ├── CheckpointOptimizer.h   # Gurobi MILP solver
 │   │   ├── CheckpointPass.h        # Main LLVM pass
 │   │   ├── LoopTripCount.h         # Loop bound extraction
-│   │   └── LoopChunkingPass.h      # Loop chunking pass
+│   │   └── LoopStripMiningPass.h   # Loop strip-mining pass
 │   └── src/
 │       ├── IRBasedEstimator.cpp
 │       ├── EnergyEstimatorFactory.cpp
@@ -36,7 +36,7 @@ checkpoint-insertion/
 │       ├── CheckpointOptimizer.cpp
 │       ├── CheckpointPass.cpp
 │       ├── LoopTripCount.cpp
-│       └── LoopChunkingPass.cpp
+│       └── LoopStripMiningPass.cpp
 ├── tests/                     # Test suite
 │   ├── run_tests.sh
 │   └── *.c                    # Test cases

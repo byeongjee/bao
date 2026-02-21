@@ -59,7 +59,7 @@ add_library(CheckpointPass MODULE
     src/milp/StateAnalysis.cpp
     src/milp/LivenessAnalysis.cpp
     src/milp/EnergyModel.cpp
-    src/milp/LoopChunkingPass.cpp
+    src/milp/LoopStripMiningPass.cpp
     src/milp/AbstractCFG.cpp
     src/milp/MILPCheckpointPass.cpp
     src/milp/CheckpointOptimizer.cpp

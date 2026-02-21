@@ -318,7 +318,7 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
         }
     }
 
-    // Print summary (always visible, like LoopChunkingPass)
+    // Print summary (always visible, like LoopStripMiningPass)
     unsigned skippedTotal = stats.skippedNotSimplify + stats.skippedUnknownTrip +
                             stats.skippedBodyTooLarge + stats.skippedFactorTooSmall +
                             stats.skippedLLVMRejected;

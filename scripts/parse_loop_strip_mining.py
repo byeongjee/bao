@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Parse output.log from benchmark_milp.sh --verbose to extract
-the relationship between capacitor size and loop chunking K values."""
+the relationship between capacitor size and loop strip-mining K values."""
 
 import re
 import csv
@@ -36,7 +36,7 @@ def parse_log(log_path):
         capacitor = parts[1] if len(parts) > 1 else ""
         capacity = CAPACITY_MAP.get(capacitor, 0)
 
-        # Extract loop chunking stats
+        # Extract loop strip-mining stats
         innermost = 0
         eligible = 0
         rewritten = 0
@@ -44,7 +44,7 @@ def parse_log(log_path):
         skipped_reasons = {}
         chosen_k = {}
 
-        chunking_match = re.search(r'=== Loop Chunking: (\S+) ===', block)
+        chunking_match = re.search(r'=== Loop Strip-Mining: (\S+) ===', block)
         if chunking_match:
             m2 = re.search(r'Loops considered:\s+(\d+)', block)
             if m2:
@@ -130,7 +130,7 @@ def write_csv(runs, out_path):
                     "skipped_other": r["skipped_loops"] - k_covers,
                 })
         else:
-            # No loops were chunked at this capacitor size
+            # No loops were strip-mined at this capacitor size
             rows.append({
                 "program": prog,
                 "capacitor": cap,
@@ -161,6 +161,6 @@ def write_csv(runs, out_path):
 
 if __name__ == "__main__":
     log_path = sys.argv[1] if len(sys.argv) > 1 else "output.log"
-    out_path = sys.argv[2] if len(sys.argv) > 2 else "loop_chunking_vs_capacitor.csv"
+    out_path = sys.argv[2] if len(sys.argv) > 2 else "loop_strip_mining_vs_capacitor.csv"
     runs = parse_log(log_path)
     write_csv(runs, out_path)
