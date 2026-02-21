@@ -4,7 +4,7 @@
 #include "rockclimb/RockClimbInstrumenter.h"
 #include "rockclimb/RockClimbOptimizer.h"
 #include "common/BlockUtils.h"
-#include "common/LoopTripCount.h"
+
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -246,18 +246,11 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
                 formLCSSARecursively(*L, DT, &LI, &SE);
             }
 
-            // Only unroll loops with known trip count.
-            // Prefer __loop_tripcount markers (consistent with MILP pass),
-            // fall back to ScalarEvolution; take the conservative min if both exist.
-            auto markerTC = getMarkerTripCount(L);
-            unsigned seTripCount = SE.getSmallConstantTripCount(L);
-            unsigned tripCount;
-            if (markerTC && seTripCount)
-                tripCount = std::min(static_cast<unsigned>(*markerTC), seTripCount);
-            else if (markerTC)
-                tripCount = static_cast<unsigned>(*markerTC);
-            else
-                tripCount = seTripCount;
+            // Only unroll loops with known exact trip count.
+            // __loop_tripcount markers are NOT used here because they annotate
+            // the *maximum* trip count, not the actual count — unrolling based
+            // on a maximum would produce incorrect code when the real count is lower.
+            unsigned tripCount = SE.getSmallConstantTripCount(L);
             if (tripCount == 0) {
                 stats.skippedUnknownTrip++;
                 LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName
