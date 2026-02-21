@@ -98,15 +98,6 @@ static bool containsInvoke(const Loop *L) {
     return false;
 }
 
-static bool isLoopTripcountCall(const Instruction &I) {
-    auto *CI = dyn_cast<CallInst>(&I);
-    if (!CI) {
-        return false;
-    }
-    const Function *Callee = CI->getCalledFunction();
-    return Callee && Callee->getName() == "__loop_tripcount";
-}
-
 static Loop *getDirectChildLoop(const Loop *Parent, const BasicBlock *BB,
                                 const LoopInfo &LI) {
     Loop *Inner = LI.getLoopFor(BB);
@@ -115,53 +106,9 @@ static Loop *getDirectChildLoop(const Loop *Parent, const BasicBlock *BB,
     return Inner;
 }
 
-static bool isDirectlyInLoop(const BasicBlock *BB, const Loop *L,
-                             const LoopInfo &LI) {
-    return LI.getLoopFor(BB) == L;
-}
-
 using checkpoint::getMarkerTripCount;
-
-static void removeLoopTripcountMarkers(Loop *L, LoopInfo &LI) {
-    SmallVector<Instruction *, 8> toErase;
-    for (BasicBlock *BB : L->blocks()) {
-        if (!isDirectlyInLoop(BB, L, LI)) continue;
-        for (Instruction &I : *BB) {
-            if (isLoopTripcountCall(I)) {
-                toErase.push_back(&I);
-            }
-        }
-    }
-    for (Instruction *I : toErase) {
-        I->eraseFromParent();
-    }
-}
-
-static void insertLoopTripcountMarker(Loop *L, uint64_t tripCount) {
-    if (tripCount == 0) {
-        return;
-    }
-
-    BasicBlock *Header = L->getHeader();
-    auto insertPt = Header->getFirstInsertionPt();
-    if (insertPt == Header->end()) {
-        return;
-    }
-
-    Module *M = Header->getModule();
-    LLVMContext &Ctx = M->getContext();
-    auto *I32Ty = Type::getInt32Ty(Ctx);
-    auto *MarkerTy = FunctionType::get(Type::getVoidTy(Ctx), {I32Ty}, false);
-    FunctionCallee Marker = M->getOrInsertFunction("__loop_tripcount", MarkerTy);
-    if (auto *F = llvm::dyn_cast<llvm::Function>(Marker.getCallee()))
-        F->setDoesNotAccessMemory();
-
-    uint64_t maxMarker = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-    uint64_t markerVal = std::min(tripCount, maxMarker);
-
-    IRBuilder<> B(&*insertPt);
-    B.CreateCall(Marker, {ConstantInt::get(I32Ty, markerVal)});
-}
+using checkpoint::removeLoopTripCountMetadata;
+using checkpoint::setLoopTripCountMetadata;
 
 static std::optional<uint64_t> getConstantTripCount(Loop *L,
                                                     ScalarEvolution &SE,
@@ -695,12 +642,12 @@ static bool rewriteLoopWithChunkSize(const LoopRewritePlan &plan,
         if (!remainderLoop && remTrip != 0)
             mainTrip += 1;
 
-        removeLoopTripcountMarkers(plan.L, LI);
-        insertLoopTripcountMarker(plan.L, mainTrip);
+        removeLoopTripCountMetadata(plan.L);
+        setLoopTripCountMetadata(plan.L, mainTrip);
 
         if (remainderLoop) {
-            removeLoopTripcountMarkers(remainderLoop, LI);
-            insertLoopTripcountMarker(remainderLoop, remTrip);
+            removeLoopTripCountMetadata(remainderLoop);
+            setLoopTripCountMetadata(remainderLoop, remTrip);
         }
     }
 
