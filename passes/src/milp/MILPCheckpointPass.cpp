@@ -106,10 +106,70 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         return PreservedAnalyses::all();
     }
 
+    // Count ineligible objects by type.
+    unsigned ineligGlobalCount = 0, ineligAllocaCount = 0, ineligSSACount = 0;
+    for (llvm::Value *V : ctx.stateAnalysis->getIneligibleObjs()) {
+        if (llvm::isa<llvm::GlobalVariable>(V))
+            ineligGlobalCount++;
+        else if (llvm::isa<llvm::AllocaInst>(V))
+            ineligAllocaCount++;
+        else
+            ineligSSACount++;
+    }
+
     // Step 6: Solve MILP
     auto solveStart = std::chrono::steady_clock::now();
     if (!optimizer.solve()) {
+        auto solveEnd = std::chrono::steady_clock::now();
+        const auto totalEnd = std::chrono::steady_clock::now();
+        double solveTimeMs =
+            std::chrono::duration<double, std::milli>(solveEnd - solveStart).count();
+        double totalExecutionTimeMs =
+            std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+
         errs() << "Optimization failed\n";
+
+        errs() << "=== MILP Checkpoint Insertion Statistics ===\n";
+        errs() << "  Basic blocks (concrete):         " << ctx.cfg->getBlocks().size()
+               << "\n";
+        errs() << "  Edges (concrete):                " << ctx.cfg->getEdges().size()
+               << "\n";
+        errs() << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes
+               << "\n";
+        errs() << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges
+               << "\n";
+        errs() << "  Loops seen:                      " << abstractCFG.stats.loopsSeen
+               << "\n";
+        errs() << "  Loops eligible:                  " << abstractCFG.stats.loopsEligible
+               << "\n";
+        errs() << "  Loops summarized:                "
+               << abstractCFG.stats.loopsSummarized << "\n";
+        errs() << "  Strip-mined loops seen:          "
+               << abstractCFG.stats.stripMinedLoopsSeen << "\n";
+        errs() << "  Strip-mined loops summarized:    "
+               << abstractCFG.stats.stripMinedLoopsSummarized << "\n";
+        errs() << "  Strip-mined loops skipped:       "
+               << abstractCFG.stats.stripMinedLoopsSkipped << "\n";
+        errs() << "  Candidate globals (V_elig):      "
+               << ctx.stateAnalysis->getVMObjs().size() << "\n";
+        errs() << "  Ineligible globals:              " << ineligGlobalCount << "\n";
+        errs() << "  Ineligible allocas:              " << ineligAllocaCount << "\n";
+        errs() << "  Ineligible SSA registers:        " << ineligSSACount << "\n";
+        errs() << "  MILP variables:                  " << optimizer.getNumVars() << "\n";
+        errs() << "  MILP constraints:                " << optimizer.getNumConstrs()
+               << "\n";
+        errs() << "  Optimal solution:                no (solver failed)\n";
+        errs() << "  Solve time (ms):                 "
+               << llvm::format("%.3f", solveTimeMs) << "\n";
+        errs() << "  Total execution time (ms):       "
+               << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
+        if (!abstractCFG.stats.skippedReasons.empty()) {
+            errs() << "  Abstract CFG skip reasons:\n";
+            for (const auto &[reason, count] : abstractCFG.stats.skippedReasons) {
+                errs() << "    - " << reason << ": " << count << "\n";
+            }
+        }
+
         return PreservedAnalyses::all();
     }
     auto solveEnd = std::chrono::steady_clock::now();
@@ -144,17 +204,6 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         (void)key;
         if (enabled)
             restoreCount++;
-    }
-
-    // Count ineligible objects by type.
-    unsigned ineligGlobalCount = 0, ineligAllocaCount = 0, ineligSSACount = 0;
-    for (llvm::Value *V : ctx.stateAnalysis->getIneligibleObjs()) {
-        if (llvm::isa<llvm::GlobalVariable>(V))
-            ineligGlobalCount++;
-        else if (llvm::isa<llvm::AllocaInst>(V))
-            ineligAllocaCount++;
-        else
-            ineligSSACount++;
     }
 
     const auto totalEnd = std::chrono::steady_clock::now();

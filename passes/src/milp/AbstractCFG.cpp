@@ -470,22 +470,35 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         if (isStripMined)
             out.stats.stripMinedLoopsSeen++;
 
-        auto skipLoop = [&](const std::string &reason) {
+        auto skipLoop = [&](const std::string &reason,
+                            const std::string &details = "") {
             out.stats.skippedReasons[reason]++;
             if (isStripMined) {
                 out.stats.stripMinedLoopsSkipped++;
                 errs() << "AbstractCFG warning: strip-mined loop not summarized "
                        << F.getName() << "::" << loopHeaderName
-                       << " reason=" << reason << "\n";
+                       << " reason=" << reason;
+                if (!details.empty()) {
+                    errs() << " details=" << details;
+                }
+                errs() << "\n";
             }
         };
 
         if (budget <= 0.0) {
-            skipLoop("nonpositive-energy-budget");
+            skipLoop("nonpositive-energy-budget",
+                     "capacity=" + std::to_string(model.params_.capacity) +
+                         ", E_pro=" + std::to_string(model.params_.E_pro) +
+                         ", E_epi=" + std::to_string(model.params_.E_epi) +
+                         ", budget=" + std::to_string(budget));
             continue;
         }
         if (!loopHeader || !L->getLoopLatch()) {
-            skipLoop("missing-header-or-latch");
+            skipLoop("missing-header-or-latch",
+                     "has-header=" +
+                         std::string(loopHeader ? "true" : "false") +
+                         ", has-latch=" +
+                         std::string(L->getLoopLatch() ? "true" : "false"));
             continue;
         }
         if (containsInvoke(L)) {
@@ -501,11 +514,13 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                                                          LI, SE);
         if (!path.ok) {
             skipLoop(path.error.empty() ? "unknown-path-summary-error"
-                                        : path.error);
+                                        : path.error,
+                     "path-energy-unavailable");
             continue;
         }
         if (path.energy <= 0.0) {
-            skipLoop("nonpositive-loop-energy");
+            skipLoop("nonpositive-loop-energy",
+                     "path-energy=" + std::to_string(path.energy));
             continue;
         }
 
@@ -522,7 +537,9 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         else if (markerTC)
             loopTC = static_cast<unsigned>(*markerTC);
         else {
-            skipLoop("unknown-loop-trip-count");
+            skipLoop("unknown-loop-trip-count",
+                     "scev-trip-count=" + std::to_string(scevTC) +
+                         ", marker-trip-count=none");
             continue;
         }
 
@@ -542,7 +559,14 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         const double effectiveBudget = budget - ineligRestoreCost;
         double totalEnergy = path.energy * static_cast<double>(loopTC);
         if (effectiveBudget <= 0.0 || !(totalEnergy < effectiveBudget)) {
-            skipLoop("loop-total-exceeds-budget");
+            skipLoop("loop-total-exceeds-budget",
+                     "path-energy=" + std::to_string(path.energy) +
+                         ", trip-count=" + std::to_string(loopTC) +
+                         ", total-energy=" + std::to_string(totalEnergy) +
+                         ", inelig-restore=" +
+                         std::to_string(ineligRestoreCost) +
+                         ", effective-budget=" +
+                         std::to_string(effectiveBudget));
             continue;
         }
 

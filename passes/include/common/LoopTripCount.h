@@ -21,7 +21,7 @@ void removeLoopTripCountMetadata(llvm::Loop *L);
 /// Return true if the loop is marked as produced by strip-mining.
 bool hasStripMinedLoopMetadata(const llvm::Loop *L);
 
-/// Mark loop metadata to indicate this loop is a strip-mined outer loop.
+/// Mark loop metadata to indicate this loop is the strip-mined K-bounded loop.
 void setStripMinedLoopMetadata(llvm::Loop *L);
 
 /// Remove strip-mined marker metadata from the loop.

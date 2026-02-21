@@ -800,10 +800,11 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
     // ── Phase 11: Tripcount markers, LCSSA repair, SCEV invalidation ──
     removeLoopTripCountMetadata(L);
     setLoopTripCountMetadata(L, K);
-    removeStripMinedLoopMetadata(L);
+    // Mark the K-bounded inner loop as strip-mined; this is the loop that
+    // should be summarized by AbstractCFG.
+    setStripMinedLoopMetadata(L);
 
     setLoopTripCountMetadata(OuterLoop, outerTripCount);
-    setStripMinedLoopMetadata(OuterLoop);
 
     formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
 
