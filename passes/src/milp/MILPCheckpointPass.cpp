@@ -177,6 +177,12 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
            << "\n";
     errs() << "  Loops summarized:                "
            << abstractCFG.stats.loopsSummarized << "\n";
+    errs() << "  Strip-mined loops seen:          "
+           << abstractCFG.stats.stripMinedLoopsSeen << "\n";
+    errs() << "  Strip-mined loops summarized:    "
+           << abstractCFG.stats.stripMinedLoopsSummarized << "\n";
+    errs() << "  Strip-mined loops skipped:       "
+           << abstractCFG.stats.stripMinedLoopsSkipped << "\n";
     errs() << "  Candidate globals (V_elig):      "
            << ctx.stateAnalysis->getVMObjs().size() << "\n";
     errs() << "  Ineligible globals:              " << ineligGlobalCount << "\n";

@@ -107,7 +107,9 @@ static Loop *getDirectChildLoop(const Loop *Parent, const BasicBlock *BB,
 
 using checkpoint::getMarkerTripCount;
 using checkpoint::removeLoopTripCountMetadata;
+using checkpoint::removeStripMinedLoopMetadata;
 using checkpoint::setLoopTripCountMetadata;
+using checkpoint::setStripMinedLoopMetadata;
 
 static std::optional<uint64_t> getConstantTripCount(Loop *L,
                                                     ScalarEvolution &SE,
@@ -798,8 +800,10 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
     // ── Phase 11: Tripcount markers, LCSSA repair, SCEV invalidation ──
     removeLoopTripCountMetadata(L);
     setLoopTripCountMetadata(L, K);
+    removeStripMinedLoopMetadata(L);
 
     setLoopTripCountMetadata(OuterLoop, outerTripCount);
+    setStripMinedLoopMetadata(OuterLoop);
 
     formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
 

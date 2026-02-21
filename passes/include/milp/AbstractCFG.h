@@ -26,6 +26,9 @@ struct AbstractCFGStats {
     unsigned loopsSeen = 0;
     unsigned loopsEligible = 0;
     unsigned loopsSummarized = 0;
+    unsigned stripMinedLoopsSeen = 0;
+    unsigned stripMinedLoopsSummarized = 0;
+    unsigned stripMinedLoopsSkipped = 0;
     std::map<std::string, unsigned> skippedReasons;
     unsigned abstractNodes = 0;
     unsigned abstractEdges = 0;

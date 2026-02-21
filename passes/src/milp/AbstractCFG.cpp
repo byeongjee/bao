@@ -11,6 +11,7 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <functional>
@@ -462,32 +463,49 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
 
     for (Loop *L : loops) {
         out.stats.loopsSeen++;
+        BasicBlock *loopHeader = L->getHeader();
+        std::string loopHeaderName =
+            loopHeader ? getBlockName(*loopHeader, F) : "<unknown>";
+        bool isStripMined = hasStripMinedLoopMetadata(L);
+        if (isStripMined)
+            out.stats.stripMinedLoopsSeen++;
+
+        auto skipLoop = [&](const std::string &reason) {
+            out.stats.skippedReasons[reason]++;
+            if (isStripMined) {
+                out.stats.stripMinedLoopsSkipped++;
+                errs() << "AbstractCFG warning: strip-mined loop not summarized "
+                       << F.getName() << "::" << loopHeaderName
+                       << " reason=" << reason << "\n";
+            }
+        };
 
         if (budget <= 0.0) {
-            out.stats.skippedReasons["nonpositive-energy-budget"]++;
+            skipLoop("nonpositive-energy-budget");
             continue;
         }
-        if (!L->getHeader() || !L->getLoopLatch()) {
-            out.stats.skippedReasons["missing-header-or-latch"]++;
+        if (!loopHeader || !L->getLoopLatch()) {
+            skipLoop("missing-header-or-latch");
             continue;
         }
         if (containsInvoke(L)) {
-            out.stats.skippedReasons["contains-invoke"]++;
+            skipLoop("contains-invoke");
             continue;
         }
         if (overlapsSelected(L, summarizedConcreteBlocks)) {
-            out.stats.skippedReasons["overlaps-summarized-loop"]++;
+            skipLoop("overlaps-summarized-loop");
             continue;
         }
 
         PathSummary path = computeWorstCasePathSummary(L, blockEnergyByBB,
                                                          LI, SE);
         if (!path.ok) {
-            out.stats.skippedReasons[path.error]++;
+            skipLoop(path.error.empty() ? "unknown-path-summary-error"
+                                        : path.error);
             continue;
         }
         if (path.energy <= 0.0) {
-            out.stats.skippedReasons["nonpositive-loop-energy"]++;
+            skipLoop("nonpositive-loop-energy");
             continue;
         }
 
@@ -504,7 +522,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         else if (markerTC)
             loopTC = static_cast<unsigned>(*markerTC);
         else {
-            out.stats.skippedReasons["unknown-loop-trip-count"]++;
+            skipLoop("unknown-loop-trip-count");
             continue;
         }
 
@@ -524,12 +542,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         const double effectiveBudget = budget - ineligRestoreCost;
         double totalEnergy = path.energy * static_cast<double>(loopTC);
         if (effectiveBudget <= 0.0 || !(totalEnergy < effectiveBudget)) {
-            out.stats.skippedReasons["loop-total-exceeds-budget"]++;
+            skipLoop("loop-total-exceeds-budget");
             continue;
         }
 
-        BasicBlock *headerBB = L->getHeader();
-        std::string headerName = getBlockName(*headerBB, F);
+        BasicBlock *headerBB = loopHeader;
+        std::string headerName = loopHeaderName;
         std::string nodeName = makeUniqueSummaryNodeName(headerName, usedNodeNames);
         usedNodeNames.insert(nodeName);
 
@@ -601,6 +619,8 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
 
         summariesByNode[nodeName] = std::move(agg);
         out.stats.loopsSummarized++;
+        if (isStripMined)
+            out.stats.stripMinedLoopsSummarized++;
     }
 
     // Build concrete-to-abstract mapping.
