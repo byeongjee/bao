@@ -425,8 +425,7 @@ PreservedAnalyses RockClimbPass::run(Function &F,
         for (const auto &region : result.regions) {
             BasicBlock *startBB = RockClimbOptimizer::resolveBlock(region.startBlock);
             dbgs() << "  Region starting at " << getBlockName(*startBB, F)
-                   << " (energy: " << region.totalEnergy
-                   << ", blocks: " << region.blocks.size() << ")\n";
+                   << " (blocks: " << region.blocks.size() << ")\n";
         }
     });
 
@@ -470,18 +469,6 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     errs() << "  Regions: " << result.regions.size() << "\n";
     errs() << "  Boundary checks: " << boundarySet.size() << "\n";
     errs() << "  Register checkpoints: " << checkpointPoints.size() << "\n";
-
-    double totalRegionEnergy = 0;
-    double maxRegionEnergy = 0;
-    for (const auto &region : result.regions) {
-        totalRegionEnergy += region.totalEnergy;
-        maxRegionEnergy = std::max(maxRegionEnergy, region.totalEnergy);
-    }
-    if (!result.regions.empty()) {
-        errs() << "  Avg region energy: "
-               << (totalRegionEnergy / result.regions.size()) << "\n";
-        errs() << "  Max region energy: " << maxRegionEnergy << "\n";
-    }
 
     // We modified the IR
     return PreservedAnalyses::none();
