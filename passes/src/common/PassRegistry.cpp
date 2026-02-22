@@ -7,6 +7,9 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Transforms/Scalar/IndVarSimplify.h"
+#include "llvm/Transforms/Scalar/LoopRotation.h"
+#include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/LCSSA.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 
@@ -57,6 +60,10 @@ llvmGetPassPluginInfo() {
                   if (Name == "checkpoint") {
                     FPM.addPass(LoopSimplifyPass());
                     FPM.addPass(LCSSAPass());
+                    FPM.addPass(
+                        createFunctionToLoopPassAdaptor(LoopRotatePass()));
+                    FPM.addPass(
+                        createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
                     FPM.addPass(checkpoint::LoopStripMiningPass());
                     FPM.addPass(checkpoint::MILPCheckpointPass());
                     return true;
@@ -68,6 +75,10 @@ llvmGetPassPluginInfo() {
                   if (Name == "milp") {
                     FPM.addPass(LoopSimplifyPass());
                     FPM.addPass(LCSSAPass());
+                    FPM.addPass(
+                        createFunctionToLoopPassAdaptor(LoopRotatePass()));
+                    FPM.addPass(
+                        createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
                     FPM.addPass(checkpoint::LoopStripMiningPass());
                     FPM.addPass(checkpoint::MILPCheckpointPass());
                     return true;
