@@ -3,6 +3,7 @@
 #include "milp/LoopStripMiningPass.h"
 #include "milp/MILPCheckpointPass.h"
 #include "rockclimb/RockClimbPass.h"
+#include "schematic/SchematicPass.h"
 
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
@@ -12,6 +13,7 @@
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/LCSSA.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
+#include "llvm/Transforms/Utils/Mem2Reg.h"
 
 using namespace llvm;
 
@@ -48,6 +50,11 @@ cl::opt<bool>
                        cl::desc("Emit runtime function calls for register "
                                 "save/restore (for mock counter debugging)"),
                        cl::init(false));
+
+cl::opt<std::string> SchematicConfigOpt(
+    "schematic-config",
+    cl::desc("Path to JSON SCHEMATIC configuration file"),
+    cl::value_desc("filename"), cl::init(""));
 
 // Plugin registration for new pass manager
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
@@ -87,6 +94,13 @@ llvmGetPassPluginInfo() {
                     FPM.addPass(LoopSimplifyPass());
                     FPM.addPass(LCSSAPass());
                     FPM.addPass(checkpoint::RockClimbPass());
+                    return true;
+                  }
+                  if (Name == "schematic") {
+                    FPM.addPass(LoopSimplifyPass());
+                    FPM.addPass(LCSSAPass());
+                    FPM.addPass(checkpoint::SchematicPass());
+                    FPM.addPass(PromotePass()); // mem2reg: promote loop counter allocas to SSA
                     return true;
                   }
                   if (Name == "energy-validate") {

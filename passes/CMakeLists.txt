@@ -46,6 +46,7 @@ include_directories(
 add_library(CheckpointPass MODULE
     # Common utilities
     src/common/AnnotationUtils.cpp
+    src/common/BlockSplitter.cpp
     src/common/CFGAnalysis.cpp
     src/common/EnergyValidatorPass.cpp
     src/common/LoopTripCount.cpp
@@ -69,6 +70,14 @@ add_library(CheckpointPass MODULE
     src/rockclimb/RockClimbOptimizer.cpp
     src/rockclimb/RockClimbInstrumenter.cpp
     src/rockclimb/DistributedCheckpointing.cpp
+    # SCHEMATIC (greedy heuristic baseline)
+    src/schematic/SchematicParams.cpp
+    src/schematic/SchematicPass.cpp
+    src/schematic/IntervalAllocator.cpp
+    src/schematic/PathEnumerator.cpp
+    src/schematic/RCGSolver.cpp
+    src/schematic/LoopAnalyzer.cpp
+    src/schematic/SchematicInstrumenter.cpp
 )
 
 # Use C++17 and disable RTTI/exceptions to match LLVM

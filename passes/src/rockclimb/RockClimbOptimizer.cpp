@@ -1,4 +1,5 @@
 #include "rockclimb/RockClimbOptimizer.h"
+#include "common/BlockSplitter.h"
 #include "common/BlockUtils.h"
 
 #include "llvm/ADT/PostOrderIterator.h"
@@ -281,48 +282,11 @@ llvm::BasicBlock *RockClimbOptimizer::splitBlock(llvm::BasicBlock *BB,
     if (!estimator_) return nullptr;
     if (!BB) return nullptr;
 
-    // Find the split point: accumulate per-instruction energy until threshold
-    double accumulated = 0.0;
-    llvm::Instruction *splitPoint = nullptr;
+    // Use shared block-splitting utility for the core split
+    llvm::BasicBlock *newBB = splitOversizedBlock(BB, threshold, *estimator_);
+    if (!newBB) return nullptr;
 
-    for (llvm::Instruction &I : *BB) {
-        // Don't split before a PHI node or landingpad
-        if (llvm::isa<llvm::PHINode>(&I) || llvm::isa<llvm::LandingPadInst>(&I))
-            continue;
-
-        double instCost = estimator_->getInstructionCost(I);
-
-        if (accumulated + instCost >= threshold && splitPoint) {
-            // Split before this instruction
-            break;
-        }
-
-        accumulated += instCost;
-        splitPoint = &I;
-
-        // Don't set split point to the terminator
-        if (I.isTerminator()) {
-            splitPoint = nullptr;
-        }
-    }
-
-    if (!splitPoint) return nullptr;  // Can't split (block too small or all PHIs)
-
-    // Split after splitPoint — the next instruction becomes the start of the new block
-    llvm::Instruction *splitBefore = splitPoint->getNextNode();
-    if (!splitBefore || splitBefore->isTerminator()) {
-        // Nothing meaningful to split off
-        // If the terminator is the only thing left, try splitting before splitPoint
-        if (splitPoint->isTerminator()) return nullptr;
-        splitBefore = splitPoint;
-    }
-
-    // Perform the split
-    std::string blockName = getBlockName(*BB, F_);
-    llvm::BasicBlock *newBB = BB->splitBasicBlock(splitBefore,
-                                                   blockName + ".split");
-
-    // Update energyCosts_ for both halves directly
+    // Update local bookkeeping for both halves
     energyCosts_[BB] = estimator_->estimate(*BB).cost;
     energyCosts_[newBB] = estimator_->estimate(*newBB).cost;
 

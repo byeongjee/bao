@@ -66,6 +66,7 @@ PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 ESTIMATOR_CONFIG=""
 MILP_CONFIG=""
 ROCKCLIMB_CONFIG=""
+SCHEMATIC_CONFIG=""
 
 ROCKCLIMB_RUNTIME="$PROJECT_DIR/passes/runtime/rockclimb_runtime.c"
 ROCKCLIMB_BOOT="$PROJECT_DIR/passes/runtime/rockclimb_boot.S"
@@ -179,6 +180,7 @@ while [[ $# -gt 0 ]]; do
         -e|--energy-config) ESTIMATOR_CONFIG="$2"; shift 2 ;;
         -m|--milp-config) MILP_CONFIG="$2"; shift 2 ;;
         -c|--rockclimb-config) ROCKCLIMB_CONFIG="$2"; shift 2 ;;
+        -s|--schematic-config) SCHEMATIC_CONFIG="$2"; shift 2 ;;
         -O) OPT_LEVEL="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
@@ -219,6 +221,12 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             [[ ! -f "$ESTIMATOR_CONFIG" ]] && error "Estimator config not found: $ESTIMATOR_CONFIG"
             [[ -z "$ROCKCLIMB_CONFIG" ]] && error "RockClimb config required: use -c <config.json>"
             [[ ! -f "$ROCKCLIMB_CONFIG" ]] && error "RockClimb config not found: $ROCKCLIMB_CONFIG"
+            ;;
+        schematic)
+            [[ -z "$ESTIMATOR_CONFIG" ]] && error "Energy estimator config required for schematic mode: use -e <config.json>"
+            [[ ! -f "$ESTIMATOR_CONFIG" ]] && error "Estimator config not found: $ESTIMATOR_CONFIG"
+            [[ -z "$SCHEMATIC_CONFIG" ]] && error "SCHEMATIC config required: use -s <config.json>"
+            [[ ! -f "$SCHEMATIC_CONFIG" ]] && error "SCHEMATIC config not found: $SCHEMATIC_CONFIG"
             ;;
         none)
             if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
@@ -437,8 +445,49 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             fi
             ;;
 
+        schematic)
+            info "Compiling with SCHEMATIC..."
+            [[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
+
+            compile_to_ir
+
+            SCHEMATIC_EXTRA_FLAGS=""
+            if [[ "$RUNTIME_TYPE" == "mock-counter" ]]; then
+                SCHEMATIC_EXTRA_FLAGS="-add-debug-markers"
+            fi
+            PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
+            if $OPT -load-pass-plugin="$PASS_LIB" \
+                -passes=schematic \
+                -energy-config="$ESTIMATOR_CONFIG" \
+                -schematic-config="$SCHEMATIC_CONFIG" \
+                $SCHEMATIC_EXTRA_FLAGS \
+                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" \
+                >"$PASS_LOG" 2>&1; then
+                if [[ "$VERBOSE" == "true" ]]; then
+                    cat "$PASS_LOG"
+                else
+                    head -10 "$PASS_LOG"
+                fi
+            else
+                cat "$PASS_LOG" >&2
+                error "SCHEMATIC pass failed (see output above)"
+            fi
+
+            if [[ "$LOCAL_MODE" == "true" ]]; then
+                sed -i '' 's/, section ".nvm"//g' "$TMP_DIR/ckpt.ll"
+                link_local "$TMP_DIR/ckpt.ll" "$MILP_MOCK_CKPT_COUNTER"
+            else
+                $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
+                $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
+                    -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
+                link_runtime "$MILP_MOCK_CKPT_COUNTER" "$MILP_RUNTIME" \
+                    "$MILP_BOOT" "$MILP_LINKER"
+                cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+            fi
+            ;;
+
         *)
-            error "Unknown mode: $MODE (use: none, rockclimb, milp)"
+            error "Unknown mode: $MODE (use: none, rockclimb, milp, schematic)"
             ;;
     esac
 
@@ -452,7 +501,7 @@ fi
 if [[ "$COMPILE_ONLY" != "true" ]]; then
     if [[ "$LOCAL_MODE" == "true" ]]; then
         info "Running locally..."
-        "${OUTPUT}"
+        "${OUTPUT}" || true
     else
         info "Flashing..."
         mspdebug tilib "prog ${OUTPUT}.elf"
