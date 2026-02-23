@@ -33,8 +33,11 @@ private:
     std::optional<uint64_t> getMaxTripCount(llvm::Loop *L) const;
 
     /// Compute worst-case per-iteration energy via longest path in loop body DAG.
+    /// Inner loops with numIterationsPerCharge==0 (entire loop fits in one charge)
+    /// are collapsed to E_loop * tripCount to avoid energy underestimation.
     double computeMaxIterationEnergy(llvm::Loop *L,
-                                     const RegionAllocation &allocation) const;
+                                     const RegionAllocation &allocation,
+                                     const SchematicSolution &solution) const;
 };
 
 } // namespace checkpoint

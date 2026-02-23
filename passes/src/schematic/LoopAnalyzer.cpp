@@ -86,7 +86,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         solution.enabledCheckpoints.insert({latch, header});
     } else {
         // Compute per-iteration energy via longest path in loop body DAG
-        double E_loop = computeMaxIterationEnergy(L, bodyAllocation);
+        double E_loop = computeMaxIterationEnergy(L, bodyAllocation, solution);
         decision.E_loop = E_loop;
 
         if (E_loop <= 0.0) {
@@ -158,12 +158,63 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     return true;
 }
 
-double LoopAnalyzer::computeMaxIterationEnergy(
-    llvm::Loop *L, const RegionAllocation &allocation) const {
+/// Given a BasicBlock BB inside Parent, return the direct child loop of Parent
+/// that contains BB, or nullptr if BB belongs directly to Parent.
+static llvm::Loop *getDirectChildLoop(const llvm::Loop *Parent,
+                                       const llvm::BasicBlock *BB,
+                                       const llvm::LoopInfo &LI) {
+    llvm::Loop *Inner = LI.getLoopFor(BB);
+    if (!Inner || Inner == Parent) return nullptr;
+    while (Inner->getParentLoop() != Parent)
+        Inner = Inner->getParentLoop();
+    return Inner;
+}
 
-    // Compute per-block execution energy (base + NVM penalties) under allocation
-    llvm::DenseMap<llvm::BasicBlock *, double> blockEnergy;
-    for (llvm::BasicBlock *BB : L->getBlocks()) {
+double LoopAnalyzer::computeMaxIterationEnergy(
+    llvm::Loop *L, const RegionAllocation &allocation,
+    const SchematicSolution &solution) const {
+
+    llvm::BasicBlock *header = L->getHeader();
+
+    // --- Step 1: Identify collapsible sub-loops ---
+    // Inner loops with numIterationsPerCharge==0 (entire loop fits in one charge)
+    // must be collapsed: their energy contribution is E_loop * tripCount, not
+    // just the energy of a single traversal of their blocks.
+    llvm::DenseMap<llvm::Loop *, double> collapsedEnergy;
+    llvm::DenseSet<llvm::BasicBlock *> skipBlocks;
+
+    for (llvm::Loop *ChildL : L->getSubLoops()) {
+        llvm::BasicBlock *childHeader = ChildL->getHeader();
+        auto it = solution.loopDecisions.find(childHeader);
+        if (it == solution.loopDecisions.end()) continue;
+        const LoopCheckpointDecision &childDecision = it->second;
+
+        if (childDecision.numIterationsPerCharge != 0) continue;
+
+        // This inner loop fits entirely — collapse it.
+        // childDecision.E_loop already includes recursively collapsed inner costs
+        // (thanks to bottom-up processing order).
+        auto childTC = getMaxTripCount(ChildL);
+        uint64_t tc = childTC.value_or(1);
+        collapsedEnergy[ChildL] = childDecision.E_loop * tc;
+
+        // Mark non-header body blocks for skipping
+        for (llvm::BasicBlock *BB : ChildL->getBlocks()) {
+            if (BB != childHeader)
+                skipBlocks.insert(BB);
+        }
+    }
+
+    // --- Step 2: Build active block set and energy map ---
+    // Energy lambda: collapsed inner-loop headers get collapsed energy;
+    // other blocks get base + NVM penalty energy.
+    auto getBlockEnergy = [&](llvm::BasicBlock *BB) -> double {
+        llvm::Loop *ChildL = getDirectChildLoop(L, BB, LI_);
+        if (ChildL && ChildL->getHeader() == BB) {
+            auto it = collapsedEnergy.find(ChildL);
+            if (it != collapsedEnergy.end())
+                return it->second;
+        }
         double E = cfg_.getBlockInfo(BB).energyCost;
         for (const auto &[gv, p] : allocation.placement) {
             if (p == Placement::NVM) {
@@ -172,39 +223,63 @@ double LoopAnalyzer::computeMaxIterationEnergy(
                 E += accesses * params_.nvmAccessPenalty;
             }
         }
-        blockEnergy[BB] = E;
+        return E;
+    };
+
+    // Active blocks: L's blocks minus skipped inner-loop body blocks
+    std::vector<llvm::BasicBlock *> activeBlocks;
+    for (llvm::BasicBlock *BB : L->getBlocks()) {
+        if (!skipBlocks.count(BB))
+            activeBlocks.push_back(BB);
     }
 
+    llvm::DenseSet<llvm::BasicBlock *> activeSet(activeBlocks.begin(),
+                                                  activeBlocks.end());
+
+    // Successor lambda: collapsed inner-loop headers jump to exit blocks;
+    // other blocks use normal successors filtered to active set.
+    auto getSuccessors = [&](llvm::BasicBlock *BB,
+                             bool isLatch) -> llvm::SmallVector<llvm::BasicBlock *, 4> {
+        llvm::SmallVector<llvm::BasicBlock *, 4> succs;
+        llvm::Loop *ChildL = getDirectChildLoop(L, BB, LI_);
+        if (ChildL && ChildL->getHeader() == BB && collapsedEnergy.count(ChildL)) {
+            // Collapsed inner loop: successors are the inner loop's exit blocks
+            llvm::SmallVector<llvm::BasicBlock *, 4> exits;
+            ChildL->getExitBlocks(exits);
+            for (llvm::BasicBlock *Exit : exits) {
+                if (L->contains(Exit) && activeSet.count(Exit))
+                    succs.push_back(Exit);
+            }
+        } else {
+            for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
+                if (isLatch && Succ == header) continue; // skip back-edge
+                if (L->contains(Succ) && activeSet.count(Succ))
+                    succs.push_back(Succ);
+            }
+        }
+        return succs;
+    };
+
+    // --- Step 3: Topological sort and longest-path DP ---
     // Identify back-edge targets for exclusion
     llvm::SmallVector<llvm::BasicBlock *, 4> latches;
     L->getLoopLatches(latches);
     llvm::DenseSet<llvm::BasicBlock *> latchSet(latches.begin(), latches.end());
-    llvm::BasicBlock *header = L->getHeader();
 
-    // Compute in-degree within loop body (excluding back-edges)
+    // Compute in-degree within active blocks (excluding back-edges)
     llvm::DenseMap<llvm::BasicBlock *, unsigned> inDegree;
-    for (llvm::BasicBlock *BB : L->getBlocks())
+    for (llvm::BasicBlock *BB : activeBlocks)
         inDegree[BB] = 0;
 
-    for (llvm::BasicBlock *BB : L->getBlocks()) {
-        // Skip back-edges: latch -> header
-        if (latchSet.count(BB)) {
-            for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                if (Succ == header) continue; // back-edge, skip
-                if (L->contains(Succ))
-                    inDegree[Succ]++;
-            }
-        } else {
-            for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                if (L->contains(Succ))
-                    inDegree[Succ]++;
-            }
-        }
+    for (llvm::BasicBlock *BB : activeBlocks) {
+        bool isLatch = latchSet.count(BB);
+        for (llvm::BasicBlock *Succ : getSuccessors(BB, isLatch))
+            inDegree[Succ]++;
     }
 
     // Topological sort via Kahn's algorithm
     std::queue<llvm::BasicBlock *> worklist;
-    for (llvm::BasicBlock *BB : L->getBlocks()) {
+    for (llvm::BasicBlock *BB : activeBlocks) {
         if (inDegree[BB] == 0)
             worklist.push(BB);
     }
@@ -216,9 +291,7 @@ double LoopAnalyzer::computeMaxIterationEnergy(
         topoOrder.push_back(BB);
 
         bool isLatch = latchSet.count(BB);
-        for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-            if (isLatch && Succ == header) continue; // skip back-edge
-            if (!L->contains(Succ)) continue;
+        for (llvm::BasicBlock *Succ : getSuccessors(BB, isLatch)) {
             if (--inDegree[Succ] == 0)
                 worklist.push(Succ);
         }
@@ -226,20 +299,17 @@ double LoopAnalyzer::computeMaxIterationEnergy(
 
     // DP forward: longest path cost from header
     llvm::DenseMap<llvm::BasicBlock *, double> maxCost;
-    for (llvm::BasicBlock *BB : L->getBlocks())
+    for (llvm::BasicBlock *BB : activeBlocks)
         maxCost[BB] = -1.0; // unvisited
 
-    maxCost[header] = blockEnergy[header];
+    maxCost[header] = getBlockEnergy(header);
 
     for (llvm::BasicBlock *BB : topoOrder) {
         if (maxCost[BB] < 0.0) continue; // unreachable from header
 
         bool isLatch = latchSet.count(BB);
-        for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
-            if (isLatch && Succ == header) continue; // skip back-edge
-            if (!L->contains(Succ)) continue;
-
-            double candidate = maxCost[BB] + blockEnergy[Succ];
+        for (llvm::BasicBlock *Succ : getSuccessors(BB, isLatch)) {
+            double candidate = maxCost[BB] + getBlockEnergy(Succ);
             if (candidate > maxCost[Succ])
                 maxCost[Succ] = candidate;
         }
@@ -248,7 +318,7 @@ double LoopAnalyzer::computeMaxIterationEnergy(
     // Return max cost at any latch (worst case across all latches)
     double result = 0.0;
     for (llvm::BasicBlock *Latch : latches) {
-        if (maxCost[Latch] > result)
+        if (maxCost.count(Latch) && maxCost[Latch] > result)
             result = maxCost[Latch];
     }
     return result;
