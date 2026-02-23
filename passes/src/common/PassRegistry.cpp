@@ -99,6 +99,7 @@ llvmGetPassPluginInfo() {
                   if (Name == "schematic") {
                     FPM.addPass(LoopSimplifyPass());
                     FPM.addPass(LCSSAPass());
+                    FPM.addPass(checkpoint::TripCountAnnotationPass());
                     FPM.addPass(checkpoint::SchematicPass());
                     FPM.addPass(PromotePass()); // mem2reg: promote loop counter allocas to SSA
                     return true;
