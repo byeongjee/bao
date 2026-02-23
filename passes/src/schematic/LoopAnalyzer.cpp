@@ -189,16 +189,18 @@ double LoopAnalyzer::computeMaxIterationEnergy(
         if (it == solution.loopDecisions.end()) continue;
         const LoopCheckpointDecision &childDecision = it->second;
 
-        if (childDecision.numIterationsPerCharge != 0) continue;
+        if (childDecision.numIterationsPerCharge == 0) {
+            // Entire inner loop fits in one charge — collapse with full trip count
+            auto childTC = getMaxTripCount(ChildL);
+            uint64_t tc = childTC.value_or(1);
+            collapsedEnergy[ChildL] = childDecision.E_loop * tc;
+        } else {
+            // Inner loop has checkpoints — collapse with K (worst-case segment)
+            collapsedEnergy[ChildL] = childDecision.E_loop *
+                                       childDecision.numIterationsPerCharge;
+        }
 
-        // This inner loop fits entirely — collapse it.
-        // childDecision.E_loop already includes recursively collapsed inner costs
-        // (thanks to bottom-up processing order).
-        auto childTC = getMaxTripCount(ChildL);
-        uint64_t tc = childTC.value_or(1);
-        collapsedEnergy[ChildL] = childDecision.E_loop * tc;
-
-        // Mark non-header body blocks for skipping
+        // Skip non-header body blocks for all collapsed loops
         for (llvm::BasicBlock *BB : ChildL->getBlocks()) {
             if (BB != childHeader)
                 skipBlocks.insert(BB);
