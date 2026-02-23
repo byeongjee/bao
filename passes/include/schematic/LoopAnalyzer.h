@@ -9,6 +9,7 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 
 #include <optional>
+#include <vector>
 
 namespace checkpoint {
 
@@ -31,6 +32,16 @@ private:
 
     bool analyzeLoop(llvm::Loop *L, SchematicSolution &solution);
     std::optional<uint64_t> getMaxTripCount(llvm::Loop *L) const;
+
+    std::vector<std::vector<llvm::BasicBlock *>>
+    enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const;
+
+    bool placementsDiffer(
+        const std::map<llvm::GlobalVariable *, Placement> &a,
+        const std::map<llvm::GlobalVariable *, Placement> &b) const;
+
+    RegionAllocation buildBoundaryAllocation(
+        const std::map<llvm::GlobalVariable *, Placement> &placement) const;
 
     /// Compute worst-case per-iteration energy via longest path in loop body DAG.
     /// Inner loops with numIterationsPerCharge==0 (entire loop fits in one charge)

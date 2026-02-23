@@ -12,6 +12,7 @@ llvm::BasicBlock *splitOversizedBlock(llvm::BasicBlock *BB,
     // Find the split point: accumulate per-instruction energy until threshold
     double accumulated = 0.0;
     llvm::Instruction *splitPoint = nullptr;
+    llvm::Instruction *lastNonTerm = nullptr;
 
     for (llvm::Instruction &I : *BB) {
         // Don't split before a PHI node or landingpad
@@ -31,8 +32,15 @@ llvm::BasicBlock *splitOversizedBlock(llvm::BasicBlock *BB,
         // Don't set split point to the terminator
         if (I.isTerminator()) {
             splitPoint = nullptr;
+        } else {
+            lastNonTerm = &I;
         }
     }
+
+    // Fallback: if threshold crossing was not found (e.g., model granularity or
+    // rounding), still try a structural split at the last non-terminator.
+    if (!splitPoint)
+        splitPoint = lastNonTerm;
 
     if (!splitPoint) return nullptr; // Can't split (block too small or all PHIs)
 
@@ -67,6 +75,29 @@ bool splitAllOversizedBlocks(llvm::Function &F,
                                                               estimator);
                 if (!newBB) {
                     // Unsplittable block exceeds capacity
+                    llvm::errs() << "Unsplittable block '" << BB.getName()
+                                 << "' in function '" << F.getName()
+                                 << "' exceeds split threshold (energy="
+                                 << blockEnergy << ", threshold="
+                                 << threshold << ")\n";
+                    double maxInstCost = 0.0;
+                    const llvm::Instruction *maxInst = nullptr;
+                    for (const llvm::Instruction &I : BB) {
+                        if (llvm::isa<llvm::PHINode>(I) ||
+                            llvm::isa<llvm::LandingPadInst>(I))
+                            continue;
+                        double cost = estimator.getInstructionCost(I);
+                        if (cost > maxInstCost) {
+                            maxInstCost = cost;
+                            maxInst = &I;
+                        }
+                    }
+                    if (maxInst) {
+                        llvm::errs() << "  Max instruction cost: "
+                                     << maxInstCost << " | inst: ";
+                        maxInst->print(llvm::errs());
+                        llvm::errs() << "\n";
+                    }
                     return false;
                 }
                 changed = true;

@@ -1,6 +1,7 @@
 #include "schematic/RCGSolver.h"
 #include "schematic/IntervalAllocator.h"
 
+#include <algorithm>
 #include <limits>
 #include <vector>
 
@@ -14,9 +15,12 @@ RCGSolver::RCGSolver(
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
     const llvm::DenseMap<llvm::BasicBlock *,
                          std::map<llvm::GlobalVariable *, Placement>>
-        &decidedPlacements)
+        &decidedPlacements,
+    llvm::BasicBlock *startBoundaryBlock,
+    llvm::BasicBlock *endBoundaryBlock)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
-      existingMeta_(existingMeta), decidedPlacements_(decidedPlacements) {}
+      existingMeta_(existingMeta), decidedPlacements_(decidedPlacements),
+      startBoundaryBlock_(startBoundaryBlock), endBoundaryBlock_(endBoundaryBlock) {}
 
 void RCGSolver::buildNodes() {
     nodes_.clear();
@@ -45,7 +49,7 @@ void RCGSolver::buildNodes() {
     nodes_.push_back(end);
 }
 
-std::vector<llvm::BasicBlock *> RCGSolver::getIntervalBlocks(
+std::pair<unsigned, unsigned> RCGSolver::getIntervalRange(
     unsigned nodeFrom, unsigned nodeTo) const {
 
     // Determine block index range
@@ -65,29 +69,39 @@ std::vector<llvm::BasicBlock *> RCGSolver::getIntervalBlocks(
         toBlockIdx = nodes_[nodeTo].blockIndex;
     }
 
+    return {fromBlockIdx, toBlockIdx};
+}
+
+std::vector<llvm::BasicBlock *> RCGSolver::getIntervalBlocks(
+    unsigned nodeFrom, unsigned nodeTo) const {
+
+    auto [fromBlockIdx, toBlockIdx] = getIntervalRange(nodeFrom, nodeTo);
     std::vector<llvm::BasicBlock *> blocks;
-    for (unsigned i = fromBlockIdx; i < toBlockIdx; ++i) {
+    for (unsigned i = fromBlockIdx; i < toBlockIdx; ++i)
         blocks.push_back(pathBlocks_[i]);
-    }
     return blocks;
 }
 
-double RCGSolver::getIntervalBudget(unsigned /*nodeFrom*/,
-                                     unsigned /*nodeTo*/) const {
-    // Every interval gets the full energy capacity as its budget.
-    //
-    // Previous versions tried to tighten the budget for Start/End intervals
-    // using E_left and E_to_leave from earlier paths.  However, those values
-    // represent the remaining energy *after* a block within a region — not a
-    // bound on an entire interval that *contains* that block.  Using E_left
-    // directly as the interval budget causes false infeasibility whenever the
-    // first path's partition leaves a small E_left on the entry block, because
-    // subsequent paths can't even fit the entry block inside the tightened
-    // budget.
-    //
-    // Cross-path consistency is still enforced by the monotonic E_left /
-    // E_to_leave updates in SchematicPass after each path is solved.
-    return params_.capacity;
+double RCGSolver::getIntervalBudget(unsigned nodeFrom,
+                                     unsigned nodeTo) const {
+    double budget = params_.capacity;
+
+    // Paper overlap rule: for edges from Start, use E_left at boundary.
+    if (nodes_[nodeFrom].kind == Node::Start && startBoundaryBlock_) {
+        auto it = existingMeta_.find(startBoundaryBlock_);
+        if (it != existingMeta_.end())
+            budget = std::min(budget, it->second.E_left);
+    }
+
+    // Paper overlap rule: for edges to End, use capacity - E_to_leave.
+    if (nodes_[nodeTo].kind == Node::End && endBoundaryBlock_) {
+        auto it = existingMeta_.find(endBoundaryBlock_);
+        if (it != existingMeta_.end())
+            budget = std::min(
+                budget, params_.capacity - it->second.E_to_leave);
+    }
+
+    return budget;
 }
 
 RCGResult RCGSolver::solve() {
@@ -131,6 +145,12 @@ RCGResult RCGSolver::solve() {
             bool isFirst = (nodes_[i].kind == Node::Start);
             bool isLast = (nodes_[j].kind == Node::End);
 
+            auto [fromIdx, toIdx] = getIntervalRange(i, j);
+            (void)fromIdx;
+            std::vector<llvm::BasicBlock *> postBlocks;
+            for (unsigned k = toIdx; k < pathBlocks_.size(); ++k)
+                postBlocks.push_back(pathBlocks_[k]);
+
             // Collect fixed placements from previously decided blocks
             std::map<llvm::GlobalVariable *, Placement> fixedPlacements;
             for (llvm::BasicBlock *BB : blocks) {
@@ -142,10 +162,10 @@ RCGResult RCGSolver::solve() {
             }
 
             auto allocation = computeIntervalAllocation(
-                blocks, state_, params_, fixedPlacements);
+                blocks, state_, params_, fixedPlacements, &postBlocks);
             double energy = computeIntervalEnergy(
                 blocks, allocation, state_, cfg_, params_,
-                isFirst, isLast);
+                isFirst, isLast, &postBlocks);
 
             double budget = getIntervalBudget(i, j);
 

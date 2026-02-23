@@ -31,7 +31,9 @@ public:
               const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
               const llvm::DenseMap<llvm::BasicBlock *,
                                    std::map<llvm::GlobalVariable *, Placement>>
-                  &decidedPlacements);
+                  &decidedPlacements,
+              llvm::BasicBlock *startBoundaryBlock = nullptr,
+              llvm::BasicBlock *endBoundaryBlock = nullptr);
 
     RCGResult solve();
 
@@ -51,11 +53,16 @@ private:
     const llvm::DenseMap<llvm::BasicBlock *,
                           std::map<llvm::GlobalVariable *, Placement>>
         &decidedPlacements_;
+    llvm::BasicBlock *startBoundaryBlock_;
+    llvm::BasicBlock *endBoundaryBlock_;
 
     std::vector<Node> nodes_;
 
     void buildNodes();
     double getIntervalBudget(unsigned nodeFrom, unsigned nodeTo) const;
+
+    std::pair<unsigned, unsigned> getIntervalRange(unsigned nodeFrom,
+                                                   unsigned nodeTo) const;
 
     /// Extract blocks between two nodes (inclusive of interval boundaries).
     std::vector<llvm::BasicBlock *> getIntervalBlocks(unsigned nodeFrom,

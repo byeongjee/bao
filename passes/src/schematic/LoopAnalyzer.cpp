@@ -1,13 +1,17 @@
 #include "schematic/LoopAnalyzer.h"
 #include "common/LoopTripCount.h"
 #include "schematic/IntervalAllocator.h"
+#include "schematic/RCGSolver.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/CFG.h"
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <map>
 #include <queue>
+#include <set>
 
 namespace checkpoint {
 
@@ -44,6 +48,99 @@ bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
     return true;
 }
 
+std::vector<std::vector<llvm::BasicBlock *>>
+LoopAnalyzer::enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const {
+    std::vector<std::vector<llvm::BasicBlock *>> paths;
+    llvm::BasicBlock *header = L->getHeader();
+    if (!header)
+        return paths;
+
+    // Remove back-edges for this loop and all nested loops.
+    std::set<std::pair<llvm::BasicBlock *, llvm::BasicBlock *>> backEdges;
+    llvm::SmallVector<llvm::Loop *, 8> stack;
+    stack.push_back(L);
+    while (!stack.empty()) {
+        llvm::Loop *cur = stack.pop_back_val();
+        llvm::BasicBlock *curHeader = cur->getHeader();
+        llvm::SmallVector<llvm::BasicBlock *, 4> latches;
+        cur->getLoopLatches(latches);
+        for (llvm::BasicBlock *latch : latches)
+            backEdges.insert({latch, curHeader});
+        for (llvm::Loop *sub : cur->getSubLoops())
+            stack.push_back(sub);
+    }
+
+    std::vector<llvm::BasicBlock *> currentPath;
+    std::set<llvm::BasicBlock *> visited;
+
+    std::function<void(llvm::BasicBlock *)> dfs = [&](llvm::BasicBlock *BB) {
+        if (paths.size() >= params_.maxPaths)
+            return;
+
+        visited.insert(BB);
+        currentPath.push_back(BB);
+
+        llvm::SmallVector<llvm::BasicBlock *, 4> succs;
+        for (llvm::BasicBlock *Succ : llvm::successors(BB)) {
+            if (!L->contains(Succ))
+                continue;
+            if (backEdges.count({BB, Succ}) > 0)
+                continue;
+            if (visited.count(Succ))
+                continue;
+            succs.push_back(Succ);
+        }
+
+        if (succs.empty()) {
+            paths.push_back(currentPath);
+        } else {
+            for (llvm::BasicBlock *Succ : succs)
+                dfs(Succ);
+        }
+
+        currentPath.pop_back();
+        visited.erase(BB);
+    };
+
+    dfs(header);
+    if (paths.empty())
+        paths.push_back({header});
+    return paths;
+}
+
+bool LoopAnalyzer::placementsDiffer(
+    const std::map<llvm::GlobalVariable *, Placement> &a,
+    const std::map<llvm::GlobalVariable *, Placement> &b) const {
+
+    for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        auto ita = a.find(GV);
+        auto itb = b.find(GV);
+        Placement pa = (ita != a.end()) ? ita->second : Placement::NVM;
+        Placement pb = (itb != b.end()) ? itb->second : Placement::NVM;
+        if (pa != pb)
+            return true;
+    }
+    return false;
+}
+
+RegionAllocation LoopAnalyzer::buildBoundaryAllocation(
+    const std::map<llvm::GlobalVariable *, Placement> &placement) const {
+    RegionAllocation alloc;
+    alloc.placement = placement;
+
+    unsigned vmOffset = 0;
+    for (const auto &[GV, P] : placement) {
+        if (P != Placement::VM)
+            continue;
+        alloc.vmOffsets[GV] = vmOffset;
+        vmOffset += state_.getVarSizeBytes(GV);
+        // Loop conditional checkpoint currently saves/restores all VM vars.
+        alloc.livenessFlags[GV] = {true, true};
+    }
+    alloc.vmBytesUsed = vmOffset;
+    return alloc;
+}
+
 bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     llvm::BasicBlock *header = L->getHeader();
     llvm::BasicBlock *latch = L->getLoopLatch();
@@ -62,99 +159,155 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     // Collect loop body blocks
     std::vector<llvm::BasicBlock *> bodyBlocks;
-    for (llvm::BasicBlock *BB : L->getBlocks()) {
+    for (llvm::BasicBlock *BB : L->getBlocks())
         bodyBlocks.push_back(BB);
+    if (bodyBlocks.empty())
+        return true;
+
+    // Step 1: Analyze one iteration with back-edges removed, using the same
+    // RCG path analysis as acyclic regions.
+    auto loopPaths = enumerateLoopPathsWithoutBackEdges(L);
+    for (const auto &pathBlocks : loopPaths) {
+        bool hasNew = false;
+        for (llvm::BasicBlock *BB : pathBlocks) {
+            auto it = solution.blockMeta.find(BB);
+            if (it == solution.blockMeta.end() || !it->second.analyzed) {
+                hasNew = true;
+                break;
+            }
+        }
+        if (!hasNew)
+            continue;
+
+        RCGSolver rcg(pathBlocks, state_, cfg_, params_, solution.blockMeta,
+                      solution.decidedPlacements);
+        auto result = rcg.solve();
+        if (!result.feasible) {
+            llvm::errs() << "Error: infeasible loop body path in '"
+                         << header->getName() << "': " << result.errorMessage
+                         << "\n";
+            return false;
+        }
+
+        for (const auto &edge : result.selectedCheckpoints)
+            solution.enabledCheckpoints.insert(edge);
+
+        for (size_t i = 0; i < result.allocations.size(); ++i) {
+            solution.regions.push_back(
+                {result.intervalBlocks[i], result.allocations[i]});
+            for (llvm::BasicBlock *BB : result.intervalBlocks[i]) {
+                auto &decided = solution.decidedPlacements[BB];
+                for (const auto &[gv, p] : result.allocations[i].placement)
+                    decided.insert({gv, p}); // first decision wins
+            }
+        }
+
+        double cumulativeEnergy = 0.0;
+        for (size_t ri = 0; ri < result.intervalBlocks.size(); ++ri) {
+            cumulativeEnergy = 0.0;
+            for (llvm::BasicBlock *BB : result.intervalBlocks[ri]) {
+                double blockE = cfg_.getBlockInfo(BB).energyCost;
+                for (const auto &[gv, p] : result.allocations[ri].placement) {
+                    if (p == Placement::NVM) {
+                        unsigned accesses = state_.getLoadCount(BB, gv) +
+                                            state_.getStoreCount(BB, gv);
+                        blockE += accesses * params_.nvmAccessPenalty;
+                    }
+                }
+                cumulativeEnergy += blockE;
+
+                auto &meta = solution.blockMeta[BB];
+                double newELeft = params_.capacity - cumulativeEnergy;
+                double newEToLeave = cumulativeEnergy;
+                if (newELeft < meta.E_left)
+                    meta.E_left = newELeft;
+                if (newEToLeave > meta.E_to_leave)
+                    meta.E_to_leave = newEToLeave;
+                meta.analyzed = true;
+            }
+        }
     }
 
-    if (bodyBlocks.empty()) return true;
+    // Gather boundary placements from the one-iteration analysis.
+    std::map<llvm::GlobalVariable *, Placement> headerPlacement;
+    std::map<llvm::GlobalVariable *, Placement> latchPlacement;
+    auto hIt = solution.decidedPlacements.find(header);
+    if (hIt != solution.decidedPlacements.end())
+        headerPlacement = hIt->second;
+    auto lIt = solution.decidedPlacements.find(latch);
+    if (lIt != solution.decidedPlacements.end())
+        latchPlacement = lIt->second;
 
-    // Analyze one iteration: compute allocation
-    auto bodyAllocation = computeIntervalAllocation(
-        bodyBlocks, state_, params_);
+    if (headerPlacement.empty())
+        headerPlacement =
+            computeIntervalAllocation({header}, state_, params_).placement;
+    if (latchPlacement.empty())
+        latchPlacement =
+            computeIntervalAllocation({latch}, state_, params_).placement;
 
-    // Since we use a single allocation for the whole body, alloc(H) == alloc(L).
-    // Mandatory back-edge only needed if per-block allocations differ.
-    bool mandatoryBackEdge = false;
+    bool mandatoryBackEdge = placementsDiffer(headerPlacement, latchPlacement);
 
     LoopCheckpointDecision decision;
     decision.loop = L;
-    decision.bodyAllocation = bodyAllocation;
+    decision.bodyAllocation = buildBoundaryAllocation(headerPlacement);
 
+    // Step 2: Decide back-edge policy.
     if (mandatoryBackEdge) {
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         solution.enabledCheckpoints.insert({latch, header});
+        solution.loopDecisions[header] = decision;
+        return true;
+    }
+
+    // Prefer paper formula based on propagated metadata when available.
+    double E_loop = 0.0;
+    auto hMetaIt = solution.blockMeta.find(header);
+    auto lMetaIt = solution.blockMeta.find(latch);
+    if (hMetaIt != solution.blockMeta.end() && lMetaIt != solution.blockMeta.end() &&
+        hMetaIt->second.analyzed && lMetaIt->second.analyzed) {
+        E_loop = hMetaIt->second.E_left - lMetaIt->second.E_left;
+    }
+    if (E_loop <= 0.0) {
+        E_loop = computeMaxIterationEnergy(L, decision.bodyAllocation, solution);
+    }
+    decision.E_loop = E_loop;
+
+    if (E_loop <= 0.0) {
+        decision.numIterationsPerCharge = 0;
+        solution.loopDecisions[header] = decision;
+        return true;
+    }
+
+    // Conservative loop periodicity: reserve checkpoint cost explicitly.
+    double E_ckpt = params_.E_epi + params_.E_pro +
+                    params_.N_reg * (params_.regStoreEnergy +
+                                     params_.regRestoreEnergy);
+    for (const auto &[gv, p] : decision.bodyAllocation.placement) {
+        if (p != Placement::VM)
+            continue;
+        unsigned varSize = state_.getVarSizeBytes(gv);
+        E_ckpt += (params_.memStoreEnergyPerByte +
+                   params_.memRestoreEnergyPerByte) * varSize;
+    }
+
+    double availableCapacity = params_.capacity - E_ckpt;
+    unsigned numIt = (availableCapacity > 0.0)
+        ? static_cast<unsigned>(std::floor(availableCapacity / E_loop))
+        : 0;
+
+    if (numIt == 0) {
+        decision.mandatoryBackEdge = true;
+        decision.numIterationsPerCharge = 1;
+        solution.enabledCheckpoints.insert({latch, header});
+    } else if (numIt >= maxIt) {
+        decision.numIterationsPerCharge = 0;
     } else {
-        // Compute per-iteration energy via longest path in loop body DAG
-        double E_loop = computeMaxIterationEnergy(L, bodyAllocation, solution);
-        decision.E_loop = E_loop;
-
-        if (E_loop <= 0.0) {
-            // Empty or zero-energy loop body
-            decision.numIterationsPerCharge = 0;
-        } else {
-            // Reserve energy for the checkpoint itself:
-            // epilogue + prologue + register save/restore + VM memory save/restore
-            double E_ckpt = params_.E_epi + params_.E_pro +
-                            params_.N_reg * (params_.regStoreEnergy +
-                                             params_.regRestoreEnergy);
-            for (const auto &[gv, p] : bodyAllocation.placement) {
-                if (p == Placement::VM) {
-                    unsigned varSize = state_.getVarSizeBytes(gv);
-                    E_ckpt += (params_.memStoreEnergyPerByte +
-                               params_.memRestoreEnergyPerByte) * varSize;
-                }
-            }
-            double availableCapacity = params_.capacity - E_ckpt;
-            unsigned numIt = (availableCapacity > 0.0)
-                ? static_cast<unsigned>(std::floor(availableCapacity / E_loop))
-                : 0;
-
-            if (numIt == 0) {
-                // Single iteration doesn't fit — force checkpoint every iteration
-                decision.mandatoryBackEdge = true;
-                decision.numIterationsPerCharge = 1;
-                solution.enabledCheckpoints.insert({latch, header});
-            } else if (numIt >= maxIt) {
-                // Entire loop fits in one charge — no checkpoint needed
-                decision.numIterationsPerCharge = 0;
-            } else {
-                // Conditional checkpoint every numIt iterations
-                decision.numIterationsPerCharge = numIt;
-                solution.enabledCheckpoints.insert({latch, header});
-            }
-        }
+        decision.numIterationsPerCharge = numIt;
+        solution.enabledCheckpoints.insert({latch, header});
     }
 
     solution.loopDecisions[header] = decision;
-
-    // Update blockMeta for loop body blocks
-    double cumulativeEnergy = 0.0;
-    for (llvm::BasicBlock *BB : bodyBlocks) {
-        double blockE = cfg_.getBlockInfo(BB).energyCost;
-        // Add NVM penalties
-        for (const auto &[gv, p] : bodyAllocation.placement) {
-            if (p == Placement::NVM) {
-                unsigned accesses = state_.getLoadCount(BB, gv) +
-                                    state_.getStoreCount(BB, gv);
-                blockE += accesses * params_.nvmAccessPenalty;
-            }
-        }
-
-        cumulativeEnergy += blockE;
-
-        auto &meta = solution.blockMeta[BB];
-        double newELeft = params_.capacity - cumulativeEnergy;
-        double newEToLeave = cumulativeEnergy;
-
-        // Monotonic updates: E_left can only decrease, E_to_leave can only increase
-        if (newELeft < meta.E_left)
-            meta.E_left = newELeft;
-        if (newEToLeave > meta.E_to_leave)
-            meta.E_to_leave = newEToLeave;
-        meta.analyzed = true;
-    }
-
     return true;
 }
 

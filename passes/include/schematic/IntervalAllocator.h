@@ -17,14 +17,16 @@ namespace checkpoint {
 std::pair<bool, bool> computeLivenessFlags(
     llvm::GlobalVariable *v,
     const std::vector<llvm::BasicBlock *> &intervalBlocks,
-    const StateAnalysis &state);
+    const StateAnalysis &state,
+    const std::vector<llvm::BasicBlock *> *postIntervalBlocks = nullptr);
 
 /// Compute optimal greedy allocation for an interval (spec §6.2).
 RegionAllocation computeIntervalAllocation(
     const std::vector<llvm::BasicBlock *> &intervalBlocks,
     const StateAnalysis &state,
     const SchematicParams &params,
-    const std::map<llvm::GlobalVariable *, Placement> &fixedPlacements = {});
+    const std::map<llvm::GlobalVariable *, Placement> &fixedPlacements = {},
+    const std::vector<llvm::BasicBlock *> *postIntervalBlocks = nullptr);
 
 /// Compute total interval energy (spec §7.2).
 double computeIntervalEnergy(
@@ -34,6 +36,7 @@ double computeIntervalEnergy(
     const CFGAnalysis &cfg,
     const SchematicParams &params,
     bool isFirstInterval,
-    bool isLastInterval);
+    bool isLastInterval,
+    const std::vector<llvm::BasicBlock *> *postIntervalBlocks = nullptr);
 
 } // namespace checkpoint

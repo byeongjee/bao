@@ -1,43 +1,117 @@
 #include "schematic/IntervalAllocator.h"
 
+#include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/Instructions.h"
+
 #include <algorithm>
 #include <set>
 
 namespace checkpoint {
 
+namespace {
+
+enum class AccessKind { None, Read, Write, Unknown };
+
+static bool pointsToGlobal(const llvm::Value *Ptr, llvm::GlobalVariable *GV) {
+    if (!Ptr || !GV)
+        return false;
+    const llvm::Value *Obj =
+        llvm::getUnderlyingObject(Ptr->stripPointerCasts());
+    return Obj == GV;
+}
+
+static AccessKind firstAccessInBlock(llvm::GlobalVariable *GV,
+                                     llvm::BasicBlock *BB) {
+    for (llvm::Instruction &I : *BB) {
+        if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
+            if (pointsToGlobal(LI->getPointerOperand(), GV))
+                return AccessKind::Read;
+            continue;
+        }
+        if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+            if (pointsToGlobal(SI->getPointerOperand(), GV))
+                return AccessKind::Write;
+            continue;
+        }
+
+        // Conservative fallback for memory-touching calls that reference GV.
+        if (auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
+            if (!CB->mayReadOrWriteMemory())
+                continue;
+            for (const llvm::Use &U : CB->operands()) {
+                const llvm::Value *V =
+                    llvm::getUnderlyingObject(U.get()->stripPointerCasts());
+                if (V == GV)
+                    return AccessKind::Unknown;
+            }
+        }
+    }
+    return AccessKind::None;
+}
+
+static AccessKind firstAccessInBlocks(
+    llvm::GlobalVariable *GV,
+    const std::vector<llvm::BasicBlock *> &blocks) {
+
+    for (llvm::BasicBlock *BB : blocks) {
+        AccessKind kind = firstAccessInBlock(GV, BB);
+        if (kind != AccessKind::None)
+            return kind;
+    }
+    return AccessKind::None;
+}
+
+static bool hasAnyAccess(llvm::GlobalVariable *GV,
+                         const std::vector<llvm::BasicBlock *> &blocks,
+                         const StateAnalysis &state) {
+    for (llvm::BasicBlock *BB : blocks) {
+        if (state.getLoadCount(BB, GV) > 0 || state.getStoreCount(BB, GV) > 0)
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
 std::pair<bool, bool> computeLivenessFlags(
     llvm::GlobalVariable *v,
     const std::vector<llvm::BasicBlock *> &intervalBlocks,
-    const StateAnalysis &state) {
+    const StateAnalysis &state,
+    const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
 
     bool liveStart = false;
     bool liveEnd = false;
 
-    // live_start: scan blocks in order; find first block with access to v.
-    // If first access is a load -> 1, if store -> 0, if no access -> 0.
-    // NOTE: This linear scan is correct because intervalBlocks always comes
-    // from PathEnumerator, which produces single execution paths (no branches
-    // within a path). For multi-path intervals, a dominator-based analysis
-    // would be needed.
-    for (llvm::BasicBlock *BB : intervalBlocks) {
-        unsigned loads = state.getLoadCount(BB, v);
-        unsigned stores = state.getStoreCount(BB, v);
-        if (loads > 0 || stores > 0) {
-            // First access found
-            liveStart = (loads > 0);
-            break;
-        }
+    // live_start: based on first access after interval start.
+    switch (firstAccessInBlocks(v, intervalBlocks)) {
+    case AccessKind::Read:
+        liveStart = true;
+        break;
+    case AccessKind::Unknown:
+        // Conservative fallback on unresolved access ordering.
+        liveStart = true;
+        break;
+    case AccessKind::Write:
+    case AccessKind::None:
+        liveStart = false;
+        break;
     }
 
-    // live_end: conservative — if v is accessed anywhere in the interval,
-    // assume it may be live-out (needs save at interval end).
-    for (llvm::BasicBlock *BB : intervalBlocks) {
-        unsigned loads = state.getLoadCount(BB, v);
-        unsigned stores = state.getStoreCount(BB, v);
-        if (loads > 0 || stores > 0) {
+    // live_end: if post-interval path context is available, use first access
+    // after the boundary. Otherwise, use conservative fallback.
+    if (postIntervalBlocks) {
+        switch (firstAccessInBlocks(v, *postIntervalBlocks)) {
+        case AccessKind::Read:
+        case AccessKind::Unknown:
             liveEnd = true;
             break;
+        case AccessKind::Write:
+        case AccessKind::None:
+            liveEnd = false;
+            break;
         }
+    } else {
+        liveEnd = hasAnyAccess(v, intervalBlocks, state);
     }
 
     return {liveStart, liveEnd};
@@ -47,7 +121,8 @@ RegionAllocation computeIntervalAllocation(
     const std::vector<llvm::BasicBlock *> &intervalBlocks,
     const StateAnalysis &state,
     const SchematicParams &params,
-    const std::map<llvm::GlobalVariable *, Placement> &fixedPlacements) {
+    const std::map<llvm::GlobalVariable *, Placement> &fixedPlacements,
+    const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
 
     RegionAllocation alloc;
     alloc.vmBytesUsed = 0;
@@ -95,11 +170,13 @@ RegionAllocation computeIntervalAllocation(
             nW += state.getStoreCount(BB, gv);
         }
 
-        auto [liveStart, liveEnd] = computeLivenessFlags(gv, intervalBlocks, state);
+        auto [liveStart, liveEnd] =
+            computeLivenessFlags(gv, intervalBlocks, state, postIntervalBlocks);
 
         unsigned varSize = state.getVarSizeBytes(gv);
-        double E_sr = params.memRestoreEnergyPerByte * varSize * (liveStart ? 1.0 : 0.0) +
-                       params.memStoreEnergyPerByte * varSize * (liveEnd ? 1.0 : 0.0);
+        double E_sr =
+            params.memRestoreEnergyPerByte * varSize * (liveStart ? 1.0 : 0.0) +
+            params.memStoreEnergyPerByte * varSize * (liveEnd ? 1.0 : 0.0);
         double gain = params.nvmAccessPenalty * (nR + nW) - E_sr;
 
         if (gain > 0 && varSize > 0) {
@@ -134,8 +211,8 @@ RegionAllocation computeIntervalAllocation(
     // Compute and store liveness flags for VM-placed variables
     for (const auto &[gv, p] : alloc.placement) {
         if (p == Placement::VM) {
-            alloc.livenessFlags[gv] =
-                computeLivenessFlags(gv, intervalBlocks, state);
+            alloc.livenessFlags[gv] = computeLivenessFlags(
+                gv, intervalBlocks, state, postIntervalBlocks);
         }
     }
 
@@ -149,11 +226,20 @@ double computeIntervalEnergy(
     const CFGAnalysis &cfg,
     const SchematicParams &params,
     bool isFirstInterval,
-    bool isLastInterval) {
+    bool isLastInterval,
+    const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
 
     double E_restore = 0.0;
     double E_save = 0.0;
     double E_exec = 0.0;
+
+    auto getLiveness = [&](llvm::GlobalVariable *GV) {
+        auto it = allocation.livenessFlags.find(GV);
+        if (it != allocation.livenessFlags.end())
+            return it->second;
+        return computeLivenessFlags(
+            GV, intervalBlocks, state, postIntervalBlocks);
+    };
 
     // Compute restore cost at interval start
     if (!isFirstInterval) {
@@ -162,8 +248,8 @@ double computeIntervalEnergy(
                     params.N_reg * params.regRestoreEnergy;
         for (const auto &[gv, p] : allocation.placement) {
             if (p == Placement::VM) {
-                auto [liveStart, liveEnd] =
-                    computeLivenessFlags(gv, intervalBlocks, state);
+                auto [liveStart, liveEnd] = getLiveness(gv);
+                (void)liveEnd;
                 if (liveStart) {
                     E_restore += params.memRestoreEnergyPerByte *
                                  state.getVarSizeBytes(gv);
@@ -182,8 +268,8 @@ double computeIntervalEnergy(
                  params.N_reg * params.regStoreEnergy;
         for (const auto &[gv, p] : allocation.placement) {
             if (p == Placement::VM) {
-                auto [liveStart, liveEnd] =
-                    computeLivenessFlags(gv, intervalBlocks, state);
+                auto [liveStart, liveEnd] = getLiveness(gv);
+                (void)liveStart;
                 if (liveEnd) {
                     E_save += params.memStoreEnergyPerByte *
                               state.getVarSizeBytes(gv);

@@ -24,6 +24,7 @@
 #include "llvm/Support/Format.h"
 
 #include <chrono>
+#include <cstddef>
 
 using namespace llvm;
 
@@ -77,6 +78,31 @@ PreservedAnalyses SchematicPass::run(Function &F,
         return PreservedAnalyses::all();
     }
 
+    // Current SCHEMATIC implementation is intraprocedural.
+    // Emit an explicit note when user-level calls are present.
+    bool hasUserCalls = false;
+    for (const BasicBlock &BB : F) {
+        for (const Instruction &I : BB) {
+            const auto *CB = dyn_cast<CallBase>(&I);
+            if (!CB)
+                continue;
+            const Function *Callee = CB->getCalledFunction();
+            if (!Callee || Callee->isIntrinsic())
+                continue;
+            if (Callee->getName().starts_with("__"))
+                continue;
+            hasUserCalls = true;
+            break;
+        }
+        if (hasUserCalls)
+            break;
+    }
+    if (hasUserCalls) {
+        errs() << "Note: SCHEMATIC currently applies intraprocedural analysis "
+               << "for function '" << F.getName()
+               << "' (interprocedural call-graph constraints are deferred).\n";
+    }
+
     // Step 4: Parse SCHEMATIC config
     auto paramsOpt = parseSchematicParams(SchematicConfigOpt.getValue());
     if (!paramsOpt) {
@@ -97,10 +123,10 @@ PreservedAnalyses SchematicPass::run(Function &F,
             ineligSSACount++;
     }
 
-    // Step 5: Split oversized blocks
-    // The split threshold must account for the minimum checkpoint overhead
-    // (prologue + epilogue + register save/restore) so that every block can
-    // fit inside a single-block interval in the RCG solver.
+    // Step 5: Split oversized blocks.
+    // Conservative precondition: a single-block interval must still leave room
+    // for checkpoint boundary costs (prologue/epilogue + regs), otherwise
+    // RCG can become spuriously infeasible at low capacities.
     double minCheckpointOverhead =
         params.E_pro + params.E_epi +
         params.N_reg * (params.regStoreEnergy + params.regRestoreEnergy);
@@ -149,66 +175,103 @@ PreservedAnalyses SchematicPass::run(Function &F,
 
     // Step 8: Analyze paths via RCG
     for (const auto &path : paths) {
-        bool hasNew = false;
-        for (auto *BB : path.blocks) {
+        auto isAnalyzed = [&](llvm::BasicBlock *BB) {
             auto metaIt = solution.blockMeta.find(BB);
-            if (metaIt == solution.blockMeta.end() || !metaIt->second.analyzed) {
-                hasNew = true;
+            return metaIt != solution.blockMeta.end() && metaIt->second.analyzed;
+        };
+
+        // Analyze only maximal contiguous segments containing unprocessed blocks.
+        std::vector<std::pair<size_t, size_t>> segments;
+        size_t idx = 0;
+        while (idx < path.blocks.size()) {
+            while (idx < path.blocks.size() && isAnalyzed(path.blocks[idx]))
+                ++idx;
+            if (idx >= path.blocks.size())
                 break;
+            size_t start = idx;
+            while (idx < path.blocks.size() && !isAnalyzed(path.blocks[idx]))
+                ++idx;
+            segments.push_back({start, idx}); // [start, idx)
+        }
+        if (segments.empty())
+            continue;
+
+        for (const auto &[segStart, segEnd] : segments) {
+            std::vector<llvm::BasicBlock *> segBlocks(
+                path.blocks.begin() + static_cast<std::ptrdiff_t>(segStart),
+                path.blocks.begin() + static_cast<std::ptrdiff_t>(segEnd));
+
+            llvm::BasicBlock *startBoundary =
+                (segStart > 0) ? path.blocks[segStart - 1] : nullptr;
+            llvm::BasicBlock *endBoundary =
+                (segEnd < path.blocks.size()) ? path.blocks[segEnd] : nullptr;
+
+            RCGSolver rcg(segBlocks, *ctx.stateAnalysis, *ctx.cfg, params,
+                          solution.blockMeta, solution.decidedPlacements,
+                          startBoundary, endBoundary);
+            auto result = rcg.solve();
+            if (!result.feasible) {
+                errs() << "Warning: infeasible path segment in " << F.getName()
+                       << ": " << result.errorMessage << "\n";
+                return PreservedAnalyses::all();
             }
-        }
-        if (!hasNew) continue;
 
-        RCGSolver rcg(path.blocks, *ctx.stateAnalysis, *ctx.cfg, params,
-                      solution.blockMeta, solution.decidedPlacements);
-        auto result = rcg.solve();
-        if (!result.feasible) {
-            errs() << "Warning: infeasible path in " << F.getName()
-                   << ": " << result.errorMessage << "\n";
-            return PreservedAnalyses::all();
-        }
-
-        // Record decisions
-        for (const auto &edge : result.selectedCheckpoints)
-            solution.enabledCheckpoints.insert(edge);
-        for (size_t i = 0; i < result.allocations.size(); ++i) {
-            solution.regions.push_back(
-                {result.intervalBlocks[i], result.allocations[i]});
-            // Record decided placements for subsequent paths
-            for (llvm::BasicBlock *BB : result.intervalBlocks[i]) {
-                auto &decided = solution.decidedPlacements[BB];
-                for (const auto &[gv, p] : result.allocations[i].placement)
-                    decided.insert({gv, p}); // first decision wins
-            }
-        }
-
-        // Update blockMeta (E_left, E_to_leave, analyzed) — monotonic
-        double cumulativeEnergy = 0.0;
-        for (size_t ri = 0; ri < result.intervalBlocks.size(); ++ri) {
-            cumulativeEnergy = 0.0;
-            for (llvm::BasicBlock *BB : result.intervalBlocks[ri]) {
-                double blockE = ctx.cfg->getBlockInfo(BB).energyCost;
-                for (const auto &[gv, p] : result.allocations[ri].placement) {
-                    if (p == Placement::NVM) {
-                        unsigned accesses =
-                            ctx.stateAnalysis->getLoadCount(BB, gv) +
-                            ctx.stateAnalysis->getStoreCount(BB, gv);
-                        blockE += accesses * params.nvmAccessPenalty;
-                    }
+            // Record decisions
+            for (const auto &edge : result.selectedCheckpoints)
+                solution.enabledCheckpoints.insert(edge);
+            for (size_t i = 0; i < result.allocations.size(); ++i) {
+                solution.regions.push_back(
+                    {result.intervalBlocks[i], result.allocations[i]});
+                // Record decided placements for subsequent analyses
+                for (llvm::BasicBlock *BB : result.intervalBlocks[i]) {
+                    auto &decided = solution.decidedPlacements[BB];
+                    for (const auto &[gv, p] : result.allocations[i].placement)
+                        decided.insert({gv, p}); // first decision wins
                 }
-                cumulativeEnergy += blockE;
-
-                auto &meta = solution.blockMeta[BB];
-                double newELeft = params.capacity - cumulativeEnergy;
-                double newEToLeave = cumulativeEnergy;
-                if (newELeft < meta.E_left)
-                    meta.E_left = newELeft;
-                if (newEToLeave > meta.E_to_leave)
-                    meta.E_to_leave = newEToLeave;
-                meta.analyzed = true;
             }
+
+            // Update blockMeta (E_left, E_to_leave, analyzed) — monotonic
+            double segmentBudget = params.capacity;
+            if (startBoundary) {
+                auto it = solution.blockMeta.find(startBoundary);
+                if (it != solution.blockMeta.end())
+                    segmentBudget = std::min(segmentBudget, it->second.E_left);
+            }
+
+            double tailLeave = 0.0;
+            if (endBoundary) {
+                auto it = solution.blockMeta.find(endBoundary);
+                if (it != solution.blockMeta.end())
+                    tailLeave = std::max(0.0, it->second.E_to_leave);
+            }
+
+            double cumulativeEnergy = 0.0;
+            for (size_t ri = 0; ri < result.intervalBlocks.size(); ++ri) {
+                cumulativeEnergy = 0.0;
+                for (llvm::BasicBlock *BB : result.intervalBlocks[ri]) {
+                    double blockE = ctx.cfg->getBlockInfo(BB).energyCost;
+                    for (const auto &[gv, p] : result.allocations[ri].placement) {
+                        if (p == Placement::NVM) {
+                            unsigned accesses =
+                                ctx.stateAnalysis->getLoadCount(BB, gv) +
+                                ctx.stateAnalysis->getStoreCount(BB, gv);
+                            blockE += accesses * params.nvmAccessPenalty;
+                        }
+                    }
+                    cumulativeEnergy += blockE;
+
+                    auto &meta = solution.blockMeta[BB];
+                    double newELeft = segmentBudget - cumulativeEnergy;
+                    double newEToLeave = cumulativeEnergy + tailLeave;
+                    if (newELeft < meta.E_left)
+                        meta.E_left = newELeft;
+                    if (newEToLeave > meta.E_to_leave)
+                        meta.E_to_leave = newEToLeave;
+                    meta.analyzed = true;
+                }
+            }
+            solution.pathsAnalyzed++;
         }
-        solution.pathsAnalyzed++;
     }
 
     // Check for incomplete coverage
