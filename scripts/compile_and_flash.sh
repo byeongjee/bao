@@ -382,6 +382,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             MILP_INPUT_LL="$TMP_DIR/tripcount.ll"
             if [[ "$MILP_FRONTEND_OPT_LEVEL" != "0" ]]; then
                 if ! $OPT -passes="default<O$MILP_FRONTEND_OPT_LEVEL>" \
+                    -vectorize-loops=false -vectorize-slp=false \
                     -S "$TMP_DIR/tripcount.ll" -o "$TMP_DIR/input_optimized.ll"; then
                     error "IR optimization pipeline failed at -O$MILP_FRONTEND_OPT_LEVEL"
                 fi
@@ -466,6 +467,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             SCHEMATIC_INPUT_LL="$TMP_DIR/tripcount.ll"
             if [[ "$SCHEMATIC_FRONTEND_OPT_LEVEL" != "0" ]]; then
                 if ! $OPT -passes="default<O$SCHEMATIC_FRONTEND_OPT_LEVEL>" \
+                    -vectorize-loops=false -vectorize-slp=false \
                     -S "$TMP_DIR/tripcount.ll" -o "$TMP_DIR/input_optimized.ll"; then
                     error "IR optimization pipeline failed at -O$SCHEMATIC_FRONTEND_OPT_LEVEL"
                 fi
