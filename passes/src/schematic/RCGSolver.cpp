@@ -72,28 +72,22 @@ std::vector<llvm::BasicBlock *> RCGSolver::getIntervalBlocks(
     return blocks;
 }
 
-double RCGSolver::getIntervalBudget(unsigned nodeFrom, unsigned nodeTo) const {
-    double budget = params_.capacity;
-
-    // If starting from Start and first block already analyzed, use E_left
-    if (nodes_[nodeFrom].kind == Node::Start && !pathBlocks_.empty()) {
-        llvm::BasicBlock *firstBB = pathBlocks_[0];
-        auto it = existingMeta_.find(firstBB);
-        if (it != existingMeta_.end() && it->second.analyzed) {
-            budget = std::min(budget, it->second.E_left);
-        }
-    }
-
-    // If ending at End and last block already analyzed, tighten budget
-    if (nodes_[nodeTo].kind == Node::End && !pathBlocks_.empty()) {
-        llvm::BasicBlock *lastBB = pathBlocks_.back();
-        auto it = existingMeta_.find(lastBB);
-        if (it != existingMeta_.end() && it->second.analyzed) {
-            budget = std::min(budget, params_.capacity - it->second.E_to_leave);
-        }
-    }
-
-    return budget;
+double RCGSolver::getIntervalBudget(unsigned /*nodeFrom*/,
+                                     unsigned /*nodeTo*/) const {
+    // Every interval gets the full energy capacity as its budget.
+    //
+    // Previous versions tried to tighten the budget for Start/End intervals
+    // using E_left and E_to_leave from earlier paths.  However, those values
+    // represent the remaining energy *after* a block within a region — not a
+    // bound on an entire interval that *contains* that block.  Using E_left
+    // directly as the interval budget causes false infeasibility whenever the
+    // first path's partition leaves a small E_left on the entry block, because
+    // subsequent paths can't even fit the entry block inside the tightened
+    // budget.
+    //
+    // Cross-path consistency is still enforced by the monotonic E_left /
+    // E_to_leave updates in SchematicPass after each path is solved.
+    return params_.capacity;
 }
 
 RCGResult RCGSolver::solve() {

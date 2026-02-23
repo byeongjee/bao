@@ -98,7 +98,14 @@ PreservedAnalyses SchematicPass::run(Function &F,
     }
 
     // Step 5: Split oversized blocks
-    if (!splitAllOversizedBlocks(F, params.capacity, *ctx.estimator,
+    // The split threshold must account for the minimum checkpoint overhead
+    // (prologue + epilogue + register save/restore) so that every block can
+    // fit inside a single-block interval in the RCG solver.
+    double minCheckpointOverhead =
+        params.E_pro + params.E_epi +
+        params.N_reg * (params.regStoreEnergy + params.regRestoreEnergy);
+    double splitThreshold = params.capacity - minCheckpointOverhead;
+    if (!splitAllOversizedBlocks(F, splitThreshold, *ctx.estimator,
                                   LI, *ctx.cfg)) {
         errs() << "Error: unsplittable block exceeds capacity in "
                << F.getName() << "\n";

@@ -449,7 +449,28 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             info "Compiling with SCHEMATIC..."
             [[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
 
+            # Two-phase compile: annotate trip counts at -O0, then optimize.
+            # This preserves loop structure for __loop_tripcount annotation
+            # before LLVM optimizations can unroll/eliminate loops.
+            SCHEMATIC_FRONTEND_OPT_LEVEL="$CLANG_OPT_LEVEL"
+            CLANG_OPT_LEVEL="0"
             compile_to_ir
+            CLANG_OPT_LEVEL="$SCHEMATIC_FRONTEND_OPT_LEVEL"
+
+            if ! $OPT -load-pass-plugin="$PASS_LIB" \
+                -passes=tripcount-annotation \
+                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/tripcount.ll"; then
+                error "TripCountAnnotation pass failed"
+            fi
+
+            SCHEMATIC_INPUT_LL="$TMP_DIR/tripcount.ll"
+            if [[ "$SCHEMATIC_FRONTEND_OPT_LEVEL" != "0" ]]; then
+                if ! $OPT -passes="default<O$SCHEMATIC_FRONTEND_OPT_LEVEL>" \
+                    -S "$TMP_DIR/tripcount.ll" -o "$TMP_DIR/input_optimized.ll"; then
+                    error "IR optimization pipeline failed at -O$SCHEMATIC_FRONTEND_OPT_LEVEL"
+                fi
+                SCHEMATIC_INPUT_LL="$TMP_DIR/input_optimized.ll"
+            fi
 
             SCHEMATIC_EXTRA_FLAGS=""
             if [[ "$RUNTIME_TYPE" == "mock-counter" ]]; then
@@ -461,7 +482,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 -energy-config="$ESTIMATOR_CONFIG" \
                 -schematic-config="$SCHEMATIC_CONFIG" \
                 $SCHEMATIC_EXTRA_FLAGS \
-                -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" \
+                -S "$SCHEMATIC_INPUT_LL" -o "$TMP_DIR/ckpt.ll" \
                 >"$PASS_LOG" 2>&1; then
                 if [[ "$VERBOSE" == "true" ]]; then
                     cat "$PASS_LOG"
