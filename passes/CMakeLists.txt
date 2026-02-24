@@ -75,7 +75,7 @@ add_library(CheckpointPass MODULE
     src/schematic/SchematicParams.cpp
     src/schematic/SchematicPass.cpp
     src/schematic/IntervalAllocator.cpp
-    src/schematic/PathEnumerator.cpp
+
     src/schematic/RCGSolver.cpp
     src/schematic/LoopAnalyzer.cpp
     src/schematic/SchematicInstrumenter.cpp

@@ -1,10 +1,9 @@
 #pragma once
 
-#include "schematic/PathEnumerator.h"
-
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
 
 #include <optional>
@@ -12,6 +11,13 @@
 #include <vector>
 
 namespace checkpoint {
+
+/// A single entry-to-exit (or header-to-latch) path with execution metadata.
+struct EnumeratedPath {
+    std::vector<llvm::BasicBlock *> blocks;
+    double probability = 0.0;
+    unsigned count = 0; // execution count from trace (0 = unobserved)
+};
 
 struct LoadedLoopTrace {
     llvm::Loop *loop;

@@ -4,6 +4,7 @@
 #include "milp/StateAnalysis.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
+#include "schematic/TraceLoader.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -20,6 +21,9 @@ public:
                  const CFGAnalysis &cfg, const StateAnalysis &state,
                  const SchematicParams &params);
 
+    /// Set loaded loop traces from TraceLoader for trace-guided analysis.
+    void setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces);
+
     /// Returns false if a loop has no trip count annotation (fatal error).
     bool analyzeLoops(SchematicSolution &solution);
 
@@ -29,6 +33,8 @@ private:
     const CFGAnalysis &cfg_;
     const StateAnalysis &state_;
     const SchematicParams &params_;
+
+    std::vector<LoadedLoopTrace> loadedLoopTraces_;
 
     bool analyzeLoop(llvm::Loop *L, SchematicSolution &solution);
     std::optional<uint64_t> getMaxTripCount(llvm::Loop *L) const;
