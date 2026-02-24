@@ -3,6 +3,14 @@
 # Benchmark SCHEMATIC checkpoint insertion across all intermittent benchmarks
 # and capacitor sizes. Outputs a CSV summary.
 #
+# Pipeline per benchmark:
+#   1. clang -O0 → LLVM IR
+#   2. opt -passes=tripcount-annotation → annotate loop trip counts
+#   3. opt -O2 → optimize
+#   4. opt -passes=trace-collect → instrument for tracing
+#   5. compile + run trace binary → schematic_trace.json  (once per benchmark)
+#   6. opt -passes="tripcount-annotation,schematic" → checkpoint insertion (per capacitor)
+#
 # Usage:
 #   ./scripts/benchmark_schematic.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
 #
@@ -27,7 +35,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Paths
+PASS_PLUGIN="$PROJECT_DIR/passes/build/CheckpointPass.so"
 ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_energy_config_ir.json"
+TRACE_RUNTIME="$PROJECT_DIR/passes/runtime/schematic_trace_runtime.c"
+RUNTIME_DIR="$PROJECT_DIR/passes/runtime"
+TMPDIR="${TMPDIR:-/tmp}/schematic_bench_$$"
+mkdir -p "$TMPDIR"
+
+# macOS SDK for system headers (custom-built clang needs this)
+SDK_PATH=""
+if [[ "$(uname)" == "Darwin" ]]; then
+    SDK_PATH=$(xcrun --show-sdk-path 2>/dev/null || true)
+fi
+SDK_FLAGS=()
+if [[ -n "$SDK_PATH" ]]; then
+    SDK_FLAGS=(-isysroot "$SDK_PATH")
+fi
 
 CAPACITOR_CONFIGS=(
     "100nF:$PROJECT_DIR/benchmarks/sample_schematic_config_100nF.json"
@@ -35,6 +59,13 @@ CAPACITOR_CONFIGS=(
     "10uF:$PROJECT_DIR/benchmarks/sample_schematic_config_10uF.json"
     "100uF:$PROJECT_DIR/benchmarks/sample_schematic_config_100uF.json"
 )
+
+# Verify pass plugin exists
+if [[ ! -f "$PASS_PLUGIN" ]]; then
+    echo "Error: Pass plugin not found at $PASS_PLUGIN" >&2
+    echo "       Run: cd passes/build && cmake .. && make" >&2
+    exit 1
+fi
 
 # Find benchmarks
 BENCHMARKS=()
@@ -59,11 +90,10 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,regions,checkpoints_placed,paths_analyzed,vm_variables,nvm_variables,total_execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls"
+HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,enabled_checkpoints,loop_decisions,regions,paths_analyzed,runtime_calls_inserted"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 # Extract first numeric/token value after "label:" from output.
-# Accepts multiple labels and returns the first match.
 extract_stat() {
     local output="$1"
     shift
@@ -89,6 +119,108 @@ count=0
 for bench_path in "${BENCHMARKS[@]}"; do
     bench_name=$(basename "$bench_path" .c)
 
+    # === Per-benchmark preparation (steps 1-5): compile, annotate, optimize, trace ===
+    echo ""
+    echo "--- Preparing $bench_name (compile + trace) ---"
+
+    ll_o0="$TMPDIR/${bench_name}_O0.ll"
+    ll_ann="$TMPDIR/${bench_name}_ann.ll"
+    ll_o2="$TMPDIR/${bench_name}_O2.ll"
+    ll_trace_inst="$TMPDIR/${bench_name}_trace_inst.ll"
+    trace_bin="$TMPDIR/${bench_name}_trace_run"
+    trace_json="$TMPDIR/${bench_name}_trace.json"
+
+    # Step 1: C → LLVM IR at O0
+    prep_output=""
+    if ! prep_output=$(clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+            -I "$RUNTIME_DIR" "${SDK_FLAGS[@]}" \
+            "$bench_path" -o "$ll_o0" 2>&1); then
+        echo "  FAILED: clang compilation"
+        [[ "$VERBOSE" -eq 1 ]] && echo "$prep_output"
+        for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
+            cap_label="${cap_entry%%:*}"
+            count=$((count + 1))
+            echo "${bench_name},${cap_label},COMPILE_FAILED,,,,,,," >> "$OUTPUT_CSV"
+        done
+        continue
+    fi
+
+    # Step 2: Annotate trip counts
+    if ! prep_output=$(opt -load-pass-plugin="$PASS_PLUGIN" \
+            -passes=tripcount-annotation \
+            -S "$ll_o0" -o "$ll_ann" 2>&1); then
+        echo "  FAILED: trip count annotation"
+        [[ "$VERBOSE" -eq 1 ]] && echo "$prep_output"
+        for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
+            cap_label="${cap_entry%%:*}"
+            count=$((count + 1))
+            echo "${bench_name},${cap_label},ANNOTATE_FAILED,,,,,,," >> "$OUTPUT_CSV"
+        done
+        continue
+    fi
+
+    # Step 3: Optimize at O2
+    if ! prep_output=$(opt -O2 -S "$ll_ann" -o "$ll_o2" 2>&1); then
+        echo "  FAILED: O2 optimization"
+        [[ "$VERBOSE" -eq 1 ]] && echo "$prep_output"
+        for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
+            cap_label="${cap_entry%%:*}"
+            count=$((count + 1))
+            echo "${bench_name},${cap_label},OPT_FAILED,,,,,,," >> "$OUTPUT_CSV"
+        done
+        continue
+    fi
+
+    # Step 4: Instrument for trace collection
+    if ! prep_output=$(opt -load-pass-plugin="$PASS_PLUGIN" \
+            -passes=trace-collect \
+            -energy-config="$ENERGY_CONFIG" \
+            -S "$ll_o2" -o "$ll_trace_inst" 2>&1); then
+        echo "  FAILED: trace instrumentation"
+        [[ "$VERBOSE" -eq 1 ]] && echo "$prep_output"
+        for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
+            cap_label="${cap_entry%%:*}"
+            count=$((count + 1))
+            echo "${bench_name},${cap_label},TRACE_INST_FAILED,,,,,,," >> "$OUTPUT_CSV"
+        done
+        continue
+    fi
+    [[ "$VERBOSE" -eq 1 ]] && echo "$prep_output"
+
+    # Step 5: Compile and run trace binary
+    if ! prep_output=$(clang "${SDK_FLAGS[@]}" \
+            "$ll_trace_inst" "$TRACE_RUNTIME" \
+            -o "$trace_bin" 2>&1); then
+        echo "  FAILED: trace binary compilation"
+        [[ "$VERBOSE" -eq 1 ]] && echo "$prep_output"
+        for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
+            cap_label="${cap_entry%%:*}"
+            count=$((count + 1))
+            echo "${bench_name},${cap_label},TRACE_COMPILE_FAILED,,,,,,," >> "$OUTPUT_CSV"
+        done
+        continue
+    fi
+
+    # Run trace binary (ignore exit code — benchmarks may return non-zero)
+    trace_run_output=$("$trace_bin" 2>&1) || true
+    [[ "$VERBOSE" -eq 1 ]] && echo "$trace_run_output"
+
+    # The trace runtime writes to schematic_trace.json in CWD
+    if [[ -f "schematic_trace.json" ]]; then
+        mv "schematic_trace.json" "$trace_json"
+    else
+        echo "  FAILED: trace binary did not produce schematic_trace.json"
+        for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
+            cap_label="${cap_entry%%:*}"
+            count=$((count + 1))
+            echo "${bench_name},${cap_label},TRACE_RUN_FAILED,,,,,,," >> "$OUTPUT_CSV"
+        done
+        continue
+    fi
+
+    echo "  Trace collected for $bench_name"
+
+    # === Per-capacitor: run SCHEMATIC (step 6) ===
     for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
         cap_label="${cap_entry%%:*}"
         cap_config="${cap_entry#*:}"
@@ -97,66 +229,49 @@ for bench_path in "${BENCHMARKS[@]}"; do
         row_name="${bench_name}-${cap_label}"
         echo "[$count/$total] Running $row_name ..."
 
-        run_cmd=(
-            "$SCRIPT_DIR/compile_and_flash.sh"
-            --mode schematic
-            --runtime mock-counter
-            -e "$ENERGY_CONFIG"
-            -s "$cap_config"
-            --local
-            -I "$PROJECT_DIR/passes/runtime"
-            --verbose
-            "$bench_path"
-        )
-        printf -v run_cmd_display '%q ' "${run_cmd[@]}"
-        run_cmd_display="${run_cmd_display% }"
-        echo "  Command: $run_cmd_display"
+        if [[ ! -f "$cap_config" ]]; then
+            echo "  SKIPPED: config not found: $cap_config"
+            echo "$bench_name,$cap_label,CONFIG_NOT_FOUND,,,,,,," >> "$OUTPUT_CSV"
+            continue
+        fi
 
-        # Run compile_and_flash, capture all output regardless of exit code
-        full_output=$("${run_cmd[@]}" 2>&1) || true
+        # Step 6: Run SCHEMATIC pass
+        ll_out="$TMPDIR/${bench_name}_${cap_label}_out.ll"
+        full_output=$(opt -load-pass-plugin="$PASS_PLUGIN" \
+            -passes="tripcount-annotation,schematic" \
+            -energy-config="$ENERGY_CONFIG" \
+            -schematic-config="$cap_config" \
+            -schematic-trace="$trace_json" \
+            -S "$ll_o2" -o "$ll_out" 2>&1) || true
 
         if [[ "$VERBOSE" -eq 1 ]]; then
             echo "$full_output"
         fi
 
-        # Check for compilation failure (no SCHEMATIC statistics at all)
+        # Check for failure
         if ! echo "$full_output" | grep -q "SCHEMATIC Checkpoint Insertion Statistics"; then
-            echo "  FAILED (compilation error)"
-            echo "$row_name,$cap_label,FAILED,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "  FAILED (SCHEMATIC pass error)"
+            [[ "$VERBOSE" -eq 0 ]] && echo "$full_output" | tail -5
+            echo "$bench_name,$cap_label,FAILED,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
 
         basic_blocks=$(extract_stat "$full_output" "Basic blocks")
         edges=$(extract_stat "$full_output" "Edges")
         candidate_globals=$(extract_stat "$full_output" "Candidate globals (V_elig)")
+        enabled_ckpts=$(extract_stat "$full_output" "Enabled checkpoints")
+        loop_decisions=$(extract_stat "$full_output" "Loop decisions")
         regions=$(extract_stat "$full_output" "Regions")
-        checkpoints_placed=$(extract_stat "$full_output" "Checkpoints placed")
         paths_analyzed=$(extract_stat "$full_output" "Paths analyzed")
-        vm_variables=$(extract_stat "$full_output" "Variables placed in VM")
-        nvm_variables=$(extract_stat "$full_output" "Variables placed in NVM")
-        total_exec_time=$(extract_stat "$full_output" "Total execution time (ms)")
+        runtime_calls=$(extract_stat "$full_output" "Runtime calls inserted")
 
-        # Extract mock counter stats
-        prologue=$(extract_stat "$full_output" "__region_prologue")
-        epilogue=$(extract_stat "$full_output" "__region_epilogue")
-        store_reg=$(extract_stat "$full_output" "__checkpoint_store_reg")
-        store_mem=$(extract_stat "$full_output" "__checkpoint_store_mem")
-        restore_reg=$(extract_stat "$full_output" "__restore_reg")
-        restore_mem=$(extract_stat "$full_output" "__restore_mem")
-
-        # Default to 0 if not found
-        prologue=${prologue:-0}
-        epilogue=${epilogue:-0}
-        store_reg=${store_reg:-0}
-        store_mem=${store_mem:-0}
-        restore_reg=${restore_reg:-0}
-        restore_mem=${restore_mem:-0}
-        total_exec_time=${total_exec_time:-0}
-
-        echo "$row_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$regions,$checkpoints_placed,$paths_analyzed,$vm_variables,$nvm_variables,$total_exec_time,$prologue,$epilogue,$store_reg,$store_mem,$restore_reg,$restore_mem" >> "$OUTPUT_CSV"
-        echo "  OK ($regions regions, $checkpoints_placed checkpoints)"
+        echo "$bench_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$enabled_ckpts,$loop_decisions,$regions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
+        echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls)"
     done
 done
+
+# Cleanup
+rm -rf "$TMPDIR"
 
 echo ""
 echo "=========================================="
