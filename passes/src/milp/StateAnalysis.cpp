@@ -14,6 +14,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <queue>
+#include <limits>
 
 namespace checkpoint {
 
@@ -237,10 +238,20 @@ void StateAnalysis::identifyIneligibleObjs() {
             if (!AI->getAllocatedType()->isSized())
                 continue;
 
+            auto *arraySizeCI = llvm::cast<llvm::ConstantInt>(AI->getArraySize());
+            uint64_t elemBytes = DL.getTypeAllocSize(AI->getAllocatedType());
+            uint64_t elemCount = arraySizeCI->getZExtValue();
+            uint64_t totalBytes = elemBytes * elemCount;
+            if (totalBytes > std::numeric_limits<unsigned>::max()) {
+                llvm::report_fatal_error(
+                    "MILP checkpoint pass: alloca '%" + AI->getName() +
+                    "' in function '" + F_.getName() +
+                    "' exceeds size model range");
+            }
+
             ineligibleObjs_.push_back(AI);
             ineligibleObjSet_.insert(AI);
-            unsigned sizeBytes = DL.getTypeAllocSize(AI->getAllocatedType());
-            varSizeBytes_[AI] = sizeBytes;
+            varSizeBytes_[AI] = static_cast<unsigned>(totalBytes);
         }
     }
 }

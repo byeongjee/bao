@@ -105,7 +105,14 @@ void CheckpointInstrumenter::createNVMBackupGlobals(
             backupType = GV->getValueType();
             backupName = "__nvm_backup_" + GV->getName().str();
         } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-            backupType = AI->getAllocatedType();
+            auto *arraySizeCI = llvm::cast<llvm::ConstantInt>(AI->getArraySize());
+            uint64_t elemCount = arraySizeCI->getZExtValue();
+            if (elemCount <= 1) {
+                backupType = AI->getAllocatedType();
+            } else {
+                backupType = llvm::ArrayType::get(
+                    AI->getAllocatedType(), elemCount);
+            }
             backupName = "__nvm_alloca_" + (AI->hasName()
                              ? AI->getName().str()
                              : std::to_string(ssaCounter++));
