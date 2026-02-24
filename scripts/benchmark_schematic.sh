@@ -10,6 +10,7 @@
 #   4. opt -passes=trace-collect → instrument for tracing
 #   5. compile + run trace binary → schematic_trace.json  (once per benchmark)
 #   6. opt -passes="tripcount-annotation,schematic" → checkpoint insertion (per capacitor)
+#   7. compile + run instrumented binary with mock counter runtime (per capacitor)
 #
 # Usage:
 #   ./scripts/benchmark_schematic.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
@@ -39,6 +40,7 @@ done
 PASS_PLUGIN="$PROJECT_DIR/passes/build/CheckpointPass.so"
 ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_energy_config_ir.json"
 TRACE_RUNTIME="$PROJECT_DIR/passes/runtime/schematic_trace_runtime.c"
+MOCK_RUNTIME="$PROJECT_DIR/passes/runtime/schematic_mock_ckpt_counter.c"
 RUNTIME_DIR="$PROJECT_DIR/passes/runtime"
 TMPDIR="${TMPDIR:-/tmp}/schematic_bench_$$"
 mkdir -p "$TMPDIR"
@@ -90,8 +92,10 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,enabled_checkpoints,loop_decisions,regions,paths_analyzed,runtime_calls_inserted"
+HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,enabled_checkpoints,loop_decisions,regions,paths_analyzed,runtime_calls_inserted,rt_prologue,rt_epilogue,rt_store_reg,rt_store_mem,rt_restore_reg,rt_restore_mem"
 echo "$HEADER" > "$OUTPUT_CSV"
+
+FAIL_COLS=",,,,,,,,,,,,,,"  # 14 empty fields for error rows
 
 # Extract first numeric/token value after "label:" from output.
 extract_stat() {
@@ -111,6 +115,20 @@ extract_stat() {
         fi
     done
     return 1
+}
+
+# Extract runtime counter value from mock counter output.
+extract_counter() {
+    local output="$1"
+    local label="$2"
+    local line value
+    line=$(echo "$output" | grep -F "$label:" | head -1 || true)
+    if [[ -n "$line" ]]; then
+        value=$(echo "$line" | awk '{print $NF}')
+        echo "$value"
+    else
+        echo "0"
+    fi
 }
 
 total=$((${#BENCHMARKS[@]} * ${#CAPACITOR_CONFIGS[@]}))
@@ -140,7 +158,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},COMPILE_FAILED,,,,,,," >> "$OUTPUT_CSV"
+            echo "${bench_name},${cap_label},COMPILE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -154,7 +172,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},ANNOTATE_FAILED,,,,,,," >> "$OUTPUT_CSV"
+            echo "${bench_name},${cap_label},ANNOTATE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -166,7 +184,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},OPT_FAILED,,,,,,," >> "$OUTPUT_CSV"
+            echo "${bench_name},${cap_label},OPT_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -181,7 +199,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},TRACE_INST_FAILED,,,,,,," >> "$OUTPUT_CSV"
+            echo "${bench_name},${cap_label},TRACE_INST_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -196,7 +214,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},TRACE_COMPILE_FAILED,,,,,,," >> "$OUTPUT_CSV"
+            echo "${bench_name},${cap_label},TRACE_COMPILE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -213,14 +231,14 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},TRACE_RUN_FAILED,,,,,,," >> "$OUTPUT_CSV"
+            echo "${bench_name},${cap_label},TRACE_RUN_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
 
     echo "  Trace collected for $bench_name"
 
-    # === Per-capacitor: run SCHEMATIC (step 6) ===
+    # === Per-capacitor: run SCHEMATIC (step 6) + compile & run (step 7) ===
     for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
         cap_label="${cap_entry%%:*}"
         cap_config="${cap_entry#*:}"
@@ -231,7 +249,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
 
         if [[ ! -f "$cap_config" ]]; then
             echo "  SKIPPED: config not found: $cap_config"
-            echo "$bench_name,$cap_label,CONFIG_NOT_FOUND,,,,,,," >> "$OUTPUT_CSV"
+            echo "$bench_name,$cap_label,CONFIG_NOT_FOUND${FAIL_COLS}" >> "$OUTPUT_CSV"
             continue
         fi
 
@@ -252,7 +270,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         if ! echo "$full_output" | grep -q "SCHEMATIC Checkpoint Insertion Statistics"; then
             echo "  FAILED (SCHEMATIC pass error)"
             [[ "$VERBOSE" -eq 0 ]] && echo "$full_output" | tail -5
-            echo "$bench_name,$cap_label,FAILED,,,,,,," >> "$OUTPUT_CSV"
+            echo "$bench_name,$cap_label,FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
             continue
         fi
 
@@ -265,8 +283,44 @@ for bench_path in "${BENCHMARKS[@]}"; do
         paths_analyzed=$(extract_stat "$full_output" "Paths analyzed")
         runtime_calls=$(extract_stat "$full_output" "Runtime calls inserted")
 
-        echo "$bench_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$enabled_ckpts,$loop_decisions,$regions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
-        echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls)"
+        # Step 7: Compile and run instrumented binary with mock counter
+        # Strip ELF-only .nvm section specifier (invalid on Mach-O)
+        sed -i '' 's/, section ".nvm"//g' "$ll_out"
+
+        inst_bin="$TMPDIR/${bench_name}_${cap_label}_run"
+        rt_prologue=""
+        rt_epilogue=""
+        rt_store_reg=""
+        rt_store_mem=""
+        rt_restore_reg=""
+        rt_restore_mem=""
+
+        if compile_output=$(clang "${SDK_FLAGS[@]}" \
+                "$ll_out" "$MOCK_RUNTIME" \
+                -o "$inst_bin" 2>&1); then
+            # Run instrumented binary (ignore exit code)
+            run_output=$("$inst_bin" 2>&1) || true
+            [[ "$VERBOSE" -eq 1 ]] && echo "$run_output"
+
+            rt_prologue=$(extract_counter "$run_output" "__region_prologue")
+            rt_epilogue=$(extract_counter "$run_output" "__region_epilogue")
+            rt_store_reg=$(extract_counter "$run_output" "__checkpoint_store_reg")
+            rt_store_mem=$(extract_counter "$run_output" "__checkpoint_store_mem")
+            rt_restore_reg=$(extract_counter "$run_output" "__restore_reg")
+            rt_restore_mem=$(extract_counter "$run_output" "__restore_mem")
+        else
+            echo "  WARNING: instrumented binary compilation failed"
+            [[ "$VERBOSE" -eq 1 ]] && echo "$compile_output"
+            rt_prologue="COMPILE_FAILED"
+            rt_epilogue=""
+            rt_store_reg=""
+            rt_store_mem=""
+            rt_restore_reg=""
+            rt_restore_mem=""
+        fi
+
+        echo "$bench_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$enabled_ckpts,$loop_decisions,$regions,$paths_analyzed,$runtime_calls,$rt_prologue,$rt_epilogue,$rt_store_reg,$rt_store_mem,$rt_restore_reg,$rt_restore_mem" >> "$OUTPUT_CSV"
+        echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $rt_prologue prologues)"
     done
 done
 
