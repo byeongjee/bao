@@ -245,13 +245,33 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
         inserted++;
     }
 
-    // Phase 3: Epilogue.
+    // Phase 3: Epilogue + register save markers.
     builder.CreateCall(epilogueFn_);
     inserted++;
+    if (addDebugMarkers_) {
+        for (unsigned r = 0; r < N_reg_; ++r) {
+            auto *slotId = llvm::ConstantInt::get(
+                llvm::Type::getInt32Ty(M_.getContext()), r);
+            auto *val = llvm::ConstantInt::get(
+                llvm::Type::getInt64Ty(M_.getContext()), 0);
+            builder.CreateCall(storeRegFn_, {slotId, val});
+            inserted++;
+        }
+    }
 
-    // Phase 4: Prologue.
+    // Phase 4: Prologue + register restore markers.
     builder.CreateCall(prologueFn_);
     inserted++;
+    if (addDebugMarkers_) {
+        for (unsigned r = 0; r < N_reg_; ++r) {
+            auto *slotId = llvm::ConstantInt::get(
+                llvm::Type::getInt32Ty(M_.getContext()), r);
+            auto *nullPtr = llvm::ConstantPointerNull::get(
+                llvm::PointerType::getUnqual(M_.getContext()));
+            builder.CreateCall(restoreRegFn_, {slotId, nullPtr});
+            inserted++;
+        }
+    }
 
     // Phase 5: Restore starting region's VM vars with live_start=true.
     if (startingAlloc) {
