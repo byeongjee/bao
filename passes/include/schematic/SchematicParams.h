@@ -19,6 +19,7 @@ struct SchematicParams {
     unsigned vmCapacityBytes;       // VM (SRAM) capacity in bytes
     unsigned maxPaths;              // Maximum paths to enumerate
     bool addDebugMarkers = false;   // Emit debug marker calls
+    bool enableBlockSplitting = true; // Split oversized blocks before solving
 };
 
 /// Parse SCHEMATIC parameters from a JSON config file.

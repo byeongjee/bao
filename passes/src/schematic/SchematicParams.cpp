@@ -71,6 +71,28 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
         params.addDebugMarkers = config["add_debug_markers"].get<bool>();
     }
 
+    params.enableBlockSplitting = true;
+    if (config.contains("enable_block_splitting")) {
+        if (!config["enable_block_splitting"].is_boolean()) {
+            llvm::errs() << "Error: Field 'enable_block_splitting' must be "
+                         << "boolean in SCHEMATIC config: " << configPath
+                         << "\n";
+            return std::nullopt;
+        }
+        params.enableBlockSplitting =
+            config["enable_block_splitting"].get<bool>();
+    }
+    if (config.contains("disable_block_splitting")) {
+        if (!config["disable_block_splitting"].is_boolean()) {
+            llvm::errs() << "Error: Field 'disable_block_splitting' must be "
+                         << "boolean in SCHEMATIC config: " << configPath
+                         << "\n";
+            return std::nullopt;
+        }
+        params.enableBlockSplitting =
+            !config["disable_block_splitting"].get<bool>();
+    }
+
     return params;
 }
 
