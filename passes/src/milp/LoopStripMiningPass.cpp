@@ -58,6 +58,7 @@ struct LoopRewritePlan {
     uint64_t N = 0;
     uint64_t K = 0;
     double iterEnergy = 0.0;
+    bool isChunking = false;
 };
 
 struct PlanResult {
@@ -81,6 +82,7 @@ struct LoopStripMiningStats {
     unsigned loopsSeen = 0;
     unsigned loopsEligible = 0;
     unsigned loopsRewritten = 0;
+    unsigned loopsChunked = 0;
     std::map<std::string, unsigned> skippedReasons;
     std::vector<std::pair<std::string, uint64_t>> chosenKByHeader;
 };
@@ -457,6 +459,7 @@ static PlanResult buildRewritePlan(
     PlanResult result;
     result.skipReason = "unknown";
 
+    // ── Common checks (both strip mining and chunking) ──
     if (!L->isLoopSimplifyForm()) {
         result.skipReason = "not-loop-simplify-form";
         return result;
@@ -469,49 +472,23 @@ static PlanResult buildRewritePlan(
         result.skipReason = "missing-preheader";
         return result;
     }
-    if (!L->getLoopLatch()) {
+    BasicBlock *Latch = L->getLoopLatch();
+    if (!Latch) {
         result.skipReason = "missing-single-latch";
         return result;
     }
-    if (!L->getCanonicalInductionVariable()) {
-        result.skipReason = "missing-canonical-induction";
-        return result;
-    }
-
-    SmallVector<BasicBlock *, 8> exitingBlocks;
-    L->getExitingBlocks(exitingBlocks);
-    if (exitingBlocks.size() != 1) {
-        result.skipReason = "requires-single-exiting-block";
-        return result;
-    }
-
     if (containsInvoke(L)) {
         result.skipReason = "contains-invoke";
         return result;
     }
 
-    std::optional<uint64_t> tripCount =
-        getConstantTripCount(L, SE, exitingBlocks.front());
-    if (!tripCount) {
-        result.skipReason = "nonconstant-trip-count";
-        return result;
-    }
-    if (*tripCount < 2) {
-        result.skipReason = "trip-count-too-small";
-        return result;
-    }
-
+    // ── Common: compute energy budget and K ──
     double budget = params.capacity - params.E_pro - params.E_epi;
     if (budget <= 0.0) {
         result.skipReason = "nonpositive-energy-budget";
         return result;
     }
 
-    // Tighten budget by:
-    // (1) upper-bound ineligible restore cost, and
-    // (2) user-configured capacitor margin for strip-mining.
-    // This keeps chosen K conservative so summarized loop chunks are more
-    // likely to remain MILP-feasible.
     double ineligMargin = estimateIneligRestoreUpperBound(L, params);
     double stripMiningMargin =
         params.capacity * (params.loopStripMiningMarginPercent / 100.0);
@@ -543,20 +520,75 @@ static PlanResult buildRewritePlan(
         result.skipReason = "k-not-beneficial";
         return result;
     }
-    if (K >= *tripCount) {
-        result.skipReason = "k-covers-entire-loop";
-        return result;
-    }
     if (K > std::numeric_limits<unsigned>::max()) {
         result.skipReason = "k-too-large";
         return result;
     }
 
+    // ── Tier 1: Try strip mining ──
+    // Requires: canonical IV, single exiting block, constant trip count, K < N
+    PHINode *IV = L->getCanonicalInductionVariable();
+    SmallVector<BasicBlock *, 8> exitingBlocks;
+    L->getExitingBlocks(exitingBlocks);
+
+    if (IV && exitingBlocks.size() == 1) {
+        std::optional<uint64_t> tripCount =
+            getConstantTripCount(L, SE, exitingBlocks.front());
+        if (tripCount && *tripCount >= 2) {
+            if (K >= *tripCount) {
+                result.skipReason = "k-covers-entire-loop";
+                return result;
+            }
+            LoopRewritePlan plan;
+            plan.L = L;
+            plan.N = *tripCount;
+            plan.K = K;
+            plan.iterEnergy = iterEnergy.energy;
+            plan.isChunking = false;
+            result.plan = plan;
+            result.skipReason.clear();
+            return result;
+        }
+    }
+
+    // ── Tier 2: Chunking fallback ──
+    // Only needs: latch has a BranchInst with backedge to header
+    BasicBlock *Header = L->getHeader();
+    BranchInst *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
+    if (!LatchBr) {
+        result.skipReason = "latch-not-branch-inst";
+        return result;
+    }
+
+    bool hasBackedge = false;
+    for (unsigned i = 0; i < LatchBr->getNumSuccessors(); i++) {
+        if (LatchBr->getSuccessor(i) == Header) {
+            hasBackedge = true;
+            break;
+        }
+    }
+    if (!hasBackedge) {
+        result.skipReason = "latch-no-backedge-to-header";
+        return result;
+    }
+
+    // If we can determine trip count and K covers it, skip
+    std::optional<uint64_t> knownTC;
+    if (exitingBlocks.size() == 1)
+        knownTC = getConstantTripCount(L, SE, exitingBlocks.front());
+    if (!knownTC)
+        knownTC = getMarkerTripCount(L);
+    if (knownTC && K >= *knownTC) {
+        result.skipReason = "k-covers-entire-loop";
+        return result;
+    }
+
     LoopRewritePlan plan;
     plan.L = L;
-    plan.N = *tripCount;
+    plan.N = 0; // unknown trip count for chunking
     plan.K = K;
     plan.iterEnergy = iterEnergy.energy;
+    plan.isChunking = true;
     result.plan = plan;
     result.skipReason.clear();
     return result;
@@ -818,11 +850,169 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
     return true;
 }
 
+static bool chunkLoop(const LoopRewritePlan &plan,
+                      LoopInfo &LI,
+                      ScalarEvolution &SE,
+                      DominatorTree &DT) {
+    // ── Phase 1: Extract loop components ──
+    Loop *L = plan.L;
+    uint64_t K = plan.K;
+
+    BasicBlock *Preheader = L->getLoopPreheader();
+    BasicBlock *Header    = L->getHeader();
+    BasicBlock *Latch     = L->getLoopLatch();
+    Function *F = Header->getParent();
+    LLVMContext &Ctx = F->getContext();
+
+    if (!Preheader || !Header || !Latch)
+        return false;
+
+    // ── Phase 2: Find latch backedge index (which successor == Header) ──
+    BranchInst *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
+    if (!LatchBr)
+        return false;
+
+    unsigned backedgeIdx = UINT_MAX;
+    for (unsigned i = 0; i < LatchBr->getNumSuccessors(); i++) {
+        if (LatchBr->getSuccessor(i) == Header) {
+            backedgeIdx = i;
+            break;
+        }
+    }
+    if (backedgeIdx == UINT_MAX)
+        return false;
+
+    // ── Phase 3: Create outer.header, counter.check, outer.latch blocks ──
+    BasicBlock *OuterHeader  = BasicBlock::Create(Ctx, "outer.header", F, Header);
+    BasicBlock *CounterCheck = BasicBlock::Create(Ctx, "counter.check", F);
+    BasicBlock *OuterLatch   = BasicBlock::Create(Ctx, "outer.latch", F);
+
+    // ── Phase 4: Build outer.header — forward all header PHIs through outer PHIs ──
+    IRBuilder<> OHB(OuterHeader);
+
+    struct HeaderPhiInfo {
+        PHINode *headerPhi;
+        PHINode *outerPhi;
+        Value   *initVal;
+    };
+    SmallVector<HeaderPhiInfo, 8> headerPhiForwarding;
+    for (PHINode &PN : Header->phis()) {
+        Value *InitVal = PN.getIncomingValueForBlock(Preheader);
+        PHINode *OHP = OHB.CreatePHI(PN.getType(), 2, PN.getName() + ".outer");
+        headerPhiForwarding.push_back({&PN, OHP, InitVal});
+    }
+    OHB.CreateBr(Header);
+
+    // ── Phase 5: Rewire Preheader → OuterHeader, update header PHI incoming ──
+    Preheader->getTerminator()->replaceSuccessorWith(Header, OuterHeader);
+
+    for (auto &info : headerPhiForwarding) {
+        int idx = info.headerPhi->getBasicBlockIndex(Preheader);
+        if (idx >= 0) {
+            info.headerPhi->setIncomingBlock(idx, OuterHeader);
+            info.headerPhi->setIncomingValue(idx, info.outerPhi);
+        }
+    }
+
+    // ── Phase 6: Add chunk.counter PHI to header ──
+    Type *I64Ty = Type::getInt64Ty(Ctx);
+    PHINode *ChunkCounter = PHINode::Create(I64Ty, 2, "chunk.counter",
+                                            Header->getFirstNonPHIIt());
+
+    // ── Phase 7: Redirect latch backedge: Latch → CounterCheck ──
+    LatchBr->setSuccessor(backedgeIdx, CounterCheck);
+
+    // ── Phase 8: Build counter.check — increment counter, branch ──
+    IRBuilder<> CCB(CounterCheck);
+    Value *CounterNext = CCB.CreateAdd(ChunkCounter,
+                                       ConstantInt::get(I64Ty, 1),
+                                       "counter.next");
+    Value *CounterDone = CCB.CreateICmpEQ(CounterNext,
+                                          ConstantInt::get(I64Ty, K),
+                                          "counter.done");
+    CCB.CreateCondBr(CounterDone, OuterLatch, Header);
+
+    // ── Phase 9: Update header PHIs — incoming block Latch → CounterCheck ──
+    for (auto &info : headerPhiForwarding) {
+        int idx = info.headerPhi->getBasicBlockIndex(Latch);
+        if (idx >= 0) {
+            info.headerPhi->setIncomingBlock(idx, CounterCheck);
+        }
+    }
+
+    // Complete chunk counter PHI
+    ChunkCounter->addIncoming(ConstantInt::get(I64Ty, 0), OuterHeader);
+    ChunkCounter->addIncoming(CounterNext, CounterCheck);
+
+    // ── Phase 10: Build outer.latch — forward loop-carried values ──
+    IRBuilder<> OLB(OuterLatch);
+
+    // Capture loop-carried values (originally from Latch, now from CounterCheck)
+    SmallVector<Value *, 8> forwardedValues;
+    for (auto &info : headerPhiForwarding) {
+        int idx = info.headerPhi->getBasicBlockIndex(CounterCheck);
+        Value *CarriedVal = info.headerPhi->getIncomingValue(idx);
+        forwardedValues.push_back(CarriedVal);
+    }
+    OLB.CreateBr(OuterHeader);
+
+    // ── Phase 11: Complete outer.header PHIs (init from Preheader, fwd from OuterLatch) ──
+    for (unsigned i = 0; i < headerPhiForwarding.size(); i++) {
+        auto &info = headerPhiForwarding[i];
+        info.outerPhi->addIncoming(info.initVal, Preheader);
+        info.outerPhi->addIncoming(forwardedValues[i], OuterLatch);
+    }
+
+    // ── Phase 12: Update LoopInfo ──
+    Loop *ParentLoop = L->getParentLoop();
+    Loop *OuterLoop = LI.AllocateLoop();
+
+    if (ParentLoop) {
+        for (auto I = ParentLoop->begin(); I != ParentLoop->end(); ++I) {
+            if (*I == L) { ParentLoop->removeChildLoop(I); break; }
+        }
+        ParentLoop->addChildLoop(OuterLoop);
+    } else {
+        for (auto I = LI.begin(); I != LI.end(); ++I) {
+            if (*I == L) { LI.removeLoop(I); break; }
+        }
+        LI.addTopLevelLoop(OuterLoop);
+    }
+    OuterLoop->addChildLoop(L);
+
+    OuterLoop->addBasicBlockToLoop(OuterHeader, LI);
+    OuterLoop->addBasicBlockToLoop(OuterLatch, LI);
+    L->addBasicBlockToLoop(CounterCheck, LI);
+
+    for (BasicBlock *BB : L->blocks())
+        OuterLoop->addBlockEntry(BB);
+
+    OuterLoop->moveToHeader(OuterHeader);
+
+    // ── Phase 13: Rebuild DomTree ──
+    DT.recalculate(*F);
+
+    // ── Phase 14: Set metadata on inner loop ──
+    removeLoopTripCountMetadata(L);
+    setLoopTripCountMetadata(L, K);
+    setStripMinedLoopMetadata(L);
+    // No metadata on outer loop (unknown trip count)
+
+    // ── Phase 15: LCSSA repair, SCEV invalidation ──
+    formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
+    SE.forgetLoop(L);
+
+    return true;
+}
+
 static void printSummary(const Function &F, const LoopStripMiningStats &stats) {
     errs() << "=== Loop Strip-Mining: " << F.getName() << " ===\n";
     errs() << "  Loops considered:                " << stats.loopsSeen << "\n";
     errs() << "  Eligible loops:                  " << stats.loopsEligible << "\n";
     errs() << "  Rewritten loops:                 " << stats.loopsRewritten << "\n";
+    errs() << "    Strip-mined:                   "
+           << (stats.loopsRewritten - stats.loopsChunked) << "\n";
+    errs() << "    Chunked:                       " << stats.loopsChunked << "\n";
 
     unsigned skippedTotal = 0;
     for (const auto &entry : stats.skippedReasons) {
@@ -934,8 +1124,9 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
         plan.L = L;
         stats.loopsEligible++;
 
-        bool rewritten =
-            stripMineLoop(plan, LI, SE, DT, AC, AA, TTI);
+        bool rewritten = plan.isChunking
+            ? chunkLoop(plan, LI, SE, DT)
+            : stripMineLoop(plan, LI, SE, DT, AC, AA, TTI);
         if (!rewritten) {
             stats.skippedReasons["rewrite-utility-failed"]++;
             if (LoopStripMiningVerboseOpt) {
@@ -947,10 +1138,14 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
 
         changed = true;
         stats.loopsRewritten++;
+        if (plan.isChunking)
+            stats.loopsChunked++;
         stats.chosenKByHeader.emplace_back(headerName, plan.K);
         if (LoopStripMiningVerboseOpt) {
-            errs() << "LoopStripMiningPass: rewritten " << F.getName() << "::"
-                   << headerName << " N=" << plan.N << " K=" << plan.K
+            errs() << "LoopStripMiningPass: "
+                   << (plan.isChunking ? "chunked " : "rewritten ")
+                   << F.getName() << "::" << headerName
+                   << " N=" << plan.N << " K=" << plan.K
                    << " E_iter_wc=" << plan.iterEnergy << "\n";
         }
     }
