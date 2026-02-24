@@ -4,6 +4,7 @@
 #include "milp/MILPCheckpointPass.h"
 #include "rockclimb/RockClimbPass.h"
 #include "schematic/SchematicPass.h"
+#include "schematic/TraceCollectorPass.h"
 
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
@@ -56,6 +57,11 @@ cl::opt<std::string> SchematicConfigOpt(
     cl::desc("Path to JSON SCHEMATIC configuration file"),
     cl::value_desc("filename"), cl::init(""));
 
+cl::opt<std::string> SchematicTraceOpt(
+    "schematic-trace",
+    cl::desc("Path to trace JSON for SCHEMATIC"),
+    cl::value_desc("filename"), cl::init(""));
+
 // Plugin registration for new pass manager
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
@@ -101,6 +107,12 @@ llvmGetPassPluginInfo() {
                     FPM.addPass(LCSSAPass());
                     FPM.addPass(checkpoint::SchematicPass());
                     FPM.addPass(PromotePass()); // mem2reg: promote loop counter allocas to SSA
+                    return true;
+                  }
+                  if (Name == "trace-collect") {
+                    FPM.addPass(LoopSimplifyPass());
+                    FPM.addPass(LCSSAPass());
+                    FPM.addPass(checkpoint::TraceCollectorPass());
                     return true;
                   }
                   if (Name == "energy-validate") {

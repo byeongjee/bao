@@ -13,6 +13,7 @@ namespace checkpoint {
 struct EnumeratedPath {
     std::vector<llvm::BasicBlock *> blocks;
     double probability;
+    unsigned count = 0; // execution count from trace (0 = BPI-enumerated)
 };
 
 class PathEnumerator {

@@ -45,6 +45,7 @@ include_directories(
 # Build as a shared module (not using add_llvm_pass_plugin to avoid linking LLVM)
 add_library(CheckpointPass MODULE
     # Common utilities
+    src/common/BBNaming.cpp
     src/common/AnnotationUtils.cpp
     src/common/BlockSplitter.cpp
     src/common/CFGAnalysis.cpp
@@ -78,6 +79,8 @@ add_library(CheckpointPass MODULE
     src/schematic/RCGSolver.cpp
     src/schematic/LoopAnalyzer.cpp
     src/schematic/SchematicInstrumenter.cpp
+    src/schematic/TraceCollectorPass.cpp
+    src/schematic/TraceLoader.cpp
 )
 
 # Use C++17 and disable RTTI/exceptions to match LLVM
