@@ -72,8 +72,23 @@ This produces `CheckpointPass.so`.
 
 ### 1. Compile C to LLVM IR
 
+MILP now requires profile-guided block frequencies. Generate profile data first,
+then compile IR with `-fprofile-instr-use`:
+
 ```bash
-clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
+# 1) Build + run training binary
+clang -O0 -Xclang -disable-O0-optnone \
+    -fprofile-instr-generate=default.profraw \
+    input.c -o input_train
+LLVM_PROFILE_FILE=default.profraw ./input_train || true
+
+# 2) Merge profile data
+llvm-profdata merge -o default.profdata default.profraw
+
+# 3) Emit profiled LLVM IR
+clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+    -fprofile-instr-use=default.profdata \
+    input.c -o input.ll
 ```
 
 > **Note:** The `-Xclang -disable-O0-optnone` flag is required to allow optimization passes to run on `-O0` compiled code.
@@ -84,11 +99,13 @@ clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
 opt -load-pass-plugin=./CheckpointPass.so \
     -passes=milp \
     -energy-config=./benchmarks/sample_ir_energy_config.json \
+    -milp-config=./tests/milp_params.json \
     -checkpoint-function=__milp_checkpoint \
     -S input.ll -o instrumented.ll
 ```
 
 > **Note:** `-passes=checkpoint` is still supported; `-passes=milp` is a clearer alias for the MILP-based pass.
+> **Note:** MILP fails fast if profile metadata is missing in the input IR.
 
 ### Command-line Options
 
@@ -136,13 +153,21 @@ int sum_squares(int n) {
 int main() { return sum_squares(100); }
 EOF
 
-# Compile to IR
-clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone test.c -o test.ll
+# Build/run training binary, then emit profiled IR
+clang -O0 -Xclang -disable-O0-optnone \
+    -fprofile-instr-generate=test.profraw \
+    test.c -o test_train
+LLVM_PROFILE_FILE=test.profraw ./test_train || true
+llvm-profdata merge -o test.profdata test.profraw
+clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+    -fprofile-instr-use=test.profdata \
+    test.c -o test.ll
 
 # Run checkpoint insertion
 opt -load-pass-plugin=./passes/build/CheckpointPass.so \
     -passes=milp \
     -energy-config=./benchmarks/sample_ir_energy_config.json \
+    -milp-config=./tests/milp_params.json \
     -checkpoint-function=__milp_checkpoint \
     -S test.ll -o instrumented.ll
 

@@ -21,9 +21,11 @@ fi
 if [[ -n "${LLVM_DIR}" ]]; then
     CLANG="${CLANG:-${LLVM_DIR}/bin/clang}"
     OPT="${OPT:-${LLVM_DIR}/bin/opt}"
+    LLVM_PROFDATA="${LLVM_PROFDATA:-${LLVM_DIR}/bin/llvm-profdata}"
 else
     CLANG="${CLANG:-clang}"
     OPT="${OPT:-opt}"
+    LLVM_PROFDATA="${LLVM_PROFDATA:-llvm-profdata}"
 fi
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
@@ -37,6 +39,13 @@ ROCKCLIMB_PARAMS="$SCRIPT_DIR/rockclimb_params.json"
 
 # Ensure tmp directory exists
 mkdir -p "$TMP_DIR"
+
+# Sysroot for source-built clang on macOS (needed when linking profile runs)
+SYSROOT_FLAGS=""
+if command -v xcrun &>/dev/null; then
+    SYSROOT_FLAGS="-isysroot $(xcrun --show-sdk-path)"
+fi
+PROFILE_CLANG="$CLANG"
 
 # Colors for output
 RED='\033[0;31m'
@@ -73,15 +82,53 @@ if [ ! -f "$PASS_LIB" ]; then
     exit 1
 fi
 
+if $RUN_MILP || $RUN_ROCKCLIMB; then
+    if ! command -v "$LLVM_PROFDATA" >/dev/null 2>&1; then
+        echo -e "${RED}Error: llvm-profdata not found ($LLVM_PROFDATA)${NC}"
+        exit 1
+    fi
+
+    probe_dir=$(mktemp -d)
+    cat >"$probe_dir/profile_probe.c" <<'EOF'
+int main(void) { return 0; }
+EOF
+    selected_profile_clang=""
+    candidate_clangs=("$PROFILE_CLANG" "$(command -v clang 2>/dev/null || true)" "/usr/bin/clang")
+    for candidate in "${candidate_clangs[@]}"; do
+        [[ -z "$candidate" ]] && continue
+        if "$candidate" $SYSROOT_FLAGS \
+            -fprofile-instr-generate="$probe_dir/profile_probe.profraw" \
+            "$probe_dir/profile_probe.c" -o "$probe_dir/profile_probe_bin" >/dev/null 2>&1; then
+            selected_profile_clang="$candidate"
+            break
+        fi
+    done
+
+    if [[ -z "$selected_profile_clang" ]]; then
+        echo -e "${RED}Error: no clang toolchain can link -fprofile-instr-generate binaries${NC}"
+        rm -rf "$probe_dir"
+        exit 1
+    fi
+
+    PROFILE_CLANG="$selected_profile_clang"
+    if [[ "$PROFILE_CLANG" != "$CLANG" ]]; then
+        echo -e "${YELLOW}Info: using $PROFILE_CLANG for profile generation${NC}"
+    fi
+    rm -rf "$probe_dir"
+fi
+
 # Test entries: name:description:pass:estimator_config:milp_or_rc_config:clang_opt:check_type
 #   pass            = checkpoint | rockclimb
 #   estimator_config = estimator config filename (relative to SCRIPT_DIR)
 #   milp_or_rc_config = MILP or RockClimb params config filename
 #   clang_opt       = O3 | O0 (O0 adds -Xclang -disable-O0-optnone)
-#   check_type      = pass (expect success) | infeasible (expect capacity error) | regions (check "Region boundaries")
+#   check_type      = pass (expect success) | infeasible (expect capacity error) |
+#                     regions (check "Region boundaries") |
+#                     missing_profile (expect hard profile-data error)
 
 MILP_TESTS=(
     "test_linear:Linear sequence - basic energy propagation:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
+    "test_linear:MILP rejects non-profiled IR (expect hard error):checkpoint:estimator_ir_uniform.json:milp_params.json:O3:missing_profile"
     "test_diamond:Diamond CFG - asymmetric if-else paths:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
     "test_simple_loop:Simple loop - frequency weighting:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
     "test_nested_loops:Nested loops - avoid inner loop:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
@@ -142,6 +189,88 @@ if ! $CONFIGS_OK; then
     exit 1
 fi
 
+build_profiled_ir() {
+    local src_file="$1"
+    local out_ll="$2"
+    local clang_opt="$3"
+    local stem="$4"
+    local work_dir="$TMP_DIR/profile_${stem}"
+
+    mkdir -p "$work_dir"
+
+    local profraw="$work_dir/${stem}.profraw"
+    local profdata="$work_dir/${stem}.profdata"
+    local train_bin="$work_dir/${stem}_train"
+    local driver_file="$work_dir/${stem}_profile_driver.c"
+    local opt_flag="-O3"
+    local optnone_flags=()
+    local train_inputs=("$src_file")
+
+    if [[ "$clang_opt" == "O0" ]]; then
+        opt_flag="-O0"
+        optnone_flags=(-Xclang -disable-O0-optnone)
+    fi
+
+    if ! grep -qE "\\bmain[[:space:]]*\\(" "$src_file"; then
+        python3 - "$src_file" "$stem" > "$driver_file" <<'PY'
+import re
+import sys
+
+src_path, func_name = sys.argv[1], sys.argv[2]
+text = open(src_path, "r", encoding="utf-8").read()
+match = re.search(r"\b%s\s*\(([^)]*)\)\s*\{" % re.escape(func_name), text, re.S)
+params = []
+if match:
+    raw = match.group(1).strip()
+    if raw and raw != "void":
+        params = [part.strip() for part in raw.split(",") if part.strip()]
+
+decls = []
+args = []
+ptr_idx = 0
+for i, param in enumerate(params):
+    if "*" in param or "[" in param:
+        ptr_idx += 1
+        name = f"ptr_arg_{ptr_idx}"
+        decls.append(f"    volatile int {name} = {ptr_idx};")
+        args.append(f"&{name}")
+    elif re.search(r"\b(float|double)\b", param):
+        args.append("1.0")
+    else:
+        args.append(str(10 + i))
+
+print(f"extern int {func_name}();")
+print("int main(void) {")
+for decl in decls:
+    print(decl)
+if args:
+    print(f"    volatile int result = {func_name}({', '.join(args)});")
+else:
+    print(f"    volatile int result = {func_name}();")
+print("    return (int)result;")
+print("}")
+PY
+        train_inputs+=("$driver_file")
+    fi
+
+    "$PROFILE_CLANG" $SYSROOT_FLAGS "$opt_flag" "${optnone_flags[@]}" \
+        -fprofile-instr-generate="$profraw" \
+        "${train_inputs[@]}" -o "$train_bin" 2>/dev/null
+
+    LLVM_PROFILE_FILE="$profraw" "$train_bin" >/dev/null 2>&1 || true
+
+    if [[ ! -f "$profraw" ]]; then
+        echo -e "${RED}  FAIL: profile run did not produce $profraw${NC}"
+        return 1
+    fi
+
+    "$LLVM_PROFDATA" merge -o "$profdata" "$profraw" 2>/dev/null
+
+    "$CLANG" $SYSROOT_FLAGS -S -emit-llvm "$opt_flag" "${optnone_flags[@]}" \
+        -fprofile-instr-use="$profdata" \
+        "$src_file" -o "$out_ll" 2>/dev/null
+}
+
 # Run each test
 run_test() {
     local test_name="$1"
@@ -170,10 +299,16 @@ run_test() {
 
     # Compile C to LLVM IR
     echo "  Compiling to IR..."
-    if [[ "$clang_opt" == "O0" ]]; then
-        "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone "$test_file" -o "$ll_file" 2>/dev/null
+    if [[ "$pass" == "checkpoint" && "$check_type" != "missing_profile" ]]; then
+        echo "  Building profile data..."
+        build_profiled_ir "$test_file" "$ll_file" "$clang_opt" "$test_name"
     else
-        "$CLANG" -S -emit-llvm -O3 "$test_file" -o "$ll_file" 2>/dev/null
+        if [[ "$clang_opt" == "O0" ]]; then
+            "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+                "$test_file" -o "$ll_file" 2>/dev/null
+        else
+            "$CLANG" -S -emit-llvm -O3 "$test_file" -o "$ll_file" 2>/dev/null
+        fi
     fi
 
     # Build pass-specific flags
@@ -225,6 +360,22 @@ run_test() {
                 echo -e "${RED}  FAIL${NC}"
             fi
             ;;
+        missing_profile)
+            set +e
+            OUTPUT=$("$OPT" -load-pass-plugin="$PASS_LIB" \
+                      -passes="$pass" \
+                      $pass_flags \
+                      "$ll_file" -S -o /dev/null 2>&1)
+            EXIT_CODE=$?
+            set -e
+            echo "$OUTPUT"
+            if [[ $EXIT_CODE -ne 0 ]] && \
+               echo "$OUTPUT" | grep -q "profile-guided block frequencies"; then
+                echo -e "${GREEN}  PASS: Missing profile correctly rejected${NC}"
+            else
+                echo -e "${RED}  FAIL: Expected hard failure for missing profile${NC}"
+            fi
+            ;;
         phi_runtime)
             # Runtime test: compile to IR, mem2reg, instrument, link with driver, run
             if [[ -x "$SCRIPT_DIR/${test_name}.sh" ]]; then
@@ -264,8 +415,8 @@ if $RUN_ROCKCLIMB; then
         echo "Comparing passes on: $COMPARISON_TEST"
         echo ""
 
-        # Compile
-        "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone "$test_file" -o "$ll_file" 2>/dev/null
+        # Compile profiled IR for MILP comparison.
+        build_profiled_ir "$test_file" "$ll_file" "O0" "${COMPARISON_TEST}_comparison"
 
         echo -e "${CYAN}--- MILP Pass ---${NC}"
         "$OPT" -load-pass-plugin="$PASS_LIB" \

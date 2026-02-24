@@ -11,12 +11,17 @@
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 
 #include <chrono>
+#include <string>
 
 using namespace llvm;
 
@@ -29,6 +34,103 @@ extern cl::opt<bool> AddDebugMarkersOpt;
 
 namespace checkpoint {
 
+namespace {
+
+std::string formatBlockName(const BasicBlock *BB) {
+    std::string name;
+    raw_string_ostream os(name);
+    BB->printAsOperand(os, /*PrintType=*/false);
+    return os.str();
+}
+
+SmallPtrSet<const BasicBlock *, 32> collectReachableBlocks(Function &F) {
+    SmallPtrSet<const BasicBlock *, 32> reachable;
+    SmallVector<const BasicBlock *, 32> worklist;
+
+    const BasicBlock *entry = &F.getEntryBlock();
+    reachable.insert(entry);
+    worklist.push_back(entry);
+
+    while (!worklist.empty()) {
+        const BasicBlock *BB = worklist.pop_back_val();
+        for (const BasicBlock *succ : successors(BB)) {
+            if (reachable.insert(succ).second)
+                worklist.push_back(succ);
+        }
+    }
+
+    return reachable;
+}
+
+[[noreturn]] void failForMissingProfile(const Function &F, StringRef detail) {
+    errs() << "Error: MILP requires profile-guided block frequencies for "
+           << "function '" << F.getName() << "'.\n";
+    if (!detail.empty())
+        errs() << "  " << detail << "\n";
+    errs() << "  Hint: compile with -fprofile-instr-generate, run a training "
+              "workload, merge with llvm-profdata, then rebuild IR with "
+              "-fprofile-instr-use=<path>.\n";
+    report_fatal_error(Twine("MILP profile data missing for function '") +
+                           F.getName() + "'",
+                       /*GenCrashDiag=*/false);
+}
+
+void validateMILPProfileData(Function &F, BlockFrequencyInfo &BFI) {
+    if (!F.hasProfileData(/*IncludeSynthetic=*/false)) {
+        failForMissingProfile(F,
+                              "No real function entry profile count found.");
+    }
+
+    auto entryCount = F.getEntryCount(/*AllowSynthetic=*/false);
+    if (!entryCount) {
+        failForMissingProfile(F, "Function entry profile count is missing.");
+    }
+
+    SmallPtrSet<const BasicBlock *, 32> reachable = collectReachableBlocks(F);
+
+    SmallVector<std::string, 8> missingBlockCounts;
+    SmallVector<std::string, 8> missingBranchWeights;
+
+    for (BasicBlock &BB : F) {
+        if (!reachable.contains(&BB))
+            continue;
+
+        if (!BFI.getBlockProfileCount(&BB, /*AllowSynthetic=*/false))
+            missingBlockCounts.push_back(formatBlockName(&BB));
+
+        const Instruction *TI = BB.getTerminator();
+        if (TI && TI->getNumSuccessors() > 1 &&
+            !TI->getMetadata(LLVMContext::MD_prof)) {
+            missingBranchWeights.push_back(formatBlockName(&BB));
+        }
+    }
+
+    if (!missingBlockCounts.empty()) {
+        std::string detail =
+            "Missing real block profile counts for: " + missingBlockCounts.front();
+        if (missingBlockCounts.size() > 1) {
+            detail += " (+" +
+                      std::to_string(missingBlockCounts.size() - 1) +
+                      " more blocks)";
+        }
+        failForMissingProfile(F, detail);
+    }
+
+    if (!missingBranchWeights.empty()) {
+        std::string detail =
+            "Missing !prof branch metadata on multi-successor blocks, e.g. " +
+            missingBranchWeights.front();
+        if (missingBranchWeights.size() > 1) {
+            detail += " (+" +
+                      std::to_string(missingBranchWeights.size() - 1) +
+                      " more blocks)";
+        }
+        failForMissingProfile(F, detail);
+    }
+}
+
+} // namespace
+
 PreservedAnalyses MILPCheckpointPass::run(Function &F,
                                           FunctionAnalysisManager &AM) {
     const auto totalStart = std::chrono::steady_clock::now();
@@ -38,6 +140,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
     auto &AA = AM.getResult<AAManager>(F);
     auto &BFI = AM.getResult<BlockFrequencyAnalysis>(F);
+
+    validateMILPProfileData(F, BFI);
+    errs() << "MILP: using profile-guided block frequencies for function "
+           << F.getName() << "\n";
 
     // Step 2: Create base checkpoint context (estimator + CFG)
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(),

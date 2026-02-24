@@ -34,8 +34,9 @@ struct MILPEnergyParams {
 
 /// Computes all energy parameters needed by the MILP (spec Sections 4 + 8).
 ///
-/// Uses BlockFrequencyInfo for block frequency estimation and StateAnalysis
-/// access maps for per-global NVM access penalty computation.
+/// Uses profile-guided block frequencies from BlockFrequencyInfo (real profile
+/// counts required) and StateAnalysis access maps for per-global NVM access
+/// penalty computation.
 class EnergyModel {
 public:
     EnergyModel(const CFGAnalysis &cfg,
@@ -61,7 +62,7 @@ public:
     /// E_rst[v]: energy cost of restoring variable v.
     double getERestore(llvm::Value *v) const;
 
-    /// F_entry[b]: estimated entry frequency for block b.
+    /// F_entry[b]: normalized profile entry frequency for block b.
     double getFEntry(const llvm::BasicBlock *BB) const;
 
     /// q_reboot: uniform reboot probability (= q_reboot_prob parameter).

@@ -21,9 +21,11 @@ fi
 if [[ -n "${LLVM_DIR}" ]]; then
     CLANG="${CLANG:-${LLVM_DIR}/bin/clang}"
     OPT="${OPT:-${LLVM_DIR}/bin/opt}"
+    LLVM_PROFDATA="${LLVM_PROFDATA:-${LLVM_DIR}/bin/llvm-profdata}"
 else
     CLANG="${CLANG:-clang}"
     OPT="${OPT:-opt}"
+    LLVM_PROFDATA="${LLVM_PROFDATA:-llvm-profdata}"
 fi
 
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
@@ -37,6 +39,13 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
+
+# Sysroot for source-built clang on macOS (needed when linking profile runs)
+SYSROOT_FLAGS=""
+if command -v xcrun &>/dev/null; then
+    SYSROOT_FLAGS="-isysroot $(xcrun --show-sdk-path)"
+fi
+PROFILE_CLANG="$CLANG"
 
 # All scenarios: name:energy_config:milp_config[:source_name]
 # energy_config: energy estimator config (instruction costs)
@@ -116,10 +125,20 @@ run_scenario() {
         return
     fi
 
-    # Step 1: Compile C -> LLVM IR (O0, disable-O0-optnone), then run mem2reg
+    # Step 1: Compile and apply profile data, then build LLVM IR + mem2reg.
     local raw_ll="$OUT_DIR/${test_name}_raw.ll"
+    local profraw="$OUT_DIR/${test_name}.profraw"
+    local profdata="$OUT_DIR/${test_name}.profdata"
+    local train_bin="$OUT_DIR/${test_name}_train"
     echo -e "${YELLOW}--- Compiling to IR (O0 + mem2reg) ---${NC}"
-    "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone "$src" -o "$raw_ll" 2>/dev/null
+    "$PROFILE_CLANG" $SYSROOT_FLAGS -O0 -Xclang -disable-O0-optnone \
+        -fprofile-instr-generate="$profraw" \
+        "$src" -o "$train_bin" 2>/dev/null
+    LLVM_PROFILE_FILE="$profraw" "$train_bin" >/dev/null 2>&1 || true
+    "$LLVM_PROFDATA" merge -o "$profdata" "$profraw" 2>/dev/null
+    "$CLANG" $SYSROOT_FLAGS -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+        -fprofile-instr-use="$profdata" \
+        "$src" -o "$raw_ll" 2>/dev/null
     "$OPT" -passes=mem2reg -S "$raw_ll" -o "$input_ll" 2>/dev/null
     echo "  $input_ll"
     echo ""
@@ -181,6 +200,39 @@ if [[ ! -f "$PASS_LIB" ]]; then
     echo "Run: cd passes/build && cmake .. && make"
     exit 1
 fi
+
+if ! command -v "$LLVM_PROFDATA" >/dev/null 2>&1; then
+    echo -e "${RED}Error: llvm-profdata not found ($LLVM_PROFDATA)${NC}"
+    exit 1
+fi
+
+probe_dir=$(mktemp -d)
+cat >"$probe_dir/profile_probe.c" <<'EOF'
+int main(void) { return 0; }
+EOF
+selected_profile_clang=""
+candidate_clangs=("$PROFILE_CLANG" "$(command -v clang 2>/dev/null || true)" "/usr/bin/clang")
+for candidate in "${candidate_clangs[@]}"; do
+    [[ -z "$candidate" ]] && continue
+    if "$candidate" $SYSROOT_FLAGS \
+        -fprofile-instr-generate="$probe_dir/profile_probe.profraw" \
+        "$probe_dir/profile_probe.c" -o "$probe_dir/profile_probe_bin" >/dev/null 2>&1; then
+        selected_profile_clang="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$selected_profile_clang" ]]; then
+    echo -e "${RED}Error: no clang toolchain can link -fprofile-instr-generate binaries${NC}"
+    rm -rf "$probe_dir"
+    exit 1
+fi
+
+PROFILE_CLANG="$selected_profile_clang"
+if [[ "$PROFILE_CLANG" != "$CLANG" ]]; then
+    echo -e "${YELLOW}Info: using $PROFILE_CLANG for profile generation${NC}"
+fi
+rm -rf "$probe_dir"
 
 # Ensure output directory exists
 mkdir -p "$OUT_DIR"

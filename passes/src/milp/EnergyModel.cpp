@@ -2,10 +2,12 @@
 
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 
@@ -64,22 +66,35 @@ double EnergyModel::getQReboot() const {
 
 void EnergyModel::computeFrequencies(llvm::BlockFrequencyInfo &BFI,
                                       llvm::Function &F) {
-    // Use LLVM's BlockFrequencyInfo for much better estimates than
-    // the crude 10^loopDepth heuristic.
-    // BFI returns integer-scaled frequencies; we normalize by entry frequency.
+    // Use profile-backed block counts and normalize by entry count.
+    // Unlike the old heuristic path, we do not clamp cold blocks to 1.0.
     llvm::BasicBlock &Entry = F.getEntryBlock();
-    uint64_t entryFreq = BFI.getBlockFreq(&Entry).getFrequency();
-    if (entryFreq == 0)
-        entryFreq = 1;
+    auto entryCountOpt = BFI.getBlockProfileCount(&Entry, /*AllowSynthetic=*/false);
+    if (!entryCountOpt) {
+        llvm::report_fatal_error(
+            llvm::Twine("MILP requires real profile count for entry block in function '") +
+                F.getName() + "'",
+            /*GenCrashDiag=*/false);
+    }
+    const uint64_t entryCount = std::max<uint64_t>(*entryCountOpt, 1);
 
     for (llvm::BasicBlock &BB : F) {
-        uint64_t freq = BFI.getBlockFreq(&BB).getFrequency();
-        // Normalize so entry block has frequency 1.0
-        double normalized = static_cast<double>(freq) /
-                            static_cast<double>(entryFreq);
-        // Ensure minimum frequency of 1.0 (entry-level)
-        if (normalized < 1.0)
-            normalized = 1.0;
+        auto blockCountOpt =
+            BFI.getBlockProfileCount(&BB, /*AllowSynthetic=*/false);
+        if (!blockCountOpt) {
+            std::string blockName;
+            llvm::raw_string_ostream os(blockName);
+            BB.printAsOperand(os, /*PrintType=*/false);
+            llvm::report_fatal_error(
+                llvm::Twine("MILP missing profile count for block ") + os.str() +
+                    " in function '" + F.getName() + "'",
+                /*GenCrashDiag=*/false);
+        }
+
+        // Normalize so entry block has frequency 1.0.
+        // Truly cold blocks are allowed to be below 1.0.
+        double normalized = static_cast<double>(*blockCountOpt) /
+                            static_cast<double>(entryCount);
         fEntry_[&BB] = normalized;
     }
 }

@@ -19,6 +19,7 @@ NC='\033[0m'
 
 CLANG="${CLANG:-${LLVM_DIR:+$LLVM_DIR/bin/}clang}"
 OPT="${OPT:-${LLVM_DIR:+$LLVM_DIR/bin/}opt}"
+LLVM_PROFDATA="${LLVM_PROFDATA:-${LLVM_DIR:+$LLVM_DIR/bin/}llvm-profdata}"
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 RUNTIME="$PROJECT_DIR/passes/runtime/energy_validate_runtime.c"
 
@@ -30,11 +31,45 @@ SYSROOT_FLAGS=""
 if command -v xcrun &>/dev/null; then
     SYSROOT_FLAGS="-isysroot $(xcrun --show-sdk-path)"
 fi
+PROFILE_CLANG="$CLANG"
 
 if [[ ! -f "$PASS_LIB" ]]; then
     echo -e "${RED}Error: Pass library not found at $PASS_LIB${NC}"
     exit 1
 fi
+
+if ! command -v "$LLVM_PROFDATA" >/dev/null 2>&1; then
+    echo -e "${RED}Error: llvm-profdata not found ($LLVM_PROFDATA)${NC}"
+    exit 1
+fi
+
+probe_dir=$(mktemp -d)
+cat >"$probe_dir/profile_probe.c" <<'EOF'
+int main(void) { return 0; }
+EOF
+selected_profile_clang=""
+candidate_clangs=("$PROFILE_CLANG" "$(command -v clang 2>/dev/null || true)" "/usr/bin/clang")
+for candidate in "${candidate_clangs[@]}"; do
+    [[ -z "$candidate" ]] && continue
+    if "$candidate" $SYSROOT_FLAGS \
+        -fprofile-instr-generate="$probe_dir/profile_probe.profraw" \
+        "$probe_dir/profile_probe.c" -o "$probe_dir/profile_probe_bin" >/dev/null 2>&1; then
+        selected_profile_clang="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$selected_profile_clang" ]]; then
+    echo -e "${RED}Error: no clang toolchain can link -fprofile-instr-generate binaries${NC}"
+    rm -rf "$probe_dir"
+    exit 1
+fi
+
+PROFILE_CLANG="$selected_profile_clang"
+if [[ "$PROFILE_CLANG" != "$CLANG" ]]; then
+    echo -e "${YELLOW}Info: using $PROFILE_CLANG for profile generation${NC}"
+fi
+rm -rf "$probe_dir"
 
 echo "=========================================="
 echo "MILP Energy Validation End-to-End Tests"
@@ -43,6 +78,26 @@ echo ""
 
 PASS_COUNT=0
 FAIL_COUNT=0
+
+build_profiled_ir() {
+    local src_file="$1"
+    local out_ll="$2"
+    local work_dir="$3"
+    local profraw="$work_dir/test.profraw"
+    local profdata="$work_dir/test.profdata"
+    local train_bin="$work_dir/test_train"
+
+    $PROFILE_CLANG $SYSROOT_FLAGS -O0 -Xclang -disable-O0-optnone \
+        -fprofile-instr-generate="$profraw" \
+        "$src_file" -o "$train_bin" 2>/dev/null
+
+    LLVM_PROFILE_FILE="$profraw" "$train_bin" >/dev/null 2>&1 || true
+    $LLVM_PROFDATA merge -o "$profdata" "$profraw" 2>/dev/null
+
+    $CLANG $SYSROOT_FLAGS -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+        -fprofile-instr-use="$profdata" \
+        "$src_file" -o "$out_ll" 2>/dev/null
+}
 
 run_milp_validate() {
     local test_name="$1"
@@ -62,9 +117,8 @@ run_milp_validate() {
     tmp_dir=$(mktemp -d)
     trap "rm -rf $tmp_dir" RETURN
 
-    # Compile to IR
-    $CLANG $SYSROOT_FLAGS -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
-        "$test_file" -o "$tmp_dir/test.ll" 2>/dev/null
+    # Compile to profile-guided IR
+    build_profiled_ir "$test_file" "$tmp_dir/test.ll" "$tmp_dir"
 
     # MILP pass
     $OPT -load-pass-plugin="$PASS_LIB" \
