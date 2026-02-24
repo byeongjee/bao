@@ -10,7 +10,8 @@
 int frequently_accessed __attribute__((annotate("milp_candidate")));
 int rarely_accessed __attribute__((annotate("milp_candidate")));
 
-int test_vm_nvm_placement(int x) {
+int main(void) {
+    int x = 10;
     // Frequent accesses to first global
     frequently_accessed = x;
     int a = frequently_accessed + 1;

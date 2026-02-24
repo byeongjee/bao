@@ -8,7 +8,10 @@
  * Uses volatile to prevent optimization.
  */
 
-int test_early_return(volatile int* ptr, volatile int n) {
+int main(void) {
+    volatile int val = 42;
+    volatile int *ptr = &val;
+    volatile int n = 5;
     volatile int result;
 
     // Entry: validation

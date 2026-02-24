@@ -9,7 +9,8 @@
  * Uses volatile to prevent loop optimizations.
  */
 
-int test_nested_loops(volatile int m, volatile int n) {
+int main(void) {
+    volatile int m = 10, n = 10;
     volatile int sum = 0;
     volatile int i, j;
 

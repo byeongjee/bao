@@ -8,7 +8,8 @@
  * Uses volatile to prevent optimization.
  */
 
-int test_exit_constraint(volatile int x) {
+int main(void) {
+    volatile int x = 10;
     volatile int a;
     volatile int result;
 

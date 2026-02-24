@@ -82,7 +82,7 @@ if [ ! -f "$PASS_LIB" ]; then
     exit 1
 fi
 
-if $RUN_MILP || $RUN_ROCKCLIMB; then
+if $RUN_ROCKCLIMB; then
     if ! command -v "$LLVM_PROFDATA" >/dev/null 2>&1; then
         echo -e "${RED}Error: llvm-profdata not found ($LLVM_PROFDATA)${NC}"
         exit 1
@@ -117,6 +117,8 @@ EOF
     rm -rf "$probe_dir"
 fi
 
+BB_FREQ_RUNTIME="$PROJECT_DIR/passes/runtime/bb_freq_runtime.c"
+
 # Test entries: name:description:pass:estimator_config:milp_or_rc_config:clang_opt:check_type
 #   pass            = checkpoint | rockclimb
 #   estimator_config = estimator config filename (relative to SCRIPT_DIR)
@@ -128,7 +130,7 @@ fi
 
 MILP_TESTS=(
     "test_linear:Linear sequence - basic energy propagation:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
-    "test_linear:MILP rejects non-profiled IR (expect hard error):checkpoint:estimator_ir_uniform.json:milp_params.json:O3:missing_profile"
+    "test_linear:MILP rejects missing bb-freq-file (expect hard error):checkpoint:estimator_ir_uniform.json:milp_params.json:O3:missing_bb_freq"
     "test_diamond:Diamond CFG - asymmetric if-else paths:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
     "test_simple_loop:Simple loop - frequency weighting:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
     "test_nested_loops:Nested loops - avoid inner loop:checkpoint:estimator_ir_uniform.json:milp_params.json:O3:pass"
@@ -299,9 +301,42 @@ run_test() {
 
     # Compile C to LLVM IR
     echo "  Compiling to IR..."
-    if [[ "$pass" == "checkpoint" && "$check_type" != "missing_profile" ]]; then
-        echo "  Building profile data..."
-        build_profiled_ir "$test_file" "$ll_file" "$clang_opt" "$test_name"
+    local bb_freq_json=""
+    if [[ "$pass" == "checkpoint" && "$check_type" != "missing_bb_freq" ]]; then
+        # BB frequency workflow: compile at O0, annotate trip counts, collect frequencies
+        "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+            "$test_file" -o "$ll_file" 2>/dev/null
+
+        # Annotate trip counts
+        "$OPT" -load-pass-plugin="$PASS_LIB" \
+            -passes=tripcount-annotation \
+            -S "$ll_file" -o "$TMP_DIR/${test_name}_ann.ll" 2>/dev/null
+
+        echo "  Collecting BB frequencies..."
+        local freq_work_dir="$TMP_DIR/freq_${test_name}"
+        mkdir -p "$freq_work_dir"
+
+        # Instrument for BB frequency collection
+        "$OPT" -load-pass-plugin="$PASS_LIB" \
+            -passes=bb-freq-collect \
+            -energy-config="$estimator_path" \
+            -milp-config="$mode_config_path" \
+            -S "$TMP_DIR/${test_name}_ann.ll" -o "$freq_work_dir/freq_inst.ll" 2>/dev/null
+
+        # Compile and run to get bb_freq.json
+        "$CLANG" $SYSROOT_FLAGS -O0 \
+            "$freq_work_dir/freq_inst.ll" "$BB_FREQ_RUNTIME" \
+            -o "$freq_work_dir/freq_run" 2>/dev/null
+
+        (cd "$freq_work_dir" && ./freq_run) >/dev/null 2>&1 || true
+
+        if [[ ! -f "$freq_work_dir/bb_freq.json" ]]; then
+            echo -e "${RED}  FAIL: BB frequency collection did not produce bb_freq.json${NC}"
+            echo ""
+            return
+        fi
+        bb_freq_json="$freq_work_dir/bb_freq.json"
+        ll_file="$TMP_DIR/${test_name}_ann.ll"
     else
         if [[ "$clang_opt" == "O0" ]]; then
             "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
@@ -315,6 +350,9 @@ run_test() {
     local pass_flags
     if [[ "$pass" == "checkpoint" ]]; then
         pass_flags="-energy-config=$estimator_path -milp-config=$mode_config_path"
+        if [[ -n "$bb_freq_json" ]]; then
+            pass_flags="$pass_flags -bb-freq-file=$bb_freq_json"
+        fi
     else
         pass_flags="-energy-config=$estimator_path -rockclimb-config=$mode_config_path"
     fi
@@ -360,7 +398,7 @@ run_test() {
                 echo -e "${RED}  FAIL${NC}"
             fi
             ;;
-        missing_profile)
+        missing_bb_freq)
             set +e
             OUTPUT=$("$OPT" -load-pass-plugin="$PASS_LIB" \
                       -passes="$pass" \
@@ -370,10 +408,10 @@ run_test() {
             set -e
             echo "$OUTPUT"
             if [[ $EXIT_CODE -ne 0 ]] && \
-               echo "$OUTPUT" | grep -q "profile-guided block frequencies"; then
-                echo -e "${GREEN}  PASS: Missing profile correctly rejected${NC}"
+               echo "$OUTPUT" | grep -q "bb-freq-file"; then
+                echo -e "${GREEN}  PASS: Missing BB frequency file correctly rejected${NC}"
             else
-                echo -e "${RED}  FAIL: Expected hard failure for missing profile${NC}"
+                echo -e "${RED}  FAIL: Expected hard failure for missing bb-freq-file${NC}"
             fi
             ;;
         phi_runtime)
@@ -415,14 +453,33 @@ if $RUN_ROCKCLIMB; then
         echo "Comparing passes on: $COMPARISON_TEST"
         echo ""
 
-        # Compile profiled IR for MILP comparison.
-        build_profiled_ir "$test_file" "$ll_file" "O0" "${COMPARISON_TEST}_comparison"
+        # Compile and collect BB frequencies for MILP comparison.
+        "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
+            "$test_file" -o "$ll_file" 2>/dev/null
+        "$OPT" -load-pass-plugin="$PASS_LIB" \
+            -passes=tripcount-annotation \
+            -S "$ll_file" -o "$TMP_DIR/${COMPARISON_TEST}_ann.ll" 2>/dev/null
+
+        cmp_freq_dir="$TMP_DIR/freq_${COMPARISON_TEST}_cmp"
+        mkdir -p "$cmp_freq_dir"
+        "$OPT" -load-pass-plugin="$PASS_LIB" \
+            -passes=bb-freq-collect \
+            -energy-config="$ESTIMATOR_UNIFORM" \
+            -milp-config="$MILP_PARAMS" \
+            -S "$TMP_DIR/${COMPARISON_TEST}_ann.ll" -o "$cmp_freq_dir/freq_inst.ll" 2>/dev/null
+        "$CLANG" $SYSROOT_FLAGS -O0 \
+            "$cmp_freq_dir/freq_inst.ll" "$BB_FREQ_RUNTIME" \
+            -o "$cmp_freq_dir/freq_run" 2>/dev/null
+        (cd "$cmp_freq_dir" && ./freq_run) >/dev/null 2>&1 || true
+
+        ll_file="$TMP_DIR/${COMPARISON_TEST}_ann.ll"
 
         echo -e "${CYAN}--- MILP Pass ---${NC}"
         "$OPT" -load-pass-plugin="$PASS_LIB" \
               -passes=checkpoint \
               -energy-config="$ESTIMATOR_UNIFORM" \
               -milp-config="$MILP_PARAMS" \
+              -bb-freq-file="$cmp_freq_dir/bb_freq.json" \
               "$ll_file" -S -o /dev/null 2>&1 || true
 
         echo ""

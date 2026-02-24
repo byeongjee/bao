@@ -1,9 +1,9 @@
 #pragma once
 
 #include "common/CFGAnalysis.h"
+#include "milp/BBFreqLoader.h"
 #include "milp/StateAnalysis.h"
 
-#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/IR/Value.h"
 
 #include <map>
@@ -34,14 +34,14 @@ struct MILPEnergyParams {
 
 /// Computes all energy parameters needed by the MILP (spec Sections 4 + 8).
 ///
-/// Uses profile-guided block frequencies from BlockFrequencyInfo (real profile
-/// counts required) and StateAnalysis access maps for per-global NVM access
-/// penalty computation.
+/// Uses exact block visit counts from BBFreqLoader (produced by the
+/// bb-freq-collect pipeline) and StateAnalysis access maps for per-global
+/// NVM access penalty computation.
 class EnergyModel {
 public:
     EnergyModel(const CFGAnalysis &cfg,
                 const StateAnalysis &state,
-                llvm::BlockFrequencyInfo &BFI,
+                const BBFreqLoader &freqLoader,
                 llvm::Function &F,
                 const MILPEnergyParams &params);
 
@@ -79,7 +79,8 @@ private:
     std::map<llvm::Value *, double> eSaveByVar_;
     std::map<llvm::Value *, double> eRestoreByVar_;
 
-    void computeFrequencies(llvm::BlockFrequencyInfo &BFI, llvm::Function &F);
+    void computeFrequenciesFromFile(const BBFreqLoader &freqLoader,
+                                     llvm::Function &F);
     void computeNvmPenalties();
     void computeSaveRestoreCosts();
 };

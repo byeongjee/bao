@@ -9,7 +9,8 @@
  * Using volatile to prevent optimization from folding constants.
  */
 
-int test_infeasible(volatile int x) {
+int main(void) {
+    volatile int x = 1;
     // Huge block: >120 instructions (exceeds capacity of 100)
     volatile int result = x;
     result = result + 1;  result = result + 2;  result = result + 3;

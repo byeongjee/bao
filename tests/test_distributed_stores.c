@@ -9,7 +9,8 @@
 
 volatile int global_counter;
 
-int test_distributed_stores(int x) {
+int main(void) {
+    int x = 10;
     // Several definitions that may need checkpoint stores
     int a = x + 1;
     int b = a * 2;

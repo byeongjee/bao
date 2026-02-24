@@ -389,6 +389,33 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 MILP_INPUT_LL="$TMP_DIR/input_optimized.ll"
             fi
 
+            # BB frequency collection: instrument, compile, run, get bb_freq.json
+            BB_FREQ_RUNTIME="$PROJECT_DIR/passes/runtime/bb_freq_runtime.c"
+            info "Collecting BB frequencies..."
+            if ! $OPT -load-pass-plugin="$PASS_LIB" \
+                -passes=bb-freq-collect \
+                -energy-config="$ESTIMATOR_CONFIG" \
+                -milp-config="$MILP_CONFIG" \
+                -S "$MILP_INPUT_LL" -o "$TMP_DIR/freq_inst.ll" 2>&1; then
+                error "BB frequency collection pass failed"
+            fi
+
+            BB_FREQ_SYSROOT=""
+            if command -v xcrun &>/dev/null; then
+                BB_FREQ_SYSROOT="-isysroot $(xcrun --show-sdk-path)"
+            fi
+            if ! $CLANG -O0 $BB_FREQ_SYSROOT \
+                "$TMP_DIR/freq_inst.ll" "$BB_FREQ_RUNTIME" \
+                -o "$TMP_DIR/freq_run" 2>&1; then
+                error "BB frequency runtime compilation failed"
+            fi
+
+            BB_FREQ_JSON="$TMP_DIR/bb_freq.json"
+            (cd "$TMP_DIR" && ./freq_run) || true
+            if [[ ! -f "$BB_FREQ_JSON" ]]; then
+                error "BB frequency collection did not produce bb_freq.json"
+            fi
+
             # MILP pass
             MILP_EXTRA_FLAGS=""
             if [[ "$RUNTIME_TYPE" == "mock-counter" ]]; then
@@ -399,6 +426,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 -passes=milp \
                 -energy-config="$ESTIMATOR_CONFIG" \
                 -milp-config="$MILP_CONFIG" \
+                -bb-freq-file="$BB_FREQ_JSON" \
                 $MILP_EXTRA_FLAGS \
                 -S "$MILP_INPUT_LL" -o "$TMP_DIR/ckpt.ll" \
                 >"$PASS_LOG" 2>&1; then

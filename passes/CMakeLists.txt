@@ -51,6 +51,7 @@ add_library(CheckpointPass MODULE
     src/common/CFGAnalysis.cpp
     src/common/EnergyValidatorPass.cpp
     src/common/LoopTripCount.cpp
+    src/common/BBFreqCollectorPass.cpp
     src/common/PassRegistry.cpp
     src/common/TripCountAnnotationPass.cpp
     # Energy estimators
@@ -58,6 +59,7 @@ add_library(CheckpointPass MODULE
     src/estimator/IRBasedEstimator.cpp
     src/estimator/EnergyEstimatorFactory.cpp
     # MILP checkpoint insertion
+    src/milp/BBFreqLoader.cpp
     src/milp/StateAnalysis.cpp
     src/milp/LivenessAnalysis.cpp
     src/milp/EnergyModel.cpp

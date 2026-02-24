@@ -1,5 +1,6 @@
 #include "milp/EnergyModel.h"
 
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -15,11 +16,11 @@ namespace checkpoint {
 
 EnergyModel::EnergyModel(const CFGAnalysis &cfg,
                          const StateAnalysis &state,
-                         llvm::BlockFrequencyInfo &BFI,
+                         const BBFreqLoader &freqLoader,
                          llvm::Function &F,
                          const MILPEnergyParams &params)
     : cfg_(cfg), state_(state), params_(params) {
-    computeFrequencies(BFI, F);
+    computeFrequenciesFromFile(freqLoader, F);
     computeNvmPenalties();
     computeSaveRestoreCosts();
 }
@@ -64,35 +65,50 @@ double EnergyModel::getQReboot() const {
 
 // ---- Private implementation ----
 
-void EnergyModel::computeFrequencies(llvm::BlockFrequencyInfo &BFI,
-                                      llvm::Function &F) {
-    // Use profile-backed block counts and normalize by entry count.
-    // Unlike the old heuristic path, we do not clamp cold blocks to 1.0.
+void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader,
+                                              llvm::Function &F) {
+    // Get entry block count from the frequency file.
     llvm::BasicBlock &Entry = F.getEntryBlock();
-    auto entryCountOpt = BFI.getBlockProfileCount(&Entry, /*AllowSynthetic=*/false);
+    auto entryCountOpt = freqLoader.getBlockCount(&Entry);
     if (!entryCountOpt) {
         llvm::report_fatal_error(
-            llvm::Twine("MILP requires real profile count for entry block in function '") +
-                F.getName() + "'",
+            llvm::Twine("MILP: entry block frequency missing for function '") +
+                F.getName() + "' in BB frequency file",
             /*GenCrashDiag=*/false);
     }
     const uint64_t entryCount = std::max<uint64_t>(*entryCountOpt, 1);
 
+    // Collect reachable blocks to distinguish truly missing from unreachable.
+    llvm::SmallPtrSet<const llvm::BasicBlock *, 32> reachable;
+    llvm::SmallVector<const llvm::BasicBlock *, 32> worklist;
+    reachable.insert(&Entry);
+    worklist.push_back(&Entry);
+    while (!worklist.empty()) {
+        const llvm::BasicBlock *BB = worklist.pop_back_val();
+        for (const llvm::BasicBlock *succ : llvm::successors(BB)) {
+            if (reachable.insert(succ).second)
+                worklist.push_back(succ);
+        }
+    }
+
     for (llvm::BasicBlock &BB : F) {
-        auto blockCountOpt =
-            BFI.getBlockProfileCount(&BB, /*AllowSynthetic=*/false);
+        auto blockCountOpt = freqLoader.getBlockCount(&BB);
         if (!blockCountOpt) {
-            std::string blockName;
-            llvm::raw_string_ostream os(blockName);
-            BB.printAsOperand(os, /*PrintType=*/false);
-            llvm::report_fatal_error(
-                llvm::Twine("MILP missing profile count for block ") + os.str() +
-                    " in function '" + F.getName() + "'",
-                /*GenCrashDiag=*/false);
+            if (reachable.contains(&BB)) {
+                std::string blockName;
+                llvm::raw_string_ostream os(blockName);
+                BB.printAsOperand(os, /*PrintType=*/false);
+                llvm::report_fatal_error(
+                    llvm::Twine("MILP: missing BB frequency for reachable block ") +
+                        os.str() + " in function '" + F.getName() + "'",
+                    /*GenCrashDiag=*/false);
+            }
+            // Unreachable block — assign frequency 0.
+            fEntry_[&BB] = 0.0;
+            continue;
         }
 
         // Normalize so entry block has frequency 1.0.
-        // Truly cold blocks are allowed to be below 1.0.
         double normalized = static_cast<double>(*blockCountOpt) /
                             static_cast<double>(entryCount);
         fEntry_[&BB] = normalized;

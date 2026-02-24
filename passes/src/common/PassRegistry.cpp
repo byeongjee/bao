@@ -1,3 +1,4 @@
+#include "common/BBFreqCollectorPass.h"
 #include "common/EnergyValidatorPass.h"
 #include "common/TripCountAnnotationPass.h"
 #include "milp/LoopStripMiningPass.h"
@@ -62,6 +63,11 @@ cl::opt<std::string> SchematicTraceOpt(
     cl::desc("Path to trace JSON for SCHEMATIC"),
     cl::value_desc("filename"), cl::init(""));
 
+cl::opt<std::string> BBFreqFileOpt(
+    "bb-freq-file",
+    cl::desc("Path to BB frequency JSON file (from bb-freq-collect runtime)"),
+    cl::value_desc("filename"), cl::init(""));
+
 // Plugin registration for new pass manager
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
@@ -113,6 +119,17 @@ llvmGetPassPluginInfo() {
                     FPM.addPass(LoopSimplifyPass());
                     FPM.addPass(LCSSAPass());
                     FPM.addPass(checkpoint::TraceCollectorPass());
+                    return true;
+                  }
+                  if (Name == "bb-freq-collect") {
+                    FPM.addPass(LoopSimplifyPass());
+                    FPM.addPass(LCSSAPass());
+                    FPM.addPass(
+                        createFunctionToLoopPassAdaptor(LoopRotatePass()));
+                    FPM.addPass(
+                        createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+                    FPM.addPass(checkpoint::LoopStripMiningPass());
+                    FPM.addPass(checkpoint::BBFreqCollectorPass());
                     return true;
                   }
                   if (Name == "energy-validate") {

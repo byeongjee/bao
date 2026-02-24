@@ -12,7 +12,8 @@
 
 volatile int sink;
 
-int test_switch(volatile int x) {
+int main(void) {
+    volatile int x = 1;
     volatile int result = 0;
 
     switch (x) {
