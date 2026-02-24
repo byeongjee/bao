@@ -23,17 +23,15 @@ void SchematicInstrumenter::declareRuntimeFunctions() {
     prologueFn_ = M_.getOrInsertFunction("__region_prologue", VoidTy);
     epilogueFn_ = M_.getOrInsertFunction("__region_epilogue", VoidTy);
 
-    if (addDebugMarkers_) {
-        llvm::Type *I64Ty = llvm::Type::getInt64Ty(Ctx);
-        storeMemFn_ = M_.getOrInsertFunction(
-            "__checkpoint_store_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-        restoreMemFn_ = M_.getOrInsertFunction(
-            "__restore_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-        storeRegFn_ = M_.getOrInsertFunction(
-            "__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
-        restoreRegFn_ = M_.getOrInsertFunction(
-            "__restore_reg", VoidTy, I32Ty, PtrTy);
-    }
+    llvm::Type *I64Ty = llvm::Type::getInt64Ty(Ctx);
+    storeMemFn_ = M_.getOrInsertFunction(
+        "__checkpoint_store_mem", VoidTy, PtrTy, PtrTy, I32Ty);
+    restoreMemFn_ = M_.getOrInsertFunction(
+        "__restore_mem", VoidTy, PtrTy, PtrTy, I32Ty);
+    storeRegFn_ = M_.getOrInsertFunction(
+        "__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
+    restoreRegFn_ = M_.getOrInsertFunction(
+        "__restore_reg", VoidTy, I32Ty, PtrTy);
 }
 
 void SchematicInstrumenter::createShadowGlobals(
@@ -208,13 +206,11 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
             llvm::Value *size = llvm::ConstantInt::get(
                 llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
-            if (addDebugMarkers_) {
+            builder.CreateMemCpy(gv, gv->getAlign(), shadowIt->second,
+                                 shadowIt->second->getAlign(), size);
+            if (addDebugMarkers_)
                 builder.CreateCall(storeMemFn_,
                                    {gv, shadowIt->second, size});
-            } else {
-                builder.CreateMemCpy(gv, gv->getAlign(), shadowIt->second,
-                                     shadowIt->second->getAlign(), size);
-            }
             inserted++;
         }
     }
@@ -232,21 +228,19 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
             llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+            builder.CreateMemCpy(backupIt->second,
+                                 backupIt->second->getAlign(), GV,
+                                 GV->getAlign(), size);
             if (addDebugMarkers_)
                 builder.CreateCall(storeMemFn_,
                                    {backupIt->second, GV, size});
-            else
-                builder.CreateMemCpy(backupIt->second,
-                                     backupIt->second->getAlign(), GV,
-                                     GV->getAlign(), size);
         } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
+            builder.CreateMemCpy(backupIt->second,
+                                 backupIt->second->getAlign(), AI,
+                                 AI->getAlign(), size);
             if (addDebugMarkers_)
                 builder.CreateCall(storeMemFn_,
                                    {backupIt->second, AI, size});
-            else
-                builder.CreateMemCpy(backupIt->second,
-                                     backupIt->second->getAlign(), AI,
-                                     AI->getAlign(), size);
         }
         inserted++;
     }
@@ -277,14 +271,12 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
             llvm::Value *size = llvm::ConstantInt::get(
                 llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
-            if (addDebugMarkers_) {
+            builder.CreateMemCpy(shadowIt->second,
+                                 shadowIt->second->getAlign(), gv,
+                                 gv->getAlign(), size);
+            if (addDebugMarkers_)
                 builder.CreateCall(restoreMemFn_,
                                    {shadowIt->second, gv, size});
-            } else {
-                builder.CreateMemCpy(shadowIt->second,
-                                     shadowIt->second->getAlign(), gv,
-                                     gv->getAlign(), size);
-            }
             inserted++;
         }
     }
@@ -302,17 +294,15 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
             llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+            builder.CreateMemCpy(GV, GV->getAlign(), backupIt->second,
+                                 backupIt->second->getAlign(), size);
             if (addDebugMarkers_)
                 builder.CreateCall(restoreMemFn_, {GV, backupIt->second, size});
-            else
-                builder.CreateMemCpy(GV, GV->getAlign(), backupIt->second,
-                                     backupIt->second->getAlign(), size);
         } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
+            builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second,
+                                 backupIt->second->getAlign(), size);
             if (addDebugMarkers_)
                 builder.CreateCall(restoreMemFn_, {AI, backupIt->second, size});
-            else
-                builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second,
-                                     backupIt->second->getAlign(), size);
         }
         inserted++;
     }
