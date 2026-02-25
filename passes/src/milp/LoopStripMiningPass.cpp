@@ -5,8 +5,10 @@
 #include "common/LoopTripCount.h"
 #include "estimator/EnergyEstimatorFactory.h"
 #include "milp/EnergyModel.h"
+#include "milp/StateAnalysis.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
@@ -14,7 +16,6 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -71,6 +72,7 @@ struct PlanResult {
 struct EnergyPathResult {
     bool ok = false;
     double energy = 0.0;
+    SmallPtrSet<const BasicBlock *, 16> blocksOnPath;
     std::string error;
 };
 
@@ -133,8 +135,9 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
         return result;
     }
 
-    // Step 1: Recursively compute total energy for each direct sub-loop
+    // Step 1: Recursively compute total energy for each direct sub-loop.
     DenseMap<const Loop *, double> subLoopTotal;
+    std::map<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
     for (Loop *SubL : L->getSubLoops()) {
         std::optional<uint64_t> scevTC;
         SmallVector<BasicBlock *, 8> subExiting;
@@ -163,9 +166,11 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
         }
 
         subLoopTotal[SubL] = subIter.energy * static_cast<double>(*subTC);
+        for (const BasicBlock *BB : SubL->blocks())
+            subLoopBlocks[SubL].insert(BB);
     }
 
-    // Step 2: Block energy with sub-loop collapsing
+    // Step 2: Block energy with sub-loop collapsing.
     auto getEnergy = [&](const BasicBlock *BB) -> double {
         Loop *ChildL = getDirectChildLoop(L, BB, LI);
         if (ChildL && ChildL->getHeader() == BB) {
@@ -176,7 +181,7 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
         return (it != blockEnergy.end()) ? it->second : 0.0;
     };
 
-    // Step 3: Successor computation with sub-loop collapsing
+    // Step 3: Successor computation with sub-loop collapsing.
     auto getSuccs = [&](const BasicBlock *BB) -> SmallVector<const BasicBlock *, 4> {
         SmallVector<const BasicBlock *, 4> succs;
         Loop *ChildL = getDirectChildLoop(L, BB, LI);
@@ -195,11 +200,13 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
     if (Header == Latch) {
         result.ok = true;
         result.energy = getEnergy(Header);
+        result.blocksOnPath.insert(Header);
         return result;
     }
 
     DenseMap<const BasicBlock *, VisitState> visitState;
     DenseMap<const BasicBlock *, double> memo;
+    DenseMap<const BasicBlock *, const BasicBlock *> bestSucc;
     bool cycleDetected = false;
 
     std::function<double(const BasicBlock *)> dfs =
@@ -218,7 +225,8 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
         }
 
         visitState[BB] = VisitState::Visiting;
-        double bestSucc = -1.0;
+        double bestSuccEnergy = -1.0;
+        const BasicBlock *best = nullptr;
         for (const BasicBlock *Succ : getSuccs(BB)) {
             if (!L->contains(Succ)) {
                 continue;
@@ -230,18 +238,20 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
             if (succEnergy < 0.0) {
                 continue;
             }
-            if (succEnergy > bestSucc) {
-                bestSucc = succEnergy;
+            if (succEnergy > bestSuccEnergy) {
+                bestSuccEnergy = succEnergy;
+                best = Succ;
             }
         }
         visitState[BB] = VisitState::Visited;
 
-        if (bestSucc < 0.0) {
+        if (!best || bestSuccEnergy < 0.0) {
             memo[BB] = -1.0;
             return -1.0;
         }
 
-        memo[BB] = getEnergy(BB) + bestSucc;
+        bestSucc[BB] = best;
+        memo[BB] = getEnergy(BB) + bestSuccEnergy;
         return memo[BB];
     };
 
@@ -255,8 +265,38 @@ static EnergyPathResult computeWorstCaseIterationEnergy(
         return result;
     }
 
+    SmallPtrSet<const BasicBlock *, 16> pathBlocks;
+    const BasicBlock *cur = Header;
+    while (cur) {
+        pathBlocks.insert(cur);
+        // If this block is an inner-loop header, expand with all sub-loop blocks
+        // so state margins are aggregated consistently with AbstractCFG.
+        Loop *ChildL = getDirectChildLoop(L, cur, LI);
+        if (ChildL && ChildL->getHeader() == cur) {
+            auto it = subLoopBlocks.find(ChildL);
+            if (it != subLoopBlocks.end()) {
+                pathBlocks.insert(it->second.begin(), it->second.end());
+            }
+        }
+        if (cur == Latch) {
+            break;
+        }
+        auto it = bestSucc.find(cur);
+        if (it == bestSucc.end()) {
+            result.error = "path-reconstruction-failed";
+            return result;
+        }
+        cur = it->second;
+    }
+
+    if (pathBlocks.empty() || !pathBlocks.count(Latch)) {
+        result.error = "path-reconstruction-failed";
+        return result;
+    }
+
     result.ok = true;
     result.energy = energy;
+    result.blocksOnPath = std::move(pathBlocks);
     return result;
 }
 
@@ -302,155 +342,95 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
     return backedgeValue;
 }
 
-/// Compute a conservative upper bound on NVM access energy inside one loop
-/// iteration. Since chunked/strip-mined inner loops do not checkpoint
-/// internally, we do not charge restore energy here; instead we account for
-/// potential global-memory accesses as nvm_access_penalty per load/store.
-static double estimateNvmAccessPenaltyUpperBound(
-    Loop *L, const checkpoint::MILPEnergyParams &params) {
-    double total = 0.0;
-
-    for (BasicBlock *BB : L->blocks()) {
-        for (Instruction &I : *BB) {
-            const Value *Ptr = nullptr;
-            if (auto *LI = dyn_cast<LoadInst>(&I))
-                Ptr = LI->getPointerOperand();
-            else if (auto *SI = dyn_cast<StoreInst>(&I))
-                Ptr = SI->getPointerOperand();
-            else
-                continue;
-
-            const Value *Obj = getUnderlyingObject(Ptr->stripPointerCasts());
-            auto *GV = dyn_cast<GlobalVariable>(const_cast<Value *>(Obj));
-            if (!GV)
-                continue;
-
-            // Match MILP global tracking filters and ignore internal helpers.
-            if (GV->isDeclaration())
-                continue;
-            if (GV->isConstant())
-                continue;
-            if (GV->getName().starts_with("llvm."))
-                continue;
-            if (GV->getName().starts_with("__nvm_"))
-                continue;
-            if (GV->getName().starts_with("__vm_shadow_"))
-                continue;
-            if (!GV->getValueType()->isSized())
-                continue;
-
-            total += params.nvmAccessPenalty;
-        }
+static double getSaveCostForValue(llvm::Value *V,
+                                  const checkpoint::StateAnalysis &state,
+                                  const checkpoint::MILPEnergyParams &params) {
+    if (auto *I = dyn_cast<Instruction>(V)) {
+        if (!isa<AllocaInst>(I))
+            return params.regStoreEnergy;
     }
-
-    return total;
-}
-
-static bool isTrackableGlobalForMargin(const GlobalVariable *GV) {
-    if (!GV)
-        return false;
-    if (GV->isDeclaration())
-        return false;
-    if (GV->isConstant())
-        return false;
-    if (GV->getName().starts_with("llvm."))
-        return false;
-    if (GV->getName().starts_with("__nvm_"))
-        return false;
-    if (GV->getName().starts_with("__vm_shadow_"))
-        return false;
-    if (!GV->getValueType()->isSized())
-        return false;
-    return true;
-}
-
-/// Estimate additional loop boundary margin from tracked state at q=1.
-/// We conservatively charge restore+commit for memory-backed values touched in
-/// the loop and cross-block SSA values produced in the loop.
-static double estimateBoundaryStateMarginUpperBound(
-    Loop *L, const checkpoint::MILPEnergyParams &params) {
-    Function *F = L ? L->getHeader()->getParent() : nullptr;
-    Module *M = F ? F->getParent() : nullptr;
-    if (!M)
+    unsigned sizeBytes = state.getVarSizeBytes(V);
+    if (sizeBytes == 0)
         return 0.0;
+    return static_cast<double>(sizeBytes) * params.memStoreEnergyPerByte;
+}
 
-    const DataLayout &DL = M->getDataLayout();
-    std::set<const Value *> memoryBackedObjs;
-    std::set<const Instruction *> crossBlockRegs;
+static double getRestoreCostForValue(llvm::Value *V,
+                                     const checkpoint::StateAnalysis &state,
+                                     const checkpoint::MILPEnergyParams &params) {
+    if (auto *I = dyn_cast<Instruction>(V)) {
+        if (!isa<AllocaInst>(I))
+            return params.regRestoreEnergy;
+    }
+    unsigned sizeBytes = state.getVarSizeBytes(V);
+    if (sizeBytes == 0)
+        return 0.0;
+    return static_cast<double>(sizeBytes) * params.memRestoreEnergyPerByte;
+}
 
-    auto maybeRecordMemoryObj = [&](const Value *Ptr) {
-        const Value *Obj = getUnderlyingObject(Ptr->stripPointerCasts());
-        if (auto *GV = dyn_cast<GlobalVariable>(const_cast<Value *>(Obj))) {
-            if (isTrackableGlobalForMargin(GV))
-                memoryBackedObjs.insert(GV);
-            return;
+static double computeNvmAccessMarginOnPath(
+    const SmallPtrSetImpl<const BasicBlock *> &pathBlocks,
+    const checkpoint::StateAnalysis &state,
+    const checkpoint::MILPEnergyParams &params) {
+    std::vector<GlobalVariable *> ineligGlobals;
+    for (Value *V : state.getIneligibleObjs()) {
+        if (auto *GV = dyn_cast<GlobalVariable>(V))
+            ineligGlobals.push_back(GV);
+    }
+
+    double nvmAccessMargin = 0.0;
+    for (const BasicBlock *BB : pathBlocks) {
+        for (GlobalVariable *GV : state.getVMObjs()) {
+            unsigned accesses =
+                state.getLoadCount(BB, GV) + state.getStoreCount(BB, GV);
+            nvmAccessMargin +=
+                static_cast<double>(accesses) * params.nvmAccessPenalty;
         }
-        if (auto *AI = dyn_cast<AllocaInst>(const_cast<Value *>(Obj))) {
-            if (!AI->getAllocatedType()->isSized())
-                return;
-            if (!isa<ConstantInt>(AI->getArraySize()))
-                return;
-            memoryBackedObjs.insert(AI);
+        for (GlobalVariable *GV : ineligGlobals) {
+            unsigned accesses =
+                state.getLoadCount(BB, GV) + state.getStoreCount(BB, GV);
+            nvmAccessMargin +=
+                static_cast<double>(accesses) * params.nvmAccessPenalty;
         }
-    };
+    }
+    return nvmAccessMargin;
+}
 
-    for (BasicBlock *BB : L->blocks()) {
-        for (Instruction &I : *BB) {
-            if (auto *LI = dyn_cast<LoadInst>(&I))
-                maybeRecordMemoryObj(LI->getPointerOperand());
-            else if (auto *SI = dyn_cast<StoreInst>(&I))
-                maybeRecordMemoryObj(SI->getPointerOperand());
+static double computeBoundaryStateMarginOnPath(
+    const SmallPtrSetImpl<const BasicBlock *> &pathBlocks,
+    const checkpoint::StateAnalysis &state,
+    const checkpoint::MILPEnergyParams &params,
+    double &restoreLiveInMargin,
+    double &commitDefMargin) {
+    std::set<Value *> liveInVars;
+    std::set<Value *> defVars;
 
-            if (I.getType()->isVoidTy() || isa<AllocaInst>(&I) ||
-                !I.getType()->isSized()) {
-                continue;
-            }
+    for (const BasicBlock *BB : pathBlocks) {
+        for (GlobalVariable *GV : state.getEligLiveIn(BB))
+            liveInVars.insert(GV);
+        for (Value *V : state.getIneligLiveIn(BB))
+            liveInVars.insert(V);
 
-            bool hasCrossBlockUse = false;
-            for (const User *U : I.users()) {
-                auto *UI = dyn_cast<Instruction>(U);
-                if (UI && UI->getParent() != BB) {
-                    hasCrossBlockUse = true;
-                    break;
-                }
-            }
-            if (hasCrossBlockUse)
-                crossBlockRegs.insert(&I);
+        for (GlobalVariable *GV : state.getVMObjs()) {
+            if (state.getEligDefIndicator(BB, GV))
+                defVars.insert(GV);
+        }
+        for (Value *V : state.getIneligibleObjs()) {
+            if (state.getIneligDefIndicator(BB, V))
+                defVars.insert(V);
         }
     }
 
-    double restoreMargin = 0.0;
-    double commitMargin = 0.0;
+    restoreLiveInMargin = 0.0;
+    for (Value *V : liveInVars)
+        restoreLiveInMargin += getRestoreCostForValue(V, state, params);
 
-    for (const Value *V : memoryBackedObjs) {
-        unsigned sizeBytes = 0;
-        if (auto *GV = dyn_cast<GlobalVariable>(const_cast<Value *>(V))) {
-            sizeBytes = static_cast<unsigned>(DL.getTypeAllocSize(GV->getValueType()));
-        } else if (auto *AI = dyn_cast<AllocaInst>(const_cast<Value *>(V))) {
-            auto *ArrSize = dyn_cast<ConstantInt>(AI->getArraySize());
-            if (!ArrSize)
-                continue;
-            uint64_t elemBytes = DL.getTypeAllocSize(AI->getAllocatedType());
-            uint64_t totalBytes = elemBytes * ArrSize->getZExtValue();
-            if (totalBytes > std::numeric_limits<unsigned>::max()) {
-                totalBytes = std::numeric_limits<unsigned>::max();
-            }
-            sizeBytes = static_cast<unsigned>(totalBytes);
-        }
-        if (sizeBytes == 0)
-            continue;
-        restoreMargin +=
-            static_cast<double>(sizeBytes) * params.memRestoreEnergyPerByte;
-        commitMargin +=
-            static_cast<double>(sizeBytes) * params.memStoreEnergyPerByte;
-    }
-
-    const double regBoundaryCost =
-        static_cast<double>(crossBlockRegs.size()) *
-        (params.regRestoreEnergy + params.regStoreEnergy);
+    commitDefMargin = 0.0;
+    for (Value *V : defVars)
+        commitDefMargin += getSaveCostForValue(V, state, params);
 
     // q is intentionally treated as 1.0 for strip-mining budgeting.
-    return restoreMargin + commitMargin + regBoundaryCost;
+    return restoreLiveInMargin + commitDefMargin;
 }
 
 static PlanResult buildRewritePlan(
@@ -458,7 +438,8 @@ static PlanResult buildRewritePlan(
     ScalarEvolution &SE,
     const DenseMap<const BasicBlock *, double> &blockEnergy,
     const checkpoint::MILPEnergyParams &params,
-    LoopInfo &LI) {
+    LoopInfo &LI,
+    const checkpoint::StateAnalysis &state) {
     PlanResult result;
     result.skipReason = "unknown";
 
@@ -496,18 +477,6 @@ static PlanResult buildRewritePlan(
         return result;
     }
 
-    double nvmAccessMargin = estimateNvmAccessPenaltyUpperBound(L, params);
-    double boundaryStateMargin = estimateBoundaryStateMarginUpperBound(L, params);
-    double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
-    if (effectiveBudget <= 0.0) {
-        result.skipReason = "nonpositive-effective-budget";
-        result.skipDetail = "budget=" + std::to_string(budget) +
-            ", nvm-access-margin=" + std::to_string(nvmAccessMargin) +
-            ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
-            ", effective-budget=" + std::to_string(effectiveBudget);
-        return result;
-    }
-
     EnergyPathResult iterEnergy =
         computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok) {
@@ -516,6 +485,28 @@ static PlanResult buildRewritePlan(
     }
     if (iterEnergy.energy <= 0.0) {
         result.skipReason = "nonpositive-iteration-energy";
+        return result;
+    }
+
+    double nvmAccessMargin = computeNvmAccessMarginOnPath(
+        iterEnergy.blocksOnPath, state, params);
+    double restoreLiveInMargin = 0.0;
+    double commitDefMargin = 0.0;
+    double boundaryStateMargin = computeBoundaryStateMarginOnPath(
+        iterEnergy.blocksOnPath,
+        state,
+        params,
+        restoreLiveInMargin,
+        commitDefMargin);
+    double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
+    if (effectiveBudget <= 0.0) {
+        result.skipReason = "nonpositive-effective-budget";
+        result.skipDetail = "budget=" + std::to_string(budget) +
+            ", nvm-access-margin=" + std::to_string(nvmAccessMargin) +
+            ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
+            ", commit-def-margin=" + std::to_string(commitDefMargin) +
+            ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
+            ", effective-budget=" + std::to_string(effectiveBudget);
         return result;
     }
 
@@ -625,7 +616,7 @@ struct ChunkReclampResult {
 static ChunkReclampResult recomputeChunkKWithOverhead(
     Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
     const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
-    ScalarEvolution &SE) {
+    ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
     ChunkReclampResult out;
 
     double budget = params.capacity - params.E_pro - params.E_epi;
@@ -634,19 +625,27 @@ static ChunkReclampResult recomputeChunkKWithOverhead(
         return out;
     }
 
-    double nvmAccessMargin = estimateNvmAccessPenaltyUpperBound(L, params);
-    double boundaryStateMargin = estimateBoundaryStateMarginUpperBound(L, params);
-    double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
-    if (effectiveBudget <= 0.0) {
-        out.error = "nonpositive-effective-budget";
-        return out;
-    }
-
     EnergyPathResult iterEnergy =
         computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok || iterEnergy.energy <= 0.0) {
         out.error = iterEnergy.error.empty() ? "post-chunk-iter-energy-unavailable"
                                              : iterEnergy.error;
+        return out;
+    }
+
+    double nvmAccessMargin = computeNvmAccessMarginOnPath(
+        iterEnergy.blocksOnPath, state, params);
+    double restoreLiveInMargin = 0.0;
+    double commitDefMargin = 0.0;
+    double boundaryStateMargin = computeBoundaryStateMarginOnPath(
+        iterEnergy.blocksOnPath,
+        state,
+        params,
+        restoreLiveInMargin,
+        commitDefMargin);
+    double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
+    if (effectiveBudget <= 0.0) {
+        out.error = "nonpositive-effective-budget";
         return out;
     }
 
@@ -728,11 +727,12 @@ static void selectInNest(
     Loop *L, ScalarEvolution &SE,
     const DenseMap<const BasicBlock *, double> &blockEnergy,
     const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+    const checkpoint::StateAnalysis &state,
     std::vector<std::pair<Loop *, LoopRewritePlan>> &out,
     LoopStripMiningStats &stats) {
 
     stats.loopsSeen++;
-    PlanResult pr = buildRewritePlan(L, SE, blockEnergy, params, LI);
+    PlanResult pr = buildRewritePlan(L, SE, blockEnergy, params, LI, state);
 
     if (pr.plan) {
         out.emplace_back(L, *pr.plan);
@@ -760,7 +760,7 @@ static void selectInNest(
 
     stats.skippedReasons[pr.skipReason]++;
     for (Loop *SubL : L->getSubLoops()) {
-        selectInNest(SubL, SE, blockEnergy, params, LI, out, stats);
+        selectInNest(SubL, SE, blockEnergy, params, LI, state, out, stats);
     }
 }
 
@@ -768,10 +768,11 @@ static std::vector<std::pair<Loop *, LoopRewritePlan>> selectLoopsToStripMine(
     LoopInfo &LI, ScalarEvolution &SE,
     const DenseMap<const BasicBlock *, double> &blockEnergy,
     const checkpoint::MILPEnergyParams &params,
+    const checkpoint::StateAnalysis &state,
     LoopStripMiningStats &stats) {
     std::vector<std::pair<Loop *, LoopRewritePlan>> selected;
     for (Loop *L : LI) {
-        selectInNest(L, SE, blockEnergy, params, LI, selected, stats);
+        selectInNest(L, SE, blockEnergy, params, LI, state, selected, stats);
     }
     return selected;
 }
@@ -1227,6 +1228,14 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
     auto &AC = AM.getResult<AssumptionAnalysis>(F);
     auto &AA = AM.getResult<AAManager>(F);
     auto &TTI = AM.getResult<TargetIRAnalysis>(F);
+    checkpoint::CFGAnalysis cfg(F, LI, *estimator);
+    checkpoint::StateAnalysis state(F, AA, cfg);
+    if (state.hasAnalysisErrors()) {
+        state.printAnalysisErrors(errs());
+        errs() << "LoopStripMiningPass: skipping " << F.getName()
+               << " due to unresolved memory/call effects.\n";
+        return PreservedAnalyses::all();
+    }
 
     LoopStripMiningStats stats;
     bool changed = false;
@@ -1234,7 +1243,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
     // Select loops to strip-mine (outermost-first within each nest).
     // Snapshot headers as WeakTrackingVH so we can detect invalidation
     // from prior rewrites that may restructure the CFG.
-    auto selected = selectLoopsToStripMine(LI, SE, blockEnergy, *milpParamsOpt, stats);
+    auto selected = selectLoopsToStripMine(
+        LI, SE, blockEnergy, *milpParamsOpt, state, stats);
     std::vector<std::pair<WeakTrackingVH, LoopRewritePlan>> worklist;
     worklist.reserve(selected.size());
     for (auto &[L, plan] : selected) {
@@ -1274,8 +1284,20 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
             // Re-estimate on the transformed loop to include chunking overhead
             // (counter.check block) and clamp K in place if needed.
             refreshBlockEnergy(F, *estimator, blockEnergy);
+            checkpoint::CFGAnalysis postCfg(F, LI, *estimator);
+            checkpoint::StateAnalysis postState(F, AA, postCfg);
+            const checkpoint::StateAnalysis *reclampState = &state;
+            if (postState.hasAnalysisErrors()) {
+                if (LoopStripMiningVerboseOpt) {
+                    errs() << "LoopStripMiningPass: post-chunk state analysis "
+                           << "failed for re-clamp in " << F.getName()
+                           << "; using pre-rewrite state margins\n";
+                }
+            } else {
+                reclampState = &postState;
+            }
             ChunkReclampResult reclamp = recomputeChunkKWithOverhead(
-                L, blockEnergy, *milpParamsOpt, LI, SE);
+                L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
             if (!reclamp.ok) {
                 stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
                 if (LoopStripMiningVerboseOpt) {
