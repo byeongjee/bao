@@ -92,10 +92,10 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,enabled_checkpoints,loop_decisions,regions,paths_analyzed,runtime_calls_inserted,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls"
+HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,enabled_checkpoints,loop_decisions,regions,paths_analyzed,runtime_calls_inserted,total_execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls"
 echo "$HEADER" > "$OUTPUT_CSV"
 
-FAIL_COLS=",,,,,,,,,,,,,,"  # 14 empty fields for error rows
+FAIL_COLS=",,,,,,,,,,,,,,,"  # 15 empty fields for error rows
 
 # Extract first numeric/token value after "label:" from output.
 extract_stat() {
@@ -288,6 +288,8 @@ for bench_path in "${BENCHMARKS[@]}"; do
         regions=$(extract_stat "$full_output" "Regions")
         paths_analyzed=$(extract_stat "$full_output" "Paths analyzed")
         runtime_calls=$(extract_stat "$full_output" "Runtime calls inserted")
+        total_exec_time=$(extract_stat "$full_output" "Total execution time (ms)")
+        total_exec_time=${total_exec_time:-0}
 
         # Step 7: Compile and run instrumented binary with mock counter
         # Strip ELF-only .nvm section specifier (invalid on Mach-O)
@@ -325,7 +327,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
             rt_restore_mem=""
         fi
 
-        echo "$row_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$enabled_ckpts,$loop_decisions,$regions,$paths_analyzed,$runtime_calls,$rt_prologue,$rt_epilogue,$rt_store_reg,$rt_store_mem,$rt_restore_reg,$rt_restore_mem" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$enabled_ckpts,$loop_decisions,$regions,$paths_analyzed,$runtime_calls,$total_exec_time,$rt_prologue,$rt_epilogue,$rt_store_reg,$rt_store_mem,$rt_restore_reg,$rt_restore_mem" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $rt_prologue prologues)"
     done
 done

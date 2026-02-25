@@ -14,11 +14,13 @@
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
+#include <chrono>
 #include <fstream>
 #include <sstream>
 
@@ -350,6 +352,8 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
 
 PreservedAnalyses RockClimbPass::run(Function &F,
                                      FunctionAnalysisManager &AM) {
+    const auto totalStart = std::chrono::steady_clock::now();
+
     // Create RockClimb context with separate estimator and rockclimb configs
     auto &LI = AM.getResult<LoopAnalysis>(F);
     auto ctxResult = createRockClimbContext(F, LI,
@@ -465,10 +469,16 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     instrumenter.instrumentFunction(
         F, boundarySet, checkpointPoints, useDistributedCkpt);
 
+    const auto totalEnd = std::chrono::steady_clock::now();
+    double totalExecutionTimeMs =
+        std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+
     errs() << "\n=== RockClimb Metrics ===\n";
     errs() << "  Regions: " << result.regions.size() << "\n";
     errs() << "  Boundary checks: " << boundarySet.size() << "\n";
     errs() << "  Register checkpoints: " << checkpointPoints.size() << "\n";
+    errs() << "  Total execution time (ms): "
+           << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
 
     // We modified the IR
     return PreservedAnalyses::none();

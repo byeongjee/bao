@@ -15,12 +15,14 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 
+#include <chrono>
 #include <deque>
 #include <set>
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -35,6 +37,8 @@ namespace checkpoint {
 
 PreservedAnalyses SchematicPass::run(Function &F,
                                      FunctionAnalysisManager &AM) {
+    const auto totalStart = std::chrono::steady_clock::now();
+
     // Step 1: Obtain LLVM analyses.
     auto &LI = AM.getResult<LoopAnalysis>(F);
     auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
@@ -399,6 +403,10 @@ PreservedAnalyses SchematicPass::run(Function &F,
                                        params.N_reg);
     unsigned inserted = instrumenter.instrumentFunction(F, solution, state);
 
+    const auto totalEnd = std::chrono::steady_clock::now();
+    double totalExecutionTimeMs =
+        std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+
     // Step 13: Print statistics.
     errs() << "=== SCHEMATIC Checkpoint Insertion Statistics ===\n";
     errs() << "  Function:                        " << F.getName() << "\n";
@@ -417,7 +425,8 @@ PreservedAnalyses SchematicPass::run(Function &F,
     errs() << "  Regions:                         " << solution.regions.size()
            << "\n";
     errs() << "  Runtime calls inserted:          " << inserted << "\n";
-
+    errs() << "  Total execution time (ms):       "
+           << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
     errs() << "  Trace-guided:                    yes\n";
 
     return PreservedAnalyses::none();

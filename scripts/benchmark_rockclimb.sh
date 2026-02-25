@@ -59,7 +59,7 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,status,regions,boundary_checks,register_checkpoints,avg_region_energy,max_region_energy,runtime_rockclimb_check_calls,runtime_rockclimb_save_reg_calls,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_rockclimb_init_calls,runtime_rockclimb_is_recovery_calls,runtime_rockclimb_recover_calls"
+HEADER="benchmark,capacitor,status,regions,boundary_checks,register_checkpoints,avg_region_energy,max_region_energy,total_execution_time_ms,runtime_rockclimb_check_calls,runtime_rockclimb_save_reg_calls,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_rockclimb_init_calls,runtime_rockclimb_is_recovery_calls,runtime_rockclimb_recover_calls"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 # Extract first numeric/token value after "label:" from output.
@@ -122,19 +122,19 @@ for bench_path in "${BENCHMARKS[@]}"; do
         # Check for infeasibility
         if echo "$full_output" | grep -q "Region partitioning failed"; then
             echo "  INFEASIBLE (region partitioning failed)"
-            echo "$row_name,$cap_label,infeasible,0,0,0,0,0,0,0,0,0,0,0,0,0" >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,infeasible,0,0,0,0,0,0,0,0,0,0,0,0,0,0" >> "$OUTPUT_CSV"
             continue
         fi
         if echo "$full_output" | grep -q "blocks exceed E_safe"; then
             echo "  INFEASIBLE (blocks exceed E_safe)"
-            echo "$row_name,$cap_label,infeasible,0,0,0,0,0,0,0,0,0,0,0,0,0" >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,infeasible,0,0,0,0,0,0,0,0,0,0,0,0,0,0" >> "$OUTPUT_CSV"
             continue
         fi
 
         # Check for compilation failure (no RockClimb metrics at all)
         if ! echo "$full_output" | grep -q "RockClimb Metrics"; then
             echo "  FAILED (compilation error)"
-            echo "$row_name,$cap_label,failed,0,0,0,0,0,0,0,0,0,0,0,0,0" >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,failed,0,0,0,0,0,0,0,0,0,0,0,0,0,0" >> "$OUTPUT_CSV"
             continue
         fi
 
@@ -144,6 +144,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         register_ckpts=$(extract_stat "$full_output" "Register checkpoints")
         avg_region_energy=$(extract_stat "$full_output" "Avg region energy")
         max_region_energy=$(extract_stat "$full_output" "Max region energy")
+        total_exec_time=$(extract_stat "$full_output" "Total execution time (ms)")
 
         # Extract mock counter stats from "=== RockClimb Checkpoint Counter Summary ==="
         runtime_check=$(extract_stat "$full_output" "__rockclimb_check")
@@ -161,6 +162,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         register_ckpts=${register_ckpts:-0}
         avg_region_energy=${avg_region_energy:-0}
         max_region_energy=${max_region_energy:-0}
+        total_exec_time=${total_exec_time:-0}
         runtime_check=${runtime_check:-0}
         runtime_save_reg=${runtime_save_reg:-0}
         runtime_prologue=${runtime_prologue:-0}
@@ -170,7 +172,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         runtime_is_recovery=${runtime_is_recovery:-0}
         runtime_recover=${runtime_recover:-0}
 
-        echo "$row_name,$cap_label,ok,$regions,$boundary_checks,$register_ckpts,$avg_region_energy,$max_region_energy,$runtime_check,$runtime_save_reg,$runtime_prologue,$runtime_epilogue,$runtime_store_reg,$runtime_init,$runtime_is_recovery,$runtime_recover" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,ok,$regions,$boundary_checks,$register_ckpts,$avg_region_energy,$max_region_energy,$total_exec_time,$runtime_check,$runtime_save_reg,$runtime_prologue,$runtime_epilogue,$runtime_store_reg,$runtime_init,$runtime_is_recovery,$runtime_recover" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $boundary_checks boundaries)"
     done
 done
