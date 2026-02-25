@@ -372,14 +372,15 @@ unsigned SchematicInstrumenter::insertLoopConditionalCheckpoint(
 
     llvm::IRBuilder<> checkBuilder(checkBB);
     llvm::Value *counterVal = checkBuilder.CreateLoad(I32Ty, counter);
+    // Evaluate the checkpoint condition before increment so counter=0
+    // triggers the initial ("0-th") checkpoint.
+    llvm::Value *rem = checkBuilder.CreateURem(
+        counterVal, llvm::ConstantInt::get(I32Ty, numIt));
+    llvm::Value *cond =
+        checkBuilder.CreateICmpEQ(rem, llvm::ConstantInt::get(I32Ty, 0));
     llvm::Value *incremented = checkBuilder.CreateAdd(
         counterVal, llvm::ConstantInt::get(I32Ty, 1));
     checkBuilder.CreateStore(incremented, counter);
-
-    llvm::Value *rem = checkBuilder.CreateURem(
-        incremented, llvm::ConstantInt::get(I32Ty, numIt));
-    llvm::Value *cond =
-        checkBuilder.CreateICmpEQ(rem, llvm::ConstantInt::get(I32Ty, 0));
 
     // Create checkpoint BB.
     llvm::BasicBlock *ckptBB = llvm::BasicBlock::Create(
