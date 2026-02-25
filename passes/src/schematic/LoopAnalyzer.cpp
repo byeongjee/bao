@@ -57,6 +57,11 @@ LoopAnalyzer::enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const {
     // DFS from header to latch blocks, skipping back-edges and inner loop blocks.
     std::vector<std::vector<llvm::BasicBlock *>> result;
 
+    // Self-latching (single-block) loops must still be analyzed as one-iteration
+    // paths. The single iteration path is [header].
+    if (latches.count(header))
+        result.push_back({header});
+
     struct DFSState {
         llvm::BasicBlock *BB;
         std::vector<llvm::BasicBlock *> path;
@@ -290,9 +295,11 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     bool usedTraces = false;
     for (const auto &lt : loadedLoopTraces_) {
         if (lt.header == header) {
-            for (const auto &ep : lt.iterationPaths)
-                bodyPaths.push_back(ep.blocks);
-            usedTraces = true;
+            for (const auto &ep : lt.iterationPaths) {
+                if (!ep.blocks.empty())
+                    bodyPaths.push_back(ep.blocks);
+            }
+            usedTraces = !bodyPaths.empty();
             break;
         }
     }
@@ -300,13 +307,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         bodyPaths = enumerateLoopPathsWithoutBackEdges(L);
 
     if (bodyPaths.empty()) {
-        // Single-block loop or trivial — no analysis needed.
-        LoopCheckpointDecision decision;
-        decision.loop = L;
-        decision.numIterationsPerCharge = 0;
-        decision.E_loop = 0.0;
-        solution.loopDecisions[header] = decision;
-        return true;
+        llvm::errs() << "SCHEMATIC: loop at " << header->getName()
+                      << " has no analyzable body paths\n";
+        return false;
     }
 
     // 3. Run RCG solver on each path.
