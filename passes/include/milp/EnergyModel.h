@@ -26,9 +26,6 @@ struct MILPEnergyParams {
     unsigned vmCapacityBytes;      // VM (SRAM) capacity in bytes
     double qRebootProb;            // Probability of reboot at boundary
     bool loopStripMiningEnabled = false; // Enable loop strip-mining pass
-    // Additional strip-mining safety margin as % of capacitor capacity.
-    // Effective strip-mining budget is reduced by this amount.
-    double loopStripMiningMarginPercent = 0.0;
     bool addDebugMarkers = false;    // Emit debug marker calls for register save/restore
 };
 
@@ -86,8 +83,7 @@ private:
 };
 
 /// Parse MILP energy parameters from a JSON config file.
-/// Energy fields are required; loop_strip_mining_enabled and
-/// loop_strip_mining_margin_percent are optional.
+/// Energy fields are required; loop_strip_mining_enabled is optional.
 /// Returns std::nullopt on error.
 std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configPath);
 

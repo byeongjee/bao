@@ -64,6 +64,7 @@ struct LoopRewritePlan {
 struct PlanResult {
     std::optional<LoopRewritePlan> plan;
     std::string skipReason;
+    std::string skipDetail;
 };
 
 struct EnergyPathResult {
@@ -300,21 +301,14 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
     return backedgeValue;
 }
 
-/// Compute a conservative upper bound on the ineligible restore cost for
-/// objects relevant to loop \p L.  This mirrors the classification in
-/// StateAnalysis but is scoped to the loop so the estimate is tighter than
-/// a whole-function sum.  The result is an upper bound because it counts
-/// every potentially-ineligible object touching the loop regardless of
-/// simultaneous liveness.
-static double estimateIneligRestoreUpperBound(
+/// Compute a conservative upper bound on NVM access energy inside one loop
+/// iteration. Since chunked/strip-mined inner loops do not checkpoint
+/// internally, we do not charge restore energy here; instead we account for
+/// potential global-memory accesses as nvm_access_penalty per load/store.
+static double estimateNvmAccessPenaltyUpperBound(
     Loop *L, const checkpoint::MILPEnergyParams &params) {
-    Function *F = L->getHeader()->getParent();
-    Module *M = F->getParent();
-    const DataLayout &DL = M->getDataLayout();
     double total = 0.0;
 
-    // --- Non-candidate globals accessed in the loop ---
-    std::set<GlobalVariable *> seenGV;
     for (BasicBlock *BB : L->blocks()) {
         for (Instruction &I : *BB) {
             const Value *Ptr = nullptr;
@@ -325,12 +319,12 @@ static double estimateIneligRestoreUpperBound(
             else
                 continue;
 
-            const Value *Obj =
-                getUnderlyingObject(Ptr->stripPointerCasts());
+            const Value *Obj = getUnderlyingObject(Ptr->stripPointerCasts());
             auto *GV = dyn_cast<GlobalVariable>(const_cast<Value *>(Obj));
             if (!GV)
                 continue;
 
+            // Match MILP global tracking filters and ignore internal helpers.
             if (GV->isDeclaration())
                 continue;
             if (GV->isConstant())
@@ -343,107 +337,8 @@ static double estimateIneligRestoreUpperBound(
                 continue;
             if (!GV->getValueType()->isSized())
                 continue;
-            if (checkpoint::isMilpCandidateAnnotated(GV, M))
-                continue;
 
-            if (!seenGV.insert(GV).second)
-                continue;
-
-            total += static_cast<double>(DL.getTypeAllocSize(GV->getValueType()))
-                     * params.memRestoreEnergyPerByte;
-        }
-    }
-
-    // --- Stack allocas used in the loop ---
-    std::set<AllocaInst *> seenAlloca;
-    BasicBlock &EntryBB = F->getEntryBlock();
-    for (Instruction &I : EntryBB) {
-        auto *AI = dyn_cast<AllocaInst>(&I);
-        if (!AI)
-            continue;
-        if (!AI->getAllocatedType()->isSized())
-            continue;
-
-        bool usedInLoop = false;
-        for (const User *U : AI->users()) {
-            if (auto *UI = dyn_cast<Instruction>(U)) {
-                if (L->contains(UI->getParent())) {
-                    usedInLoop = true;
-                    break;
-                }
-            }
-        }
-        if (!usedInLoop)
-            continue;
-        if (!seenAlloca.insert(AI).second)
-            continue;
-
-        total += static_cast<double>(DL.getTypeAllocSize(AI->getAllocatedType()))
-                 * params.memRestoreEnergyPerByte;
-    }
-
-    // --- SSA values defined inside the loop with cross-block uses ---
-    for (BasicBlock *BB : L->blocks()) {
-        for (Instruction &I : *BB) {
-            if (I.getType()->isVoidTy())
-                continue;
-            if (isa<AllocaInst>(&I))
-                continue;
-            if (!I.getType()->isSized())
-                continue;
-
-            bool hasCrossBlockUse = false;
-            for (const User *U : I.users()) {
-                if (auto *UI = dyn_cast<Instruction>(U)) {
-                    if (UI->getParent() != BB) {
-                        hasCrossBlockUse = true;
-                        break;
-                    }
-                }
-            }
-            if (!hasCrossBlockUse)
-                continue;
-
-            total += static_cast<double>(DL.getTypeAllocSize(I.getType()))
-                     * params.memRestoreEnergyPerByte;
-        }
-    }
-
-    // --- SSA values defined outside the loop but used inside ---
-    std::set<Value *> seenLiveIn;
-    for (BasicBlock *BB : L->blocks()) {
-        for (Instruction &I : *BB) {
-            for (Use &Op : I.operands()) {
-                auto *DefI = dyn_cast<Instruction>(Op.get());
-                if (!DefI)
-                    continue;
-                if (L->contains(DefI->getParent()))
-                    continue;
-                if (isa<AllocaInst>(DefI))
-                    continue;
-                if (DefI->getType()->isVoidTy())
-                    continue;
-                if (!DefI->getType()->isSized())
-                    continue;
-
-                bool hasCrossBlockUse = false;
-                for (const User *U : DefI->users()) {
-                    if (auto *UI = dyn_cast<Instruction>(U)) {
-                        if (UI->getParent() != DefI->getParent()) {
-                            hasCrossBlockUse = true;
-                            break;
-                        }
-                    }
-                }
-                if (!hasCrossBlockUse)
-                    continue;
-
-                if (!seenLiveIn.insert(static_cast<Value *>(DefI)).second)
-                    continue;
-
-                total += static_cast<double>(DL.getTypeAllocSize(DefI->getType()))
-                         * params.memRestoreEnergyPerByte;
-            }
+            total += params.nvmAccessPenalty;
         }
     }
 
@@ -486,15 +381,20 @@ static PlanResult buildRewritePlan(
     double budget = params.capacity - params.E_pro - params.E_epi;
     if (budget <= 0.0) {
         result.skipReason = "nonpositive-energy-budget";
+        result.skipDetail = "capacity=" + std::to_string(params.capacity) +
+            ", E_pro=" + std::to_string(params.E_pro) +
+            ", E_epi=" + std::to_string(params.E_epi) +
+            ", budget=" + std::to_string(budget);
         return result;
     }
 
-    double ineligMargin = estimateIneligRestoreUpperBound(L, params);
-    double stripMiningMargin =
-        params.capacity * (params.loopStripMiningMarginPercent / 100.0);
-    double effectiveBudget = budget - ineligMargin - stripMiningMargin;
+    double nvmAccessMargin = estimateNvmAccessPenaltyUpperBound(L, params);
+    double effectiveBudget = budget - nvmAccessMargin;
     if (effectiveBudget <= 0.0) {
         result.skipReason = "nonpositive-effective-budget";
+        result.skipDetail = "budget=" + std::to_string(budget) +
+            ", nvm-access-margin=" + std::to_string(nvmAccessMargin) +
+            ", effective-budget=" + std::to_string(effectiveBudget);
         return result;
     }
 
@@ -594,6 +494,125 @@ static PlanResult buildRewritePlan(
     return result;
 }
 
+static void refreshBlockEnergy(Function &F,
+                               checkpoint::EnergyEstimator &estimator,
+                               DenseMap<const BasicBlock *, double> &blockEnergy) {
+    estimator.prepareForFunction(F);
+    blockEnergy.clear();
+    blockEnergy.reserve(F.size());
+    for (BasicBlock &BB : F) {
+        blockEnergy[&BB] = estimator.estimate(BB).cost;
+    }
+}
+
+struct ChunkReclampResult {
+    bool ok = false;
+    uint64_t maxK = 0;
+    double iterEnergy = 0.0;
+    std::string error;
+};
+
+static ChunkReclampResult recomputeChunkKWithOverhead(
+    Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+    const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+    ScalarEvolution &SE) {
+    ChunkReclampResult out;
+
+    double budget = params.capacity - params.E_pro - params.E_epi;
+    if (budget <= 0.0) {
+        out.error = "nonpositive-energy-budget";
+        return out;
+    }
+
+    double nvmAccessMargin = estimateNvmAccessPenaltyUpperBound(L, params);
+    double effectiveBudget = budget - nvmAccessMargin;
+    if (effectiveBudget <= 0.0) {
+        out.error = "nonpositive-effective-budget";
+        return out;
+    }
+
+    EnergyPathResult iterEnergy =
+        computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
+    if (!iterEnergy.ok || iterEnergy.energy <= 0.0) {
+        out.error = iterEnergy.error.empty() ? "post-chunk-iter-energy-unavailable"
+                                             : iterEnergy.error;
+        return out;
+    }
+
+    double rawK = std::floor(effectiveBudget / iterEnergy.energy);
+    if (!std::isfinite(rawK) || rawK <= 0.0) {
+        out.error = "post-chunk-k-zero";
+        return out;
+    }
+
+    uint64_t maxK = static_cast<uint64_t>(rawK);
+    if (maxK > std::numeric_limits<unsigned>::max()) {
+        maxK = std::numeric_limits<unsigned>::max();
+    }
+
+    out.ok = true;
+    out.maxK = maxK;
+    out.iterEnergy = iterEnergy.energy;
+    return out;
+}
+
+static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
+    BasicBlock *Header = L->getHeader();
+    if (!Header) {
+        return false;
+    }
+
+    PHINode *ChunkCounter = nullptr;
+    for (PHINode &PN : Header->phis()) {
+        if (PN.getName().starts_with("chunk.counter")) {
+            ChunkCounter = &PN;
+            break;
+        }
+    }
+    if (!ChunkCounter) {
+        return false;
+    }
+
+    BasicBlock *CounterCheck = nullptr;
+    for (unsigned i = 0; i < ChunkCounter->getNumIncomingValues(); i++) {
+        BasicBlock *InBB = ChunkCounter->getIncomingBlock(i);
+        if (InBB && L->contains(InBB)) {
+            CounterCheck = InBB;
+            break;
+        }
+    }
+    if (!CounterCheck) {
+        return false;
+    }
+
+    auto *Br = dyn_cast<BranchInst>(CounterCheck->getTerminator());
+    if (!Br || !Br->isConditional()) {
+        return false;
+    }
+
+    auto *Cmp = dyn_cast<ICmpInst>(Br->getCondition());
+    if (!Cmp) {
+        return false;
+    }
+
+    auto *IntTy = dyn_cast<IntegerType>(ChunkCounter->getType());
+    if (!IntTy) {
+        return false;
+    }
+    ConstantInt *Bound = ConstantInt::get(IntTy, newK);
+
+    if (isa<ConstantInt>(Cmp->getOperand(0))) {
+        Cmp->setOperand(0, Bound);
+        return true;
+    }
+    if (isa<ConstantInt>(Cmp->getOperand(1))) {
+        Cmp->setOperand(1, Bound);
+        return true;
+    }
+
+    return false;
+}
+
 static void selectInNest(
     Loop *L, ScalarEvolution &SE,
     const DenseMap<const BasicBlock *, double> &blockEnergy,
@@ -616,7 +635,11 @@ static void selectInNest(
             ? checkpoint::getBlockName(*Header, *F) : "<unknown>";
         std::string funcName = F ? F->getName().str() : "<unknown>";
         errs() << "LoopStripMiningPass: skip " << funcName << "::"
-               << headerName << " reason=" << pr.skipReason << "\n";
+               << headerName << " reason=" << pr.skipReason;
+        if (!pr.skipDetail.empty()) {
+            errs() << " " << pr.skipDetail;
+        }
+        errs() << "\n";
     }
 
     if (pr.skipReason == "k-covers-entire-loop") {
@@ -1134,6 +1157,49 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
                        << "::" << headerName << " K=" << plan.K << "\n";
             }
             continue;
+        }
+
+        if (plan.isChunking) {
+            // Re-estimate on the transformed loop to include chunking overhead
+            // (counter.check block) and clamp K in place if needed.
+            refreshBlockEnergy(F, *estimator, blockEnergy);
+            ChunkReclampResult reclamp = recomputeChunkKWithOverhead(
+                L, blockEnergy, *milpParamsOpt, LI, SE);
+            if (!reclamp.ok) {
+                stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
+                if (LoopStripMiningVerboseOpt) {
+                    errs() << "LoopStripMiningPass: chunk K re-clamp unavailable "
+                           << F.getName() << "::" << headerName
+                           << " reason=" << reclamp.error
+                           << " original-K=" << plan.K << "\n";
+                }
+            } else {
+                plan.iterEnergy = reclamp.iterEnergy;
+                uint64_t newK = std::min<uint64_t>(plan.K, reclamp.maxK);
+                if (newK != plan.K) {
+                    if (!updateChunkLoopBound(L, newK)) {
+                        stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
+                        if (LoopStripMiningVerboseOpt) {
+                            errs() << "LoopStripMiningPass: chunk K re-clamp update failed "
+                                   << F.getName() << "::" << headerName
+                                   << " original-K=" << plan.K
+                                   << " new-K=" << newK << "\n";
+                        }
+                    } else {
+                        setLoopTripCountMetadata(L, newK);
+                        SE.forgetLoop(L);
+                        if (LoopStripMiningVerboseOpt) {
+                            errs() << "LoopStripMiningPass: chunk K re-clamped "
+                                   << F.getName() << "::" << headerName
+                                   << " original-K=" << plan.K
+                                   << " new-K=" << newK
+                                   << " E_iter_wc_post=" << reclamp.iterEnergy
+                                   << "\n";
+                        }
+                        plan.K = newK;
+                    }
+                }
+            }
         }
 
         changed = true;

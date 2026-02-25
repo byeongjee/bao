@@ -444,6 +444,13 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         model.eSaveByVar_[V] = energy.getESave(V);
         model.eRestoreByVar_[V] = energy.getERestore(V);
     }
+    std::vector<llvm::GlobalVariable *> ineligGlobals;
+    ineligGlobals.reserve(model.ineligibleObjs_.size());
+    for (llvm::Value *V : model.ineligibleObjs_) {
+        if (auto *GV = dyn_cast<llvm::GlobalVariable>(V)) {
+            ineligGlobals.push_back(GV);
+        }
+    }
 
     // Build per-BB energy map from CFGAnalysis.
     DenseMap<const BasicBlock *, double> blockEnergyByBB;
@@ -543,28 +550,26 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             continue;
         }
 
-        // Compute ineligible restore cost margin.
-        double ineligRestoreCost = 0.0;
-        {
-            std::set<llvm::Value *> seenInelig;
-            for (const BasicBlock *BB : path.blocksOnPath) {
-                for (llvm::Value *V : state.getIneligLiveIn(BB)) {
-                    if (seenInelig.insert(V).second) {
-                        ineligRestoreCost += energy.getERestore(V);
-                    }
-                }
+        // Compute NVM access penalty margin on the selected path.
+        double nvmAccessMargin = 0.0;
+        for (const BasicBlock *BB : path.blocksOnPath) {
+            for (llvm::GlobalVariable *GV : model.vmObjs_) {
+                nvmAccessMargin += energy.getENvm(BB, GV);
+            }
+            for (llvm::GlobalVariable *GV : ineligGlobals) {
+                nvmAccessMargin += energy.getENvm(BB, GV);
             }
         }
 
-        const double effectiveBudget = budget - ineligRestoreCost;
+        const double effectiveBudget = budget - nvmAccessMargin;
         double totalEnergy = path.energy * static_cast<double>(loopTC);
         if (effectiveBudget <= 0.0 || !(totalEnergy < effectiveBudget)) {
             skipLoop("loop-total-exceeds-budget",
                      "path-energy=" + std::to_string(path.energy) +
                          ", trip-count=" + std::to_string(loopTC) +
                          ", total-energy=" + std::to_string(totalEnergy) +
-                         ", inelig-restore=" +
-                         std::to_string(ineligRestoreCost) +
+                         ", nvm-access-margin=" +
+                         std::to_string(nvmAccessMargin) +
                          ", effective-budget=" +
                          std::to_string(effectiveBudget));
             continue;
