@@ -507,8 +507,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         updater.Initialize(origVal->getType(), origVal->getName());
 
         // The original definition is available in its defining block.
-        if (auto *I = llvm::dyn_cast<llvm::Instruction>(origVal))
-            updater.AddAvailableValue(I->getParent(), origVal);
+        auto *defInst = llvm::dyn_cast<llvm::Instruction>(origVal);
+        const llvm::BasicBlock *defBlock = nullptr;
+        if (defInst) {
+            defBlock = defInst->getParent();
+            updater.AddAvailableValue(defInst->getParent(), origVal);
+        }
 
         // Each boundary's restore load is available in its block.
         for (auto &[block, restoredVal] : defs)
@@ -523,6 +527,11 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
             // Skip commit stores — they correctly use the original value
             // during normal (non-restart) execution.
             if (allCommitInsts.count(I))
+                continue;
+            // Keep same-block uses on the original SSA def. These uses are
+            // dominated by the local definition and should not consume a
+            // boundary restore value.
+            if (defBlock && I->getParent() == defBlock)
                 continue;
             usesToRewrite.push_back(&U);
         }

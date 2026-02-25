@@ -263,6 +263,78 @@ static PathSummary computeWorstCasePathSummary(
     return result;
 }
 
+static double getSaveCostForValue(llvm::Value *V,
+                                  const StateAnalysis &state,
+                                  const MILPEnergyParams &params) {
+    if (auto *I = dyn_cast<Instruction>(V)) {
+        if (!isa<AllocaInst>(I)) {
+            return params.regStoreEnergy;
+        }
+    }
+    unsigned sizeBytes = state.getVarSizeBytes(V);
+    if (sizeBytes == 0)
+        return 0.0;
+    return static_cast<double>(sizeBytes) * params.memStoreEnergyPerByte;
+}
+
+static double getRestoreCostForValue(llvm::Value *V,
+                                     const StateAnalysis &state,
+                                     const MILPEnergyParams &params) {
+    if (auto *I = dyn_cast<Instruction>(V)) {
+        if (!isa<AllocaInst>(I)) {
+            return params.regRestoreEnergy;
+        }
+    }
+    unsigned sizeBytes = state.getVarSizeBytes(V);
+    if (sizeBytes == 0)
+        return 0.0;
+    return static_cast<double>(sizeBytes) * params.memRestoreEnergyPerByte;
+}
+
+static double computeBoundaryStateMarginOnPath(
+    const SmallPtrSetImpl<const BasicBlock *> &pathBlocks,
+    const StateAnalysis &state,
+    const std::vector<llvm::GlobalVariable *> &vmObjs,
+    const std::vector<llvm::Value *> &ineligibleObjs,
+    const MILPEnergyParams &params,
+    double &restoreLiveInMargin,
+    double &commitDefMargin) {
+    std::set<llvm::Value *> liveInVars;
+    std::set<llvm::Value *> defVars;
+
+    for (const BasicBlock *BB : pathBlocks) {
+        for (llvm::GlobalVariable *GV : state.getEligLiveIn(BB)) {
+            liveInVars.insert(GV);
+        }
+        for (llvm::Value *V : state.getIneligLiveIn(BB)) {
+            liveInVars.insert(V);
+        }
+        for (llvm::GlobalVariable *GV : vmObjs) {
+            if (state.getEligDefIndicator(BB, GV)) {
+                defVars.insert(GV);
+            }
+        }
+        for (llvm::Value *V : ineligibleObjs) {
+            if (state.getIneligDefIndicator(BB, V)) {
+                defVars.insert(V);
+            }
+        }
+    }
+
+    restoreLiveInMargin = 0.0;
+    for (llvm::Value *V : liveInVars) {
+        // q is intentionally treated as 1.0 for loop-summary eligibility.
+        restoreLiveInMargin += getRestoreCostForValue(V, state, params);
+    }
+
+    commitDefMargin = 0.0;
+    for (llvm::Value *V : defVars) {
+        commitDefMargin += getSaveCostForValue(V, state, params);
+    }
+
+    return restoreLiveInMargin + commitDefMargin;
+}
+
 static bool overlapsSelected(Loop *L,
                              const SmallPtrSetImpl<const BasicBlock *> &selectedBlocks) {
     for (const BasicBlock *BB : L->blocks()) {
@@ -561,7 +633,19 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             }
         }
 
-        const double effectiveBudget = budget - nvmAccessMargin;
+        double restoreLiveInMargin = 0.0;
+        double commitDefMargin = 0.0;
+        double boundaryStateMargin = computeBoundaryStateMarginOnPath(
+            path.blocksOnPath,
+            state,
+            model.vmObjs_,
+            model.ineligibleObjs_,
+            model.params_,
+            restoreLiveInMargin,
+            commitDefMargin);
+
+        const double effectiveBudget =
+            budget - nvmAccessMargin - boundaryStateMargin;
         double totalEnergy = path.energy * static_cast<double>(loopTC);
         if (effectiveBudget <= 0.0 || !(totalEnergy < effectiveBudget)) {
             skipLoop("loop-total-exceeds-budget",
@@ -570,6 +654,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                          ", total-energy=" + std::to_string(totalEnergy) +
                          ", nvm-access-margin=" +
                          std::to_string(nvmAccessMargin) +
+                         ", restore-livein-margin=" +
+                         std::to_string(restoreLiveInMargin) +
+                         ", commit-def-margin=" +
+                         std::to_string(commitDefMargin) +
+                         ", boundary-state-margin=" +
+                         std::to_string(boundaryStateMargin) +
                          ", effective-budget=" +
                          std::to_string(effectiveBudget));
             continue;

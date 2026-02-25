@@ -271,6 +271,8 @@ void StateAnalysis::identifyIneligibleSSAValues() {
                 continue;
             if (llvm::isa<llvm::AllocaInst>(&I))
                 continue;
+            if (llvm::isa<llvm::PHINode>(&I))
+                continue;
 
             // Unsized types (void, label, token, metadata) cannot be stored to
             // memory and don't represent runtime data state — void produces no

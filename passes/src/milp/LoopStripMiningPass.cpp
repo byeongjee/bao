@@ -35,6 +35,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -345,6 +346,113 @@ static double estimateNvmAccessPenaltyUpperBound(
     return total;
 }
 
+static bool isTrackableGlobalForMargin(const GlobalVariable *GV) {
+    if (!GV)
+        return false;
+    if (GV->isDeclaration())
+        return false;
+    if (GV->isConstant())
+        return false;
+    if (GV->getName().starts_with("llvm."))
+        return false;
+    if (GV->getName().starts_with("__nvm_"))
+        return false;
+    if (GV->getName().starts_with("__vm_shadow_"))
+        return false;
+    if (!GV->getValueType()->isSized())
+        return false;
+    return true;
+}
+
+/// Estimate additional loop boundary margin from tracked state at q=1.
+/// We conservatively charge restore+commit for memory-backed values touched in
+/// the loop and cross-block SSA values produced in the loop.
+static double estimateBoundaryStateMarginUpperBound(
+    Loop *L, const checkpoint::MILPEnergyParams &params) {
+    Function *F = L ? L->getHeader()->getParent() : nullptr;
+    Module *M = F ? F->getParent() : nullptr;
+    if (!M)
+        return 0.0;
+
+    const DataLayout &DL = M->getDataLayout();
+    std::set<const Value *> memoryBackedObjs;
+    std::set<const Instruction *> crossBlockRegs;
+
+    auto maybeRecordMemoryObj = [&](const Value *Ptr) {
+        const Value *Obj = getUnderlyingObject(Ptr->stripPointerCasts());
+        if (auto *GV = dyn_cast<GlobalVariable>(const_cast<Value *>(Obj))) {
+            if (isTrackableGlobalForMargin(GV))
+                memoryBackedObjs.insert(GV);
+            return;
+        }
+        if (auto *AI = dyn_cast<AllocaInst>(const_cast<Value *>(Obj))) {
+            if (!AI->getAllocatedType()->isSized())
+                return;
+            if (!isa<ConstantInt>(AI->getArraySize()))
+                return;
+            memoryBackedObjs.insert(AI);
+        }
+    };
+
+    for (BasicBlock *BB : L->blocks()) {
+        for (Instruction &I : *BB) {
+            if (auto *LI = dyn_cast<LoadInst>(&I))
+                maybeRecordMemoryObj(LI->getPointerOperand());
+            else if (auto *SI = dyn_cast<StoreInst>(&I))
+                maybeRecordMemoryObj(SI->getPointerOperand());
+
+            if (I.getType()->isVoidTy() || isa<AllocaInst>(&I) ||
+                !I.getType()->isSized()) {
+                continue;
+            }
+
+            bool hasCrossBlockUse = false;
+            for (const User *U : I.users()) {
+                auto *UI = dyn_cast<Instruction>(U);
+                if (UI && UI->getParent() != BB) {
+                    hasCrossBlockUse = true;
+                    break;
+                }
+            }
+            if (hasCrossBlockUse)
+                crossBlockRegs.insert(&I);
+        }
+    }
+
+    double restoreMargin = 0.0;
+    double commitMargin = 0.0;
+
+    for (const Value *V : memoryBackedObjs) {
+        unsigned sizeBytes = 0;
+        if (auto *GV = dyn_cast<GlobalVariable>(const_cast<Value *>(V))) {
+            sizeBytes = static_cast<unsigned>(DL.getTypeAllocSize(GV->getValueType()));
+        } else if (auto *AI = dyn_cast<AllocaInst>(const_cast<Value *>(V))) {
+            auto *ArrSize = dyn_cast<ConstantInt>(AI->getArraySize());
+            if (!ArrSize)
+                continue;
+            uint64_t elemBytes = DL.getTypeAllocSize(AI->getAllocatedType());
+            uint64_t totalBytes = elemBytes * ArrSize->getZExtValue();
+            if (totalBytes > std::numeric_limits<unsigned>::max()) {
+                totalBytes = std::numeric_limits<unsigned>::max();
+            }
+            sizeBytes = static_cast<unsigned>(totalBytes);
+        }
+        if (sizeBytes == 0)
+            continue;
+        restoreMargin +=
+            static_cast<double>(sizeBytes) * params.memRestoreEnergyPerByte;
+        commitMargin +=
+            static_cast<double>(sizeBytes) * params.memStoreEnergyPerByte;
+    }
+
+    const double regBoundaryCost =
+        static_cast<double>(crossBlockRegs.size()) *
+        (params.regRestoreEnergy + params.regStoreEnergy);
+
+    // q is intentionally treated as 1.0 for strip-mining budgeting.
+    return restoreMargin + commitMargin + regBoundaryCost;
+}
+
 static PlanResult buildRewritePlan(
     Loop *L,
     ScalarEvolution &SE,
@@ -389,11 +497,13 @@ static PlanResult buildRewritePlan(
     }
 
     double nvmAccessMargin = estimateNvmAccessPenaltyUpperBound(L, params);
-    double effectiveBudget = budget - nvmAccessMargin;
+    double boundaryStateMargin = estimateBoundaryStateMarginUpperBound(L, params);
+    double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
     if (effectiveBudget <= 0.0) {
         result.skipReason = "nonpositive-effective-budget";
         result.skipDetail = "budget=" + std::to_string(budget) +
             ", nvm-access-margin=" + std::to_string(nvmAccessMargin) +
+            ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
             ", effective-budget=" + std::to_string(effectiveBudget);
         return result;
     }
@@ -525,7 +635,8 @@ static ChunkReclampResult recomputeChunkKWithOverhead(
     }
 
     double nvmAccessMargin = estimateNvmAccessPenaltyUpperBound(L, params);
-    double effectiveBudget = budget - nvmAccessMargin;
+    double boundaryStateMargin = estimateBoundaryStateMarginUpperBound(L, params);
+    double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
     if (effectiveBudget <= 0.0) {
         out.error = "nonpositive-effective-budget";
         return out;
