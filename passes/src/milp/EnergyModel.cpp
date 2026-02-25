@@ -148,15 +148,12 @@ void EnergyModel::computeSaveRestoreCosts() {
     // E_sv[v], E_rst[v] for all tracked variables (elig + inelig).
     auto computeForVar = [&](llvm::Value *V) {
         if (auto *I = llvm::dyn_cast<llvm::Instruction>(V)) {
-            if (llvm::isa<llvm::AllocaInst>(I)) {
-                // Stack allocas are assumed to reside in persistent FRAM.
-                // No explicit checkpoint save/restore is required.
+            if (!llvm::isa<llvm::AllocaInst>(I)) {
+                // Cross-block SSA values represent register state.
+                eSaveByVar_[V] = params_.regStoreEnergy;
+                eRestoreByVar_[V] = params_.regRestoreEnergy;
                 return;
             }
-            // Cross-block SSA values represent register state.
-            eSaveByVar_[V] = params_.regStoreEnergy;
-            eRestoreByVar_[V] = params_.regRestoreEnergy;
-            return;
         }
 
         unsigned sizeBytes = state_.getVarSizeBytes(V);
@@ -210,17 +207,11 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
                      << " in MILP config: " << configPath << "\n";
         return std::nullopt;
     }
-    if (!config.contains("N_reg")) {
-        llvm::errs() << "Error: Missing required field 'N_reg'"
-                     << " in MILP config: " << configPath << "\n";
-        return std::nullopt;
-    }
 
     MILPEnergyParams params;
     params.capacity = config["capacity"].get<double>();
     params.E_pro = config["E_pro"].get<double>();
     params.E_epi = config["E_epi"].get<double>();
-    params.N_reg = config["N_reg"].get<unsigned>();
     params.regStoreEnergy = config["reg_store_energy"].get<double>();
     params.regRestoreEnergy = config["reg_restore_energy"].get<double>();
     params.nvmAccessPenalty = config["nvm_access_penalty"].get<double>();
@@ -228,12 +219,6 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
     params.memRestoreEnergyPerByte = config["mem_restore_energy_per_byte"].get<double>();
     params.vmCapacityBytes = config["vm_capacity_bytes"].get<unsigned>();
     params.qRebootProb = config["q_reboot_probability"].get<double>();
-
-    if (params.N_reg == 0) {
-        llvm::errs() << "Error: Field 'N_reg' must be > 0 in MILP config: "
-                     << configPath << "\n";
-        return std::nullopt;
-    }
     params.loopStripMiningEnabled = false;
     if (config.contains("loop_strip_mining_enabled")) {
         if (!config["loop_strip_mining_enabled"].is_boolean()) {

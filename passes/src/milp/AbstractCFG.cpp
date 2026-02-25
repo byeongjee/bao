@@ -280,12 +280,10 @@ static double getSaveCostForValue(llvm::Value *V,
             return 0.0;
         }
     }
-    if (isa<AllocaInst>(V)) {
-        // Stack allocas are assumed to be persistent in FRAM.
-        return 0.0;
-    }
-    if (isa<Instruction>(V)) {
-        return params.regStoreEnergy;
+    if (auto *I = dyn_cast<Instruction>(V)) {
+        if (!isa<AllocaInst>(I)) {
+            return params.regStoreEnergy;
+        }
     }
     unsigned sizeBytes = state.getVarSizeBytes(V);
     if (sizeBytes == 0)
@@ -303,22 +301,15 @@ static double getRestoreCostForValue(llvm::Value *V,
             return 0.0;
         }
     }
-    if (isa<AllocaInst>(V)) {
-        // Stack allocas are assumed to be persistent in FRAM.
-        return 0.0;
-    }
-    if (isa<Instruction>(V)) {
-        return params.regRestoreEnergy;
+    if (auto *I = dyn_cast<Instruction>(V)) {
+        if (!isa<AllocaInst>(I)) {
+            return params.regRestoreEnergy;
+        }
     }
     unsigned sizeBytes = state.getVarSizeBytes(V);
     if (sizeBytes == 0)
         return 0.0;
     return static_cast<double>(sizeBytes) * params.memRestoreEnergyPerByte;
-}
-
-static bool isRegisterLikeValue(llvm::Value *V) {
-    auto *I = dyn_cast<Instruction>(V);
-    return I && !isa<AllocaInst>(I);
 }
 
 static double computeBoundaryStateMarginOnPath(
@@ -328,11 +319,7 @@ static double computeBoundaryStateMarginOnPath(
     const std::vector<llvm::Value *> &ineligibleObjs,
     const MILPEnergyParams &params,
     double &restoreLiveInMargin,
-    double &commitDefMargin,
-    unsigned &liveInRegCount,
-    unsigned &liveInRegBounded,
-    unsigned &defRegCount,
-    unsigned &defRegBounded) {
+    double &commitDefMargin) {
     std::set<llvm::Value *> liveInVars;
     std::set<llvm::Value *> defVars;
 
@@ -355,32 +342,16 @@ static double computeBoundaryStateMarginOnPath(
         }
     }
 
-    double restoreMemMargin = 0.0;
-    liveInRegCount = 0;
+    restoreLiveInMargin = 0.0;
     for (llvm::Value *V : liveInVars) {
-        if (isRegisterLikeValue(V)) {
-            liveInRegCount++;
-            continue;
-        }
         // q is intentionally treated as 1.0 for loop-summary eligibility.
-        restoreMemMargin += getRestoreCostForValue(V, state, params);
+        restoreLiveInMargin += getRestoreCostForValue(V, state, params);
     }
-    liveInRegBounded = std::min(liveInRegCount, params.N_reg);
-    restoreLiveInMargin = restoreMemMargin +
-        static_cast<double>(liveInRegBounded) * params.regRestoreEnergy;
 
-    double commitMemMargin = 0.0;
-    defRegCount = 0;
+    commitDefMargin = 0.0;
     for (llvm::Value *V : defVars) {
-        if (isRegisterLikeValue(V)) {
-            defRegCount++;
-            continue;
-        }
-        commitMemMargin += getSaveCostForValue(V, state, params);
+        commitDefMargin += getSaveCostForValue(V, state, params);
     }
-    defRegBounded = std::min(defRegCount, params.N_reg);
-    commitDefMargin = commitMemMargin +
-        static_cast<double>(defRegBounded) * params.regStoreEnergy;
 
     return restoreLiveInMargin + commitDefMargin;
 }
@@ -693,10 +664,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
 
         double restoreLiveInMargin = 0.0;
         double commitDefMargin = 0.0;
-        unsigned liveInRegCount = 0;
-        unsigned liveInRegBounded = 0;
-        unsigned defRegCount = 0;
-        unsigned defRegBounded = 0;
         double boundaryStateMargin = computeBoundaryStateMarginOnPath(
             path.blocksOnPath,
             state,
@@ -704,11 +671,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             model.ineligibleObjs_,
             model.params_,
             restoreLiveInMargin,
-            commitDefMargin,
-            liveInRegCount,
-            liveInRegBounded,
-            defRegCount,
-            defRegBounded);
+            commitDefMargin);
 
         const double budgetAfterBoundary = budget - boundaryStateMargin;
         double totalBaseEnergy = path.energy * static_cast<double>(loopTC);
@@ -736,16 +699,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                          std::to_string(restoreLiveInMargin) +
                          ", commit-def-margin=" +
                          std::to_string(commitDefMargin) +
-                         ", livein-reg-count=" +
-                         std::to_string(liveInRegCount) +
-                         ", livein-reg-bounded=" +
-                         std::to_string(liveInRegBounded) +
-                         ", def-reg-count=" +
-                         std::to_string(defRegCount) +
-                         ", def-reg-bounded=" +
-                         std::to_string(defRegBounded) +
-                         ", N_reg=" +
-                         std::to_string(model.params_.N_reg) +
                          ", boundary-state-margin=" +
                          std::to_string(boundaryStateMargin) +
                          ", budget-after-boundary=" +

@@ -18,7 +18,6 @@ struct MILPEnergyParams {
     double capacity;               // E_buf: energy buffer capacity
     double E_pro;                  // Prologue energy at region boundary
     double E_epi;                  // Epilogue energy at region boundary
-    unsigned N_reg;                // Upper bound on architectural register state
     double regStoreEnergy;         // Energy to store one SSA reg to FRAM
     double regRestoreEnergy;       // Energy to restore one SSA reg from FRAM
     double nvmAccessPenalty;       // Extra energy per NVM access vs VM
