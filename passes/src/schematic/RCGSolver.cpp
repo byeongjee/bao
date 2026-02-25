@@ -137,6 +137,7 @@ RCGResult RCGSolver::solve() {
         auto alloc = computeIntervalAllocation(blocks, state_, params_, fixed);
         double energy = computeIntervalEnergy(
             blocks, alloc, state_, cfg_, params_, true, true);
+        alloc.intervalEnergy = energy;
         double budget = getIntervalBudget(0, 1);
 
         if (energy <= budget) {
@@ -183,6 +184,7 @@ RCGResult RCGSolver::solve() {
             bool isLast = (j == numNodes - 1);
             double energy = computeIntervalEnergy(
                 blocks, alloc, state_, cfg_, params_, isFirst, isLast);
+            alloc.intervalEnergy = energy;
             double budget = getIntervalBudget(i, j);
 
             if (energy <= budget) {
