@@ -454,14 +454,20 @@ unsigned SchematicInstrumenter::instrumentFunction(
     }
 
     for (const CFGEdge &edge : solution.enabledCheckpoints) {
-        // Skip loop back-edge checkpoints handled by loop conditionals.
+        // Skip only the true loop back-edge (latch -> header) when loop
+        // checkpoint logic (mandatory or conditional) handles it in Step 8.
         bool isLoopBackEdge = false;
         for (const auto &[header, dec] : solution.loopDecisions) {
-            if (dec.mandatoryBackEdge && edge.dst == header) {
-                isLoopBackEdge = true;
-                break;
-            }
-            if (dec.numIterationsPerCharge > 0 && edge.dst == header) {
+            bool handledByLoopLogic =
+                dec.mandatoryBackEdge || dec.numIterationsPerCharge > 0;
+            if (!handledByLoopLogic || !dec.loop)
+                continue;
+
+            llvm::BasicBlock *latch = dec.loop->getLoopLatch();
+            if (!latch)
+                continue;
+
+            if (edge.src == latch && edge.dst == header) {
                 isLoopBackEdge = true;
                 break;
             }
