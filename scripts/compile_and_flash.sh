@@ -422,7 +422,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 MILP_EXTRA_FLAGS="-add-debug-markers"
             fi
             if [[ "$VERBOSE" == "true" ]]; then
-                MILP_EXTRA_FLAGS="$MILP_EXTRA_FLAGS -loop-strip-mining-verbose"
+                MILP_EXTRA_FLAGS="$MILP_EXTRA_FLAGS -loop-strip-mining-verbose -abstract-cfg-verbose"
             fi
             PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
             if $OPT -load-pass-plugin="$PASS_LIB" \

@@ -12,6 +12,7 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
@@ -28,6 +29,11 @@ using namespace llvm;
 namespace checkpoint {
 
 namespace {
+
+cl::opt<bool> AbstractCFGVerboseOpt(
+    "abstract-cfg-verbose",
+    cl::desc("Print per-loop abstract CFG summarization skip details"),
+    cl::init(false));
 
 struct PathSummary {
     bool ok = false;
@@ -596,6 +602,14 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         auto skipLoop = [&](const std::string &reason,
                             const std::string &details = "") {
             out.stats.skippedReasons[reason]++;
+            if (AbstractCFGVerboseOpt) {
+                errs() << "AbstractCFG skip " << F.getName() << "::"
+                       << loopHeaderName << " reason=" << reason;
+                if (!details.empty()) {
+                    errs() << " details=" << details;
+                }
+                errs() << "\n";
+            }
             if (isStripMined) {
                 out.stats.stripMinedLoopsSkipped++;
                 errs() << "AbstractCFG warning: strip-mined loop not summarized "
