@@ -30,6 +30,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -345,9 +346,12 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
 static double getSaveCostForValue(llvm::Value *V,
                                   const checkpoint::StateAnalysis &state,
                                   const checkpoint::MILPEnergyParams &params) {
-    if (auto *I = dyn_cast<Instruction>(V)) {
-        if (!isa<AllocaInst>(I))
-            return params.regStoreEnergy;
+    if (isa<AllocaInst>(V)) {
+        // Stack allocas are assumed to be persistent in FRAM.
+        return 0.0;
+    }
+    if (isa<Instruction>(V)) {
+        return params.regStoreEnergy;
     }
     unsigned sizeBytes = state.getVarSizeBytes(V);
     if (sizeBytes == 0)
@@ -358,14 +362,22 @@ static double getSaveCostForValue(llvm::Value *V,
 static double getRestoreCostForValue(llvm::Value *V,
                                      const checkpoint::StateAnalysis &state,
                                      const checkpoint::MILPEnergyParams &params) {
-    if (auto *I = dyn_cast<Instruction>(V)) {
-        if (!isa<AllocaInst>(I))
-            return params.regRestoreEnergy;
+    if (isa<AllocaInst>(V)) {
+        // Stack allocas are assumed to be persistent in FRAM.
+        return 0.0;
+    }
+    if (isa<Instruction>(V)) {
+        return params.regRestoreEnergy;
     }
     unsigned sizeBytes = state.getVarSizeBytes(V);
     if (sizeBytes == 0)
         return 0.0;
     return static_cast<double>(sizeBytes) * params.memRestoreEnergyPerByte;
+}
+
+static bool isRegisterLikeValue(llvm::Value *V) {
+    auto *I = dyn_cast<Instruction>(V);
+    return I && !isa<AllocaInst>(I);
 }
 
 static double computeNvmAccessMarginOnPath(
@@ -401,7 +413,11 @@ static double computeBoundaryStateMarginOnPath(
     const checkpoint::StateAnalysis &state,
     const checkpoint::MILPEnergyParams &params,
     double &restoreLiveInMargin,
-    double &commitDefMargin) {
+    double &commitDefMargin,
+    unsigned &liveInRegCount,
+    unsigned &liveInRegBounded,
+    unsigned &defRegCount,
+    unsigned &defRegBounded) {
     std::set<Value *> liveInVars;
     std::set<Value *> defVars;
 
@@ -421,13 +437,31 @@ static double computeBoundaryStateMarginOnPath(
         }
     }
 
-    restoreLiveInMargin = 0.0;
-    for (Value *V : liveInVars)
-        restoreLiveInMargin += getRestoreCostForValue(V, state, params);
+    double restoreMemMargin = 0.0;
+    liveInRegCount = 0;
+    for (Value *V : liveInVars) {
+        if (isRegisterLikeValue(V)) {
+            liveInRegCount++;
+            continue;
+        }
+        restoreMemMargin += getRestoreCostForValue(V, state, params);
+    }
+    liveInRegBounded = std::min(liveInRegCount, params.N_reg);
+    restoreLiveInMargin = restoreMemMargin +
+        static_cast<double>(liveInRegBounded) * params.regRestoreEnergy;
 
-    commitDefMargin = 0.0;
-    for (Value *V : defVars)
-        commitDefMargin += getSaveCostForValue(V, state, params);
+    double commitMemMargin = 0.0;
+    defRegCount = 0;
+    for (Value *V : defVars) {
+        if (isRegisterLikeValue(V)) {
+            defRegCount++;
+            continue;
+        }
+        commitMemMargin += getSaveCostForValue(V, state, params);
+    }
+    defRegBounded = std::min(defRegCount, params.N_reg);
+    commitDefMargin = commitMemMargin +
+        static_cast<double>(defRegBounded) * params.regStoreEnergy;
 
     // q is intentionally treated as 1.0 for strip-mining budgeting.
     return restoreLiveInMargin + commitDefMargin;
@@ -492,12 +526,20 @@ static PlanResult buildRewritePlan(
         iterEnergy.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
+    unsigned liveInRegCount = 0;
+    unsigned liveInRegBounded = 0;
+    unsigned defRegCount = 0;
+    unsigned defRegBounded = 0;
     double boundaryStateMargin = computeBoundaryStateMarginOnPath(
         iterEnergy.blocksOnPath,
         state,
         params,
         restoreLiveInMargin,
-        commitDefMargin);
+        commitDefMargin,
+        liveInRegCount,
+        liveInRegBounded,
+        defRegCount,
+        defRegBounded);
     double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
     if (effectiveBudget <= 0.0) {
         result.skipReason = "nonpositive-effective-budget";
@@ -505,6 +547,11 @@ static PlanResult buildRewritePlan(
             ", nvm-access-margin=" + std::to_string(nvmAccessMargin) +
             ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
             ", commit-def-margin=" + std::to_string(commitDefMargin) +
+            ", livein-reg-count=" + std::to_string(liveInRegCount) +
+            ", livein-reg-bounded=" + std::to_string(liveInRegBounded) +
+            ", def-reg-count=" + std::to_string(defRegCount) +
+            ", def-reg-bounded=" + std::to_string(defRegBounded) +
+            ", N_reg=" + std::to_string(params.N_reg) +
             ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
             ", effective-budget=" + std::to_string(effectiveBudget);
         return result;
@@ -639,12 +686,20 @@ static ChunkReclampResult recomputeChunkKWithOverhead(
         iterEnergy.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
+    unsigned liveInRegCount = 0;
+    unsigned liveInRegBounded = 0;
+    unsigned defRegCount = 0;
+    unsigned defRegBounded = 0;
     double boundaryStateMargin = computeBoundaryStateMarginOnPath(
         iterEnergy.blocksOnPath,
         state,
         params,
         restoreLiveInMargin,
-        commitDefMargin);
+        commitDefMargin,
+        liveInRegCount,
+        liveInRegBounded,
+        defRegCount,
+        defRegBounded);
     double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
     if (effectiveBudget <= 0.0) {
         out.error = "nonpositive-effective-budget";

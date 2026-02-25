@@ -216,7 +216,7 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
     double effectiveCapacity = computeEffectiveCapacity(mode);
 
     // Step 3: Parse overhead parameters (only needed for MILP mode)
-    MILPEnergyParams milpParams{0,0,0,0,0,0,0,0,0,0};
+    MILPEnergyParams milpParams{};
     if (mode == ValidateMode::MILP) {
         auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
         if (!milpParamsOpt) {

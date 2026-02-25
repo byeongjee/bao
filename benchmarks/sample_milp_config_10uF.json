@@ -2,6 +2,7 @@
   "capacity": 48600.0,
   "E_pro": 12.0,
   "E_epi": 10.0,
+  "N_reg": 16,
   "reg_store_energy": 1.89,
   "reg_restore_energy": 1.90,
   "nvm_access_penalty": 1.5,

@@ -101,19 +101,11 @@ void CheckpointInstrumenter::createNVMBackupGlobals(
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
             backupType = GV->getValueType();
             backupName = "__nvm_backup_" + GV->getName().str();
-        } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-            auto *arraySizeCI = llvm::cast<llvm::ConstantInt>(AI->getArraySize());
-            uint64_t elemCount = arraySizeCI->getZExtValue();
-            if (elemCount <= 1) {
-                backupType = AI->getAllocatedType();
-            } else {
-                backupType = llvm::ArrayType::get(
-                    AI->getAllocatedType(), elemCount);
-            }
-            backupName = "__nvm_alloca_" + (AI->hasName()
-                             ? AI->getName().str()
-                             : std::to_string(ssaCounter++));
         } else if (auto *Inst = llvm::dyn_cast<llvm::Instruction>(V)) {
+            if (llvm::isa<llvm::AllocaInst>(Inst)) {
+                // Stack allocas are assumed persistent in FRAM.
+                continue;
+            }
             backupType = Inst->getType();
             backupName = "__nvm_ssa_" + std::to_string(ssaCounter++);
         } else {
@@ -276,6 +268,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
             }
 
             for (llvm::Value *V : commitVars) {
+                if (llvm::isa<llvm::AllocaInst>(V)) {
+                    // Stack allocas are assumed persistent in FRAM.
+                    continue;
+                }
                 unsigned sizeBytes = state.getVarSizeBytes(V);
                 if (sizeBytes == 0)
                     continue;
@@ -311,26 +307,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                                                {backupIt->second, GV, size});
                             commitInsts.insert(call);
                         }
-                    }
-                } else if (llvm::isa<llvm::AllocaInst>(V)) {
-                    // Stack alloca -> NVM backup (memcpy)
-                    llvm::Value *size = llvm::ConstantInt::get(
-                        llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-                    auto backupIt = nvmBackupMap_.find(V);
-                    assert(backupIt != nvmBackupMap_.end() &&
-                           "alloca commit requires an NVM backup");
-                    {
-                        auto *AI = llvm::cast<llvm::AllocaInst>(V);
-                        auto *mc = builder.CreateMemCpy(
-                            backupIt->second, backupIt->second->getAlign(),
-                            AI, AI->getAlign(),
-                            size);
-                        commitInsts.insert(mc);
-                    }
-                    if (addDebugMarkers_) {
-                        auto *call = builder.CreateCall(storeMemFn_,
-                                           {backupIt->second, V, size});
-                        commitInsts.insert(call);
                     }
                 } else {
                     // SSA register: defer — direct store may violate dominance.
@@ -405,8 +381,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
             if (!isLiveIn)
                 continue;
 
-            if (llvm::isa<llvm::GlobalVariable>(V) ||
-                llvm::isa<llvm::AllocaInst>(V)) {
+            if (llvm::isa<llvm::AllocaInst>(V)) {
+                // Stack allocas are assumed persistent in FRAM.
+                continue;
+            }
+
+            if (llvm::isa<llvm::GlobalVariable>(V)) {
                 // Memory object: memcpy from NVM backup.
                 unsigned sizeBytes = state.getVarSizeBytes(V);
                 if (sizeBytes == 0)
@@ -414,18 +394,11 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
                 llvm::Value *size = llvm::ConstantInt::get(
                     llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
                 // Restore: copy NVM backup -> SRAM original
-                if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-                    builder.CreateMemCpy(
-                        GV, GV->getAlign(),
-                        backupIt->second, backupIt->second->getAlign(),
-                        size);
-                } else {
-                    auto *AI = llvm::cast<llvm::AllocaInst>(V);
-                    builder.CreateMemCpy(
-                        AI, AI->getAlign(),
-                        backupIt->second, backupIt->second->getAlign(),
-                        size);
-                }
+                auto *GV = llvm::cast<llvm::GlobalVariable>(V);
+                builder.CreateMemCpy(
+                    GV, GV->getAlign(),
+                    backupIt->second, backupIt->second->getAlign(),
+                    size);
                 if (addDebugMarkers_)
                     builder.CreateCall(restoreMemFn_,
                                        {V, backupIt->second, size});
