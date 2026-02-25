@@ -92,7 +92,7 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,enabled_checkpoints,loop_decisions,regions,paths_analyzed,runtime_calls_inserted,rt_prologue,rt_epilogue,rt_store_reg,rt_store_mem,rt_restore_reg,rt_restore_mem"
+HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,enabled_checkpoints,loop_decisions,regions,paths_analyzed,runtime_calls_inserted,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 FAIL_COLS=",,,,,,,,,,,,,,"  # 14 empty fields for error rows
@@ -158,7 +158,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},COMPILE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "${bench_name}-${cap_label},${cap_label},COMPILE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -172,7 +172,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},ANNOTATE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "${bench_name}-${cap_label},${cap_label},ANNOTATE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -184,7 +184,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},OPT_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "${bench_name}-${cap_label},${cap_label},OPT_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -199,7 +199,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},TRACE_INST_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "${bench_name}-${cap_label},${cap_label},TRACE_INST_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -214,24 +214,30 @@ for bench_path in "${BENCHMARKS[@]}"; do
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},TRACE_COMPILE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "${bench_name}-${cap_label},${cap_label},TRACE_COMPILE_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
 
-    # Run trace binary (ignore exit code — benchmarks may return non-zero)
-    trace_run_output=$("$trace_bin" 2>&1) || true
-    [[ "$VERBOSE" -eq 1 ]] && echo "$trace_run_output"
+    # Run trace binary (ignore exit code — benchmarks may return non-zero).
+    # Keep output on disk to avoid exploding shell memory on noisy runs.
+    trace_run_log="$TMPDIR/${bench_name}_trace_run.log"
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        "$trace_bin" 2>&1 | tee "$trace_run_log" || true
+    else
+        "$trace_bin" > "$trace_run_log" 2>&1 || true
+    fi
 
     # The trace runtime writes to schematic_trace.json in CWD
     if [[ -f "schematic_trace.json" ]]; then
         mv "schematic_trace.json" "$trace_json"
     else
         echo "  FAILED: trace binary did not produce schematic_trace.json"
+        [[ "$VERBOSE" -eq 0 ]] && tail -20 "$trace_run_log"
         for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
             cap_label="${cap_entry%%:*}"
             count=$((count + 1))
-            echo "${bench_name},${cap_label},TRACE_RUN_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "${bench_name}-${cap_label},${cap_label},TRACE_RUN_FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
         done
         continue
     fi
@@ -249,7 +255,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
 
         if [[ ! -f "$cap_config" ]]; then
             echo "  SKIPPED: config not found: $cap_config"
-            echo "$bench_name,$cap_label,CONFIG_NOT_FOUND${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,CONFIG_NOT_FOUND${FAIL_COLS}" >> "$OUTPUT_CSV"
             continue
         fi
 
@@ -270,7 +276,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         if ! echo "$full_output" | grep -q "SCHEMATIC Checkpoint Insertion Statistics"; then
             echo "  FAILED (SCHEMATIC pass error)"
             [[ "$VERBOSE" -eq 0 ]] && echo "$full_output" | tail -5
-            echo "$bench_name,$cap_label,FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
             continue
         fi
 
@@ -319,7 +325,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
             rt_restore_mem=""
         fi
 
-        echo "$bench_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$enabled_ckpts,$loop_decisions,$regions,$paths_analyzed,$runtime_calls,$rt_prologue,$rt_epilogue,$rt_store_reg,$rt_store_mem,$rt_restore_reg,$rt_restore_mem" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$enabled_ckpts,$loop_decisions,$regions,$paths_analyzed,$runtime_calls,$rt_prologue,$rt_epilogue,$rt_store_reg,$rt_store_mem,$rt_restore_reg,$rt_restore_mem" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $rt_prologue prologues)"
     done
 done
