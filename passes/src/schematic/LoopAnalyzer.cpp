@@ -5,6 +5,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <cmath>
@@ -315,9 +316,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                          nullptr, nullptr);
         RCGResult result = solver.solve();
         if (!result.feasible) {
-            llvm::errs() << "SCHEMATIC: infeasible loop body path at "
-                          << header->getName() << "\n";
-            continue;
+            llvm::report_fatal_error(
+                llvm::Twine("SCHEMATIC infeasible loop body path at header '") +
+                    header->getName() + "': " + result.errorMessage,
+                /*GenCrashDiag=*/false);
         }
 
         // Update solution from RCG result.

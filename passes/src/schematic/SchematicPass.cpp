@@ -20,6 +20,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -180,10 +181,12 @@ PreservedAnalyses SchematicPass::run(Function &F,
             RCGResult result = solver.solve();
 
             if (!result.feasible) {
-                errs() << "SCHEMATIC: infeasible segment in path "
-                       << solution.pathsAnalyzed << ": "
-                       << result.errorMessage << "\n";
-                continue;
+                report_fatal_error(
+                    Twine("SCHEMATIC infeasible segment in function '") +
+                        F.getName() + "', path #" +
+                        Twine(solution.pathsAnalyzed) + ": " +
+                        result.errorMessage,
+                    /*GenCrashDiag=*/false);
             }
 
             // Update solution from RCG result.
@@ -297,9 +300,11 @@ PreservedAnalyses SchematicPass::run(Function &F,
         RCGResult result = solver.solve();
 
         if (!result.feasible) {
-            errs() << "SCHEMATIC: infeasible synthetic path for uncovered block "
-                   << BB->getName() << ": " << result.errorMessage << "\n";
-            continue;
+            report_fatal_error(
+                Twine("SCHEMATIC infeasible synthetic path in function '") +
+                    F.getName() + "', uncovered block '" + BB->getName() +
+                    "': " + result.errorMessage,
+                /*GenCrashDiag=*/false);
         }
 
         // Update solution (same logic as Step 9).
