@@ -21,6 +21,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -346,6 +347,13 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
 static double getSaveCostForValue(llvm::Value *V,
                                   const checkpoint::StateAnalysis &state,
                                   const checkpoint::MILPEnergyParams &params) {
+    if (auto *GV = dyn_cast<GlobalVariable>(V)) {
+        Type *Ty = GV->getValueType();
+        if (Ty->isArrayTy() || Ty->isStructTy()) {
+            // Heuristic: ignore non-scalar globals in chunking margin.
+            return 0.0;
+        }
+    }
     if (isa<AllocaInst>(V)) {
         // Stack allocas are assumed to be persistent in FRAM.
         return 0.0;
@@ -362,6 +370,13 @@ static double getSaveCostForValue(llvm::Value *V,
 static double getRestoreCostForValue(llvm::Value *V,
                                      const checkpoint::StateAnalysis &state,
                                      const checkpoint::MILPEnergyParams &params) {
+    if (auto *GV = dyn_cast<GlobalVariable>(V)) {
+        Type *Ty = GV->getValueType();
+        if (Ty->isArrayTy() || Ty->isStructTy()) {
+            // Heuristic: ignore non-scalar globals in chunking margin.
+            return 0.0;
+        }
+    }
     if (isa<AllocaInst>(V)) {
         // Stack allocas are assumed to be persistent in FRAM.
         return 0.0;
@@ -522,7 +537,7 @@ static PlanResult buildRewritePlan(
         return result;
     }
 
-    double nvmAccessMargin = computeNvmAccessMarginOnPath(
+    double perIterNvmPenalty = computeNvmAccessMarginOnPath(
         iterEnergy.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
@@ -540,11 +555,12 @@ static PlanResult buildRewritePlan(
         liveInRegBounded,
         defRegCount,
         defRegBounded);
-    double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
-    if (effectiveBudget <= 0.0) {
+    double budgetAfterBoundary = budget - boundaryStateMargin;
+    if (budgetAfterBoundary <= 0.0) {
         result.skipReason = "nonpositive-effective-budget";
         result.skipDetail = "budget=" + std::to_string(budget) +
-            ", nvm-access-margin=" + std::to_string(nvmAccessMargin) +
+            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
             ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
             ", commit-def-margin=" + std::to_string(commitDefMargin) +
             ", livein-reg-count=" + std::to_string(liveInRegCount) +
@@ -553,13 +569,32 @@ static PlanResult buildRewritePlan(
             ", def-reg-bounded=" + std::to_string(defRegBounded) +
             ", N_reg=" + std::to_string(params.N_reg) +
             ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
-            ", effective-budget=" + std::to_string(effectiveBudget);
+            ", budget-after-boundary=" + std::to_string(budgetAfterBoundary);
         return result;
     }
 
-    double rawK = std::floor(effectiveBudget / iterEnergy.energy);
+    double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty;
+    if (perIterTotalEnergy <= 0.0) {
+        result.skipReason = "nonpositive-per-iter-total-energy";
+        result.skipDetail =
+            "per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
+        return result;
+    }
+
+    // Enforce strict inequality: K * perIterTotalEnergy < budgetAfterBoundary.
+    double strictBudget =
+        std::nextafter(budgetAfterBoundary, -std::numeric_limits<double>::infinity());
+    double rawK = std::floor(strictBudget / perIterTotalEnergy);
     if (!std::isfinite(rawK) || rawK <= 0.0) {
         result.skipReason = "k-zero";
+        result.skipDetail =
+            "budget-after-boundary=" + std::to_string(budgetAfterBoundary) +
+            ", strict-budget=" + std::to_string(strictBudget) +
+            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
         return result;
     }
 
@@ -682,7 +717,7 @@ static ChunkReclampResult recomputeChunkKWithOverhead(
         return out;
     }
 
-    double nvmAccessMargin = computeNvmAccessMarginOnPath(
+    double perIterNvmPenalty = computeNvmAccessMarginOnPath(
         iterEnergy.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
@@ -700,13 +735,22 @@ static ChunkReclampResult recomputeChunkKWithOverhead(
         liveInRegBounded,
         defRegCount,
         defRegBounded);
-    double effectiveBudget = budget - nvmAccessMargin - boundaryStateMargin;
-    if (effectiveBudget <= 0.0) {
+    double budgetAfterBoundary = budget - boundaryStateMargin;
+    if (budgetAfterBoundary <= 0.0) {
         out.error = "nonpositive-effective-budget";
         return out;
     }
 
-    double rawK = std::floor(effectiveBudget / iterEnergy.energy);
+    double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty;
+    if (perIterTotalEnergy <= 0.0) {
+        out.error = "nonpositive-per-iter-total-energy";
+        return out;
+    }
+
+    // Enforce strict inequality: K * perIterTotalEnergy < budgetAfterBoundary.
+    double strictBudget =
+        std::nextafter(budgetAfterBoundary, -std::numeric_limits<double>::infinity());
+    double rawK = std::floor(strictBudget / perIterTotalEnergy);
     if (!std::isfinite(rawK) || rawK <= 0.0) {
         out.error = "post-chunk-k-zero";
         return out;

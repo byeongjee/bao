@@ -10,6 +10,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -266,6 +267,13 @@ static PathSummary computeWorstCasePathSummary(
 static double getSaveCostForValue(llvm::Value *V,
                                   const StateAnalysis &state,
                                   const MILPEnergyParams &params) {
+    if (auto *GV = dyn_cast<GlobalVariable>(V)) {
+        Type *Ty = GV->getValueType();
+        if (Ty->isArrayTy() || Ty->isStructTy()) {
+            // Heuristic: ignore non-scalar globals in summary margin.
+            return 0.0;
+        }
+    }
     if (isa<AllocaInst>(V)) {
         // Stack allocas are assumed to be persistent in FRAM.
         return 0.0;
@@ -282,6 +290,13 @@ static double getSaveCostForValue(llvm::Value *V,
 static double getRestoreCostForValue(llvm::Value *V,
                                      const StateAnalysis &state,
                                      const MILPEnergyParams &params) {
+    if (auto *GV = dyn_cast<GlobalVariable>(V)) {
+        Type *Ty = GV->getValueType();
+        if (Ty->isArrayTy() || Ty->isStructTy()) {
+            // Heuristic: ignore non-scalar globals in summary margin.
+            return 0.0;
+        }
+    }
     if (isa<AllocaInst>(V)) {
         // Stack allocas are assumed to be persistent in FRAM.
         return 0.0;
@@ -651,14 +666,14 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             continue;
         }
 
-        // Compute NVM access penalty margin on the selected path.
-        double nvmAccessMargin = 0.0;
+        // Compute per-iteration NVM penalty on the selected path.
+        double perIterNvmPenalty = 0.0;
         for (const BasicBlock *BB : path.blocksOnPath) {
             for (llvm::GlobalVariable *GV : model.vmObjs_) {
-                nvmAccessMargin += energy.getENvm(BB, GV);
+                perIterNvmPenalty += energy.getENvm(BB, GV);
             }
             for (llvm::GlobalVariable *GV : ineligGlobals) {
-                nvmAccessMargin += energy.getENvm(BB, GV);
+                perIterNvmPenalty += energy.getENvm(BB, GV);
             }
         }
 
@@ -681,16 +696,28 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             defRegCount,
             defRegBounded);
 
-        const double effectiveBudget =
-            budget - nvmAccessMargin - boundaryStateMargin;
-        double totalEnergy = path.energy * static_cast<double>(loopTC);
-        if (effectiveBudget <= 0.0 || !(totalEnergy < effectiveBudget)) {
+        const double budgetAfterBoundary = budget - boundaryStateMargin;
+        double totalBaseEnergy = path.energy * static_cast<double>(loopTC);
+        double totalNvmPenalty =
+            perIterNvmPenalty * static_cast<double>(loopTC);
+        double totalEnergyWithNvm = totalBaseEnergy + totalNvmPenalty;
+        if (budgetAfterBoundary <= 0.0 ||
+            !(totalEnergyWithNvm < budgetAfterBoundary)) {
             skipLoop("loop-total-exceeds-budget",
                      "path-energy=" + std::to_string(path.energy) +
+                         ", per-iter-path-energy=" +
+                         std::to_string(path.energy) +
+                         ", per-iter-nvm-penalty=" +
+                         std::to_string(perIterNvmPenalty) +
                          ", trip-count=" + std::to_string(loopTC) +
-                         ", total-energy=" + std::to_string(totalEnergy) +
+                         ", total-base-energy=" +
+                         std::to_string(totalBaseEnergy) +
+                         ", total-nvm-penalty=" +
+                         std::to_string(totalNvmPenalty) +
+                         ", total-energy-with-nvm=" +
+                         std::to_string(totalEnergyWithNvm) +
                          ", nvm-access-margin=" +
-                         std::to_string(nvmAccessMargin) +
+                         std::to_string(perIterNvmPenalty) +
                          ", restore-livein-margin=" +
                          std::to_string(restoreLiveInMargin) +
                          ", commit-def-margin=" +
@@ -707,8 +734,8 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
                          std::to_string(model.params_.N_reg) +
                          ", boundary-state-margin=" +
                          std::to_string(boundaryStateMargin) +
-                         ", effective-budget=" +
-                         std::to_string(effectiveBudget));
+                         ", budget-after-boundary=" +
+                         std::to_string(budgetAfterBoundary));
             continue;
         }
 
@@ -721,7 +748,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         agg.nodeName = nodeName;
         agg.headerBB = headerBB;
         agg.pathBlocks = std::move(path.blocksOnPath);
-        agg.pathEnergy = totalEnergy;
+        agg.pathEnergy = totalBaseEnergy;
         // Summary represents all iterations — entered once per loop invocation.
         if (BasicBlock *PH = L->getLoopPreheader()) {
             agg.fEntry = energy.getFEntry(PH);
