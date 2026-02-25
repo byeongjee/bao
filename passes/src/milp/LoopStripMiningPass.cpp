@@ -586,7 +586,9 @@ static PlanResult buildRewritePlan(
 
     LoopRewritePlan plan;
     plan.L = L;
-    plan.N = 0; // unknown trip count for chunking
+    // Carry known upper-bound trip count into chunking so the generated
+    // outer loop can be annotated with a conservative upper bound.
+    plan.N = knownTC ? *knownTC : 0;
     plan.K = K;
     plan.iterEnergy = iterEnergy.energy;
     plan.isChunking = true;
@@ -992,6 +994,7 @@ static bool chunkLoop(const LoopRewritePlan &plan,
     // ── Phase 1: Extract loop components ──
     Loop *L = plan.L;
     uint64_t K = plan.K;
+    uint64_t NUpper = plan.N;
 
     BasicBlock *Preheader = L->getLoopPreheader();
     BasicBlock *Header    = L->getHeader();
@@ -1127,11 +1130,17 @@ static bool chunkLoop(const LoopRewritePlan &plan,
     // ── Phase 13: Rebuild DomTree ──
     DT.recalculate(*F);
 
-    // ── Phase 14: Set metadata on inner loop ──
+    // ── Phase 14: Set metadata on generated loops ──
     removeLoopTripCountMetadata(L);
     setLoopTripCountMetadata(L, K);
     setStripMinedLoopMetadata(L);
-    // No metadata on outer loop (unknown trip count)
+    if (NUpper > 0) {
+        // Chunk outer loop executes at most ceil(NUpper / K) times.
+        uint64_t outerTripCountUpper = 1 + ((NUpper - 1) / K);
+        setLoopTripCountMetadata(OuterLoop, outerTripCountUpper);
+    } else {
+        removeLoopTripCountMetadata(OuterLoop);
+    }
 
     // ── Phase 15: LCSSA repair, SCEV invalidation ──
     formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
