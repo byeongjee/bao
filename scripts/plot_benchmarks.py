@@ -12,19 +12,19 @@ import numpy as np
 
 ALGORITHMS = {
     "milp": {
-        "file": "milp.csv",
+        "file": "../benchmarks/milp_benchmark_summary.csv",
         "label": "MILP",
         "color": "#2196F3",
         "execution_time_col": "milp_total_execution_time_ms",
     },
     "rockclimb": {
-        "file": "rockclimb.csv",
+        "file": "../benchmarks/rockclimb_benchmark_summary.csv",
         "label": "RockClimb",
         "color": "#FF9800",
         "execution_time_col": "total_execution_time_ms",
     },
     "schematic": {
-        "file": "schematic.csv",
+        "file": "../benchmarks/schematic_benchmark_summary.csv",
         "label": "SCHEMATIC",
         "color": "#4CAF50",
         "execution_time_col": "total_execution_time_ms",
@@ -42,6 +42,17 @@ METRICS = {
         "ylabel": "Execution Time (ms)",
         "title": "Execution Time",
     },
+    "checkpoint_store_reg_calls": {
+        "column": "runtime_checkpoint_store_reg_calls",
+        "ylabel": "Number of checkpoint store register calls",
+        "title": "Checkpoint Store Register Calls",
+    },
+    "checkpoint_restore_reg_calls": {
+        "column": "runtime_restore_reg_calls",
+        "ylabel": "Number of checkpoint restore register calls",
+        "title": "Checkpoint Restore Register Calls",
+    },
+
 }
 
 

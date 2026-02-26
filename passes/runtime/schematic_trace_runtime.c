@@ -43,7 +43,7 @@ typedef struct {
 #define ITER_BUF_CAP 512      /* max BBs in a single iteration/path buffer */
 #define MAX_LOOP_DEPTH 8
 #define MAX_FUNCTIONS 32
-#define MAX_LOOPS_PER_FUNC 32
+#define MAX_LOOPS_PER_FUNC 256
 #define INIT_TRACE_CAP 64     /* initial capacity for trace arrays (grows) */
 
 /* ============================================================================
@@ -82,6 +82,7 @@ typedef struct {
     TraceArray func_traces;           /* accumulated unique function traces */
     LoopResult loop_results[MAX_LOOPS_PER_FUNC];
     int loop_results_count;
+    int loop_results_overflow_reported;
 } FuncState;
 
 /* ============================================================================
@@ -173,8 +174,16 @@ static LoopResult *get_loop_result(FuncState *fs, int loop_id) {
             return &fs->loop_results[i];
     }
     if (fs->loop_results_count >= MAX_LOOPS_PER_FUNC) {
-        fprintf(stderr, "schematic_trace_runtime: too many loops\n");
-        return &fs->loop_results[0];
+        if (!fs->loop_results_overflow_reported) {
+            const char *func_name =
+                (fs->meta && fs->meta->func_name) ? fs->meta->func_name : "<unknown>";
+            fprintf(stderr,
+                    "schematic_trace_runtime: loop result cap (%d) exceeded in %s; "
+                    "dropping extra loop traces\n",
+                    MAX_LOOPS_PER_FUNC, func_name);
+            fs->loop_results_overflow_reported = 1;
+        }
+        return NULL;
     }
     LoopResult *lr = &fs->loop_results[fs->loop_results_count++];
     lr->loop_id = loop_id;
@@ -206,6 +215,7 @@ void __trace_func_enter(const FuncTraceMeta *meta) {
     g_current->func_trace_len = 0;
     g_current->loop_depth = 0;
     g_current->loop_results_count = 0;
+    g_current->loop_results_overflow_reported = 0;
     trace_array_init(&g_current->func_traces);
 }
 
@@ -256,7 +266,8 @@ void __trace_loop_iter_end(int loop_id) {
 
     /* Save current iteration to the persistent loop results */
     LoopResult *result = get_loop_result(g_current, loop_id);
-    save_trace(&result->traces, lc->bbs, lc->len);
+    if (result)
+        save_trace(&result->traces, lc->bbs, lc->len);
 
     /* Reset iteration buffer for next iteration */
     lc->len = 0;
