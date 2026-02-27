@@ -59,7 +59,7 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,basic_blocks,edges,global_variables,milp_variables,milp_constraints,optimal_solution,regions,region_boundaries_inserted,distributed_checkpoints_inserted,milp_solve_time_ms,milp_total_execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls"
+HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls,candidate_globals,milp_variables,milp_constraints,optimal_solution,region_boundaries_inserted,distributed_checkpoints_inserted,milp_solve_time_ms"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 # Extract first numeric/token value after "label:" from output.
@@ -122,25 +122,25 @@ for bench_path in "${BENCHMARKS[@]}"; do
         # Check for infeasibility
         if echo "$full_output" | grep -q "blocks exceed energy capacity"; then
             echo "  INFEASIBLE (blocks exceed capacity)"
-            echo "$row_name,$cap_label,,,,,,infeasible,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,infeasible,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
         if echo "$full_output" | grep -q "Optimization failed"; then
             echo "  INFEASIBLE (solver found no feasible solution)"
-            echo "$row_name,$cap_label,,,,,,infeasible,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,infeasible,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
 
         # Check for compilation failure (no MILP statistics at all)
         if ! echo "$full_output" | grep -q "MILP Checkpoint Insertion Statistics"; then
             echo "  FAILED (compilation error)"
-            echo "$row_name,$cap_label,FAILED,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,failed,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
 
         basic_blocks=$(extract_stat "$full_output" "Basic blocks (concrete)" "Basic blocks")
         edges=$(extract_stat "$full_output" "Edges (concrete)" "Edges")
-        global_vars=$(extract_stat "$full_output" "Global variables")
+        candidate_globals=$(extract_stat "$full_output" "Candidate globals (V_elig)")
         milp_vars=$(extract_stat "$full_output" "MILP variables")
         milp_constrs=$(extract_stat "$full_output" "MILP constraints")
         optimal_raw=$(extract_stat "$full_output" "Optimal solution")
@@ -155,7 +155,10 @@ for bench_path in "${BENCHMARKS[@]}"; do
             "Distributed checkpoints inserted" \
             "Boundary commits enabled")
         solve_time=$(extract_stat "$full_output" "Solve time (ms)")
-        total_exec_time=$(extract_stat "$full_output" "Total execution time (ms)")
+        compilation_time=$(extract_stat "$full_output" "Compilation time (ms)")
+        peak_rss=$(extract_stat "$full_output" "Peak RSS (KB)")
+        profiling_time=$(extract_stat "$full_output" "Profiling time (ms)")
+        execution_time=$(extract_stat "$full_output" "Execution time (ms)")
 
         # Check for infeasible blocks
         if echo "$full_output" | grep -q "blocks exceed energy capacity"; then
@@ -164,6 +167,12 @@ for bench_path in "${BENCHMARKS[@]}"; do
             boundaries=${boundaries:-0}
             dist_ckpts=${dist_ckpts:-0}
         fi
+
+        # Defaults
+        compilation_time=${compilation_time:-0}
+        peak_rss=${peak_rss:-0}
+        profiling_time=${profiling_time:-0}
+        execution_time=${execution_time:-0}
 
         # Extract mock counter stats
         prologue=$(extract_stat "$full_output" "__region_prologue")
@@ -181,9 +190,8 @@ for bench_path in "${BENCHMARKS[@]}"; do
         restore_reg=${restore_reg:-0}
         restore_mem=${restore_mem:-0}
         solve_time=${solve_time:-0}
-        total_exec_time=${total_exec_time:-0}
 
-        echo "$row_name,$cap_label,$basic_blocks,$edges,$global_vars,$milp_vars,$milp_constrs,$optimal,$regions,$boundaries,$dist_ckpts,$solve_time,$total_exec_time,$prologue,$epilogue,$store_reg,$store_mem,$restore_reg,$restore_mem" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$profiling_time,$execution_time,$prologue,$epilogue,$store_reg,$store_mem,$restore_reg,$restore_mem,$candidate_globals,$milp_vars,$milp_constrs,$optimal,$boundaries,$dist_ckpts,$solve_time" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $boundaries boundaries, $optimal)"
     done
 done

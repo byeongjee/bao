@@ -84,6 +84,7 @@ VALIDATE_CKPT_FUNCTION=""
 usage() { sed -n '2,26p' "$0" | sed 's/^# \?//'; exit 0; }
 error() { echo -e "\033[0;31mError: $1\033[0m" >&2; exit 1; }
 info() { echo -e "\033[0;36m$1\033[0m"; }
+_now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
 
 # Link checkpoint object with mock counter or real runtime.
 # Usage: link_runtime <mock_counter> <runtime> <boot> <linker>
@@ -391,6 +392,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
 
             # BB frequency collection: instrument, compile, run, get bb_freq.json
             BB_FREQ_RUNTIME="$PROJECT_DIR/passes/runtime/bb_freq_runtime.c"
+            PROFILE_START=$(_now_ms)
             info "Collecting BB frequencies..."
             if ! $OPT -load-pass-plugin="$PASS_LIB" \
                 -passes=bb-freq-collect \
@@ -415,6 +417,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             if [[ ! -f "$BB_FREQ_JSON" ]]; then
                 error "BB frequency collection did not produce bb_freq.json"
             fi
+            PROFILE_END=$(_now_ms)
+            echo "Profiling time (ms): $((PROFILE_END - PROFILE_START))"
 
             # MILP pass
             MILP_EXTRA_FLAGS=""
@@ -555,7 +559,10 @@ fi
 if [[ "$COMPILE_ONLY" != "true" ]]; then
     if [[ "$LOCAL_MODE" == "true" ]]; then
         info "Running locally..."
+        EXEC_START=$(_now_ms)
         "${OUTPUT}" || true
+        EXEC_END=$(_now_ms)
+        echo "Execution time (ms): $((EXEC_END - EXEC_START))"
     else
         info "Flashing..."
         mspdebug tilib "prog ${OUTPUT}.elf"

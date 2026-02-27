@@ -474,11 +474,14 @@ PreservedAnalyses RockClimbPass::run(Function &F,
         std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
     errs() << "\n=== RockClimb Metrics ===\n";
+    errs() << "  Basic blocks: " << ctx.cfg->getBlocks().size() << "\n";
+    errs() << "  Edges: " << ctx.cfg->getEdges().size() << "\n";
     errs() << "  Regions: " << result.regions.size() << "\n";
     errs() << "  Boundary checks: " << boundarySet.size() << "\n";
     errs() << "  Register checkpoints: " << checkpointPoints.size() << "\n";
-    errs() << "  Total execution time (ms): "
+    errs() << "  Compilation time (ms): "
            << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
+    errs() << "  Peak RSS (KB): " << getPeakRSSKb() << "\n";
 
     // We modified the IR
     return PreservedAnalyses::none();

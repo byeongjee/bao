@@ -15,19 +15,16 @@ ALGORITHMS = {
         "file": "../benchmarks/milp_benchmark_summary.csv",
         "label": "MILP",
         "color": "#2196F3",
-        "execution_time_col": "milp_total_execution_time_ms",
     },
     "rockclimb": {
         "file": "../benchmarks/rockclimb_benchmark_summary.csv",
         "label": "RockClimb",
         "color": "#FF9800",
-        "execution_time_col": "total_execution_time_ms",
     },
     "schematic": {
         "file": "../benchmarks/schematic_benchmark_summary.csv",
         "label": "SCHEMATIC",
         "color": "#4CAF50",
-        "execution_time_col": "total_execution_time_ms",
     },
 }
 
@@ -37,10 +34,25 @@ METRICS = {
         "ylabel": "Number of Runtime Region Prologue Calls",
         "title": "Runtime Region Prologue Calls",
     },
+    "compilation_time": {
+        "column": "compilation_time_ms",
+        "ylabel": "Compilation Time (ms)",
+        "title": "Compilation Time",
+    },
+    "profiling_time": {
+        "column": "profiling_time_ms",
+        "ylabel": "Profiling Time (ms)",
+        "title": "Profiling Time",
+    },
     "execution_time": {
-        "column": None,  # per-algorithm column, looked up from ALGORITHMS
+        "column": "execution_time_ms",
         "ylabel": "Execution Time (ms)",
         "title": "Execution Time",
+    },
+    "peak_memory": {
+        "column": "peak_rss_kb",
+        "ylabel": "Peak RSS (KB)",
+        "title": "Peak Memory Usage",
     },
     "checkpoint_store_reg_calls": {
         "column": "runtime_checkpoint_store_reg_calls",
@@ -52,7 +64,6 @@ METRICS = {
         "ylabel": "Number of checkpoint restore register calls",
         "title": "Checkpoint Restore Register Calls",
     },
-
 }
 
 
@@ -77,14 +88,9 @@ def parse_benchmark_name(benchmark):
     return benchmark, ""
 
 
-def get_value(row, column, algorithm_key, metric_key):
-    """Extract a numeric value from a row, handling per-algorithm columns."""
-    if metric_key == "execution_time":
-        col = ALGORITHMS[algorithm_key]["execution_time_col"]
-        if col is None:
-            return None
-    else:
-        col = METRICS[metric_key]["column"]
+def get_value(row, metric_key):
+    """Extract a numeric value from a row."""
+    col = METRICS[metric_key]["column"]
 
     if col not in row:
         return None
@@ -129,7 +135,7 @@ def load_data(base_dir, algorithms, benchmarks, capacitors, metric_key):
                 continue
 
             label = f"{program}\n({capacitor})"
-            val = get_value(row, None, alg_key, metric_key)
+            val = get_value(row, metric_key)
             if val is not None:
                 alg_data[label] = val
                 all_labels.add(label)
@@ -317,17 +323,6 @@ examples:
     )
 
     args = parser.parse_args()
-
-    if args.metric == "execution_time":
-        # Filter out algorithms without execution time data
-        available = [a for a in args.algorithms if ALGORITHMS[a]["execution_time_col"] is not None]
-        if not available:
-            print("Error: no selected algorithm has execution time data.", file=sys.stderr)
-            sys.exit(1)
-        if len(available) < len(args.algorithms):
-            skipped = set(args.algorithms) - set(available)
-            print(f"Note: skipping {skipped} (no execution time column)", file=sys.stderr)
-        args.algorithms = available
 
     data, labels = load_data(
         args.csv_dir,

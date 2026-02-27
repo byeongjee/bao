@@ -8,6 +8,7 @@
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
 #include "schematic/TraceLoader.h"
+#include "common/BlockUtils.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -425,8 +426,10 @@ PreservedAnalyses SchematicPass::run(Function &F,
     errs() << "  Regions:                         " << solution.regions.size()
            << "\n";
     errs() << "  Runtime calls inserted:          " << inserted << "\n";
-    errs() << "  Total execution time (ms):       "
+    errs() << "  Compilation time (ms):           "
            << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
+    errs() << "  Peak RSS (KB):                   "
+           << getPeakRSSKb() << "\n";
     errs() << "  Trace-guided:                    yes\n";
 
     return PreservedAnalyses::none();

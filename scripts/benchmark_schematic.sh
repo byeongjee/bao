@@ -55,6 +55,8 @@ if [[ -n "$SDK_PATH" ]]; then
     SDK_FLAGS=(-isysroot "$SDK_PATH")
 fi
 
+_now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+
 CAPACITOR_CONFIGS=(
     "100nF:$PROJECT_DIR/benchmarks/sample_schematic_config_100nF.json"
     "1uF:$PROJECT_DIR/benchmarks/sample_schematic_config_1uF.json"
@@ -92,10 +94,10 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,basic_blocks,edges,candidate_globals,enabled_checkpoints,loop_decisions,regions,paths_analyzed,runtime_calls_inserted,total_execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls"
+HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls,candidate_globals,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted"
 echo "$HEADER" > "$OUTPUT_CSV"
 
-FAIL_COLS=",,,,,,,,,,,,,,,"  # 15 empty fields for error rows
+FAIL_COLS=",,,,,,,,,,,,,,,,,,,,"  # 19 empty fields for error rows
 
 # Extract first numeric/token value after "label:" from output.
 extract_stat() {
@@ -189,6 +191,9 @@ for bench_path in "${BENCHMARKS[@]}"; do
         continue
     fi
 
+    # Step 4-5: Trace collection (timed for profiling_time_ms)
+    PROFILE_START=$(_now_ms)
+
     # Step 4: Instrument for trace collection
     if ! prep_output=$(opt -load-pass-plugin="$PASS_PLUGIN" \
             -passes=trace-collect \
@@ -242,7 +247,9 @@ for bench_path in "${BENCHMARKS[@]}"; do
         continue
     fi
 
-    echo "  Trace collected for $bench_name"
+    PROFILE_END=$(_now_ms)
+    PROFILING_TIME_MS=$((PROFILE_END - PROFILE_START))
+    echo "  Trace collected for $bench_name (profiling: ${PROFILING_TIME_MS}ms)"
 
     # === Per-capacitor: run SCHEMATIC (step 6) + compile & run (step 7) ===
     for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
@@ -276,7 +283,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         if ! echo "$full_output" | grep -q "SCHEMATIC Checkpoint Insertion Statistics"; then
             echo "  FAILED (SCHEMATIC pass error)"
             [[ "$VERBOSE" -eq 0 ]] && echo "$full_output" | tail -5
-            echo "$row_name,$cap_label,FAILED${FAIL_COLS}" >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,failed${FAIL_COLS}" >> "$OUTPUT_CSV"
             continue
         fi
 
@@ -288,8 +295,10 @@ for bench_path in "${BENCHMARKS[@]}"; do
         regions=$(extract_stat "$full_output" "Regions")
         paths_analyzed=$(extract_stat "$full_output" "Paths analyzed")
         runtime_calls=$(extract_stat "$full_output" "Runtime calls inserted")
-        total_exec_time=$(extract_stat "$full_output" "Total execution time (ms)")
-        total_exec_time=${total_exec_time:-0}
+        compilation_time=$(extract_stat "$full_output" "Compilation time (ms)")
+        compilation_time=${compilation_time:-0}
+        peak_rss=$(extract_stat "$full_output" "Peak RSS (KB)")
+        peak_rss=${peak_rss:-0}
 
         # Step 7: Compile and run instrumented binary with mock counter
         # Strip ELF-only .nvm section specifier (invalid on Mach-O)
@@ -307,7 +316,10 @@ for bench_path in "${BENCHMARKS[@]}"; do
                 "$ll_out" "$MOCK_RUNTIME" \
                 -o "$inst_bin" 2>&1); then
             # Run instrumented binary (ignore exit code)
+            EXEC_START=$(_now_ms)
             run_output=$("$inst_bin" 2>&1) || true
+            EXEC_END=$(_now_ms)
+            execution_time_ms=$((EXEC_END - EXEC_START))
             [[ "$VERBOSE" -eq 1 ]] && echo "$run_output"
 
             rt_prologue=$(extract_counter "$run_output" "__region_prologue")
@@ -327,7 +339,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
             rt_restore_mem=""
         fi
 
-        echo "$row_name,$cap_label,$basic_blocks,$edges,$candidate_globals,$enabled_ckpts,$loop_decisions,$regions,$paths_analyzed,$runtime_calls,$total_exec_time,$rt_prologue,$rt_epilogue,$rt_store_reg,$rt_store_mem,$rt_restore_reg,$rt_restore_mem" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$PROFILING_TIME_MS,${execution_time_ms:-},$rt_prologue,$rt_epilogue,$rt_store_reg,$rt_store_mem,$rt_restore_reg,$rt_restore_mem,$candidate_globals,$enabled_ckpts,$loop_decisions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $rt_prologue prologues)"
     done
 done

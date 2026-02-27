@@ -8,6 +8,8 @@
 #include "milp/EnergyModel.h"
 #include "milp/StateAnalysis.h"
 
+#include "common/BlockUtils.h"
+
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -181,8 +183,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         errs() << "  Optimal solution:                no (solver failed)\n";
         errs() << "  Solve time (ms):                 "
                << llvm::format("%.3f", solveTimeMs) << "\n";
-        errs() << "  Total execution time (ms):       "
+        errs() << "  Compilation time (ms):           "
                << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
+        errs() << "  Peak RSS (KB):                   "
+               << getPeakRSSKb() << "\n";
         if (!abstractCFG.stats.skippedReasons.empty()) {
             errs() << "  Abstract CFG skip reasons:\n";
             for (const auto &[reason, count] : abstractCFG.stats.skippedReasons) {
@@ -276,8 +280,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
     errs() << "  Runtime calls inserted:          " << inserted << "\n";
     errs() << "  Solve time (ms):                 "
            << llvm::format("%.3f", solveTimeMs) << "\n";
-    errs() << "  Total execution time (ms):       "
+    errs() << "  Compilation time (ms):           "
            << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
+    errs() << "  Peak RSS (KB):                   "
+           << getPeakRSSKb() << "\n";
     if (!abstractCFG.stats.skippedReasons.empty()) {
         errs() << "  Abstract CFG skip reasons:\n";
         for (const auto &[reason, count] : abstractCFG.stats.skippedReasons) {
