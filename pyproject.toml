@@ -1,0 +1,19 @@
+[project]
+name = "checkpoint-insertion"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+markers = [
+    "milp: MILP checkpoint pass tests",
+    "rockclimb: RockClimb pass tests",
+    "schematic: SCHEMATIC pass tests",
+    "energy_validation: Energy validation runtime tests",
+    "vm_nvm: VM/NVM placement tests",
+]
