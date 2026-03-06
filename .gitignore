@@ -27,6 +27,14 @@ tests/dwarf-validation/output/
 .omc/
 .envrc
 
+# Gurobi solver artifacts
+*.log
+*.ilp
+*.lp
+
+# IDE cache
+.cache/
+
 # Local untracked artifacts
 .DS_Store
 .omx/
