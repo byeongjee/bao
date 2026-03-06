@@ -1,0 +1,21 @@
+{
+  "estimator_type": "ir",
+  "energy_parameters": {
+    "instruction_costs": {
+      "simple_arithmetic": 1,
+      "complex_arithmetic": 1,
+      "floating_point": 1,
+      "load": 1,
+      "store": 1,
+      "control_flow": 1,
+      "comparison": 1,
+      "conversion": 1,
+      "call": 1,
+      "phi_select": 1,
+      "gep": 1,
+      "alloca": 1,
+      "atomic": 1,
+      "default": 1
+    }
+  }
+}

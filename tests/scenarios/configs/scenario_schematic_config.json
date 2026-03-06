@@ -1,0 +1,13 @@
+{
+  "capacity": 30.0,
+  "E_pro": 3.0,
+  "E_epi": 2.0,
+  "N_reg": 16,
+  "reg_store_energy": 1.0,
+  "reg_restore_energy": 1.0,
+  "nvm_access_penalty": 2.0,
+  "mem_store_energy_per_byte": 0.5,
+  "mem_restore_energy_per_byte": 0.5,
+  "vm_capacity_bytes": 16,
+  "max_paths": 10
+}
