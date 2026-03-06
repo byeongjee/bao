@@ -1,0 +1,33 @@
+Shortest path from  0 to 16 is   8 in cost. Path is:  0 24 23 16
+Shortest path from  1 to 17 is  10 in cost. Path is:  1 6 17
+Shortest path from  2 to 18 is   7 in cost. Path is:  2 18
+Shortest path from  3 to 19 is   5 in cost. Path is:  3 16 19
+Shortest path from  4 to 20 is  12 in cost. Path is:  4 14 21 20
+Shortest path from  5 to 21 is   8 in cost. Path is:  5 28 15 8 21
+Shortest path from  6 to 22 is  16 in cost. Path is:  6 23 16 19 24 22
+Shortest path from  7 to 23 is   5 in cost. Path is:  7 24 23
+Shortest path from  8 to 24 is   8 in cost. Path is:  8 21 1 24
+Shortest path from  9 to 25 is  14 in cost. Path is:  9 28 15 8 21 14 25
+Shortest path from 10 to 26 is  16 in cost. Path is:  10 17 0 1 26
+Shortest path from 11 to 27 is  18 in cost. Path is:  11 17 27
+Shortest path from 12 to 28 is  11 in cost. Path is:  12 7 24 28
+Shortest path from 13 to 29 is  12 in cost. Path is:  13 12 29
+Shortest path from 14 to 30 is   9 in cost. Path is:  14 21 1 30
+Shortest path from 15 to 31 is   8 in cost. Path is:  15 8 21 29 31
+Shortest path from 16 to  0 is   5 in cost. Path is:  16 27 0
+Shortest path from 17 to  1 is  11 in cost. Path is:  17 0 1
+Shortest path from 18 to  2 is  12 in cost. Path is:  18 30 2
+Shortest path from 19 to  3 is   8 in cost. Path is:  19 24 23 3
+Shortest path from 20 to  4 is  15 in cost. Path is:  20 25 4
+Shortest path from 21 to  5 is   6 in cost. Path is:  21 1 5
+Shortest path from 22 to  6 is  14 in cost. Path is:  22 8 21 1 6
+Shortest path from 23 to  7 is   7 in cost. Path is:  23 16 19 7
+Shortest path from 24 to  8 is   4 in cost. Path is:  24 28 15 8
+Shortest path from 25 to  9 is  15 in cost. Path is:  25 1 24 23 9
+Shortest path from 26 to 10 is  13 in cost. Path is:  26 7 24 23 10
+Shortest path from 27 to 11 is   6 in cost. Path is:  27 19 11
+Shortest path from 28 to 12 is   6 in cost. Path is:  28 15 13 12
+Shortest path from 29 to 13 is  16 in cost. Path is:  29 12 7 13
+Shortest path from 30 to 14 is   6 in cost. Path is:  30 24 14
+Shortest path from 31 to 15 is  20 in cost. Path is:  31 21 1 24 28 15
+Benchmark execution complete.

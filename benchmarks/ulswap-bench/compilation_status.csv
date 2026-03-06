@@ -1,0 +1,29 @@
+benchmark,status,reason
+activity_rec,OK,
+adpcm_encode,fixable,missing source file (adpcm-lib.c) in compilation
+aes,OK,
+anomaly,too large,.rodata overflows FRAM by 32KB (181KB data array)
+basicmath,OK,
+bitcount,OK,
+chacha20,OK,
+crc,OK,
+dijkstra,fixable,NULL redefined to 0xf3fff under __MSP430FR5994__ (20-bit value incompatible with 16-bit ptr)
+ecc,OK,
+fft,too large,.bss overflows RAM by 160 bytes
+image_class,too large,.text and .bss both overflow (149KB model data)
+jpeg_encode,too large,.bss overflows RAM by 2588 bytes
+lorawan_down,fixable,#include <memory.h> not found (replace with <string.h>)
+lorawan_up,fixable,#include <memory.h> not found (replace with <string.h>)
+lzfx_comp,too large,.bss overflows RAM by 1932 bytes
+lzfx_decomp,too large,.bss overflows RAM by 2052 bytes
+mp3_encode,llvm bug,llc crashes with APInt assertion failure in MSP430 codegen
+patricia,OK,
+poly1305,OK,
+qsort,fixable,comparator returns int32_t but qsort expects int (16-bit on MSP430)
+rsa,OK,
+sensor_fusion,OK,
+sha256,OK,
+stringsearch,OK,
+susan_corners,llvm bug,llc crashes with APInt assertion failure in MSP430 codegen
+susan_edges,llvm bug,llc crashes with APInt assertion failure in MSP430 codegen
+susan_smooth,llvm bug,llc crashes with APInt assertion failure in MSP430 codegen
