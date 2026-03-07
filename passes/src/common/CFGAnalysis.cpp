@@ -6,8 +6,7 @@
 
 namespace checkpoint {
 
-CFGAnalysis::CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI,
-                         EnergyEstimator &estimator) {
+CFGAnalysis::CFGAnalysis(llvm::Function &F, llvm::LoopInfo &LI, EnergyEstimator &estimator) {
     analyze(F, LI, estimator);
 }
 
@@ -20,8 +19,7 @@ const BlockInfo &CFGAnalysis::getBlockInfo(const llvm::BasicBlock *BB) const {
     return it->second;
 }
 
-void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI,
-                          EnergyEstimator &estimator) {
+void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI, EnergyEstimator &estimator) {
     // Process each basic block
     for (llvm::BasicBlock &BB : F) {
         std::string name = getBlockName(BB, F);

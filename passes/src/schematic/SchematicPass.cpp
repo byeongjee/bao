@@ -1,5 +1,7 @@
 #include "schematic/SchematicPass.h"
 
+#include "common/BlockUtils.h"
+#include "common/PassStatistics.h"
 #include "milp/CheckpointContext.h"
 #include "milp/StateAnalysis.h"
 #include "schematic/LoopAnalyzer.h"
@@ -8,8 +10,6 @@
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
 #include "schematic/TraceLoader.h"
-#include "common/BlockUtils.h"
-#include "common/PassStatistics.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -17,15 +17,15 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 
-#include <chrono>
-#include <deque>
-#include <set>
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
+#include <chrono>
+#include <deque>
+#include <set>
 
 using namespace llvm;
 
@@ -37,8 +37,7 @@ extern cl::opt<bool> AddDebugMarkersOpt;
 
 namespace checkpoint {
 
-PreservedAnalyses SchematicPass::run(Function &F,
-                                     FunctionAnalysisManager &AM) {
+PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     const auto totalStart = std::chrono::steady_clock::now();
 
     // Step 1: Obtain LLVM analyses.
@@ -47,8 +46,7 @@ PreservedAnalyses SchematicPass::run(Function &F,
     auto &AA = AM.getResult<AAManager>(F);
 
     // Step 2: Create base checkpoint context (estimator + CFG).
-    auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(),
-                                             "schematic pass");
+    auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(), "schematic pass");
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip())
             errs() << ctxResult.errorMessage;
@@ -59,8 +57,8 @@ PreservedAnalyses SchematicPass::run(Function &F,
     // Step 3: Parse SCHEMATIC params.
     auto paramsOpt = parseSchematicParams(SchematicConfigOpt.getValue());
     if (!paramsOpt) {
-        errs() << "Error: Failed to parse SCHEMATIC config: "
-               << SchematicConfigOpt.getValue() << "\n";
+        errs() << "Error: Failed to parse SCHEMATIC config: " << SchematicConfigOpt.getValue()
+               << "\n";
         return PreservedAnalyses::all();
     }
     SchematicParams params = *paramsOpt;
@@ -74,7 +72,7 @@ PreservedAnalyses SchematicPass::run(Function &F,
     for (BasicBlock &BB : F) {
         if (&BB == &entryBB)
             continue;
-        for (auto it = BB.begin(); it != BB.end(); ) {
+        for (auto it = BB.begin(); it != BB.end();) {
             auto *AI = dyn_cast<AllocaInst>(&*it++);
             if (AI && isa<ConstantInt>(AI->getArraySize()))
                 AI->moveBefore(entryBB, entryBB.getFirstInsertionPt());
@@ -85,8 +83,8 @@ PreservedAnalyses SchematicPass::run(Function &F,
     StateAnalysis state(F, AA, *ctx.cfg);
     if (state.hasAnalysisErrors()) {
         state.printAnalysisErrors(errs());
-        errs() << "Skipping SCHEMATIC instrumentation for function "
-               << F.getName() << " due to unresolved memory/call effects.\n";
+        errs() << "Skipping SCHEMATIC instrumentation for function " << F.getName()
+               << " due to unresolved memory/call effects.\n";
         return PreservedAnalyses::all();
     }
 
@@ -107,15 +105,13 @@ PreservedAnalyses SchematicPass::run(Function &F,
         loopAnalyzer.setLoadedLoopTraces(loadedTraces->loopTraces);
 
     if (!loopAnalyzer.analyzeLoops(solution)) {
-        errs() << "SCHEMATIC: loop analysis failed for " << F.getName()
-               << " — aborting\n";
+        errs() << "SCHEMATIC: loop analysis failed for " << F.getName() << " — aborting\n";
         return PreservedAnalyses::all();
     }
 
     // Step 8: Get paths from traces (required).
     if (!loadedTraces || loadedTraces->functionPaths.empty()) {
-        errs() << "SCHEMATIC: no traces loaded for " << F.getName()
-               << " — traces are required\n";
+        errs() << "SCHEMATIC: no traces loaded for " << F.getName() << " — traces are required\n";
         return PreservedAnalyses::all();
     }
     std::vector<EnumeratedPath> paths = loadedTraces->functionPaths;
@@ -145,8 +141,7 @@ PreservedAnalyses SchematicPass::run(Function &F,
         for (unsigned i = 0; i < ep.blocks.size(); ++i) {
             llvm::BasicBlock *BB = ep.blocks[i];
             auto metaIt = solution.blockMeta.find(BB);
-            bool isAnalyzed = metaIt != solution.blockMeta.end() &&
-                              metaIt->second.analyzed;
+            bool isAnalyzed = metaIt != solution.blockMeta.end() && metaIt->second.analyzed;
 
             if (!isAnalyzed) {
                 if (currentSeg.empty()) {
@@ -154,8 +149,7 @@ PreservedAnalyses SchematicPass::run(Function &F,
                     llvm::BasicBlock *startBound = nullptr;
                     if (i > 0) {
                         auto prevMeta = solution.blockMeta.find(ep.blocks[i - 1]);
-                        if (prevMeta != solution.blockMeta.end() &&
-                            prevMeta->second.analyzed)
+                        if (prevMeta != solution.blockMeta.end() && prevMeta->second.analyzed)
                             startBound = ep.blocks[i - 1];
                     }
                     startBoundaries.push_back(startBound);
@@ -178,21 +172,17 @@ PreservedAnalyses SchematicPass::run(Function &F,
         for (unsigned s = 0; s < segments.size(); ++s) {
             llvm::BasicBlock *startBound =
                 s < startBoundaries.size() ? startBoundaries[s] : nullptr;
-            llvm::BasicBlock *endBound =
-                s < endBoundaries.size() ? endBoundaries[s] : nullptr;
+            llvm::BasicBlock *endBound = s < endBoundaries.size() ? endBoundaries[s] : nullptr;
 
-            RCGSolver solver(segments[s], state, *ctx.cfg, params,
-                             solution.blockMeta, solution.decidedPlacements,
-                             startBound, endBound);
+            RCGSolver solver(segments[s], state, *ctx.cfg, params, solution.blockMeta,
+                             solution.decidedPlacements, startBound, endBound);
             RCGResult result = solver.solve();
 
             if (!result.feasible) {
-                report_fatal_error(
-                    Twine("SCHEMATIC infeasible segment in function '") +
-                        F.getName() + "', path #" +
-                        Twine(solution.pathsAnalyzed) + ": " +
-                        result.errorMessage,
-                    /*GenCrashDiag=*/false);
+                report_fatal_error(Twine("SCHEMATIC infeasible segment in function '") +
+                                       F.getName() + "', path #" + Twine(solution.pathsAnalyzed) +
+                                       ": " + result.errorMessage,
+                                   /*GenCrashDiag=*/false);
             }
 
             // Update solution from RCG result.
@@ -300,17 +290,15 @@ PreservedAnalyses SchematicPass::run(Function &F,
         }
 
         // Run RCG on the synthetic path.
-        RCGSolver solver(synPath, state, *ctx.cfg, params,
-                         solution.blockMeta, solution.decidedPlacements,
-                         startBound, endBound);
+        RCGSolver solver(synPath, state, *ctx.cfg, params, solution.blockMeta,
+                         solution.decidedPlacements, startBound, endBound);
         RCGResult result = solver.solve();
 
         if (!result.feasible) {
-            report_fatal_error(
-                Twine("SCHEMATIC infeasible synthetic path in function '") +
-                    F.getName() + "', uncovered block '" + BB->getName() +
-                    "': " + result.errorMessage,
-                /*GenCrashDiag=*/false);
+            report_fatal_error(Twine("SCHEMATIC infeasible synthetic path in function '") +
+                                   F.getName() + "', uncovered block '" + BB->getName() +
+                                   "': " + result.errorMessage,
+                               /*GenCrashDiag=*/false);
         }
 
         // Update solution (same logic as Step 9).
@@ -352,8 +340,7 @@ PreservedAnalyses SchematicPass::run(Function &F,
 
     // Step 10: Resolve remaining potential edges between analyzed blocks.
     for (const auto &[src, dst] : ctx.cfg->getEdges()) {
-        CFGEdge edge{const_cast<BasicBlock *>(src),
-                     const_cast<BasicBlock *>(dst)};
+        CFGEdge edge{const_cast<BasicBlock *>(src), const_cast<BasicBlock *>(dst)};
         if (solution.enabledCheckpoints.count(edge))
             continue;
 
@@ -365,10 +352,8 @@ PreservedAnalyses SchematicPass::run(Function &F,
             continue;
 
         // Check if allocations differ.
-        auto srcAlloc = solution.decidedPlacements.find(
-            const_cast<BasicBlock *>(src));
-        auto dstAlloc = solution.decidedPlacements.find(
-            const_cast<BasicBlock *>(dst));
+        auto srcAlloc = solution.decidedPlacements.find(const_cast<BasicBlock *>(src));
+        auto dstAlloc = solution.decidedPlacements.find(const_cast<BasicBlock *>(dst));
         bool allocsDiffer = false;
         if (srcAlloc != solution.decidedPlacements.end() &&
             dstAlloc != solution.decidedPlacements.end()) {
@@ -401,8 +386,7 @@ PreservedAnalyses SchematicPass::run(Function &F,
     }
 
     // Step 12: Instrument.
-    SchematicInstrumenter instrumenter(*F.getParent(), params.addDebugMarkers,
-                                       params.N_reg);
+    SchematicInstrumenter instrumenter(*F.getParent(), params.addDebugMarkers, params.N_reg);
     unsigned inserted = instrumenter.instrumentFunction(F, solution, state);
 
     const auto totalEnd = std::chrono::steady_clock::now();
@@ -426,12 +410,9 @@ PreservedAnalyses SchematicPass::run(Function &F,
     }
 
     errs() << "  --- SCHEMATIC-specific ---\n";
-    errs() << "  Paths analyzed:                  " << solution.pathsAnalyzed
-           << "\n";
-    errs() << "  Enabled checkpoints:             "
-           << solution.enabledCheckpoints.size() << "\n";
-    errs() << "  Loop decisions:                  "
-           << solution.loopDecisions.size() << "\n";
+    errs() << "  Paths analyzed:                  " << solution.pathsAnalyzed << "\n";
+    errs() << "  Enabled checkpoints:             " << solution.enabledCheckpoints.size() << "\n";
+    errs() << "  Loop decisions:                  " << solution.loopDecisions.size() << "\n";
     errs() << "  Trace-guided:                    yes\n";
 
     return PreservedAnalyses::none();

@@ -23,21 +23,18 @@ struct RCGResult {
 };
 
 class RCGSolver {
-public:
-    RCGSolver(const std::vector<llvm::BasicBlock *> &pathBlocks,
-              const StateAnalysis &state,
-              const CFGAnalysis &cfg,
-              const SchematicParams &params,
+  public:
+    RCGSolver(const std::vector<llvm::BasicBlock *> &pathBlocks, const StateAnalysis &state,
+              const CFGAnalysis &cfg, const SchematicParams &params,
               const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
-              const llvm::DenseMap<llvm::BasicBlock *,
-                                   std::map<llvm::GlobalVariable *, Placement>>
+              const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::GlobalVariable *, Placement>>
                   &decidedPlacements,
               llvm::BasicBlock *startBoundaryBlock = nullptr,
               llvm::BasicBlock *endBoundaryBlock = nullptr);
 
     RCGResult solve();
 
-private:
+  private:
     struct Node {
         enum Kind { Start, CandidateEdge, End };
         Kind kind;
@@ -50,8 +47,7 @@ private:
     const CFGAnalysis &cfg_;
     const SchematicParams &params_;
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta_;
-    const llvm::DenseMap<llvm::BasicBlock *,
-                          std::map<llvm::GlobalVariable *, Placement>>
+    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::GlobalVariable *, Placement>>
         &decidedPlacements_;
     llvm::BasicBlock *startBoundaryBlock_;
     llvm::BasicBlock *endBoundaryBlock_;
@@ -61,12 +57,10 @@ private:
     void buildNodes();
     double getIntervalBudget(unsigned nodeFrom, unsigned nodeTo) const;
 
-    std::pair<unsigned, unsigned> getIntervalRange(unsigned nodeFrom,
-                                                   unsigned nodeTo) const;
+    std::pair<unsigned, unsigned> getIntervalRange(unsigned nodeFrom, unsigned nodeTo) const;
 
     /// Extract blocks between two nodes (inclusive of interval boundaries).
-    std::vector<llvm::BasicBlock *> getIntervalBlocks(unsigned nodeFrom,
-                                                       unsigned nodeTo) const;
+    std::vector<llvm::BasicBlock *> getIntervalBlocks(unsigned nodeFrom, unsigned nodeTo) const;
 };
 
 } // namespace checkpoint

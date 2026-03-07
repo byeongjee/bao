@@ -10,9 +10,8 @@
 
 namespace checkpoint {
 
-llvm::PreservedAnalyses
-TripCountAnnotationPass::run(llvm::Function &F,
-                             llvm::FunctionAnalysisManager &AM) {
+llvm::PreservedAnalyses TripCountAnnotationPass::run(llvm::Function &F,
+                                                     llvm::FunctionAnalysisManager &AM) {
     if (F.isDeclaration())
         return llvm::PreservedAnalyses::all();
 
@@ -37,13 +36,11 @@ TripCountAnnotationPass::run(llvm::Function &F,
             if (CI->arg_size() < 1)
                 continue;
 
-            auto *Arg =
-                llvm::dyn_cast<llvm::ConstantInt>(CI->getArgOperand(0));
+            auto *Arg = llvm::dyn_cast<llvm::ConstantInt>(CI->getArgOperand(0));
             if (!Arg) {
-                llvm::errs()
-                    << "Warning: __loop_tripcount argument is not a "
-                       "constant in block "
-                    << BB.getName() << "\n";
+                llvm::errs() << "Warning: __loop_tripcount argument is not a "
+                                "constant in block "
+                             << BB.getName() << "\n";
                 continue;
             }
 
@@ -51,10 +48,9 @@ TripCountAnnotationPass::run(llvm::Function &F,
 
             llvm::Loop *L = LI.getLoopFor(&BB);
             if (!L) {
-                llvm::errs()
-                    << "Warning: __loop_tripcount call not inside a "
-                       "loop in block "
-                    << BB.getName() << "\n";
+                llvm::errs() << "Warning: __loop_tripcount call not inside a "
+                                "loop in block "
+                             << BB.getName() << "\n";
                 continue;
             }
 
@@ -96,10 +92,9 @@ TripCountAnnotationPass::run(llvm::Function &F,
         while (!worklist.empty()) {
             llvm::Loop *Current = worklist.pop_back_val();
             if (!getMarkerTripCount(Current)) {
-                llvm::errs()
-                    << "Error: loop in " << F.getName() << " at block '"
-                    << Current->getHeader()->getName()
-                    << "' is missing a __loop_tripcount annotation\n";
+                llvm::errs() << "Error: loop in " << F.getName() << " at block '"
+                             << Current->getHeader()->getName()
+                             << "' is missing a __loop_tripcount annotation\n";
                 missingAnnotation = true;
             }
             for (llvm::Loop *Sub : *Current)
@@ -108,10 +103,9 @@ TripCountAnnotationPass::run(llvm::Function &F,
     }
 
     if (missingAnnotation) {
-        llvm::report_fatal_error(
-            "TripCountAnnotationPass: not all loops are annotated with "
-            "__loop_tripcount(); add annotations to the source or the pass "
-            "will not be able to determine trip counts");
+        llvm::report_fatal_error("TripCountAnnotationPass: not all loops are annotated with "
+                                 "__loop_tripcount(); add annotations to the source or the pass "
+                                 "will not be able to determine trip counts");
     }
 
     return llvm::PreservedAnalyses::none();

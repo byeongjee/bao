@@ -8,14 +8,10 @@
 namespace checkpoint {
 
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>>
-computeEligibleLiveness(
-    llvm::Function &F,
-    llvm::AAResults &AA,
-    const CFGAnalysis &cfg,
-    const std::vector<llvm::GlobalVariable *> &vmObjs) {
+computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
+                        const std::vector<llvm::GlobalVariable *> &vmObjs) {
 
-    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>>
-        result;
+    llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>> result;
 
     if (vmObjs.empty())
         return result;
@@ -25,15 +21,12 @@ computeEligibleLiveness(
         bool hasMustStore = false;
     };
 
-    std::map<std::pair<const llvm::BasicBlock *, llvm::GlobalVariable *>,
-             BlockGVInfo>
-        blockGVInfo;
+    std::map<std::pair<const llvm::BasicBlock *, llvm::GlobalVariable *>, BlockGVInfo> blockGVInfo;
 
     // Phase 1: Per-instruction scan (iterate F for non-const access).
     for (llvm::BasicBlock &BB : F) {
         for (llvm::GlobalVariable *GV : vmObjs) {
-            auto key = std::make_pair(
-                static_cast<const llvm::BasicBlock *>(&BB), GV);
+            auto key = std::make_pair(static_cast<const llvm::BasicBlock *>(&BB), GV);
             BlockGVInfo info;
             bool seenMustStore = false;
 
@@ -80,11 +73,9 @@ computeEligibleLiveness(
                     }
                 }
 
-                bool newLiveIn = info.loadBeforeMustStore ||
-                                 (newLiveOut && !info.hasMustStore);
+                bool newLiveIn = info.loadBeforeMustStore || (newLiveOut && !info.hasMustStore);
 
-                if (newLiveIn != liveIn[BB] ||
-                    newLiveOut != liveOut[BB]) {
+                if (newLiveIn != liveIn[BB] || newLiveOut != liveOut[BB]) {
                     liveIn[BB] = newLiveIn;
                     liveOut[BB] = newLiveOut;
                     changed = true;
@@ -102,11 +93,8 @@ computeEligibleLiveness(
 }
 
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
-computeIneligGlobalAllocaLiveness(
-    llvm::Function &F,
-    llvm::AAResults &AA,
-    const CFGAnalysis &cfg,
-    const std::vector<llvm::Value *> &ineligibleObjs) {
+computeIneligGlobalAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
+                                  const std::vector<llvm::Value *> &ineligibleObjs) {
 
     llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>> result;
 
@@ -124,14 +112,12 @@ computeIneligGlobalAllocaLiveness(
         bool hasMustStore = false;
     };
 
-    std::map<std::pair<const llvm::BasicBlock *, llvm::Value *>, BlockVarInfo>
-        blockVarInfo;
+    std::map<std::pair<const llvm::BasicBlock *, llvm::Value *>, BlockVarInfo> blockVarInfo;
 
     // Phase 1: Per-instruction scan (iterate F for non-const access).
     for (llvm::BasicBlock &BB : F) {
         for (llvm::Value *V : globalAllocaIneligs) {
-            auto key = std::make_pair(
-                static_cast<const llvm::BasicBlock *>(&BB), V);
+            auto key = std::make_pair(static_cast<const llvm::BasicBlock *>(&BB), V);
             BlockVarInfo info;
             bool seenMustStore = false;
 
@@ -154,8 +140,7 @@ computeIneligGlobalAllocaLiveness(
             } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
                 for (llvm::Instruction &I : BB) {
                     if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
-                        if (LI->getPointerOperand()->stripPointerCasts() == AI &&
-                            !seenMustStore)
+                        if (LI->getPointerOperand()->stripPointerCasts() == AI && !seenMustStore)
                             info.loadBeforeMustStore = true;
                     }
                     if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
@@ -194,11 +179,9 @@ computeIneligGlobalAllocaLiveness(
                     }
                 }
 
-                bool newLiveIn = info.loadBeforeMustStore ||
-                                 (newLiveOut && !info.hasMustStore);
+                bool newLiveIn = info.loadBeforeMustStore || (newLiveOut && !info.hasMustStore);
 
-                if (newLiveIn != liveIn[BB] ||
-                    newLiveOut != liveOut[BB]) {
+                if (newLiveIn != liveIn[BB] || newLiveOut != liveOut[BB]) {
                     liveIn[BB] = newLiveIn;
                     liveOut[BB] = newLiveOut;
                     changed = true;
@@ -216,10 +199,8 @@ computeIneligGlobalAllocaLiveness(
 }
 
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
-computeIneligSSALiveness(
-    llvm::Function &F,
-    const CFGAnalysis &cfg,
-    const std::vector<llvm::Value *> &ineligibleObjs) {
+computeIneligSSALiveness(llvm::Function &F, const CFGAnalysis &cfg,
+                         const std::vector<llvm::Value *> &ineligibleObjs) {
 
     llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>> result;
 
@@ -232,19 +213,16 @@ computeIneligSSALiveness(
 
         // Collect PHI incoming edges and non-PHI use blocks.
         // phiIncoming: PHI_block -> {incoming blocks that carry V}
-        llvm::DenseMap<const llvm::BasicBlock *,
-                       llvm::SmallPtrSet<const llvm::BasicBlock *, 4>>
+        llvm::DenseMap<const llvm::BasicBlock *, llvm::SmallPtrSet<const llvm::BasicBlock *, 4>>
             phiIncoming;
         llvm::SmallPtrSet<const llvm::BasicBlock *, 8> useBlocks;
         for (const llvm::User *U : Inst->users()) {
             if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
                 if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(UI)) {
                     const llvm::BasicBlock *phiBlock = PHI->getParent();
-                    for (unsigned i = 0; i < PHI->getNumIncomingValues();
-                         ++i) {
+                    for (unsigned i = 0; i < PHI->getNumIncomingValues(); ++i) {
                         if (PHI->getIncomingValue(i) == Inst) {
-                            const llvm::BasicBlock *incBB =
-                                PHI->getIncomingBlock(i);
+                            const llvm::BasicBlock *incBB = PHI->getIncomingBlock(i);
                             phiIncoming[phiBlock].insert(incBB);
                         }
                     }
@@ -291,8 +269,7 @@ computeIneligSSALiveness(
                     // PHI edge: only propagate if PHI at Succ
                     // receives V from this block.
                     auto it = phiIncoming.find(Succ);
-                    if (it != phiIncoming.end() &&
-                        it->second.count(BB)) {
+                    if (it != phiIncoming.end() && it->second.count(BB)) {
                         newLiveOut = true;
                         break;
                     }
@@ -301,8 +278,7 @@ computeIneligSSALiveness(
                 bool isUsed = useBlocks.count(BB) > 0;
                 bool newRealLiveIn = isUsed || newLiveOut;
 
-                if (newRealLiveIn != realLiveIn[BB] ||
-                    newLiveOut != liveOut[BB]) {
+                if (newRealLiveIn != realLiveIn[BB] || newLiveOut != liveOut[BB]) {
                     realLiveIn[BB] = newRealLiveIn;
                     liveOut[BB] = newLiveOut;
                     changed = true;
@@ -312,8 +288,7 @@ computeIneligSSALiveness(
 
         // V is live-in if it has real or PHI liveness.
         for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
-            if (realLiveIn[BB] ||
-                phiLiveInBlocks.count(BB))
+            if (realLiveIn[BB] || phiLiveInBlocks.count(BB))
                 result[BB].insert(V);
         }
     }

@@ -10,8 +10,7 @@ using json = nlohmann::json;
 
 namespace checkpoint {
 
-TraceLoader::TraceLoader(Function &F, LoopInfo &LI)
-    : F_(F), LI_(LI) {
+TraceLoader::TraceLoader(Function &F, LoopInfo &LI) : F_(F), LI_(LI) {
     // Build name -> BB* map
     for (BasicBlock &BB : F_) {
         if (BB.hasName())
@@ -36,8 +35,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
     // Look up function name
     std::string funcName = F_.getName().str();
     if (!root.contains(funcName)) {
-        errs() << "TraceLoader: function '" << funcName
-               << "' not found in trace file\n";
+        errs() << "TraceLoader: function '" << funcName << "' not found in trace file\n";
         return std::nullopt;
     }
 
@@ -58,8 +56,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                 std::string name = bbName.get<std::string>();
                 auto it = nameToBlock_.find(StringRef(name));
                 if (it == nameToBlock_.end()) {
-                    errs() << "TraceLoader: warning: BB '" << name
-                           << "' not found in " << funcName
+                    errs() << "TraceLoader: warning: BB '" << name << "' not found in " << funcName
                            << ", skipping trace\n";
                     valid = false;
                     break;
@@ -76,10 +73,9 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
         }
 
         // Sort by decreasing count
-        std::sort(result.functionPaths.begin(), result.functionPaths.end(),
-                  [](const EnumeratedPath &a, const EnumeratedPath &b) {
-                      return a.count > b.count;
-                  });
+        std::sort(
+            result.functionPaths.begin(), result.functionPaths.end(),
+            [](const EnumeratedPath &a, const EnumeratedPath &b) { return a.count > b.count; });
     }
 
     // -----------------------------------------------------------------------
@@ -110,8 +106,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
             }
 
             if (!llt.loop) {
-                errs() << "TraceLoader: warning: no Loop* for header '"
-                       << headerName << "', skipping\n";
+                errs() << "TraceLoader: warning: no Loop* for header '" << headerName
+                       << "', skipping\n";
                 continue;
             }
 
@@ -132,8 +128,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                 }
 
                 // Members
-                if (loopMeta.contains("basic_blocks") &&
-                    loopMeta["basic_blocks"].is_array()) {
+                if (loopMeta.contains("basic_blocks") && loopMeta["basic_blocks"].is_array()) {
                     for (const auto &mn : loopMeta["basic_blocks"]) {
                         std::string name = mn.get<std::string>();
                         auto it = nameToBlock_.find(StringRef(name));
@@ -192,9 +187,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
         }
     }
 
-    errs() << "TraceLoader: loaded " << result.functionPaths.size()
-           << " function traces, " << result.loopTraces.size()
-           << " loop traces for " << funcName << "\n";
+    errs() << "TraceLoader: loaded " << result.functionPaths.size() << " function traces, "
+           << result.loopTraces.size() << " loop traces for " << funcName << "\n";
 
     return result;
 }

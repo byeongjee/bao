@@ -1,0 +1,27 @@
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  misc-unused-using-decls,
+  modernize-use-override,
+  modernize-use-nullptr,
+  modernize-use-auto,
+  modernize-use-using,
+  readability-redundant-string-cstr,
+  readability-redundant-smartptr-get,
+  readability-container-size-empty,
+  performance-unnecessary-value-param,
+  performance-for-range-copy,
+  performance-implicit-conversion-in-loop,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: 'passes/(include|src)/.*\.h$'
+
+CheckOptions:
+  - key: modernize-use-auto.MinTypeNameLength
+    value: 5

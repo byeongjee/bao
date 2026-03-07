@@ -19,7 +19,7 @@ constexpr NodeId kInvalidNodeId = std::numeric_limits<NodeId>::max();
 /// - reverseConcrete_: concrete block -> NodeId
 /// - summaryRepresentative_: summary NodeId -> representative concrete block
 class NodeMap {
-public:
+  public:
     void setConcreteNode(NodeId node, llvm::BasicBlock *BB) {
         if (!BB) {
             return;
@@ -28,8 +28,7 @@ public:
         reverseConcrete_[BB] = node;
     }
 
-    void setSummaryRepresentative(NodeId summaryNode,
-                                  llvm::BasicBlock *representativeBB) {
+    void setSummaryRepresentative(NodeId summaryNode, llvm::BasicBlock *representativeBB) {
         if (!representativeBB) {
             return;
         }
@@ -37,7 +36,8 @@ public:
     }
 
     void setSummaryMember(NodeId summaryNode, llvm::BasicBlock *BB) {
-        if (!BB) return;
+        if (!BB)
+            return;
         reverseSummaryMembers_[BB] = summaryNode;
     }
 
@@ -65,7 +65,7 @@ public:
         return nullptr;
     }
 
-private:
+  private:
     llvm::DenseMap<NodeId, llvm::WeakTrackingVH> concreteNodes_;
     llvm::DenseMap<const llvm::BasicBlock *, NodeId> reverseConcrete_;
     llvm::DenseMap<NodeId, llvm::WeakTrackingVH> summaryRepresentative_;
@@ -73,4 +73,3 @@ private:
 };
 
 } // namespace checkpoint
-

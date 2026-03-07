@@ -26,10 +26,8 @@ namespace checkpoint {
 /// - Static allocas (stack slots)
 /// - Cross-block live SSA instructions (virtual registers)
 class StateAnalysis {
-public:
-    StateAnalysis(llvm::Function &F,
-                  llvm::AAResults &AA,
-                  const CFGAnalysis &cfg);
+  public:
+    StateAnalysis(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg);
 
     // -- Candidate globals (V_elig) --
 
@@ -60,20 +58,16 @@ public:
     // -- Strict-analysis diagnostics --
 
     bool hasAnalysisErrors() const { return !analysisErrors_.empty(); }
-    const std::vector<std::string> &getAnalysisErrors() const {
-        return analysisErrors_;
-    }
+    const std::vector<std::string> &getAnalysisErrors() const { return analysisErrors_; }
     void printAnalysisErrors(llvm::raw_ostream &os) const;
 
     // -- Access maps (for energy model) --
 
     /// Number of loads from global v in block b.
-    unsigned getLoadCount(const llvm::BasicBlock *BB,
-                          llvm::GlobalVariable *gv) const;
+    unsigned getLoadCount(const llvm::BasicBlock *BB, llvm::GlobalVariable *gv) const;
 
     /// Number of stores to global v in block b.
-    unsigned getStoreCount(const llvm::BasicBlock *BB,
-                           llvm::GlobalVariable *gv) const;
+    unsigned getStoreCount(const llvm::BasicBlock *BB, llvm::GlobalVariable *gv) const;
 
     // -- Mappings --
 
@@ -81,7 +75,7 @@ public:
     /// allocas, and SSA values). Returns 0 for unknown.
     unsigned getVarSizeBytes(llvm::Value *v) const;
 
-private:
+  private:
     llvm::Function &F_;
     llvm::AAResults &AA_;
     const CFGAnalysis &cfg_;

@@ -10,7 +10,7 @@ namespace checkpoint {
 /// Energy estimator using pre-computed assembly-level energy costs.
 /// Reads energy data from a JSON file produced by bb-energy-analyzer.
 class AssemblyBasedEstimator : public EnergyEstimator {
-public:
+  public:
     /// Create estimator from configuration file.
     /// Config must have "estimator_type": "assembly" and
     /// "energy_parameters.energy_data_path" pointing to the energy data JSON.
@@ -23,7 +23,7 @@ public:
     void prepareForFunction(const llvm::Function &F) override;
     void finalizeFunction(const llvm::Function &F) override;
 
-private:
+  private:
     AssemblyBasedEstimator() = default;
 
     // Per-function, per-BB energy: funcName -> {bbName -> energy}

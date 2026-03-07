@@ -17,21 +17,15 @@ namespace checkpoint {
 /// load-before-must-store analysis.
 /// Returns BB -> set of live-in GlobalVariables.
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>>
-computeEligibleLiveness(
-    llvm::Function &F,
-    llvm::AAResults &AA,
-    const CFGAnalysis &cfg,
-    const std::vector<llvm::GlobalVariable *> &vmObjs);
+computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
+                        const std::vector<llvm::GlobalVariable *> &vmObjs);
 
 /// Compute liveness for ineligible globals and allocas using
 /// load-before-must-store analysis.
 /// Returns BB -> set of live-in Values.
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
-computeIneligGlobalAllocaLiveness(
-    llvm::Function &F,
-    llvm::AAResults &AA,
-    const CFGAnalysis &cfg,
-    const std::vector<llvm::Value *> &ineligibleObjs);
+computeIneligGlobalAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
+                                  const std::vector<llvm::Value *> &ineligibleObjs);
 
 /// Compute edge-aware SSA liveness for ineligible cross-block SSA values.
 ///
@@ -42,9 +36,7 @@ computeIneligGlobalAllocaLiveness(
 ///
 /// Returns BB -> set of live-in Values.
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
-computeIneligSSALiveness(
-    llvm::Function &F,
-    const CFGAnalysis &cfg,
-    const std::vector<llvm::Value *> &ineligibleObjs);
+computeIneligSSALiveness(llvm::Function &F, const CFGAnalysis &cfg,
+                         const std::vector<llvm::Value *> &ineligibleObjs);
 
 } // namespace checkpoint

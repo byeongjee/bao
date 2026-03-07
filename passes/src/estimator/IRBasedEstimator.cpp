@@ -4,8 +4,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
-#include <nlohmann/json.hpp>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace checkpoint {
 
@@ -47,11 +47,20 @@ bool IRBasedEstimator::loadConfig(const std::string &path) {
     auto &costs = params["instruction_costs"];
 
     // Required cost categories
-    const std::vector<std::string> requiredCategories = {
-        "simple_arithmetic", "complex_arithmetic", "floating_point",
-        "load", "store", "control_flow", "comparison", "conversion",
-        "call", "phi_select", "gep", "alloca", "atomic", "default"
-    };
+    const std::vector<std::string> requiredCategories = {"simple_arithmetic",
+                                                         "complex_arithmetic",
+                                                         "floating_point",
+                                                         "load",
+                                                         "store",
+                                                         "control_flow",
+                                                         "comparison",
+                                                         "conversion",
+                                                         "call",
+                                                         "phi_select",
+                                                         "gep",
+                                                         "alloca",
+                                                         "atomic",
+                                                         "default"};
 
     for (const auto &cat : requiredCategories) {
         if (!costs.contains(cat)) {

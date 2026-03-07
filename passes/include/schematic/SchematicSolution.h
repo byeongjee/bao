@@ -19,13 +19,12 @@ struct CFGEdge {
     llvm::BasicBlock *dst;
 
     bool operator<(const CFGEdge &o) const {
-        if (src != o.src) return src < o.src;
+        if (src != o.src)
+            return src < o.src;
         return dst < o.dst;
     }
 
-    bool operator==(const CFGEdge &o) const {
-        return src == o.src && dst == o.dst;
-    }
+    bool operator==(const CFGEdge &o) const { return src == o.src && dst == o.dst; }
 };
 
 struct RegionAllocation {
@@ -42,8 +41,8 @@ struct RegionAllocation {
 /// Per-block metadata for multi-path overlap (spec §8.3)
 struct BlockMetadata {
     bool analyzed = false;
-    double E_left = std::numeric_limits<double>::max();  // energy remaining after block
-    double E_to_leave = 0.0;                              // min energy needed at entry
+    double E_left = std::numeric_limits<double>::max(); // energy remaining after block
+    double E_to_leave = 0.0;                            // min energy needed at entry
 };
 
 struct LoopCheckpointDecision {
@@ -66,8 +65,8 @@ struct SchematicSolution {
     llvm::DenseMap<llvm::BasicBlock *, LoopCheckpointDecision> loopDecisions;
     /// Per-block decided variable placements from earlier analyses.
     /// Enforces allocation consistency across paths (spec §12.2).
-    llvm::DenseMap<llvm::BasicBlock *,
-                   std::map<llvm::GlobalVariable *, Placement>> decidedPlacements;
+    llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::GlobalVariable *, Placement>>
+        decidedPlacements;
     unsigned pathsAnalyzed = 0;
     unsigned totalVmVariables = 0;
     unsigned totalNvmVariables = 0;

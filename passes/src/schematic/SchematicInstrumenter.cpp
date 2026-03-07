@@ -10,9 +10,7 @@
 
 namespace checkpoint {
 
-SchematicInstrumenter::SchematicInstrumenter(llvm::Module &M,
-                                             bool addDebugMarkers,
-                                             unsigned N_reg)
+SchematicInstrumenter::SchematicInstrumenter(llvm::Module &M, bool addDebugMarkers, unsigned N_reg)
     : M_(M), addDebugMarkers_(addDebugMarkers), N_reg_(N_reg) {}
 
 void SchematicInstrumenter::declareRuntimeFunctions() {
@@ -25,20 +23,15 @@ void SchematicInstrumenter::declareRuntimeFunctions() {
     epilogueFn_ = M_.getOrInsertFunction("__region_epilogue", VoidTy);
 
     llvm::Type *I64Ty = llvm::Type::getInt64Ty(Ctx);
-    storeMemFn_ = M_.getOrInsertFunction(
-        "__checkpoint_store_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-    restoreMemFn_ = M_.getOrInsertFunction(
-        "__restore_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-    storeRegFn_ = M_.getOrInsertFunction(
-        "__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
-    restoreRegFn_ = M_.getOrInsertFunction(
-        "__restore_reg", VoidTy, I32Ty, PtrTy);
+    storeMemFn_ = M_.getOrInsertFunction("__checkpoint_store_mem", VoidTy, PtrTy, PtrTy, I32Ty);
+    restoreMemFn_ = M_.getOrInsertFunction("__restore_mem", VoidTy, PtrTy, PtrTy, I32Ty);
+    storeRegFn_ = M_.getOrInsertFunction("__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
+    restoreRegFn_ = M_.getOrInsertFunction("__restore_reg", VoidTy, I32Ty, PtrTy);
 }
 
-void SchematicInstrumenter::createShadowGlobals(
-    llvm::Function &F,
-    const SchematicSolution &solution,
-    const StateAnalysis &state) {
+void SchematicInstrumenter::createShadowGlobals(llvm::Function &F,
+                                                const SchematicSolution &solution,
+                                                const StateAnalysis &state) {
 
     shadowMap_.clear();
 
@@ -60,17 +53,14 @@ void SchematicInstrumenter::createShadowGlobals(
 
     for (llvm::GlobalVariable *GV : vmPlacedGVs) {
         auto *shadow = new llvm::GlobalVariable(
-            M_, GV->getValueType(), /*isConstant=*/false,
-            llvm::GlobalValue::InternalLinkage,
-            llvm::Constant::getNullValue(GV->getValueType()),
-            "__vm_shadow_" + GV->getName().str());
+            M_, GV->getValueType(), /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
+            llvm::Constant::getNullValue(GV->getValueType()), "__vm_shadow_" + GV->getName().str());
         shadow->setAlignment(GV->getAlign());
         shadowMap_[GV] = shadow;
     }
 }
 
-void SchematicInstrumenter::createIneligibleBackups(
-    llvm::Function &F, const StateAnalysis &state) {
+void SchematicInstrumenter::createIneligibleBackups(llvm::Function &F, const StateAnalysis &state) {
 
     ineligBackupMap_.clear();
     ineligCheckpointObjs_.clear();
@@ -84,21 +74,18 @@ void SchematicInstrumenter::createIneligibleBackups(
             backupType = GV->getValueType();
             backupName = "__nvm_backup_" + GV->getName().str();
         } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-            auto *arraySizeCI =
-                llvm::dyn_cast<llvm::ConstantInt>(AI->getArraySize());
+            auto *arraySizeCI = llvm::dyn_cast<llvm::ConstantInt>(AI->getArraySize());
             if (arraySizeCI) {
                 uint64_t elemCount = arraySizeCI->getZExtValue();
                 if (elemCount <= 1)
                     backupType = AI->getAllocatedType();
                 else
-                    backupType =
-                        llvm::ArrayType::get(AI->getAllocatedType(), elemCount);
+                    backupType = llvm::ArrayType::get(AI->getAllocatedType(), elemCount);
             } else {
                 backupType = AI->getAllocatedType();
             }
             backupName = "__nvm_alloca_" +
-                         (AI->hasName() ? AI->getName().str()
-                                        : std::to_string(ssaCounter++));
+                         (AI->hasName() ? AI->getName().str() : std::to_string(ssaCounter++));
         } else if (auto *Inst = llvm::dyn_cast<llvm::Instruction>(V)) {
             backupType = Inst->getType();
             backupName = "__nvm_ssa_" + std::to_string(ssaCounter++);
@@ -107,8 +94,7 @@ void SchematicInstrumenter::createIneligibleBackups(
         }
 
         auto *backup = new llvm::GlobalVariable(
-            M_, backupType, /*isConstant=*/false,
-            llvm::GlobalValue::InternalLinkage,
+            M_, backupType, /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
             llvm::Constant::getNullValue(backupType), backupName);
         backup->setSection(".nvm");
         ineligBackupMap_[V] = backup;
@@ -116,15 +102,13 @@ void SchematicInstrumenter::createIneligibleBackups(
     }
 }
 
-llvm::BasicBlock *SchematicInstrumenter::splitEdge(llvm::BasicBlock *src,
-                                                    llvm::BasicBlock *dst) {
+llvm::BasicBlock *SchematicInstrumenter::splitEdge(llvm::BasicBlock *src, llvm::BasicBlock *dst) {
     return llvm::SplitEdge(src, dst);
 }
 
 /// Recursively replace occurrences of GV with Replacement inside a Constant.
-static llvm::Constant *replaceGVInConstant(llvm::Constant *C,
-                                            llvm::GlobalVariable *GV,
-                                            llvm::GlobalVariable *Replacement) {
+static llvm::Constant *replaceGVInConstant(llvm::Constant *C, llvm::GlobalVariable *GV,
+                                           llvm::GlobalVariable *Replacement) {
     if (C == GV)
         return Replacement;
 
@@ -151,9 +135,8 @@ static llvm::Constant *replaceGVInConstant(llvm::Constant *C,
     return CE->getWithOperands(newOps);
 }
 
-void SchematicInstrumenter::rewriteAccessesInRegion(
-    const std::vector<llvm::BasicBlock *> &blocks,
-    const RegionAllocation &allocation) {
+void SchematicInstrumenter::rewriteAccessesInRegion(const std::vector<llvm::BasicBlock *> &blocks,
+                                                    const RegionAllocation &allocation) {
 
     for (llvm::BasicBlock *BB : blocks) {
         for (const auto &[GV, place] : allocation.placement) {
@@ -168,10 +151,8 @@ void SchematicInstrumenter::rewriteAccessesInRegion(
                 for (unsigned i = 0; i < I.getNumOperands(); ++i) {
                     if (I.getOperand(i) == GV) {
                         I.setOperand(i, shadow);
-                    } else if (auto *C = llvm::dyn_cast<llvm::Constant>(
-                                   I.getOperand(i))) {
-                        if (auto *replaced =
-                                replaceGVInConstant(C, GV, shadow))
+                    } else if (auto *C = llvm::dyn_cast<llvm::Constant>(I.getOperand(i))) {
+                        if (auto *replaced = replaceGVInConstant(C, GV, shadow))
                             I.setOperand(i, replaced);
                     }
                 }
@@ -180,11 +161,10 @@ void SchematicInstrumenter::rewriteAccessesInRegion(
     }
 }
 
-unsigned SchematicInstrumenter::insertCheckpointSequence(
-    llvm::BasicBlock *ckptBB,
-    const RegionAllocation *endingAlloc,
-    const RegionAllocation *startingAlloc,
-    const StateAnalysis &state) {
+unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptBB,
+                                                         const RegionAllocation *endingAlloc,
+                                                         const RegionAllocation *startingAlloc,
+                                                         const StateAnalysis &state) {
 
     unsigned inserted = 0;
     llvm::IRBuilder<> builder(ckptBB, ckptBB->getFirstInsertionPt());
@@ -195,8 +175,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
             if (place != Placement::VM)
                 continue;
             auto flagIt = endingAlloc->livenessFlags.find(gv);
-            if (flagIt == endingAlloc->livenessFlags.end() ||
-                !flagIt->second.second)
+            if (flagIt == endingAlloc->livenessFlags.end() || !flagIt->second.second)
                 continue; // live_end = false
 
             auto shadowIt = shadowMap_.find(gv);
@@ -204,14 +183,13 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
                 continue;
 
             unsigned sizeBytes = state.getVarSizeBytes(gv);
-            llvm::Value *size = llvm::ConstantInt::get(
-                llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
+            llvm::Value *size =
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
-            builder.CreateMemCpy(gv, gv->getAlign(), shadowIt->second,
-                                 shadowIt->second->getAlign(), size);
+            builder.CreateMemCpy(gv, gv->getAlign(), shadowIt->second, shadowIt->second->getAlign(),
+                                 size);
             if (addDebugMarkers_)
-                builder.CreateCall(storeMemFn_,
-                                   {gv, shadowIt->second, size});
+                builder.CreateCall(storeMemFn_, {gv, shadowIt->second, size});
             inserted++;
         }
     }
@@ -225,23 +203,19 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
         unsigned sizeBytes = state.getVarSizeBytes(V);
         if (sizeBytes == 0)
             continue;
-        llvm::Value *size = llvm::ConstantInt::get(
-            llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
+        llvm::Value *size =
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-            builder.CreateMemCpy(backupIt->second,
-                                 backupIt->second->getAlign(), GV,
-                                 GV->getAlign(), size);
+            builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(), GV, GV->getAlign(),
+                                 size);
             if (addDebugMarkers_)
-                builder.CreateCall(storeMemFn_,
-                                   {backupIt->second, GV, size});
+                builder.CreateCall(storeMemFn_, {backupIt->second, GV, size});
         } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-            builder.CreateMemCpy(backupIt->second,
-                                 backupIt->second->getAlign(), AI,
-                                 AI->getAlign(), size);
+            builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(), AI, AI->getAlign(),
+                                 size);
             if (addDebugMarkers_)
-                builder.CreateCall(storeMemFn_,
-                                   {backupIt->second, AI, size});
+                builder.CreateCall(storeMemFn_, {backupIt->second, AI, size});
         }
         inserted++;
     }
@@ -251,10 +225,8 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
     inserted++;
     if (addDebugMarkers_) {
         for (unsigned r = 0; r < N_reg_; ++r) {
-            auto *slotId = llvm::ConstantInt::get(
-                llvm::Type::getInt32Ty(M_.getContext()), r);
-            auto *val = llvm::ConstantInt::get(
-                llvm::Type::getInt64Ty(M_.getContext()), 0);
+            auto *slotId = llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), r);
+            auto *val = llvm::ConstantInt::get(llvm::Type::getInt64Ty(M_.getContext()), 0);
             builder.CreateCall(storeRegFn_, {slotId, val});
             inserted++;
         }
@@ -265,10 +237,9 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
     inserted++;
     if (addDebugMarkers_) {
         for (unsigned r = 0; r < N_reg_; ++r) {
-            auto *slotId = llvm::ConstantInt::get(
-                llvm::Type::getInt32Ty(M_.getContext()), r);
-            auto *nullPtr = llvm::ConstantPointerNull::get(
-                llvm::PointerType::getUnqual(M_.getContext()));
+            auto *slotId = llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), r);
+            auto *nullPtr =
+                llvm::ConstantPointerNull::get(llvm::PointerType::getUnqual(M_.getContext()));
             builder.CreateCall(restoreRegFn_, {slotId, nullPtr});
             inserted++;
         }
@@ -280,8 +251,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
             if (place != Placement::VM)
                 continue;
             auto flagIt = startingAlloc->livenessFlags.find(gv);
-            if (flagIt == startingAlloc->livenessFlags.end() ||
-                !flagIt->second.first)
+            if (flagIt == startingAlloc->livenessFlags.end() || !flagIt->second.first)
                 continue; // live_start = false
 
             auto shadowIt = shadowMap_.find(gv);
@@ -289,15 +259,13 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
                 continue;
 
             unsigned sizeBytes = state.getVarSizeBytes(gv);
-            llvm::Value *size = llvm::ConstantInt::get(
-                llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
+            llvm::Value *size =
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
-            builder.CreateMemCpy(shadowIt->second,
-                                 shadowIt->second->getAlign(), gv,
-                                 gv->getAlign(), size);
+            builder.CreateMemCpy(shadowIt->second, shadowIt->second->getAlign(), gv, gv->getAlign(),
+                                 size);
             if (addDebugMarkers_)
-                builder.CreateCall(restoreMemFn_,
-                                   {shadowIt->second, gv, size});
+                builder.CreateCall(restoreMemFn_, {shadowIt->second, gv, size});
             inserted++;
         }
     }
@@ -311,17 +279,17 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
         unsigned sizeBytes = state.getVarSizeBytes(V);
         if (sizeBytes == 0)
             continue;
-        llvm::Value *size = llvm::ConstantInt::get(
-            llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
+        llvm::Value *size =
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-            builder.CreateMemCpy(GV, GV->getAlign(), backupIt->second,
-                                 backupIt->second->getAlign(), size);
+            builder.CreateMemCpy(GV, GV->getAlign(), backupIt->second, backupIt->second->getAlign(),
+                                 size);
             if (addDebugMarkers_)
                 builder.CreateCall(restoreMemFn_, {GV, backupIt->second, size});
         } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-            builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second,
-                                 backupIt->second->getAlign(), size);
+            builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second, backupIt->second->getAlign(),
+                                 size);
             if (addDebugMarkers_)
                 builder.CreateCall(restoreMemFn_, {AI, backupIt->second, size});
         }
@@ -332,9 +300,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(
 }
 
 unsigned SchematicInstrumenter::insertLoopConditionalCheckpoint(
-    llvm::BasicBlock *header,
-    const LoopCheckpointDecision &decision,
-    const StateAnalysis &state) {
+    llvm::BasicBlock *header, const LoopCheckpointDecision &decision, const StateAnalysis &state) {
 
     unsigned inserted = 0;
     llvm::LLVMContext &Ctx = M_.getContext();
@@ -355,8 +321,7 @@ unsigned SchematicInstrumenter::insertLoopConditionalCheckpoint(
 
     // In preheader: alloca counter, store 0.
     llvm::IRBuilder<> preBuilder(preheader->getTerminator());
-    llvm::AllocaInst *counter =
-        preBuilder.CreateAlloca(I32Ty, nullptr, "schematic_loop_counter");
+    llvm::AllocaInst *counter = preBuilder.CreateAlloca(I32Ty, nullptr, "schematic_loop_counter");
     preBuilder.CreateStore(llvm::ConstantInt::get(I32Ty, 0), counter);
 
     // Split the back-edge (latch → header) using SplitEdge.
@@ -375,24 +340,21 @@ unsigned SchematicInstrumenter::insertLoopConditionalCheckpoint(
     llvm::Value *counterVal = checkBuilder.CreateLoad(I32Ty, counter);
     // Evaluate the checkpoint condition before increment so counter=0
     // triggers the initial ("0-th") checkpoint.
-    llvm::Value *rem = checkBuilder.CreateURem(
-        counterVal, llvm::ConstantInt::get(I32Ty, numIt));
-    llvm::Value *cond =
-        checkBuilder.CreateICmpEQ(rem, llvm::ConstantInt::get(I32Ty, 0));
-    llvm::Value *incremented = checkBuilder.CreateAdd(
-        counterVal, llvm::ConstantInt::get(I32Ty, 1));
+    llvm::Value *rem = checkBuilder.CreateURem(counterVal, llvm::ConstantInt::get(I32Ty, numIt));
+    llvm::Value *cond = checkBuilder.CreateICmpEQ(rem, llvm::ConstantInt::get(I32Ty, 0));
+    llvm::Value *incremented = checkBuilder.CreateAdd(counterVal, llvm::ConstantInt::get(I32Ty, 1));
     checkBuilder.CreateStore(incremented, counter);
 
     // Create checkpoint BB.
-    llvm::BasicBlock *ckptBB = llvm::BasicBlock::Create(
-        Ctx, "schematic_loop_ckpt", header->getParent(), header);
+    llvm::BasicBlock *ckptBB =
+        llvm::BasicBlock::Create(Ctx, "schematic_loop_ckpt", header->getParent(), header);
 
     // checkBB: if counter % numIt == 0, goto ckptBB, else goto header.
     checkBuilder.CreateCondBr(cond, ckptBB, header);
 
     // Fill checkpoint BB: full save/restore sequence, then branch to header.
-    inserted += insertCheckpointSequence(
-        ckptBB, &decision.bodyAllocation, &decision.bodyAllocation, state);
+    inserted +=
+        insertCheckpointSequence(ckptBB, &decision.bodyAllocation, &decision.bodyAllocation, state);
     llvm::IRBuilder<> ckptBuilder(ckptBB);
     ckptBuilder.CreateBr(header);
 
@@ -409,10 +371,9 @@ unsigned SchematicInstrumenter::insertLoopConditionalCheckpoint(
     return inserted;
 }
 
-unsigned SchematicInstrumenter::instrumentFunction(
-    llvm::Function &F,
-    const SchematicSolution &solution,
-    const StateAnalysis &state) {
+unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
+                                                   const SchematicSolution &solution,
+                                                   const StateAnalysis &state) {
 
     unsigned inserted = 0;
 
@@ -436,8 +397,7 @@ unsigned SchematicInstrumenter::instrumentFunction(
     // Step 6: Insert entry prologue after allocas in entry block.
     {
         llvm::BasicBlock &entryBB = F.getEntryBlock();
-        llvm::BasicBlock::iterator insertPt =
-            getInsertPointAfterAllocas(entryBB);
+        llvm::BasicBlock::iterator insertPt = getInsertPointAfterAllocas(entryBB);
         llvm::IRBuilder<> builder(&entryBB, insertPt);
         builder.CreateCall(prologueFn_);
         inserted++;
@@ -457,8 +417,7 @@ unsigned SchematicInstrumenter::instrumentFunction(
         // checkpoint logic (mandatory or conditional) handles it in Step 8.
         bool isLoopBackEdge = false;
         for (const auto &[header, dec] : solution.loopDecisions) {
-            bool handledByLoopLogic =
-                dec.mandatoryBackEdge || dec.numIterationsPerCharge > 0;
+            bool handledByLoopLogic = dec.mandatoryBackEdge || dec.numIterationsPerCharge > 0;
             if (!handledByLoopLogic || !dec.loop)
                 continue;
 
@@ -481,8 +440,7 @@ unsigned SchematicInstrumenter::instrumentFunction(
         const RegionAllocation *endingAlloc = blockToAlloc.lookup(edge.src);
         const RegionAllocation *startingAlloc = blockToAlloc.lookup(edge.dst);
 
-        inserted += insertCheckpointSequence(ckptBB, endingAlloc,
-                                             startingAlloc, state);
+        inserted += insertCheckpointSequence(ckptBB, endingAlloc, startingAlloc, state);
     }
 
     // Step 8: Handle loop conditional checkpoints.
@@ -494,15 +452,13 @@ unsigned SchematicInstrumenter::instrumentFunction(
             if (latch) {
                 llvm::BasicBlock *ckptBB = splitEdge(latch, header);
                 if (ckptBB) {
-                    inserted += insertCheckpointSequence(
-                        ckptBB, &decision.bodyAllocation,
-                        &decision.bodyAllocation, state);
+                    inserted += insertCheckpointSequence(ckptBB, &decision.bodyAllocation,
+                                                         &decision.bodyAllocation, state);
                 }
             }
         } else if (decision.numIterationsPerCharge > 0) {
             // Conditional: checkpoint every N iterations.
-            inserted +=
-                insertLoopConditionalCheckpoint(header, decision, state);
+            inserted += insertLoopConditionalCheckpoint(header, decision, state);
         }
     }
 

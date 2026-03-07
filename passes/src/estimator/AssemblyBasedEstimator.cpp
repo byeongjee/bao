@@ -4,12 +4,13 @@
 #include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
-#include <nlohmann/json.hpp>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace checkpoint {
 
-std::unique_ptr<AssemblyBasedEstimator> AssemblyBasedEstimator::create(const std::string &configPath) {
+std::unique_ptr<AssemblyBasedEstimator>
+AssemblyBasedEstimator::create(const std::string &configPath) {
     auto estimator = std::unique_ptr<AssemblyBasedEstimator>(new AssemblyBasedEstimator());
     if (!estimator->loadConfig(configPath)) {
         return nullptr;
@@ -109,8 +110,7 @@ void AssemblyBasedEstimator::prepareForFunction(const llvm::Function &F) {
     functionFound_ = (it != functionEnergy_.end());
 
     if (!functionFound_) {
-        llvm::errs() << "Warning: Function '" << currentFuncName_
-                     << "' not found in energy data\n";
+        llvm::errs() << "Warning: Function '" << currentFuncName_ << "' not found in energy data\n";
     }
 }
 
@@ -142,8 +142,8 @@ EnergyEstimate AssemblyBasedEstimator::estimate(const llvm::BasicBlock &BB) {
     }
 
     // BB not found in energy data - likely no assembly code for this BB
-    llvm::errs() << "Warning: BB '" << bbName << "' in function '"
-                 << currentFuncName_ << "' not found in energy data\n";
+    llvm::errs() << "Warning: BB '" << bbName << "' in function '" << currentFuncName_
+                 << "' not found in energy data\n";
     return EnergyEstimate{0.0, "assembly-missing-bb"};
 }
 

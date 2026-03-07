@@ -10,8 +10,8 @@
 #include "llvm/Support/CommandLine.h"
 
 #define JSON_NOEXCEPTION
-#include <nlohmann/json.hpp>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <set>
 
 using namespace llvm;
@@ -25,31 +25,27 @@ extern cl::opt<std::string> RockClimbConfigOpt;
 // Local CLI options
 namespace {
 
-static cl::opt<std::string> ValidateCheckpointFunctionOpt(
-    "validate-checkpoint-function",
-    cl::desc("Additional function name to treat as checkpoint"),
-    cl::value_desc("name"),
-    cl::init(""));
+static cl::opt<std::string>
+    ValidateCheckpointFunctionOpt("validate-checkpoint-function",
+                                  cl::desc("Additional function name to treat as checkpoint"),
+                                  cl::value_desc("name"), cl::init(""));
 
-static cl::opt<double> ValidateEpsilonOpt(
-    "validate-epsilon",
-    cl::desc("Floating-point tolerance for energy checks"),
-    cl::init(1e-4));
+static cl::opt<double> ValidateEpsilonOpt("validate-epsilon",
+                                          cl::desc("Floating-point tolerance for energy checks"),
+                                          cl::init(1e-4));
 
-static cl::opt<bool> ValidateVerboseOpt(
-    "validate-verbose",
-    cl::desc("Print per-block remaining energy to stderr"),
-    cl::init(false));
+static cl::opt<bool> ValidateVerboseOpt("validate-verbose",
+                                        cl::desc("Print per-block remaining energy to stderr"),
+                                        cl::init(false));
 
 enum class ValidateMode { MILP, RockClimb };
 
-static cl::opt<ValidateMode> ValidateModeOpt(
-    "validate-mode",
-    cl::desc("Checkpoint algorithm mode for energy validation"),
-    cl::values(
-        clEnumValN(ValidateMode::MILP, "milp", "MILP checkpoint insertion"),
-        clEnumValN(ValidateMode::RockClimb, "rockclimb", "RockClimb (PFI) checkpoint insertion")),
-    cl::init(ValidateMode::MILP));
+static cl::opt<ValidateMode>
+    ValidateModeOpt("validate-mode", cl::desc("Checkpoint algorithm mode for energy validation"),
+                    cl::values(clEnumValN(ValidateMode::MILP, "milp", "MILP checkpoint insertion"),
+                               clEnumValN(ValidateMode::RockClimb, "rockclimb",
+                                          "RockClimb (PFI) checkpoint insertion")),
+                    cl::init(ValidateMode::MILP));
 
 } // anonymous namespace
 
@@ -82,8 +78,7 @@ static double computeEffectiveCapacity(ValidateMode mode) {
 
 /// Build the set of known checkpoint runtime function names whose call costs
 /// should be excluded from block energy (the runtime accounts for them).
-static std::set<std::string> buildExcludedFunctions(
-    const std::string &userCheckpointFn) {
+static std::set<std::string> buildExcludedFunctions(const std::string &userCheckpointFn) {
     std::set<std::string> excluded = {
         // MILP runtime
         "__region_prologue",
@@ -121,7 +116,7 @@ static std::set<std::string> buildExcludedNvmGlobals() {
 
 /// Check if a global variable is an excluded NVM global (runtime or validator).
 static bool isExcludedNvmGlobal(const GlobalVariable *GV,
-                                 const std::set<std::string> &excludedNames) {
+                                const std::set<std::string> &excludedNames) {
     StringRef name = GV->getName();
     if (name.starts_with("__ev_"))
         return true;
@@ -129,21 +124,18 @@ static bool isExcludedNvmGlobal(const GlobalVariable *GV,
 }
 
 /// Get or create a double global variable in the module.
-static GlobalVariable *getOrCreateDoubleGlobal(Module &M, StringRef name,
-                                                double initVal) {
+static GlobalVariable *getOrCreateDoubleGlobal(Module &M, StringRef name, double initVal) {
     if (auto *existing = M.getGlobalVariable(name))
         return existing;
 
     auto *ty = Type::getDoubleTy(M.getContext());
     auto *init = ConstantFP::get(ty, initVal);
-    auto *gv = new GlobalVariable(M, ty, false, GlobalValue::ExternalLinkage,
-                                  init, name);
+    auto *gv = new GlobalVariable(M, ty, false, GlobalValue::ExternalLinkage, init, name);
     return gv;
 }
 
 /// Count the number of calls to excluded checkpoint functions in a block.
-static unsigned countExcludedCalls(const BasicBlock &BB,
-                                    const std::set<std::string> &excluded) {
+static unsigned countExcludedCalls(const BasicBlock &BB, const std::set<std::string> &excluded) {
     unsigned count = 0;
     for (const Instruction &I : BB) {
         if (const auto *CI = dyn_cast<CallInst>(&I)) {
@@ -158,7 +150,7 @@ static unsigned countExcludedCalls(const BasicBlock &BB,
 
 /// Count load/store instructions accessing NVM globals in a block.
 static unsigned countNvmAccesses(const BasicBlock &BB, const Module &M,
-                                  const std::set<std::string> &excludedNvmNames) {
+                                 const std::set<std::string> &excludedNvmNames) {
     unsigned count = 0;
     for (const Instruction &I : BB) {
         const GlobalVariable *GV = nullptr;
@@ -177,8 +169,7 @@ static unsigned countNvmAccesses(const BasicBlock &BB, const Module &M,
 
 /// Check if a function is a user function we should scope (not intrinsic,
 /// not runtime, not a declaration-only stub we inserted).
-static bool isUserFunction(const Function *callee,
-                            const std::set<std::string> &excluded) {
+static bool isUserFunction(const Function *callee, const std::set<std::string> &excluded) {
     if (!callee)
         return false;
     if (callee->isIntrinsic())
@@ -192,8 +183,7 @@ static bool isUserFunction(const Function *callee,
     return true;
 }
 
-PreservedAnalyses EnergyValidatorPass::run(Function &F,
-                                            FunctionAnalysisManager &AM) {
+PreservedAnalyses EnergyValidatorPass::run(Function &F, FunctionAnalysisManager &AM) {
     std::string configPath = EnergyConfigOpt.getValue();
     Module &M = *F.getParent();
     LLVMContext &Ctx = M.getContext();
@@ -216,7 +206,7 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
     double effectiveCapacity = computeEffectiveCapacity(mode);
 
     // Step 3: Parse overhead parameters (only needed for MILP mode)
-    MILPEnergyParams milpParams{0,0,0,0,0,0,0,0,0,0};
+    MILPEnergyParams milpParams{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     if (mode == ValidateMode::MILP) {
         auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
         if (!milpParamsOpt) {
@@ -247,7 +237,8 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
     double epsilon = ValidateEpsilonOpt;
 
     // Step 4: Emit parameter globals (once per module)
-    GlobalVariable *gvRemaining = getOrCreateDoubleGlobal(M, "__ev_energy_remaining", effectiveCapacity);
+    GlobalVariable *gvRemaining =
+        getOrCreateDoubleGlobal(M, "__ev_energy_remaining", effectiveCapacity);
     getOrCreateDoubleGlobal(M, "__ev_capacity", effectiveCapacity);
     getOrCreateDoubleGlobal(M, "__ev_E_pro", milpParams.E_pro);
     getOrCreateDoubleGlobal(M, "__ev_E_epi", milpParams.E_epi);
@@ -269,15 +260,14 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
     Type *VoidTy = Type::getVoidTy(Ctx);
     Type *PtrTy = PointerType::get(Ctx, 0);
     Type *DoubleTy = Type::getDoubleTy(Ctx);
-    FunctionCallee violationFn = M.getOrInsertFunction(
-        "__energy_violation", VoidTy, PtrTy, PtrTy, DoubleTy, DoubleTy);
+    FunctionCallee violationFn =
+        M.getOrInsertFunction("__energy_violation", VoidTy, PtrTy, PtrTy, DoubleTy, DoubleTy);
 
     // Declare verbose print function if needed
     FunctionCallee verboseFn = {nullptr, nullptr};
     if (ValidateVerboseOpt) {
         // void __ev_verbose_print(const char *func, const char *block, double remaining)
-        verboseFn = M.getOrInsertFunction(
-            "__ev_verbose_print", VoidTy, PtrTy, PtrTy, DoubleTy);
+        verboseFn = M.getOrInsertFunction("__ev_verbose_print", VoidTy, PtrTy, PtrTy, DoubleTy);
     }
 
     // Step 7: For each basic block, compute adjusted energy and insert fsub
@@ -338,8 +328,7 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
     // Create save slot in entry block if needed
     AllocaInst *saveSlot = nullptr;
     if (!userCalls.empty()) {
-        IRBuilder<> allocaBuilder(&F.getEntryBlock(),
-                                   F.getEntryBlock().begin());
+        IRBuilder<> allocaBuilder(&F.getEntryBlock(), F.getEntryBlock().begin());
         saveSlot = allocaBuilder.CreateAlloca(DoubleTy, nullptr, "ev.save.slot");
     }
 
@@ -379,10 +368,8 @@ PreservedAnalyses EnergyValidatorPass::run(Function &F,
         Value *violated = builder.CreateFCmpOLT(remaining, negEps, "ev.exit.cmp");
 
         // Create violation block and continue block
-        BasicBlock *violBB = BasicBlock::Create(
-            Ctx, "ev.violation", &F);
-        BasicBlock *contBB = BasicBlock::Create(
-            Ctx, "ev.exit.ok", &F);
+        BasicBlock *violBB = BasicBlock::Create(Ctx, "ev.violation", &F);
+        BasicBlock *contBB = BasicBlock::Create(Ctx, "ev.exit.ok", &F);
 
         builder.CreateCondBr(violated, violBB, contBB);
 

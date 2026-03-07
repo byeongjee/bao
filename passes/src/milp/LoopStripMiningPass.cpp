@@ -52,10 +52,9 @@ extern cl::opt<bool> LoopStripMiningEnabledOpt;
 
 namespace {
 
-static cl::opt<bool> LoopStripMiningVerboseOpt(
-    "loop-strip-mining-verbose",
-    cl::desc("Print per-loop strip-mining decisions"),
-    cl::init(false));
+static cl::opt<bool> LoopStripMiningVerboseOpt("loop-strip-mining-verbose",
+                                               cl::desc("Print per-loop strip-mining decisions"),
+                                               cl::init(false));
 
 struct LoopRewritePlan {
     Loop *L = nullptr;
@@ -91,7 +90,7 @@ struct LoopStripMiningStats {
 struct HeaderPhiInfo {
     PHINode *headerPhi;
     PHINode *outerPhi;
-    Value   *initVal;
+    Value *initVal;
 };
 
 using checkpoint::containsInvoke;
@@ -102,15 +101,12 @@ using checkpoint::removeStripMinedLoopMetadata;
 using checkpoint::setLoopTripCountMetadata;
 using checkpoint::setStripMinedLoopMetadata;
 
-static std::optional<uint64_t> getConstantTripCount(Loop *L,
-                                                    ScalarEvolution &SE,
+static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE,
                                                     const BasicBlock *ExitingBlock);
 
-static WorstCasePathResult computeWorstCaseIterationEnergy(
-    Loop *L,
-    const DenseMap<const BasicBlock *, double> &blockEnergy,
-    LoopInfo &LI,
-    ScalarEvolution &SE) {
+static WorstCasePathResult
+computeWorstCaseIterationEnergy(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                                LoopInfo &LI, ScalarEvolution &SE) {
     WorstCasePathResult result;
 
     BasicBlock *Header = L->getHeader();
@@ -194,8 +190,7 @@ static WorstCasePathResult computeWorstCaseIterationEnergy(
     DenseMap<const BasicBlock *, const BasicBlock *> bestSucc;
     bool cycleDetected = false;
 
-    std::function<double(const BasicBlock *)> dfs =
-        [&](const BasicBlock *BB) -> double {
+    std::function<double(const BasicBlock *)> dfs = [&](const BasicBlock *BB) -> double {
         if (BB == Latch) {
             return getEnergy(BB);
         }
@@ -285,8 +280,7 @@ static WorstCasePathResult computeWorstCaseIterationEnergy(
     return result;
 }
 
-static std::optional<uint64_t> getConstantTripCount(Loop *L,
-                                                    ScalarEvolution &SE,
+static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE,
                                                     const BasicBlock *ExitingBlock) {
     const SCEV *btc = SE.getBackedgeTakenCount(L);
     auto *btcConst = dyn_cast<SCEVConstant>(btc);
@@ -299,23 +293,20 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
     const Function *F = Header ? Header->getParent() : nullptr;
     std::string loopId = "<unknown>";
     if (Header && F) {
-        loopId = (F->getName() + "::" +
-                  checkpoint::getBlockName(*Header, *F))
-                     .str();
+        loopId = (F->getName() + "::" + checkpoint::getBlockName(*Header, *F)).str();
     }
 
     if (backedgeCount.getActiveBits() > 64) {
-        errs() << "LoopStripMiningPass warning: backedge count for loop "
-               << loopId << " exceeds 64 bits; skipping loop\n";
+        errs() << "LoopStripMiningPass warning: backedge count for loop " << loopId
+               << " exceeds 64 bits; skipping loop\n";
         return std::nullopt;
     }
 
     uint64_t backedgeValue = backedgeCount.getZExtValue();
     bool exitAtLatch = (ExitingBlock == L->getLoopLatch());
-    if (exitAtLatch &&
-        backedgeValue == std::numeric_limits<uint64_t>::max()) {
-        errs() << "LoopStripMiningPass warning: backedge count for loop "
-               << loopId << " cannot be incremented safely; skipping loop\n";
+    if (exitAtLatch && backedgeValue == std::numeric_limits<uint64_t>::max()) {
+        errs() << "LoopStripMiningPass warning: backedge count for loop " << loopId
+               << " cannot be incremented safely; skipping loop\n";
         return std::nullopt;
     }
 
@@ -329,10 +320,9 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
 
 using checkpoint::computeBoundaryStateMarginOnPath;
 
-static double computeNvmAccessMarginOnPath(
-    const SmallPtrSetImpl<const BasicBlock *> &pathBlocks,
-    const checkpoint::StateAnalysis &state,
-    const checkpoint::MILPEnergyParams &params) {
+static double computeNvmAccessMarginOnPath(const SmallPtrSetImpl<const BasicBlock *> &pathBlocks,
+                                           const checkpoint::StateAnalysis &state,
+                                           const checkpoint::MILPEnergyParams &params) {
     std::vector<GlobalVariable *> ineligGlobals;
     for (Value *V : state.getIneligibleObjs()) {
         if (auto *GV = dyn_cast<GlobalVariable>(V))
@@ -342,28 +332,21 @@ static double computeNvmAccessMarginOnPath(
     double nvmAccessMargin = 0.0;
     for (const BasicBlock *BB : pathBlocks) {
         for (GlobalVariable *GV : state.getVMObjs()) {
-            unsigned accesses =
-                state.getLoadCount(BB, GV) + state.getStoreCount(BB, GV);
-            nvmAccessMargin +=
-                static_cast<double>(accesses) * params.nvmAccessPenalty;
+            unsigned accesses = state.getLoadCount(BB, GV) + state.getStoreCount(BB, GV);
+            nvmAccessMargin += static_cast<double>(accesses) * params.nvmAccessPenalty;
         }
         for (GlobalVariable *GV : ineligGlobals) {
-            unsigned accesses =
-                state.getLoadCount(BB, GV) + state.getStoreCount(BB, GV);
-            nvmAccessMargin +=
-                static_cast<double>(accesses) * params.nvmAccessPenalty;
+            unsigned accesses = state.getLoadCount(BB, GV) + state.getStoreCount(BB, GV);
+            nvmAccessMargin += static_cast<double>(accesses) * params.nvmAccessPenalty;
         }
     }
     return nvmAccessMargin;
 }
 
-static PlanResult buildRewritePlan(
-    Loop *L,
-    ScalarEvolution &SE,
-    const DenseMap<const BasicBlock *, double> &blockEnergy,
-    const checkpoint::MILPEnergyParams &params,
-    LoopInfo &LI,
-    const checkpoint::StateAnalysis &state) {
+static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
+                                   const DenseMap<const BasicBlock *, double> &blockEnergy,
+                                   const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+                                   const checkpoint::StateAnalysis &state) {
     PlanResult result;
     result.skipReason = "unknown";
 
@@ -395,14 +378,13 @@ static PlanResult buildRewritePlan(
     if (budget <= 0.0) {
         result.skipReason = "nonpositive-energy-budget";
         result.skipDetail = "capacity=" + std::to_string(params.capacity) +
-            ", E_pro=" + std::to_string(params.E_pro) +
-            ", E_epi=" + std::to_string(params.E_epi) +
-            ", budget=" + std::to_string(budget);
+                            ", E_pro=" + std::to_string(params.E_pro) +
+                            ", E_epi=" + std::to_string(params.E_epi) +
+                            ", budget=" + std::to_string(budget);
         return result;
     }
 
-    WorstCasePathResult iterEnergy =
-        computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
+    WorstCasePathResult iterEnergy = computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok) {
         result.skipReason = iterEnergy.error;
         return result;
@@ -412,36 +394,30 @@ static PlanResult buildRewritePlan(
         return result;
     }
 
-    double perIterNvmPenalty = computeNvmAccessMarginOnPath(
-        iterEnergy.blocksOnPath, state, params);
+    double perIterNvmPenalty = computeNvmAccessMarginOnPath(iterEnergy.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
     double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-        iterEnergy.blocksOnPath,
-        state,
-        params,
-        restoreLiveInMargin,
-        commitDefMargin);
+        iterEnergy.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
     double budgetAfterBoundary = budget - boundaryStateMargin;
     if (budgetAfterBoundary <= 0.0) {
         result.skipReason = "nonpositive-effective-budget";
         result.skipDetail = "budget=" + std::to_string(budget) +
-            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
-            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
-            ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
-            ", commit-def-margin=" + std::to_string(commitDefMargin) +
-            ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
-            ", budget-after-boundary=" + std::to_string(budgetAfterBoundary);
+                            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+                            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+                            ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
+                            ", commit-def-margin=" + std::to_string(commitDefMargin) +
+                            ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
+                            ", budget-after-boundary=" + std::to_string(budgetAfterBoundary);
         return result;
     }
 
     double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty;
     if (perIterTotalEnergy <= 0.0) {
         result.skipReason = "nonpositive-per-iter-total-energy";
-        result.skipDetail =
-            "per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
-            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
-            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
+        result.skipDetail = "per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+                            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+                            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
         return result;
     }
 
@@ -451,12 +427,11 @@ static PlanResult buildRewritePlan(
     double rawK = std::floor(strictBudget / perIterTotalEnergy);
     if (!std::isfinite(rawK) || rawK <= 0.0) {
         result.skipReason = "k-zero";
-        result.skipDetail =
-            "budget-after-boundary=" + std::to_string(budgetAfterBoundary) +
-            ", strict-budget=" + std::to_string(strictBudget) +
-            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
-            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
-            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
+        result.skipDetail = "budget-after-boundary=" + std::to_string(budgetAfterBoundary) +
+                            ", strict-budget=" + std::to_string(strictBudget) +
+                            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+                            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+                            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
         return result;
     }
 
@@ -477,8 +452,7 @@ static PlanResult buildRewritePlan(
     L->getExitingBlocks(exitingBlocks);
 
     if (IV && exitingBlocks.size() == 1) {
-        std::optional<uint64_t> tripCount =
-            getConstantTripCount(L, SE, exitingBlocks.front());
+        std::optional<uint64_t> tripCount = getConstantTripCount(L, SE, exitingBlocks.front());
         if (tripCount && *tripCount >= 2) {
             if (K >= *tripCount) {
                 result.skipReason = "k-covers-entire-loop";
@@ -541,8 +515,7 @@ static PlanResult buildRewritePlan(
     return result;
 }
 
-static void refreshBlockEnergy(Function &F,
-                               checkpoint::EnergyEstimator &estimator,
+static void refreshBlockEnergy(Function &F, checkpoint::EnergyEstimator &estimator,
                                DenseMap<const BasicBlock *, double> &blockEnergy) {
     estimator.prepareForFunction(F);
     blockEnergy.clear();
@@ -559,10 +532,10 @@ struct ChunkBudgetResult {
     std::string error;
 };
 
-static ChunkBudgetResult recomputeChunkKWithOverhead(
-    Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-    const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
-    ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
+static ChunkBudgetResult
+recomputeChunkKWithOverhead(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                            const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+                            ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
     ChunkBudgetResult out;
 
     double budget = params.capacity - params.E_pro - params.E_epi;
@@ -571,24 +544,18 @@ static ChunkBudgetResult recomputeChunkKWithOverhead(
         return out;
     }
 
-    WorstCasePathResult iterEnergy =
-        computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
+    WorstCasePathResult iterEnergy = computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok || iterEnergy.energy <= 0.0) {
-        out.error = iterEnergy.error.empty() ? "post-chunk-iter-energy-unavailable"
-                                             : iterEnergy.error;
+        out.error =
+            iterEnergy.error.empty() ? "post-chunk-iter-energy-unavailable" : iterEnergy.error;
         return out;
     }
 
-    double perIterNvmPenalty = computeNvmAccessMarginOnPath(
-        iterEnergy.blocksOnPath, state, params);
+    double perIterNvmPenalty = computeNvmAccessMarginOnPath(iterEnergy.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
     double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-        iterEnergy.blocksOnPath,
-        state,
-        params,
-        restoreLiveInMargin,
-        commitDefMargin);
+        iterEnergy.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
     double budgetAfterBoundary = budget - boundaryStateMargin;
     if (budgetAfterBoundary <= 0.0) {
         out.error = "nonpositive-effective-budget";
@@ -678,13 +645,12 @@ static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
     return false;
 }
 
-static void selectInNest(
-    Loop *L, ScalarEvolution &SE,
-    const DenseMap<const BasicBlock *, double> &blockEnergy,
-    const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
-    const checkpoint::StateAnalysis &state,
-    std::vector<std::pair<Loop *, LoopRewritePlan>> &out,
-    LoopStripMiningStats &stats) {
+static void selectInNest(Loop *L, ScalarEvolution &SE,
+                         const DenseMap<const BasicBlock *, double> &blockEnergy,
+                         const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+                         const checkpoint::StateAnalysis &state,
+                         std::vector<std::pair<Loop *, LoopRewritePlan>> &out,
+                         LoopStripMiningStats &stats) {
 
     stats.loopsSeen++;
     PlanResult pr = buildRewritePlan(L, SE, blockEnergy, params, LI, state);
@@ -697,11 +663,11 @@ static void selectInNest(
     if (LoopStripMiningVerboseOpt) {
         BasicBlock *Header = L->getHeader();
         const Function *F = Header ? Header->getParent() : nullptr;
-        std::string headerName = (Header && F)
-            ? checkpoint::getBlockName(*Header, *F) : "<unknown>";
+        std::string headerName =
+            (Header && F) ? checkpoint::getBlockName(*Header, *F) : "<unknown>";
         std::string funcName = F ? F->getName().str() : "<unknown>";
-        errs() << "LoopStripMiningPass: skip " << funcName << "::"
-               << headerName << " reason=" << pr.skipReason;
+        errs() << "LoopStripMiningPass: skip " << funcName << "::" << headerName
+               << " reason=" << pr.skipReason;
         if (!pr.skipDetail.empty()) {
             errs() << " " << pr.skipDetail;
         }
@@ -719,12 +685,11 @@ static void selectInNest(
     }
 }
 
-static std::vector<std::pair<Loop *, LoopRewritePlan>> selectLoopsToStripMine(
-    LoopInfo &LI, ScalarEvolution &SE,
-    const DenseMap<const BasicBlock *, double> &blockEnergy,
-    const checkpoint::MILPEnergyParams &params,
-    const checkpoint::StateAnalysis &state,
-    LoopStripMiningStats &stats) {
+static std::vector<std::pair<Loop *, LoopRewritePlan>>
+selectLoopsToStripMine(LoopInfo &LI, ScalarEvolution &SE,
+                       const DenseMap<const BasicBlock *, double> &blockEnergy,
+                       const checkpoint::MILPEnergyParams &params,
+                       const checkpoint::StateAnalysis &state, LoopStripMiningStats &stats) {
     std::vector<std::pair<Loop *, LoopRewritePlan>> selected;
     for (Loop *L : LI) {
         selectInNest(L, SE, blockEnergy, params, LI, state, selected, stats);
@@ -732,20 +697,16 @@ static std::vector<std::pair<Loop *, LoopRewritePlan>> selectLoopsToStripMine(
     return selected;
 }
 
-static bool stripMineLoop(const LoopRewritePlan &plan,
-                          LoopInfo &LI,
-                          ScalarEvolution &SE,
-                          DominatorTree &DT,
-                          AssumptionCache &AC,
-                          AAResults &AA,
+static bool stripMineLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
+                          DominatorTree &DT, AssumptionCache &AC, AAResults &AA,
                           const TargetTransformInfo &TTI) {
     // ── Phase 1: Extract and validate loop components ──
     Loop *L = plan.L;
     uint64_t N = plan.N, K = plan.K;
 
     BasicBlock *Preheader = L->getLoopPreheader();
-    BasicBlock *Header    = L->getHeader();
-    BasicBlock *Latch     = L->getLoopLatch();
+    BasicBlock *Header = L->getHeader();
+    BasicBlock *Latch = L->getLoopLatch();
     BasicBlock *ExitBlock = L->getExitBlock();
     BasicBlock *ExitingBB = L->getExitingBlock();
     Function *F = Header->getParent();
@@ -755,29 +716,37 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
         return false;
 
     PHINode *IV = L->getCanonicalInductionVariable();
-    if (!IV) return false;
+    if (!IV)
+        return false;
     Type *IVTy = IV->getType();
 
     // ── Phase 2: Find exit condition ──
     BranchInst *ExitBr = dyn_cast<BranchInst>(ExitingBB->getTerminator());
-    if (!ExitBr || !ExitBr->isConditional()) return false;
+    if (!ExitBr || !ExitBr->isConditional())
+        return false;
 
     ICmpInst *ExitCmp = dyn_cast<ICmpInst>(ExitBr->getCondition());
-    if (!ExitCmp) return false;
+    if (!ExitCmp)
+        return false;
 
     Value *CmpOp0 = ExitCmp->getOperand(0);
     Value *CmpOp1 = ExitCmp->getOperand(1);
     BasicBlock *BackedgeBB = nullptr, *IncomingBB = nullptr;
-    if (!L->getIncomingAndBackEdge(IncomingBB, BackedgeBB)) return false;
+    if (!L->getIncomingAndBackEdge(IncomingBB, BackedgeBB))
+        return false;
     Value *IVNext = IV->getIncomingValueForBlock(BackedgeBB);
 
     int boundOperandIdx = -1;
-    if (CmpOp0 == IV || CmpOp0 == IVNext) boundOperandIdx = 1;
-    else if (CmpOp1 == IV || CmpOp1 == IVNext) boundOperandIdx = 0;
-    else return false;
+    if (CmpOp0 == IV || CmpOp0 == IVNext)
+        boundOperandIdx = 1;
+    else if (CmpOp1 == IV || CmpOp1 == IVNext)
+        boundOperandIdx = 0;
+    else
+        return false;
 
     auto *OrigBound = dyn_cast<ConstantInt>(ExitCmp->getOperand(boundOperandIdx));
-    if (!OrigBound || OrigBound->getZExtValue() != N) return false;
+    if (!OrigBound || OrigBound->getZExtValue() != N)
+        return false;
 
     // Collect LCSSA PHIs in ExitBlock before any modifications
     SmallVector<PHINode *, 4> lcssaPhis;
@@ -786,7 +755,7 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
 
     // ── Phase 3: Create outer loop blocks ──
     BasicBlock *OuterHeader = BasicBlock::Create(Ctx, "outer.header", F, Header);
-    BasicBlock *OuterLatch  = BasicBlock::Create(Ctx, "outer.latch", F, ExitBlock);
+    BasicBlock *OuterLatch = BasicBlock::Create(Ctx, "outer.latch", F, ExitBlock);
 
     // ── Phase 4: Build OuterHeader ──
     IRBuilder<> OHB(OuterHeader);
@@ -795,15 +764,15 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
     // Forward non-IV Header PHIs through the outer loop
     SmallVector<HeaderPhiInfo, 4> headerPhiForwarding;
     for (PHINode &PN : Header->phis()) {
-        if (&PN == IV) continue;
+        if (&PN == IV)
+            continue;
         Value *InitVal = PN.getIncomingValueForBlock(Preheader);
         PHINode *OHP = OHB.CreatePHI(PN.getType(), 2, PN.getName() + ".outer");
         headerPhiForwarding.push_back({&PN, OHP, InitVal});
     }
 
     // Inner limit: min(outer.iv + K, N)
-    Value *OuterIVPlusK = OHB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K),
-                                        "outer.iv.plus.k");
+    Value *OuterIVPlusK = OHB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K), "outer.iv.plus.k");
     Value *NVal = ConstantInt::get(IVTy, N);
     Value *Cmp = OHB.CreateICmpULT(OuterIVPlusK, NVal, "min.cmp");
     Value *InnerLimit = OHB.CreateSelect(Cmp, OuterIVPlusK, NVal, "inner.limit");
@@ -841,8 +810,7 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
     SmallVector<PHINode *, 4> outerLatchPhis;
     for (PHINode *LCPhi : lcssaPhis) {
         Value *IncomingVal = LCPhi->getIncomingValueForBlock(ExitingBB);
-        PHINode *OLP = OLB.CreatePHI(LCPhi->getType(), 1,
-                                     LCPhi->getName() + ".ol");
+        PHINode *OLP = OLB.CreatePHI(LCPhi->getType(), 1, LCPhi->getName() + ".ol");
         OLP->addIncoming(IncomingVal, ExitingBB);
         outerLatchPhis.push_back(OLP);
     }
@@ -856,21 +824,18 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
         } else {
             ForwardVal = info.headerPhi->getIncomingValueForBlock(Latch);
         }
-        PHINode *FP = OLB.CreatePHI(info.headerPhi->getType(), 1,
-                                    info.headerPhi->getName() + ".fwd");
+        PHINode *FP =
+            OLB.CreatePHI(info.headerPhi->getType(), 1, info.headerPhi->getName() + ".fwd");
         FP->addIncoming(ForwardVal, ExitingBB);
         headerForwardPhis.push_back(FP);
     }
 
     // Next outer IV
-    Value *NextOuterIV = OLB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K),
-                                       "outer.iv.next");
+    Value *NextOuterIV = OLB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K), "outer.iv.next");
 
     // Outer exit condition: outer runs ceil(N/K) times
     uint64_t outerTripCount = (N + K - 1) / K;
-    Value *OuterContinue = OLB.CreateICmpULT(NextOuterIV,
-                                             ConstantInt::get(IVTy, N),
-                                             "outer.cmp");
+    Value *OuterContinue = OLB.CreateICmpULT(NextOuterIV, ConstantInt::get(IVTy, N), "outer.cmp");
     OLB.CreateCondBr(OuterContinue, OuterHeader, ExitBlock);
 
     // Complete OuterIV PHI
@@ -897,12 +862,18 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
 
     if (ParentLoop) {
         for (auto I = ParentLoop->begin(); I != ParentLoop->end(); ++I) {
-            if (*I == L) { ParentLoop->removeChildLoop(I); break; }
+            if (*I == L) {
+                ParentLoop->removeChildLoop(I);
+                break;
+            }
         }
         ParentLoop->addChildLoop(OuterLoop);
     } else {
         for (auto I = LI.begin(); I != LI.end(); ++I) {
-            if (*I == L) { LI.removeLoop(I); break; }
+            if (*I == L) {
+                LI.removeLoop(I);
+                break;
+            }
         }
         LI.addTopLevelLoop(OuterLoop);
     }
@@ -935,9 +906,7 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
     return true;
 }
 
-static bool chunkLoop(const LoopRewritePlan &plan,
-                      LoopInfo &LI,
-                      ScalarEvolution &SE,
+static bool chunkLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
                       DominatorTree &DT) {
     // ── Phase 1: Extract loop components ──
     Loop *L = plan.L;
@@ -945,8 +914,8 @@ static bool chunkLoop(const LoopRewritePlan &plan,
     uint64_t NUpper = plan.N;
 
     BasicBlock *Preheader = L->getLoopPreheader();
-    BasicBlock *Header    = L->getHeader();
-    BasicBlock *Latch     = L->getLoopLatch();
+    BasicBlock *Header = L->getHeader();
+    BasicBlock *Latch = L->getLoopLatch();
     Function *F = Header->getParent();
     LLVMContext &Ctx = F->getContext();
 
@@ -969,9 +938,9 @@ static bool chunkLoop(const LoopRewritePlan &plan,
         return false;
 
     // ── Phase 3: Create outer.header, counter.check, outer.latch blocks ──
-    BasicBlock *OuterHeader  = BasicBlock::Create(Ctx, "outer.header", F, Header);
+    BasicBlock *OuterHeader = BasicBlock::Create(Ctx, "outer.header", F, Header);
     BasicBlock *CounterCheck = BasicBlock::Create(Ctx, "counter.check", F);
-    BasicBlock *OuterLatch   = BasicBlock::Create(Ctx, "outer.latch", F);
+    BasicBlock *OuterLatch = BasicBlock::Create(Ctx, "outer.latch", F);
 
     // ── Phase 4: Build outer.header — forward all header PHIs through outer PHIs ──
     IRBuilder<> OHB(OuterHeader);
@@ -997,20 +966,15 @@ static bool chunkLoop(const LoopRewritePlan &plan,
 
     // ── Phase 6: Add chunk.counter PHI to header ──
     Type *I64Ty = Type::getInt64Ty(Ctx);
-    PHINode *ChunkCounter = PHINode::Create(I64Ty, 2, "chunk.counter",
-                                            Header->getFirstNonPHIIt());
+    PHINode *ChunkCounter = PHINode::Create(I64Ty, 2, "chunk.counter", Header->getFirstNonPHIIt());
 
     // ── Phase 7: Redirect latch backedge: Latch → CounterCheck ──
     LatchBr->setSuccessor(backedgeIdx, CounterCheck);
 
     // ── Phase 8: Build counter.check — increment counter, branch ──
     IRBuilder<> CCB(CounterCheck);
-    Value *CounterNext = CCB.CreateAdd(ChunkCounter,
-                                       ConstantInt::get(I64Ty, 1),
-                                       "counter.next");
-    Value *CounterDone = CCB.CreateICmpEQ(CounterNext,
-                                          ConstantInt::get(I64Ty, K),
-                                          "counter.done");
+    Value *CounterNext = CCB.CreateAdd(ChunkCounter, ConstantInt::get(I64Ty, 1), "counter.next");
+    Value *CounterDone = CCB.CreateICmpEQ(CounterNext, ConstantInt::get(I64Ty, K), "counter.done");
     CCB.CreateCondBr(CounterDone, OuterLatch, Header);
 
     // ── Phase 9: Update header PHIs — incoming block Latch → CounterCheck ──
@@ -1050,12 +1014,18 @@ static bool chunkLoop(const LoopRewritePlan &plan,
 
     if (ParentLoop) {
         for (auto I = ParentLoop->begin(); I != ParentLoop->end(); ++I) {
-            if (*I == L) { ParentLoop->removeChildLoop(I); break; }
+            if (*I == L) {
+                ParentLoop->removeChildLoop(I);
+                break;
+            }
         }
         ParentLoop->addChildLoop(OuterLoop);
     } else {
         for (auto I = LI.begin(); I != LI.end(); ++I) {
-            if (*I == L) { LI.removeLoop(I); break; }
+            if (*I == L) {
+                LI.removeLoop(I);
+                break;
+            }
         }
         LI.addTopLevelLoop(OuterLoop);
     }
@@ -1097,8 +1067,8 @@ static void printSummary(const Function &F, const LoopStripMiningStats &stats) {
     errs() << "  Loops considered:                " << stats.loopsSeen << "\n";
     errs() << "  Eligible loops:                  " << stats.loopsEligible << "\n";
     errs() << "  Rewritten loops:                 " << stats.loopsRewritten << "\n";
-    errs() << "    Strip-mined:                   "
-           << (stats.loopsRewritten - stats.loopsChunked) << "\n";
+    errs() << "    Strip-mined:                   " << (stats.loopsRewritten - stats.loopsChunked)
+           << "\n";
     errs() << "    Chunked:                       " << stats.loopsChunked << "\n";
 
     unsigned skippedTotal = 0;
@@ -1126,24 +1096,22 @@ static void printSummary(const Function &F, const LoopStripMiningStats &stats) {
 
 namespace checkpoint {
 
-PreservedAnalyses LoopStripMiningPass::run(Function &F,
-                                        FunctionAnalysisManager &AM) {
+PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager &AM) {
     if (F.isDeclaration()) {
         return PreservedAnalyses::all();
     }
 
     if (MILPConfigOpt.getValue().empty()) {
         if (LoopStripMiningEnabledOpt) {
-            errs() << "LoopStripMiningPass: missing -milp-config; skipping "
-                   << F.getName() << "\n";
+            errs() << "LoopStripMiningPass: missing -milp-config; skipping " << F.getName() << "\n";
         }
         return PreservedAnalyses::all();
     }
 
     auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
     if (!milpParamsOpt) {
-        errs() << "LoopStripMiningPass: failed to parse MILP config for "
-               << F.getName() << "; skipping\n";
+        errs() << "LoopStripMiningPass: failed to parse MILP config for " << F.getName()
+               << "; skipping\n";
         return PreservedAnalyses::all();
     }
     bool loopStripMiningEnabled =
@@ -1153,8 +1121,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
     }
 
     if (EnergyConfigOpt.getValue().empty()) {
-        errs() << "LoopStripMiningPass: missing -energy-config; skipping "
-               << F.getName() << "\n";
+        errs() << "LoopStripMiningPass: missing -energy-config; skipping " << F.getName() << "\n";
         return PreservedAnalyses::all();
     }
 
@@ -1162,8 +1129,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
     std::unique_ptr<EnergyEstimator> estimator =
         factory.createFromConfig(EnergyConfigOpt.getValue());
     if (!estimator) {
-        errs() << "LoopStripMiningPass: failed to create estimator for "
-               << F.getName() << "; skipping\n";
+        errs() << "LoopStripMiningPass: failed to create estimator for " << F.getName()
+               << "; skipping\n";
         return PreservedAnalyses::all();
     }
     estimator->prepareForFunction(F);
@@ -1195,8 +1162,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
     // Select loops to strip-mine (outermost-first within each nest).
     // Snapshot headers as WeakTrackingVH so we can detect invalidation
     // from prior rewrites that may restructure the CFG.
-    auto selected = selectLoopsToStripMine(
-        LI, SE, blockEnergy, *milpParamsOpt, state, stats);
+    auto selected = selectLoopsToStripMine(LI, SE, blockEnergy, *milpParamsOpt, state, stats);
     std::vector<std::pair<WeakTrackingVH, LoopRewritePlan>> worklist;
     worklist.reserve(selected.size());
     for (auto &[L, plan] : selected) {
@@ -1220,9 +1186,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
         plan.L = L;
         stats.loopsEligible++;
 
-        bool rewritten = plan.isChunking
-            ? chunkLoop(plan, LI, SE, DT)
-            : stripMineLoop(plan, LI, SE, DT, AC, AA, TTI);
+        bool rewritten = plan.isChunking ? chunkLoop(plan, LI, SE, DT)
+                                         : stripMineLoop(plan, LI, SE, DT, AC, AA, TTI);
         if (!rewritten) {
             stats.skippedReasons["rewrite-utility-failed"]++;
             if (LoopStripMiningVerboseOpt) {
@@ -1248,14 +1213,13 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
             } else {
                 reclampState = &postState;
             }
-            ChunkBudgetResult reclamp = recomputeChunkKWithOverhead(
-                L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
+            ChunkBudgetResult reclamp =
+                recomputeChunkKWithOverhead(L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
             if (!reclamp.ok) {
                 stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
                 if (LoopStripMiningVerboseOpt) {
-                    errs() << "LoopStripMiningPass: chunk K re-clamp unavailable "
-                           << F.getName() << "::" << headerName
-                           << " reason=" << reclamp.error
+                    errs() << "LoopStripMiningPass: chunk K re-clamp unavailable " << F.getName()
+                           << "::" << headerName << " reason=" << reclamp.error
                            << " original-K=" << plan.K << "\n";
                 }
             } else {
@@ -1266,19 +1230,16 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
                         stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
                         if (LoopStripMiningVerboseOpt) {
                             errs() << "LoopStripMiningPass: chunk K re-clamp update failed "
-                                   << F.getName() << "::" << headerName
-                                   << " original-K=" << plan.K
+                                   << F.getName() << "::" << headerName << " original-K=" << plan.K
                                    << " new-K=" << newK << "\n";
                         }
                     } else {
                         setLoopTripCountMetadata(L, newK);
                         SE.forgetLoop(L);
                         if (LoopStripMiningVerboseOpt) {
-                            errs() << "LoopStripMiningPass: chunk K re-clamped "
-                                   << F.getName() << "::" << headerName
-                                   << " original-K=" << plan.K
-                                   << " new-K=" << newK
-                                   << " E_iter_wc_post=" << reclamp.iterEnergy
+                            errs() << "LoopStripMiningPass: chunk K re-clamped " << F.getName()
+                                   << "::" << headerName << " original-K=" << plan.K
+                                   << " new-K=" << newK << " E_iter_wc_post=" << reclamp.iterEnergy
                                    << "\n";
                         }
                         plan.K = newK;
@@ -1293,17 +1254,14 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
             stats.loopsChunked++;
         stats.chosenKByHeader.emplace_back(headerName, plan.K);
         if (LoopStripMiningVerboseOpt) {
-            errs() << "LoopStripMiningPass: "
-                   << (plan.isChunking ? "chunked " : "rewritten ")
-                   << F.getName() << "::" << headerName
-                   << " N=" << plan.N << " K=" << plan.K
+            errs() << "LoopStripMiningPass: " << (plan.isChunking ? "chunked " : "rewritten ")
+                   << F.getName() << "::" << headerName << " N=" << plan.N << " K=" << plan.K
                    << " E_iter_wc=" << plan.iterEnergy << "\n";
         }
     }
 
     if (verifyFunction(F, &errs())) {
-        errs() << "LoopStripMiningPass: verifier reported errors in "
-               << F.getName() << "\n";
+        errs() << "LoopStripMiningPass: verifier reported errors in " << F.getName() << "\n";
     }
 
     printSummary(F, stats);

@@ -24,7 +24,8 @@ static bool isCallSite(const llvm::Instruction &I) {
 
     llvm::Function *callee = CB->getCalledFunction();
     // __loop_tripcount is a metadata annotation, not a real call site
-    if (callee && callee->getName() == "__loop_tripcount") return false;
+    if (callee && callee->getName() == "__loop_tripcount")
+        return false;
     return !callee || !callee->isIntrinsic();
 }
 
@@ -39,18 +40,14 @@ static bool blockHasCallSite(const llvm::BasicBlock &BB) {
 
 } // namespace
 
-llvm::BasicBlock *RockClimbOptimizer::resolveBlock(
-    const llvm::WeakTrackingVH &handle) {
+llvm::BasicBlock *RockClimbOptimizer::resolveBlock(const llvm::WeakTrackingVH &handle) {
     auto *BB = llvm::cast_or_null<llvm::BasicBlock>(handle);
     assert(BB && "WeakTrackingVH resolved to null — block was deleted");
     return BB;
 }
 
-RockClimbOptimizer::RockClimbOptimizer(const CFGAnalysis &cfg,
-                                       double E_safe,
-                                       llvm::LoopInfo &LI,
-                                       llvm::Function &F,
-                                       EnergyEstimator *estimator)
+RockClimbOptimizer::RockClimbOptimizer(const CFGAnalysis &cfg, double E_safe, llvm::LoopInfo &LI,
+                                       llvm::Function &F, EnergyEstimator *estimator)
     : cfg_(cfg), E_safe_(E_safe), LI_(LI), F_(F), estimator_(estimator) {
     // Build energyCosts_ from CFGAnalysis
     for (llvm::BasicBlock &BB : F_) {
@@ -65,7 +62,7 @@ RockClimbOptimizer::RockClimbOptimizer(const CFGAnalysis &cfg,
 void RockClimbOptimizer::identifyLoopHeaders() {
     loopHeaders_.clear();
     for (llvm::Loop *L : LI_) {
-        std::queue<llvm::Loop*> worklist;
+        std::queue<llvm::Loop *> worklist;
         worklist.push(L);
         while (!worklist.empty()) {
             llvm::Loop *current = worklist.front();
@@ -96,13 +93,14 @@ void RockClimbOptimizer::computeTopologicalOrder() {
     using namespace llvm;
     topoOrder_.clear();
 
-    if (F_.empty()) return;
+    if (F_.empty())
+        return;
 
     // Reverse post-order guarantees all predecessors (modulo back-edges)
     // are visited before each block. Back-edges are safe to ignore because
     // loop headers are forced boundaries that reset energy accumulation.
-    SmallPtrSet<BasicBlock*, 32> visited;
-    ReversePostOrderTraversal<Function*> RPOT(&F_);
+    SmallPtrSet<BasicBlock *, 32> visited;
+    ReversePostOrderTraversal<Function *> RPOT(&F_);
     for (BasicBlock *BB : RPOT) {
         topoOrder_.push_back(WeakTrackingVH(BB));
         visited.insert(BB);
@@ -125,14 +123,14 @@ double RockClimbOptimizer::getBlockCost(llvm::BasicBlock *BB) const {
 }
 
 void RockClimbOptimizer::setExtraBlockCosts(
-    const llvm::DenseMap<llvm::BasicBlock*, double> &costs) {
+    const llvm::DenseMap<llvm::BasicBlock *, double> &costs) {
     for (const auto &entry : costs) {
         energyCosts_[entry.first] += entry.second;
     }
 }
 
-std::vector<llvm::BasicBlock*> RockClimbOptimizer::getInfeasibleBlocks() const {
-    std::vector<llvm::BasicBlock*> infeasible;
+std::vector<llvm::BasicBlock *> RockClimbOptimizer::getInfeasibleBlocks() const {
+    std::vector<llvm::BasicBlock *> infeasible;
     for (llvm::BasicBlock &BB : F_) {
         double energy = getBlockCost(&BB);
         if (energy >= E_safe_) {
@@ -158,13 +156,13 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
     // Algorithm 1 from RockClimb paper: path-aware region partitioning
     //
     // Lines 1-4: Initialize IncomeCycle_bbi = 0 for all blocks
-    DenseMap<BasicBlock*, double> incomeCycle;
+    DenseMap<BasicBlock *, double> incomeCycle;
     for (const auto &handle : topoOrder_) {
         incomeCycle[resolveBlock(handle)] = 0.0;
     }
 
     // Track which blocks are region boundaries
-    SmallPtrSet<BasicBlock*, 16> boundarySet;
+    SmallPtrSet<BasicBlock *, 16> boundarySet;
     // Entry block always starts a region
     BasicBlock *entryBB = resolveBlock(topoOrder_[0]);
     boundarySet.insert(entryBB);
@@ -175,7 +173,7 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
         double Cycle_bbi = getBlockCost(BB);
 
         // Check mandatory boundaries: loop headers and function call sites
-        if (BB != entryBB) {  // Entry already handled
+        if (BB != entryBB) { // Entry already handled
             if (loopHeaders_.count(BB) || callSiteBlocks_.count(BB)) {
                 boundarySet.insert(BB);
             }
@@ -208,9 +206,8 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
             if (!newBB) {
                 // Can't split further — mark infeasible
                 result.feasible = false;
-                result.errorMessage = "Block '" +
-                    getBlockName(*BB, F_) +
-                    "' exceeds E_safe and cannot be split further";
+                result.errorMessage = "Block '" + getBlockName(*BB, F_) +
+                                      "' exceeds E_safe and cannot be split further";
                 return result;
             }
 
@@ -276,15 +273,17 @@ RockClimbOptimizer::Result RockClimbOptimizer::partitionRegions() {
     return result;
 }
 
-llvm::BasicBlock *RockClimbOptimizer::splitBlock(llvm::BasicBlock *BB,
-                                                  double threshold,
-                                                  size_t insertIdx) {
-    if (!estimator_) return nullptr;
-    if (!BB) return nullptr;
+llvm::BasicBlock *RockClimbOptimizer::splitBlock(llvm::BasicBlock *BB, double threshold,
+                                                 size_t insertIdx) {
+    if (!estimator_)
+        return nullptr;
+    if (!BB)
+        return nullptr;
 
     // Use shared block-splitting utility for the core split
     llvm::BasicBlock *newBB = splitOversizedBlock(BB, threshold, *estimator_);
-    if (!newBB) return nullptr;
+    if (!newBB)
+        return nullptr;
 
     // Update local bookkeeping for both halves
     energyCosts_[BB] = estimator_->estimate(*BB).cost;
@@ -299,8 +298,10 @@ llvm::BasicBlock *RockClimbOptimizer::splitBlock(llvm::BasicBlock *BB,
     bool newHasCall = blockHasCallSite(*newBB);
 
     // Update call site blocks
-    if (!origHasCall) callSiteBlocks_.erase(BB);
-    if (newHasCall) callSiteBlocks_.insert(newBB);
+    if (!origHasCall)
+        callSiteBlocks_.erase(BB);
+    if (newHasCall)
+        callSiteBlocks_.insert(newBB);
 
     return newBB;
 }

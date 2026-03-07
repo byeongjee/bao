@@ -4,10 +4,10 @@
 
 namespace checkpoint {
 
-llvm::BasicBlock *splitOversizedBlock(llvm::BasicBlock *BB,
-                                       double threshold,
-                                       EnergyEstimator &estimator) {
-    if (!BB) return nullptr;
+llvm::BasicBlock *splitOversizedBlock(llvm::BasicBlock *BB, double threshold,
+                                      EnergyEstimator &estimator) {
+    if (!BB)
+        return nullptr;
 
     // Find the split point: accumulate per-instruction energy until threshold
     double accumulated = 0.0;
@@ -42,27 +42,25 @@ llvm::BasicBlock *splitOversizedBlock(llvm::BasicBlock *BB,
     if (!splitPoint)
         splitPoint = lastNonTerm;
 
-    if (!splitPoint) return nullptr; // Can't split (block too small or all PHIs)
+    if (!splitPoint)
+        return nullptr; // Can't split (block too small or all PHIs)
 
     // Split after splitPoint — the next instruction becomes the start of the new block
     llvm::Instruction *splitBefore = splitPoint->getNextNode();
     if (!splitBefore || splitBefore->isTerminator()) {
-        if (splitPoint->isTerminator()) return nullptr;
+        if (splitPoint->isTerminator())
+            return nullptr;
         splitBefore = splitPoint;
     }
 
     // Perform the split
     std::string blockName = BB->hasName() ? BB->getName().str() : "bb";
-    llvm::BasicBlock *newBB = BB->splitBasicBlock(splitBefore,
-                                                   blockName + ".split");
+    llvm::BasicBlock *newBB = BB->splitBasicBlock(splitBefore, blockName + ".split");
     return newBB;
 }
 
-bool splitAllOversizedBlocks(llvm::Function &F,
-                              double threshold,
-                              EnergyEstimator &estimator,
-                              llvm::LoopInfo &LI,
-                              CFGAnalysis &cfg) {
+bool splitAllOversizedBlocks(llvm::Function &F, double threshold, EnergyEstimator &estimator,
+                             llvm::LoopInfo &LI, CFGAnalysis &cfg) {
     bool changed = true;
     unsigned maxIterations = 1000; // Safety bound
 
@@ -71,20 +69,17 @@ bool splitAllOversizedBlocks(llvm::Function &F,
         for (llvm::BasicBlock &BB : F) {
             double blockEnergy = estimator.estimate(BB).cost;
             if (blockEnergy > threshold) {
-                llvm::BasicBlock *newBB = splitOversizedBlock(&BB, threshold,
-                                                              estimator);
+                llvm::BasicBlock *newBB = splitOversizedBlock(&BB, threshold, estimator);
                 if (!newBB) {
                     // Unsplittable block exceeds capacity
-                    llvm::errs() << "Unsplittable block '" << BB.getName()
-                                 << "' in function '" << F.getName()
-                                 << "' exceeds split threshold (energy="
-                                 << blockEnergy << ", threshold="
-                                 << threshold << ")\n";
+                    llvm::errs() << "Unsplittable block '" << BB.getName() << "' in function '"
+                                 << F.getName()
+                                 << "' exceeds split threshold (energy=" << blockEnergy
+                                 << ", threshold=" << threshold << ")\n";
                     double maxInstCost = 0.0;
                     const llvm::Instruction *maxInst = nullptr;
                     for (const llvm::Instruction &I : BB) {
-                        if (llvm::isa<llvm::PHINode>(I) ||
-                            llvm::isa<llvm::LandingPadInst>(I))
+                        if (llvm::isa<llvm::PHINode>(I) || llvm::isa<llvm::LandingPadInst>(I))
                             continue;
                         double cost = estimator.getInstructionCost(I);
                         if (cost > maxInstCost) {
@@ -93,8 +88,7 @@ bool splitAllOversizedBlocks(llvm::Function &F,
                         }
                     }
                     if (maxInst) {
-                        llvm::errs() << "  Max instruction cost: "
-                                     << maxInstCost << " | inst: ";
+                        llvm::errs() << "  Max instruction cost: " << maxInstCost << " | inst: ";
                         maxInst->print(llvm::errs());
                         llvm::errs() << "\n";
                     }

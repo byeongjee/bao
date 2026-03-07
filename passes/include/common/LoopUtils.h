@@ -16,12 +16,13 @@ inline bool containsInvoke(const llvm::Loop *L) {
 
 /// Given a block inside Parent, walk up the loop tree to find
 /// the direct child loop of Parent that contains BB.
-inline llvm::Loop *getDirectChildLoop(const llvm::Loop *Parent,
-                                      const llvm::BasicBlock *BB,
+inline llvm::Loop *getDirectChildLoop(const llvm::Loop *Parent, const llvm::BasicBlock *BB,
                                       const llvm::LoopInfo &LI) {
     llvm::Loop *Inner = LI.getLoopFor(BB);
-    if (!Inner || Inner == Parent) return nullptr;
-    while (Inner->getParentLoop() != Parent) Inner = Inner->getParentLoop();
+    if (!Inner || Inner == Parent)
+        return nullptr;
+    while (Inner->getParentLoop() != Parent)
+        Inner = Inner->getParentLoop();
     return Inner;
 }
 

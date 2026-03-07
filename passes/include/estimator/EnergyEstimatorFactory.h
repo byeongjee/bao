@@ -12,7 +12,7 @@ namespace checkpoint {
 /// Factory for creating energy estimators.
 /// Supports registration of new estimator types for extensibility.
 class EnergyEstimatorFactory {
-public:
+  public:
     /// Creator function type: takes config path, returns estimator.
     using CreatorFn = std::function<EnergyEstimatorPtr(const std::string &configPath)>;
 
@@ -32,8 +32,7 @@ public:
     /// @param type Estimator type identifier.
     /// @param configPath Path to configuration file.
     /// @return Created estimator, or nullptr if type not found.
-    EnergyEstimatorPtr create(const std::string &type,
-                              const std::string &configPath) const;
+    EnergyEstimatorPtr create(const std::string &type, const std::string &configPath) const;
 
     /// Create estimator from config file.
     /// Reads "estimator_type" field from config (defaults to "ir").
@@ -44,7 +43,7 @@ public:
     /// List all registered estimator types.
     std::vector<std::string> getRegisteredTypes() const;
 
-private:
+  private:
     std::unordered_map<std::string, CreatorFn> creators_;
 };
 

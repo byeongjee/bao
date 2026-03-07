@@ -17,8 +17,7 @@ struct CheckpointContext : public BaseContext {
     MILPEnergyParams milpParams;
 
     CheckpointContext(std::unique_ptr<EnergyEstimator> est,
-                      std::unique_ptr<CFGAnalysis> cfgAnalysis,
-                      llvm::LoopInfo *li)
+                      std::unique_ptr<CFGAnalysis> cfgAnalysis, llvm::LoopInfo *li)
         : BaseContext(std::move(est), std::move(cfgAnalysis), li) {}
 
     // Move-only
@@ -32,28 +31,24 @@ using CheckpointContextResult = ContextResult<CheckpointContext>;
 /// Create a basic checkpoint context from function and config path.
 /// This creates the base context (estimator + CFG) without the new analyses.
 /// The caller is responsible for adding StateAnalysis and EnergyModel.
-inline CheckpointContextResult createCheckpointContext(
-    llvm::Function &F,
-    llvm::LoopInfo &LI,
-    llvm::StringRef configPath,
-    llvm::StringRef passName) {
+inline CheckpointContextResult createCheckpointContext(llvm::Function &F, llvm::LoopInfo &LI,
+                                                       llvm::StringRef configPath,
+                                                       llvm::StringRef passName) {
 
     using Result = ContextResult<CheckpointContext>;
 
     // Validate required config
     if (configPath.empty()) {
-        return Result::error(
-            Result::Status::MissingConfig,
-            ("Error: config path is required for " + passName + "\n").str());
+        return Result::error(Result::Status::MissingConfig,
+                             ("Error: config path is required for " + passName + "\n").str());
     }
 
     // Create energy estimator from config using default factory
     auto factory = EnergyEstimatorFactory::createDefault();
     auto estimator = factory.createFromConfig(configPath.str());
     if (!estimator) {
-        return Result::error(
-            Result::Status::EstimatorFailed,
-            "Failed to create energy estimator\n");
+        return Result::error(Result::Status::EstimatorFailed,
+                             "Failed to create energy estimator\n");
     }
 
     // Skip declarations
@@ -67,8 +62,8 @@ inline CheckpointContextResult createCheckpointContext(
     // Create CFG analysis
     auto cfg = std::make_unique<CFGAnalysis>(F, LI, *estimator);
 
-    return Result::ok(std::make_unique<CheckpointContext>(
-        std::move(estimator), std::move(cfg), &LI));
+    return Result::ok(
+        std::make_unique<CheckpointContext>(std::move(estimator), std::move(cfg), &LI));
 }
 
 } // namespace checkpoint

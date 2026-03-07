@@ -43,24 +43,17 @@ static std::string valueToken(llvm::Value *V) {
     return sanitizeToken(rso.str());
 }
 
-static std::string makeVarName(const ICFGView &cfg,
-                               const char *prefix,
-                               NodeId block,
+static std::string makeVarName(const ICFGView &cfg, const char *prefix, NodeId block,
                                llvm::Value *v) {
-    return std::string(prefix) + "_" + nodeToken(cfg, block) + "_" +
-           valueToken(v);
+    return std::string(prefix) + "_" + nodeToken(cfg, block) + "_" + valueToken(v);
 }
 
-static std::string makeVarNameGV(const ICFGView &cfg,
-                                 const char *prefix,
-                                 NodeId block,
+static std::string makeVarNameGV(const ICFGView &cfg, const char *prefix, NodeId block,
                                  llvm::GlobalVariable *gv) {
-    return std::string(prefix) + "_" + nodeToken(cfg, block) + "_" +
-           sanitizeToken(gv->getName());
+    return std::string(prefix) + "_" + nodeToken(cfg, block) + "_" + sanitizeToken(gv->getName());
 }
 
-static std::map<NodeId, std::vector<NodeId>> buildPredecessorMap(
-    const ICFGView &cfg) {
+static std::map<NodeId, std::vector<NodeId>> buildPredecessorMap(const ICFGView &cfg) {
     std::map<NodeId, std::vector<NodeId>> preds;
     for (NodeId block : cfg.getBlocks()) {
         preds[block] = {};
@@ -72,8 +65,7 @@ static std::map<NodeId, std::vector<NodeId>> buildPredecessorMap(
 }
 
 /// Linearize z = a AND b for binary variables: z <= a, z <= b, z >= a+b-1.
-static void addAndLinearization(GRBModel &model,
-                                GRBVar z, GRBVar a, GRBVar b,
+static void addAndLinearization(GRBModel &model, GRBVar z, GRBVar a, GRBVar b,
                                 const std::string &namePrefix) {
     model.addConstr(z <= a, namePrefix + "_le_a");
     model.addConstr(z <= b, namePrefix + "_le_b");
@@ -83,12 +75,8 @@ static void addAndLinearization(GRBModel &model,
 } // namespace
 
 CheckpointOptimizer::CheckpointOptimizer(const MILPInput &input)
-    : cfg_(input.cfg),
-      state_(input.state),
-      energy_(input.energy),
-      params_(input.energy.getParams()),
-      env_(),
-      model_(env_) {
+    : cfg_(input.cfg), state_(input.state), energy_(input.energy),
+      params_(input.energy.getParams()), env_(), model_(env_) {
     model_.set(GRB_IntParam_OutputFlag, 0);
 }
 
@@ -132,8 +120,7 @@ bool CheckpointOptimizer::solve() {
 
     int solCount = model_.get(GRB_IntAttr_SolCount);
     llvm::errs() << "Optimization did not prove optimality"
-                 << " (Gurobi status=" << status
-                 << ", solutions found=" << solCount << ")\n";
+                 << " (Gurobi status=" << status << ", solutions found=" << solCount << ")\n";
 
     if (status == GRB_INFEASIBLE) {
         llvm::errs() << "Optimization infeasible; computing IIS diagnostics...\n";
@@ -149,8 +136,7 @@ bool CheckpointOptimizer::solve() {
         for (int i = 0; i < numConstrs; i++) {
             if (!constrs[i].get(GRB_IntAttr_IISConstr))
                 continue;
-            llvm::errs() << "  IIS constr: "
-                         << constrs[i].get(GRB_StringAttr_ConstrName) << "\n";
+            llvm::errs() << "  IIS constr: " << constrs[i].get(GRB_StringAttr_ConstrName) << "\n";
             printedConstrs++;
             if (printedConstrs >= 200) {
                 llvm::errs() << "  IIS constr: ... truncated at 200 entries\n";
@@ -162,17 +148,14 @@ bool CheckpointOptimizer::solve() {
         int numVars = model_.get(GRB_IntAttr_NumVars);
         int printedVarBounds = 0;
         for (int i = 0; i < numVars; i++) {
-            if (!vars[i].get(GRB_IntAttr_IISLB) &&
-                !vars[i].get(GRB_IntAttr_IISUB))
+            if (!vars[i].get(GRB_IntAttr_IISLB) && !vars[i].get(GRB_IntAttr_IISUB))
                 continue;
-            llvm::errs() << "  IIS var bound: "
-                         << vars[i].get(GRB_StringAttr_VarName)
+            llvm::errs() << "  IIS var bound: " << vars[i].get(GRB_StringAttr_VarName)
                          << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
                          << " UB=" << vars[i].get(GRB_IntAttr_IISUB) << "\n";
             printedVarBounds++;
             if (printedVarBounds >= 200) {
-                llvm::errs()
-                    << "  IIS var bound: ... truncated at 200 entries\n";
+                llvm::errs() << "  IIS var bound: ... truncated at 200 entries\n";
                 break;
             }
         }
@@ -203,9 +186,8 @@ void CheckpointOptimizer::addVariables() {
     NodeId entry = cfg_.getEntryBlock();
 
     for (NodeId block : cfg_.getBlocks()) {
-        isRegionStart_[block] = model_.addVar(
-            0.0, 1.0, 0.0, GRB_BINARY,
-            "is_region_start_" + nodeToken(cfg_, block));
+        isRegionStart_[block] =
+            model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, "is_region_start_" + nodeToken(cfg_, block));
     }
 
     // Eligible (candidate) variables: placeInVm, pending, vmPending.
@@ -213,15 +195,12 @@ void CheckpointOptimizer::addVariables() {
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             BlockGVKey gvKey = std::make_pair(block, GV);
             BlockVarKey varKey = std::make_pair(block, static_cast<llvm::Value *>(GV));
-            placeInVm_[gvKey] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                makeVarNameGV(cfg_, "place_in_vm", block, GV));
-            pending_[varKey] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                makeVarNameGV(cfg_, "pending", block, GV));
-            vmPending_[gvKey] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                makeVarNameGV(cfg_, "vm_pending", block, GV));
+            placeInVm_[gvKey] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY,
+                                              makeVarNameGV(cfg_, "place_in_vm", block, GV));
+            pending_[varKey] =
+                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarNameGV(cfg_, "pending", block, GV));
+            vmPending_[gvKey] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY,
+                                              makeVarNameGV(cfg_, "vm_pending", block, GV));
         }
     }
 
@@ -229,9 +208,8 @@ void CheckpointOptimizer::addVariables() {
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::Value *V : state_.getIneligibleObjs()) {
             BlockVarKey varKey = std::make_pair(block, V);
-            pending_[varKey] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                makeVarName(cfg_, "pending", block, V));
+            pending_[varKey] =
+                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "pending", block, V));
         }
     }
 
@@ -239,9 +217,8 @@ void CheckpointOptimizer::addVariables() {
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getEligLiveIn(block)) {
             BlockGVKey gvKey = std::make_pair(block, GV);
-            needRestore_[gvKey] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                makeVarNameGV(cfg_, "need_restore", block, GV));
+            needRestore_[gvKey] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY,
+                                                makeVarNameGV(cfg_, "need_restore", block, GV));
         }
     }
 
@@ -252,23 +229,20 @@ void CheckpointOptimizer::addVariables() {
         // Eligible commits.
         for (llvm::GlobalVariable *GV : state_.getEligLiveIn(block)) {
             BlockVarKey varKey = std::make_pair(block, static_cast<llvm::Value *>(GV));
-            commit_[varKey] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                makeVarNameGV(cfg_, "commit", block, GV));
+            commit_[varKey] =
+                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarNameGV(cfg_, "commit", block, GV));
         }
         // Ineligible commits.
         for (llvm::Value *V : state_.getIneligLiveIn(block)) {
             BlockVarKey varKey = std::make_pair(block, V);
-            commit_[varKey] = model_.addVar(
-                0.0, 1.0, 0.0, GRB_BINARY,
-                makeVarName(cfg_, "commit", block, V));
+            commit_[varKey] =
+                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "commit", block, V));
         }
     }
 
     for (NodeId block : cfg_.getBlocks()) {
-        energyAccumulated_[block] = model_.addVar(
-            0.0, Ebuf, 0.0, GRB_CONTINUOUS,
-            "energy_accumulated_" + nodeToken(cfg_, block));
+        energyAccumulated_[block] = model_.addVar(0.0, Ebuf, 0.0, GRB_CONTINUOUS,
+                                                  "energy_accumulated_" + nodeToken(cfg_, block));
     }
 
     model_.update();
@@ -340,8 +314,7 @@ void CheckpointOptimizer::constrainVMCapacity() {
     // persistent VM capacity.
     double ineligibleSize = 0;
     for (llvm::Value *V : state_.getIneligibleObjs()) {
-        if (!llvm::isa<llvm::GlobalVariable>(V) &&
-            !llvm::isa<llvm::AllocaInst>(V)) {
+        if (!llvm::isa<llvm::GlobalVariable>(V) && !llvm::isa<llvm::AllocaInst>(V)) {
             continue;
         }
         int sizeBytes = state_.getVarSizeBytes(V);
@@ -356,13 +329,10 @@ void CheckpointOptimizer::constrainVMCapacity() {
             if (sizeBytes <= 0) {
                 continue;
             }
-            vmUsage += static_cast<double>(sizeBytes) *
-                       placeInVm_[std::make_pair(block, GV)];
+            vmUsage += static_cast<double>(sizeBytes) * placeInVm_[std::make_pair(block, GV)];
         }
-        model_.addConstr(
-            vmUsage + ineligibleSize <=
-                static_cast<double>(params_.vmCapacityBytes),
-            "vm_capacity_" + nodeToken(cfg_, block));
+        model_.addConstr(vmUsage + ineligibleSize <= static_cast<double>(params_.vmCapacityBytes),
+                         "vm_capacity_" + nodeToken(cfg_, block));
     }
 }
 
@@ -378,10 +348,8 @@ void CheckpointOptimizer::constrainNeedRestoreLinearization() {
             continue;
 
         std::string prefix =
-            "need_restore_" + nodeToken(cfg_, block) + "_" +
-            sanitizeToken(key.second->getName());
-        addAndLinearization(model_, needVar, isRegionStart_[block],
-                            placeIt->second, prefix);
+            "need_restore_" + nodeToken(cfg_, block) + "_" + sanitizeToken(key.second->getName());
+        addAndLinearization(model_, needVar, isRegionStart_[block], placeIt->second, prefix);
     }
 }
 
@@ -397,10 +365,8 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
             GRBVar pPred = placeInVm_[std::make_pair(pred, GV)];
             GRBVar pSucc = placeInVm_[std::make_pair(succ, GV)];
             GRBVar xSucc = isRegionStart_[succ];
-            model_.addConstr(pSucc <= pPred + xSucc,
-                             "placement_prop_fwd_" + std::to_string(idx));
-            model_.addConstr(pSucc >= pPred - xSucc,
-                             "placement_prop_bwd_" + std::to_string(idx));
+            model_.addConstr(pSucc <= pPred + xSucc, "placement_prop_fwd_" + std::to_string(idx));
+            model_.addConstr(pSucc >= pPred - xSucc, "placement_prop_bwd_" + std::to_string(idx));
             idx++;
         }
     }
@@ -418,8 +384,7 @@ void CheckpointOptimizer::constrainPendingStatePropagation() {
     std::vector<llvm::Value *> allTracked;
     for (llvm::GlobalVariable *GV : state_.getVMObjs())
         allTracked.push_back(static_cast<llvm::Value *>(GV));
-    allTracked.insert(allTracked.end(),
-                      state_.getIneligibleObjs().begin(),
+    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
                       state_.getIneligibleObjs().end());
 
     for (NodeId block : cfg_.getBlocks()) {
@@ -442,8 +407,7 @@ void CheckpointOptimizer::constrainPendingStatePropagation() {
             for (NodeId pred : predecessors_[block]) {
                 predSum += pending_[std::make_pair(pred, V)];
             }
-            model_.addConstr(p <= def + predSum,
-                             "pending_upper_bound_" + suffix);
+            model_.addConstr(p <= def + predSum, "pending_upper_bound_" + suffix);
             model_.addConstr(p <= def + (1 - isRegionStart_[block]),
                              "pending_region_reset_" + suffix);
         }
@@ -452,10 +416,9 @@ void CheckpointOptimizer::constrainPendingStatePropagation() {
     unsigned idx = 0;
     for (const auto &[pred, succ] : cfg_.getEdges()) {
         for (llvm::Value *V : allTracked) {
-            model_.addConstr(
-                pending_[std::make_pair(succ, V)] >=
-                    pending_[std::make_pair(pred, V)] - isRegionStart_[succ],
-                "pending_edge_prop_" + std::to_string(idx));
+            model_.addConstr(pending_[std::make_pair(succ, V)] >=
+                                 pending_[std::make_pair(pred, V)] - isRegionStart_[succ],
+                             "pending_edge_prop_" + std::to_string(idx));
             idx++;
         }
     }
@@ -478,10 +441,9 @@ void CheckpointOptimizer::constrainCommitAtRegionBoundary() {
             BlockGVKey gvKey = std::make_pair(block, GV);
             BlockVarKey varKey = std::make_pair(block, static_cast<llvm::Value *>(GV));
             std::string prefix =
-                "vm_pending_and_" + nodeToken(cfg_, block) + "_" +
-                sanitizeToken(GV->getName());
-            addAndLinearization(model_, vmPending_[gvKey], pending_[varKey],
-                                placeInVm_[gvKey], prefix);
+                "vm_pending_and_" + nodeToken(cfg_, block) + "_" + sanitizeToken(GV->getName());
+            addAndLinearization(model_, vmPending_[gvKey], pending_[varKey], placeInVm_[gvKey],
+                                prefix);
         }
     }
 
@@ -492,8 +454,7 @@ void CheckpointOptimizer::constrainCommitAtRegionBoundary() {
 
         std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
 
-        model_.addConstr(commitVar <= isRegionStart_[block],
-                         "commit_le_region_start_" + suffix);
+        model_.addConstr(commitVar <= isRegionStart_[block], "commit_le_region_start_" + suffix);
 
         if (state_.isIneligible(V)) {
             // Ineligible commit — uses pending directly (always in VM).
@@ -501,14 +462,11 @@ void CheckpointOptimizer::constrainCommitAtRegionBoundary() {
             for (NodeId pred : predecessors_[block]) {
                 predPending += pending_[std::make_pair(pred, V)];
             }
-            model_.addConstr(commitVar <= predPending,
-                             "inelig_commit_le_preds_" + suffix);
+            model_.addConstr(commitVar <= predPending, "inelig_commit_le_preds_" + suffix);
             for (NodeId pred : predecessors_[block]) {
-                model_.addConstr(
-                    commitVar >= isRegionStart_[block] +
-                                     pending_[std::make_pair(pred, V)] - 1,
-                    "inelig_commit_ge_pred_" + nodeToken(cfg_, pred) +
-                        "_" + suffix);
+                model_.addConstr(commitVar >=
+                                     isRegionStart_[block] + pending_[std::make_pair(pred, V)] - 1,
+                                 "inelig_commit_ge_pred_" + nodeToken(cfg_, pred) + "_" + suffix);
             }
         } else {
             // Eligible commit — uses vmPending.
@@ -517,14 +475,11 @@ void CheckpointOptimizer::constrainCommitAtRegionBoundary() {
             for (NodeId pred : predecessors_[block]) {
                 predVmPending += vmPending_[std::make_pair(pred, GV)];
             }
-            model_.addConstr(commitVar <= predVmPending,
-                             "elig_commit_le_preds_" + suffix);
+            model_.addConstr(commitVar <= predVmPending, "elig_commit_le_preds_" + suffix);
             for (NodeId pred : predecessors_[block]) {
-                model_.addConstr(
-                    commitVar >= isRegionStart_[block] +
-                                     vmPending_[std::make_pair(pred, GV)] - 1,
-                    "elig_commit_ge_pred_" + nodeToken(cfg_, pred) + "_" +
-                        suffix);
+                model_.addConstr(commitVar >= isRegionStart_[block] +
+                                                  vmPending_[std::make_pair(pred, GV)] - 1,
+                                 "elig_commit_ge_pred_" + nodeToken(cfg_, pred) + "_" + suffix);
             }
         }
     }
@@ -538,11 +493,9 @@ void CheckpointOptimizer::constrainEnergyInitAtRegionStart() {
     const double M = params_.capacity;
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr eStart = buildEStart(block);
-        model_.addConstr(energyAccumulated_[block] >=
-                             eStart - M * (1 - isRegionStart_[block]),
+        model_.addConstr(energyAccumulated_[block] >= eStart - M * (1 - isRegionStart_[block]),
                          "energy_init_lb_" + nodeToken(cfg_, block));
-        model_.addConstr(energyAccumulated_[block] <=
-                             eStart + M * (1 - isRegionStart_[block]),
+        model_.addConstr(energyAccumulated_[block] <= eStart + M * (1 - isRegionStart_[block]),
                          "energy_init_ub_" + nodeToken(cfg_, block));
     }
 }
@@ -556,8 +509,7 @@ void CheckpointOptimizer::constrainEnergyPropagation() {
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
         model_.addConstr(energyAccumulated_[dst] >=
-                             energyAccumulated_[src] + eBlkSrc -
-                                 M * isRegionStart_[dst],
+                             energyAccumulated_[src] + eBlkSrc - M * isRegionStart_[dst],
                          "energy_propagation_" + std::to_string(edgeIdx++));
     }
 }
@@ -573,9 +525,8 @@ void CheckpointOptimizer::constrainEnergyWithinCapacity() {
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
         GRBLinExpr eEndDst = buildEEnd(dst);
-        model_.addConstr(
-            energyAccumulated_[src] + eBlkSrc + eEndDst <= Ebuf,
-            "energy_capacity_edge_" + std::to_string(edgeIdx++));
+        model_.addConstr(energyAccumulated_[src] + eBlkSrc + eEndDst <= Ebuf,
+                         "energy_capacity_edge_" + std::to_string(edgeIdx++));
     }
 
     for (NodeId exitBlock : cfg_.getExitBlocks()) {

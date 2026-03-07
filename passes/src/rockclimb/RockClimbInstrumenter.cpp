@@ -6,41 +6,33 @@
 
 namespace checkpoint {
 
-RockClimbInstrumenter::RockClimbInstrumenter(llvm::Module &M,
-                                             llvm::StringRef checkFnName,
-                                             llvm::StringRef saveRegFnName,
-                                             bool addDebugMarkers)
+RockClimbInstrumenter::RockClimbInstrumenter(llvm::Module &M, llvm::StringRef checkFnName,
+                                             llvm::StringRef saveRegFnName, bool addDebugMarkers)
     : M_(M), addDebugMarkers_(addDebugMarkers), nvmRegsArray_(nullptr) {
     llvm::LLVMContext &Ctx = M_.getContext();
     llvm::Type *VoidTy = llvm::Type::getVoidTy(Ctx);
     llvm::Type *I32Ty = llvm::Type::getInt32Ty(Ctx);
 
     // Declare: void __rockclimb_check(void)
-    checkCallee_ = M_.getOrInsertFunction(
-        checkFnName,
-        VoidTy
-    );
+    checkCallee_ = M_.getOrInsertFunction(checkFnName, VoidTy);
 
     // Declare: void __rockclimb_save_reg(uint8_t reg_id, uint16_t value)
     // For LLVM IR, we use i32 for both to be safe across platforms
-    saveRegCallee_ = M_.getOrInsertFunction(
-        saveRegFnName,
-        VoidTy,
-        I32Ty,  // reg_id
-        I32Ty   // value (will be truncated/extended as needed)
+    saveRegCallee_ = M_.getOrInsertFunction(saveRegFnName, VoidTy,
+                                            I32Ty, // reg_id
+                                            I32Ty  // value (will be truncated/extended as needed)
     );
 
     if (addDebugMarkers_) {
         llvm::Type *I64Ty = llvm::Type::getInt64Ty(Ctx);
         prologueCallee_ = M_.getOrInsertFunction("__region_prologue", VoidTy);
         epilogueCallee_ = M_.getOrInsertFunction("__region_epilogue", VoidTy);
-        markerStoreRegCallee_ = M_.getOrInsertFunction(
-            "__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
+        markerStoreRegCallee_ =
+            M_.getOrInsertFunction("__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
     }
 }
 
-llvm::GlobalVariable* RockClimbInstrumenter::getOrCreateNVMRegsArray(
-    unsigned numRegs) {
+llvm::GlobalVariable *RockClimbInstrumenter::getOrCreateNVMRegsArray(unsigned numRegs) {
     if (nvmRegsArray_ && nvmRegsArray_->getValueType()->getArrayNumElements() >= numRegs) {
         return nvmRegsArray_;
     }
@@ -49,17 +41,13 @@ llvm::GlobalVariable* RockClimbInstrumenter::getOrCreateNVMRegsArray(
 
     // Create @__nvm_regs[numRegs] as external global
     // Type: [numRegs x i32]
-    llvm::ArrayType *arrayType = llvm::ArrayType::get(
-        llvm::Type::getInt32Ty(Ctx), numRegs);
+    llvm::ArrayType *arrayType = llvm::ArrayType::get(llvm::Type::getInt32Ty(Ctx), numRegs);
 
-    nvmRegsArray_ = new llvm::GlobalVariable(
-        M_,
-        arrayType,
-        false,  // not constant
-        llvm::GlobalValue::ExternalLinkage,
-        nullptr,  // external - no initializer
-        "__nvm_regs"
-    );
+    nvmRegsArray_ = new llvm::GlobalVariable(M_, arrayType,
+                                             false, // not constant
+                                             llvm::GlobalValue::ExternalLinkage,
+                                             nullptr, // external - no initializer
+                                             "__nvm_regs");
 
     return nvmRegsArray_;
 }
@@ -83,8 +71,7 @@ void RockClimbInstrumenter::insertBoundaryCheck(llvm::BasicBlock &BB) {
     Builder.CreateCall(checkCallee_, {});
 }
 
-void RockClimbInstrumenter::insertRegisterCheckpoint(
-    const CheckpointPoint &ckpt) {
+void RockClimbInstrumenter::insertRegisterCheckpoint(const CheckpointPoint &ckpt) {
     llvm::LLVMContext &Ctx = M_.getContext();
 
     // Insert AFTER the instruction that defines the register
@@ -117,29 +104,23 @@ void RockClimbInstrumenter::insertRegisterCheckpoint(
     if (regType->isIntegerTy()) {
         unsigned bitWidth = regType->getIntegerBitWidth();
         if (bitWidth < 32) {
-            valueToStore = Builder.CreateZExt(regValue,
-                                              llvm::Type::getInt32Ty(Ctx));
+            valueToStore = Builder.CreateZExt(regValue, llvm::Type::getInt32Ty(Ctx));
         } else if (bitWidth > 32) {
-            valueToStore = Builder.CreateTrunc(regValue,
-                                               llvm::Type::getInt32Ty(Ctx));
+            valueToStore = Builder.CreateTrunc(regValue, llvm::Type::getInt32Ty(Ctx));
         } else {
             valueToStore = regValue;
         }
     } else if (regType->isPointerTy()) {
         // Convert pointer to integer
-        valueToStore = Builder.CreatePtrToInt(regValue,
-                                               llvm::Type::getInt32Ty(Ctx));
+        valueToStore = Builder.CreatePtrToInt(regValue, llvm::Type::getInt32Ty(Ctx));
     } else if (regType->isFloatingPointTy()) {
         // Bitcast float to int
         if (regType->isFloatTy()) {
-            valueToStore = Builder.CreateBitCast(regValue,
-                                                  llvm::Type::getInt32Ty(Ctx));
+            valueToStore = Builder.CreateBitCast(regValue, llvm::Type::getInt32Ty(Ctx));
         } else {
             // For double, truncate to float first then bitcast
-            llvm::Value *asFloat = Builder.CreateFPTrunc(
-                regValue, llvm::Type::getFloatTy(Ctx));
-            valueToStore = Builder.CreateBitCast(asFloat,
-                                                  llvm::Type::getInt32Ty(Ctx));
+            llvm::Value *asFloat = Builder.CreateFPTrunc(regValue, llvm::Type::getFloatTy(Ctx));
+            valueToStore = Builder.CreateBitCast(asFloat, llvm::Type::getInt32Ty(Ctx));
         }
     } else {
         // Unsupported type - skip
@@ -147,8 +128,7 @@ void RockClimbInstrumenter::insertRegisterCheckpoint(
     }
 
     // Create reg_id constant
-    llvm::Value *regIdVal = llvm::ConstantInt::get(
-        llvm::Type::getInt32Ty(Ctx), ckpt.regId);
+    llvm::Value *regIdVal = llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), ckpt.regId);
 
     // Call __rockclimb_save_reg(reg_id, value)
     Builder.CreateCall(saveRegCallee_, {regIdVal, valueToStore});
@@ -160,10 +140,8 @@ void RockClimbInstrumenter::insertRegisterCheckpoint(
 }
 
 unsigned RockClimbInstrumenter::instrumentFunction(
-    llvm::Function &F,
-    const llvm::SmallPtrSet<llvm::BasicBlock*, 16> &boundaries,
-    const std::vector<CheckpointPoint> &checkpoints,
-    bool enableDistributedCkpt) {
+    llvm::Function &F, const llvm::SmallPtrSet<llvm::BasicBlock *, 16> &boundaries,
+    const std::vector<CheckpointPoint> &checkpoints, bool enableDistributedCkpt) {
 
     unsigned count = 0;
 
@@ -195,8 +173,7 @@ unsigned RockClimbInstrumenter::instrumentFunction(
     return count;
 }
 
-llvm::Value *RockClimbInstrumenter::convertToI64(llvm::IRBuilder<> &Builder,
-                                                 llvm::Value *V) {
+llvm::Value *RockClimbInstrumenter::convertToI64(llvm::IRBuilder<> &Builder, llvm::Value *V) {
     llvm::Type *Ty = V->getType();
     llvm::Type *I64Ty = llvm::Type::getInt64Ty(M_.getContext());
 
@@ -211,8 +188,7 @@ llvm::Value *RockClimbInstrumenter::convertToI64(llvm::IRBuilder<> &Builder,
     if (Ty->isPointerTy())
         return Builder.CreatePtrToInt(V, I64Ty);
     if (Ty->isFloatTy()) {
-        llvm::Value *asI32 = Builder.CreateBitCast(
-            V, llvm::Type::getInt32Ty(M_.getContext()));
+        llvm::Value *asI32 = Builder.CreateBitCast(V, llvm::Type::getInt32Ty(M_.getContext()));
         return Builder.CreateZExt(asI32, I64Ty);
     }
     if (Ty->isDoubleTy())

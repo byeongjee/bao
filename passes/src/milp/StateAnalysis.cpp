@@ -12,20 +12,16 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <queue>
 #include <limits>
+#include <queue>
 
 namespace checkpoint {
 
 namespace {
 
 static bool isWhitelistedHelperName(llvm::StringRef N) {
-    return N.starts_with("__mspabi_") ||
-           N.starts_with("__aeabi_") ||
-           N.starts_with("__div") ||
-           N.starts_with("__udiv") ||
-           N.starts_with("__mul") ||
-           N.starts_with("__mod");
+    return N.starts_with("__mspabi_") || N.starts_with("__aeabi_") || N.starts_with("__div") ||
+           N.starts_with("__udiv") || N.starts_with("__mul") || N.starts_with("__mod");
 }
 
 } // namespace
@@ -34,9 +30,7 @@ static bool isWhitelistedHelperName(llvm::StringRef N) {
 const std::set<llvm::GlobalVariable *> StateAnalysis::emptyGVSet_;
 const std::set<llvm::Value *> StateAnalysis::emptyValueSet_;
 
-StateAnalysis::StateAnalysis(llvm::Function &F,
-                             llvm::AAResults &AA,
-                             const CFGAnalysis &cfg)
+StateAnalysis::StateAnalysis(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg)
     : F_(F), AA_(AA), cfg_(cfg) {
     identifyVMObjs();
     identifyIneligibleObjs();
@@ -51,8 +45,7 @@ bool StateAnalysis::isCandidateGlobal(llvm::GlobalVariable *gv) const {
     return vmObjSet_.count(gv) > 0;
 }
 
-const std::vector<llvm::Value *> &
-StateAnalysis::getIneligibleObjs() const {
+const std::vector<llvm::Value *> &StateAnalysis::getIneligibleObjs() const {
     return ineligibleObjs_;
 }
 
@@ -82,24 +75,21 @@ bool StateAnalysis::getEligDefIndicator(const llvm::BasicBlock *BB,
     return it->second.count(gv) > 0;
 }
 
-const std::set<llvm::Value *> &
-StateAnalysis::getIneligLiveIn(const llvm::BasicBlock *BB) const {
+const std::set<llvm::Value *> &StateAnalysis::getIneligLiveIn(const llvm::BasicBlock *BB) const {
     auto it = ineligLiveIn_.find(BB);
     if (it != ineligLiveIn_.end())
         return it->second;
     return emptyValueSet_;
 }
 
-bool StateAnalysis::getIneligDefIndicator(const llvm::BasicBlock *BB,
-                                          llvm::Value *v) const {
+bool StateAnalysis::getIneligDefIndicator(const llvm::BasicBlock *BB, llvm::Value *v) const {
     auto it = ineligDefVars_.find(BB);
     if (it == ineligDefVars_.end())
         return false;
     return it->second.count(v) > 0;
 }
 
-unsigned StateAnalysis::getLoadCount(const llvm::BasicBlock *BB,
-                                     llvm::GlobalVariable *gv) const {
+unsigned StateAnalysis::getLoadCount(const llvm::BasicBlock *BB, llvm::GlobalVariable *gv) const {
     auto key = std::make_pair(BB, gv);
     auto it = loadCounts_.find(key);
     if (it != loadCounts_.end())
@@ -107,8 +97,7 @@ unsigned StateAnalysis::getLoadCount(const llvm::BasicBlock *BB,
     return 0;
 }
 
-unsigned StateAnalysis::getStoreCount(const llvm::BasicBlock *BB,
-                                      llvm::GlobalVariable *gv) const {
+unsigned StateAnalysis::getStoreCount(const llvm::BasicBlock *BB, llvm::GlobalVariable *gv) const {
     auto key = std::make_pair(BB, gv);
     auto it = storeCounts_.find(key);
     if (it != storeCounts_.end())
@@ -144,10 +133,8 @@ void StateAnalysis::identifyVMObjs() {
             else
                 continue;
 
-            const llvm::Value *Obj =
-                llvm::getUnderlyingObject(Ptr->stripPointerCasts());
-            auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(
-                const_cast<llvm::Value *>(Obj));
+            const llvm::Value *Obj = llvm::getUnderlyingObject(Ptr->stripPointerCasts());
+            auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(const_cast<llvm::Value *>(Obj));
             if (!GV)
                 continue;
 
@@ -192,12 +179,11 @@ void StateAnalysis::identifyIneligibleObjs() {
             // fixed-size NVM backups or account for them in the MILP VM capacity
             // constraint.
             if (!llvm::isa<llvm::ConstantInt>(AI->getArraySize())) {
-                llvm::report_fatal_error(
-                    "MILP checkpoint pass: dynamic alloca '%" +
-                    AI->getName() + "' in function '" + F_.getName() +
-                    "' cannot be checkpointed (runtime-dependent size "
-                    "prevents fixed-size NVM backup and MILP capacity "
-                    "modeling)");
+                llvm::report_fatal_error("MILP checkpoint pass: dynamic alloca '%" + AI->getName() +
+                                         "' in function '" + F_.getName() +
+                                         "' cannot be checkpointed (runtime-dependent size "
+                                         "prevents fixed-size NVM backup and MILP capacity "
+                                         "modeling)");
             }
 
             if (!AI->getAllocatedType()->isSized())
@@ -208,10 +194,9 @@ void StateAnalysis::identifyIneligibleObjs() {
             uint64_t elemCount = arraySizeCI->getZExtValue();
             uint64_t totalBytes = elemBytes * elemCount;
             if (totalBytes > std::numeric_limits<unsigned>::max()) {
-                llvm::report_fatal_error(
-                    "MILP checkpoint pass: alloca '%" + AI->getName() +
-                    "' in function '" + F_.getName() +
-                    "' exceeds size model range");
+                llvm::report_fatal_error("MILP checkpoint pass: alloca '%" + AI->getName() +
+                                         "' in function '" + F_.getName() +
+                                         "' exceeds size model range");
             }
 
             ineligibleObjs_.push_back(AI);
@@ -300,8 +285,7 @@ bool StateAnalysis::isAllowedDirectCall(const llvm::CallBase &CB) const {
     return false;
 }
 
-void StateAnalysis::reportStrictError(const llvm::Instruction &I,
-                                      const std::string &reason) {
+void StateAnalysis::reportStrictError(const llvm::Instruction &I, const std::string &reason) {
     std::string instStr;
     llvm::raw_string_ostream rso(instStr);
     I.print(rso);
@@ -309,9 +293,8 @@ void StateAnalysis::reportStrictError(const llvm::Instruction &I,
     const auto *BB = I.getParent();
     std::string blockName = BB ? getBlockName(*BB, F_) : "<unknown-bb>";
 
-    std::string msg =
-        "Error: unresolved memory effect in function '" + F_.getName().str() +
-        "', block '" + blockName + "': " + reason + " | inst=" + rso.str();
+    std::string msg = "Error: unresolved memory effect in function '" + F_.getName().str() +
+                      "', block '" + blockName + "': " + reason + " | inst=" + rso.str();
     analysisErrors_.push_back(std::move(msg));
 }
 
@@ -323,8 +306,7 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
         for (llvm::GlobalVariable *GV : vmObjs_) {
             auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
             llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
-            if ((checkRef && llvm::isRefSet(MRI)) ||
-                (checkMod && llvm::isModSet(MRI))) {
+            if ((checkRef && llvm::isRefSet(MRI)) || (checkMod && llvm::isModSet(MRI))) {
                 return true;
             }
         }
@@ -375,28 +357,25 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
             const llvm::Value *SrcObj =
                 llvm::getUnderlyingObject(MCI->getSource()->stripPointerCasts());
             if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(DstObj))
-                directCandidate |=
-                    isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
+                directCandidate |= isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
             if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(SrcObj))
-                directCandidate |=
-                    isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
+                directCandidate |= isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
         } else {
             const llvm::Value *DstObj =
                 llvm::getUnderlyingObject(MI->getRawDest()->stripPointerCasts());
             if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(DstObj))
-                directCandidate |=
-                    isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
+                directCandidate |= isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
         }
 
         if (!directCandidate && mayTouchCandidate(/*ref*/ true, /*mod*/ true)) {
-            reportStrictError(I, "mem intrinsic may touch candidate globals via unresolved pointer");
+            reportStrictError(I,
+                              "mem intrinsic may touch candidate globals via unresolved pointer");
             return false;
         }
         return true;
     }
 
-    if (I.mayReadOrWriteMemory() &&
-        !llvm::isa<llvm::AllocaInst>(&I) &&
+    if (I.mayReadOrWriteMemory() && !llvm::isa<llvm::AllocaInst>(&I) &&
         !llvm::isa<llvm::PHINode>(&I)) {
         if (mayTouchCandidate(/*ref*/ true, /*mod*/ true)) {
             reportStrictError(I, "memory instruction touching candidate globals is unresolved");
@@ -483,20 +462,17 @@ void StateAnalysis::computeAccessMaps() {
 }
 
 void StateAnalysis::computeEligLiveness() {
-    eligLiveIn_ = checkpoint::computeEligibleLiveness(
-        F_, AA_, cfg_, vmObjs_);
+    eligLiveIn_ = checkpoint::computeEligibleLiveness(F_, AA_, cfg_, vmObjs_);
 }
 
 void StateAnalysis::computeIneligGlobalAllocaLiveness() {
-    auto gaLive = checkpoint::computeIneligGlobalAllocaLiveness(
-        F_, AA_, cfg_, ineligibleObjs_);
+    auto gaLive = checkpoint::computeIneligGlobalAllocaLiveness(F_, AA_, cfg_, ineligibleObjs_);
     for (auto &[BB, vals] : gaLive)
         ineligLiveIn_[BB].insert(vals.begin(), vals.end());
 }
 
 void StateAnalysis::computeIneligSSALiveness() {
-    auto ssaLive = checkpoint::computeIneligSSALiveness(
-        F_, cfg_, ineligibleObjs_);
+    auto ssaLive = checkpoint::computeIneligSSALiveness(F_, cfg_, ineligibleObjs_);
     for (auto &[BB, vals] : ssaLive)
         ineligLiveIn_[BB].insert(vals.begin(), vals.end());
 }

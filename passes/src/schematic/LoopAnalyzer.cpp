@@ -13,15 +13,11 @@
 
 namespace checkpoint {
 
-LoopAnalyzer::LoopAnalyzer(llvm::LoopInfo &LI,
-                           llvm::ScalarEvolution &SE,
-                           const CFGAnalysis &cfg,
-                           const StateAnalysis &state,
-                           const SchematicParams &params)
+LoopAnalyzer::LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
+                           const StateAnalysis &state, const SchematicParams &params)
     : LI_(LI), SE_(SE), cfg_(cfg), state_(state), params_(params) {}
 
-void LoopAnalyzer::setLoadedLoopTraces(
-    const std::vector<LoadedLoopTrace> &traces) {
+void LoopAnalyzer::setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces) {
     loadedLoopTraces_ = traces;
 }
 
@@ -40,8 +36,7 @@ std::vector<std::vector<llvm::BasicBlock *>>
 LoopAnalyzer::enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const {
     llvm::BasicBlock *header = L->getHeader();
     std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
-    std::set<llvm::BasicBlock *> loopBlockSet(loopBlocks.begin(),
-                                               loopBlocks.end());
+    std::set<llvm::BasicBlock *> loopBlockSet(loopBlocks.begin(), loopBlocks.end());
 
     // Identify latch blocks.
     std::set<llvm::BasicBlock *> latches;
@@ -102,13 +97,14 @@ LoopAnalyzer::enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const {
     return result;
 }
 
-bool LoopAnalyzer::placementsDiffer(
-    const std::map<llvm::GlobalVariable *, Placement> &a,
-    const std::map<llvm::GlobalVariable *, Placement> &b) const {
+bool LoopAnalyzer::placementsDiffer(const std::map<llvm::GlobalVariable *, Placement> &a,
+                                    const std::map<llvm::GlobalVariable *, Placement> &b) const {
     // Check all keys in union.
     std::set<llvm::GlobalVariable *> allKeys;
-    for (const auto &[k, _] : a) allKeys.insert(k);
-    for (const auto &[k, _] : b) allKeys.insert(k);
+    for (const auto &[k, _] : a)
+        allKeys.insert(k);
+    for (const auto &[k, _] : b)
+        allKeys.insert(k);
 
     for (llvm::GlobalVariable *gv : allKeys) {
         auto itA = a.find(gv);
@@ -135,14 +131,12 @@ RegionAllocation LoopAnalyzer::buildBoundaryAllocation(
     return alloc;
 }
 
-double LoopAnalyzer::computeMaxIterationEnergy(
-    llvm::Loop *L, const RegionAllocation &allocation,
-    const SchematicSolution &solution) const {
+double LoopAnalyzer::computeMaxIterationEnergy(llvm::Loop *L, const RegionAllocation &allocation,
+                                               const SchematicSolution &solution) const {
 
     llvm::BasicBlock *header = L->getHeader();
     std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
-    std::set<llvm::BasicBlock *> loopBlockSet(loopBlocks.begin(),
-                                               loopBlocks.end());
+    std::set<llvm::BasicBlock *> loopBlockSet(loopBlocks.begin(), loopBlocks.end());
 
     // Build DAG of direct children blocks (only this nesting level).
     // Assign per-block energy.
@@ -206,8 +200,7 @@ double LoopAnalyzer::computeMaxIterationEnergy(
         dagBlocks.insert(BB);
 
     llvm::DenseMap<llvm::BasicBlock *, unsigned> inDegree;
-    llvm::DenseMap<llvm::BasicBlock *, llvm::SmallVector<llvm::BasicBlock *, 4>>
-        dagSucc;
+    llvm::DenseMap<llvm::BasicBlock *, llvm::SmallVector<llvm::BasicBlock *, 4>> dagSucc;
 
     for (llvm::BasicBlock *BB : dagBlocks) {
         inDegree[BB] = 0;
@@ -283,7 +276,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     auto tcOpt = getMaxTripCount(L);
     if (!tcOpt) {
         llvm::errs() << "SCHEMATIC: loop at " << header->getName()
-                      << " has no trip count annotation — cannot analyze\n";
+                     << " has no trip count annotation — cannot analyze\n";
         return false;
     }
     uint64_t maxTripCount = *tcOpt;
@@ -308,20 +301,19 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     if (bodyPaths.empty()) {
         llvm::errs() << "SCHEMATIC: loop at " << header->getName()
-                      << " has no analyzable body paths\n";
+                     << " has no analyzable body paths\n";
         return false;
     }
 
     // 3. Run RCG solver on each path.
     for (const auto &path : bodyPaths) {
-        RCGSolver solver(path, state_, cfg_, params_,
-                         solution.blockMeta, solution.decidedPlacements,
-                         nullptr, nullptr);
+        RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta,
+                         solution.decidedPlacements, nullptr, nullptr);
         RCGResult result = solver.solve();
         if (!result.feasible) {
             llvm::report_fatal_error(
-                llvm::Twine("SCHEMATIC infeasible loop body path at header '") +
-                    header->getName() + "': " + result.errorMessage,
+                llvm::Twine("SCHEMATIC infeasible loop body path at header '") + header->getName() +
+                    "': " + result.errorMessage,
                 /*GenCrashDiag=*/false);
         }
 
@@ -392,8 +384,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         if (place != Placement::VM)
             continue;
         unsigned size = state_.getVarSizeBytes(gv);
-        E_ckpt += params_.memStoreEnergyPerByte * size +
-                  params_.memRestoreEnergyPerByte * size;
+        E_ckpt += params_.memStoreEnergyPerByte * size + params_.memRestoreEnergyPerByte * size;
     }
 
     if (E_loop <= 0.0) {

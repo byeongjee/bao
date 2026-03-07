@@ -11,14 +11,13 @@
 namespace checkpoint {
 
 class SchematicInstrumenter {
-public:
+  public:
     SchematicInstrumenter(llvm::Module &M, bool addDebugMarkers, unsigned N_reg);
 
-    unsigned instrumentFunction(llvm::Function &F,
-                                const SchematicSolution &solution,
+    unsigned instrumentFunction(llvm::Function &F, const SchematicSolution &solution,
                                 const StateAnalysis &state);
 
-private:
+  private:
     llvm::Module &M_;
     bool addDebugMarkers_;
     unsigned N_reg_;
@@ -39,25 +38,22 @@ private:
 
     void declareRuntimeFunctions();
 
-    void createShadowGlobals(llvm::Function &F,
-                             const SchematicSolution &solution,
+    void createShadowGlobals(llvm::Function &F, const SchematicSolution &solution,
                              const StateAnalysis &state);
     void createIneligibleBackups(llvm::Function &F, const StateAnalysis &state);
 
     llvm::BasicBlock *splitEdge(llvm::BasicBlock *src, llvm::BasicBlock *dst);
 
-    unsigned insertCheckpointSequence(llvm::BasicBlock *ckptBB,
-                                      const RegionAllocation *endingAlloc,
+    unsigned insertCheckpointSequence(llvm::BasicBlock *ckptBB, const RegionAllocation *endingAlloc,
                                       const RegionAllocation *startingAlloc,
                                       const StateAnalysis &state);
 
     void rewriteAccessesInRegion(const std::vector<llvm::BasicBlock *> &blocks,
                                  const RegionAllocation &allocation);
 
-    unsigned insertLoopConditionalCheckpoint(
-        llvm::BasicBlock *header,
-        const LoopCheckpointDecision &decision,
-        const StateAnalysis &state);
+    unsigned insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
+                                             const LoopCheckpointDecision &decision,
+                                             const StateAnalysis &state);
 };
 
 } // namespace checkpoint

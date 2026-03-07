@@ -15,7 +15,7 @@ namespace checkpoint {
 
 /// Abstract CFG view consumed by the MILP optimizer.
 class ICFGView {
-public:
+  public:
     virtual ~ICFGView() = default;
 
     virtual const std::vector<NodeId> &getBlocks() const = 0;
@@ -35,23 +35,19 @@ public:
 /// Ineligible objects (V_inelig) — non-candidate globals, allocas, cross-block
 /// SSA values — always reside in VM and only get pending/commit variables.
 class IStateView {
-public:
+  public:
     virtual ~IStateView() = default;
 
     // -- Eligible (candidate globals) --
     virtual const std::vector<llvm::GlobalVariable *> &getVMObjs() const = 0;
-    virtual const std::set<llvm::GlobalVariable *> &
-    getEligLiveIn(NodeId block) const = 0;
-    virtual bool getEligDefIndicator(NodeId block,
-                                     llvm::GlobalVariable *gv) const = 0;
+    virtual const std::set<llvm::GlobalVariable *> &getEligLiveIn(NodeId block) const = 0;
+    virtual bool getEligDefIndicator(NodeId block, llvm::GlobalVariable *gv) const = 0;
 
     // -- Ineligible (non-candidate globals, allocas, SSA registers) --
     virtual const std::vector<llvm::Value *> &getIneligibleObjs() const = 0;
     virtual bool isIneligible(llvm::Value *v) const = 0;
-    virtual const std::set<llvm::Value *> &
-    getIneligLiveIn(NodeId block) const = 0;
-    virtual bool getIneligDefIndicator(NodeId block,
-                                       llvm::Value *v) const = 0;
+    virtual const std::set<llvm::Value *> &getIneligLiveIn(NodeId block) const = 0;
+    virtual bool getIneligDefIndicator(NodeId block, llvm::Value *v) const = 0;
 
     // -- Shared --
     virtual int getVarSizeBytes(llvm::Value *v) const = 0;
@@ -59,7 +55,7 @@ public:
 
 /// Abstract energy-model view consumed by the MILP optimizer.
 class IEnergyView {
-public:
+  public:
     virtual ~IEnergyView() = default;
 
     virtual const MILPEnergyParams &getParams() const = 0;

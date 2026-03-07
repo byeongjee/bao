@@ -29,19 +29,19 @@ struct LoadedLoopTrace {
 };
 
 struct LoadedTraces {
-    std::vector<EnumeratedPath> functionPaths;  // entry-to-exit, loops collapsed
+    std::vector<EnumeratedPath> functionPaths; // entry-to-exit, loops collapsed
     std::vector<LoadedLoopTrace> loopTraces;
 };
 
 class TraceLoader {
-public:
+  public:
     TraceLoader(llvm::Function &F, llvm::LoopInfo &LI);
 
     /// Load traces from a JSON file. Returns nullopt if the function
     /// is not found in the trace file or the file cannot be parsed.
     std::optional<LoadedTraces> load(const std::string &traceFilePath);
 
-private:
+  private:
     llvm::Function &F_;
     llvm::LoopInfo &LI_;
     llvm::DenseMap<llvm::StringRef, llvm::BasicBlock *> nameToBlock_;

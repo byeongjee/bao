@@ -19,10 +19,10 @@ namespace checkpoint {
 
 /// Information about a region formed by RockClimb partitioning.
 struct RegionInfo {
-    llvm::WeakTrackingVH startBlock;               // First block of the region
-    std::vector<llvm::WeakTrackingVH> blocks;      // All blocks in the region
-    std::set<llvm::Value*> liveOutRegisters;        // Registers live at region exit
-    double totalEnergy;                             // Total energy of the region
+    llvm::WeakTrackingVH startBlock;          // First block of the region
+    std::vector<llvm::WeakTrackingVH> blocks; // All blocks in the region
+    std::set<llvm::Value *> liveOutRegisters; // Registers live at region exit
+    double totalEnergy;                       // Total energy of the region
 };
 
 /// RockClimb optimizer: greedy region partitioning.
@@ -30,13 +30,13 @@ struct RegionInfo {
 /// Implements Algorithm 1 from the RockClimb paper with path-aware
 /// energy accumulation using per-block IncomeCycle propagation.
 class RockClimbOptimizer {
-public:
+  public:
     /// Result of optimization.
     struct Result {
-        std::vector<llvm::WeakTrackingVH> regionBoundaries;  // Blocks starting new regions
-        std::vector<RegionInfo> regions;            // Detailed region information
-        bool feasible;                              // True if partitioning succeeded
-        std::string errorMessage;                   // Error description if not feasible
+        std::vector<llvm::WeakTrackingVH> regionBoundaries; // Blocks starting new regions
+        std::vector<RegionInfo> regions;                    // Detailed region information
+        bool feasible;                                      // True if partitioning succeeded
+        std::string errorMessage;                           // Error description if not feasible
     };
 
     /// Construct optimizer for a CFG.
@@ -45,28 +45,28 @@ public:
     /// @param LI Loop info for mandatory header boundaries.
     /// @param F The function being optimized.
     /// @param estimator Energy estimator for per-instruction costs (for block splitting).
-    RockClimbOptimizer(const CFGAnalysis &cfg, double E_safe, llvm::LoopInfo &LI,
-                       llvm::Function &F, EnergyEstimator *estimator = nullptr);
+    RockClimbOptimizer(const CFGAnalysis &cfg, double E_safe, llvm::LoopInfo &LI, llvm::Function &F,
+                       EnergyEstimator *estimator = nullptr);
 
     /// Run the optimization algorithm.
     /// @return Result containing region boundaries and info.
     Result optimize();
 
     /// Get blocks that exceed E_safe individually (infeasible).
-    std::vector<llvm::BasicBlock*> getInfeasibleBlocks() const;
+    std::vector<llvm::BasicBlock *> getInfeasibleBlocks() const;
 
     /// Add extra block costs from checkpoint stores (CkptCycles_bbi).
     /// Additive: each call accumulates into energyCosts_. Call at most once
     /// per optimization run. Applied before Algorithm 1 traversal so
     /// effective per-block cost is Cycle_ori + CkptCycles.
     /// @param costs Map from block pointer to additional energy cost.
-    void setExtraBlockCosts(const llvm::DenseMap<llvm::BasicBlock*, double> &costs);
+    void setExtraBlockCosts(const llvm::DenseMap<llvm::BasicBlock *, double> &costs);
 
     /// Resolve a WeakTrackingVH to a BasicBlock pointer.
     /// Asserts if the handle has been invalidated (block deleted).
     static llvm::BasicBlock *resolveBlock(const llvm::WeakTrackingVH &handle);
 
-private:
+  private:
     const CFGAnalysis &cfg_;
     double E_safe_;
     llvm::LoopInfo &LI_;
@@ -77,13 +77,13 @@ private:
     std::vector<llvm::WeakTrackingVH> topoOrder_;
 
     /// Loop headers (mandatory region boundaries).
-    llvm::SmallPtrSet<llvm::BasicBlock*, 8> loopHeaders_;
+    llvm::SmallPtrSet<llvm::BasicBlock *, 8> loopHeaders_;
 
     /// Blocks containing function calls (mandatory region boundaries).
-    llvm::SmallPtrSet<llvm::BasicBlock*, 8> callSiteBlocks_;
+    llvm::SmallPtrSet<llvm::BasicBlock *, 8> callSiteBlocks_;
 
     /// Per-block energy costs (replaces CFGAnalysis lookups + extraBlockCosts_).
-    llvm::DenseMap<llvm::BasicBlock*, double> energyCosts_;
+    llvm::DenseMap<llvm::BasicBlock *, double> energyCosts_;
 
     /// Build topological order of blocks.
     void computeTopologicalOrder();
@@ -107,8 +107,7 @@ private:
     /// @param threshold Energy threshold (E_safe).
     /// @param insertIdx Index in topoOrder_ after which the new block is inserted.
     /// @return Pointer to the new (second half) block, or nullptr if split not possible.
-    llvm::BasicBlock *splitBlock(llvm::BasicBlock *BB, double threshold,
-                                 size_t insertIdx);
+    llvm::BasicBlock *splitBlock(llvm::BasicBlock *BB, double threshold, size_t insertIdx);
 };
 
 } // namespace checkpoint

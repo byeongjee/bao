@@ -1,14 +1,14 @@
 #include "rockclimb/RockClimbPass.h"
+#include "common/BlockUtils.h"
+#include "common/PassStatistics.h"
 #include "rockclimb/DistributedCheckpointing.h"
 #include "rockclimb/RockClimbContext.h"
 #include "rockclimb/RockClimbInstrumenter.h"
 #include "rockclimb/RockClimbOptimizer.h"
-#include "common/BlockUtils.h"
-#include "common/PassStatistics.h"
 
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
-#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
@@ -16,9 +16,9 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/JSON.h"
-#include "llvm/Transforms/Utils/UnrollLoop.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
+#include "llvm/Transforms/Utils/UnrollLoop.h"
 
 #include <chrono>
 #include <fstream>
@@ -33,28 +33,25 @@ extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<bool> AddDebugMarkersOpt;
 
 // Command line options for RockClimb pass
-cl::opt<std::string> RockClimbConfigOpt(
-    "rockclimb-config",
-    cl::desc("Path to JSON configuration file for RockClimb pass"),
-    cl::value_desc("filename"),
-    cl::init(""));
+cl::opt<std::string>
+    RockClimbConfigOpt("rockclimb-config",
+                       cl::desc("Path to JSON configuration file for RockClimb pass"),
+                       cl::value_desc("filename"), cl::init(""));
 
 namespace {
 
-static cl::opt<bool> DistributedCkptOpt(
-    "rockclimb-distributed-ckpt",
-    cl::desc("Enable distributed checkpointing (default: true)"),
-    cl::init(true));
+static cl::opt<bool>
+    DistributedCkptOpt("rockclimb-distributed-ckpt",
+                       cl::desc("Enable distributed checkpointing (default: true)"),
+                       cl::init(true));
 
-static cl::opt<std::string> CheckFnOpt(
-    "rockclimb-check-function",
-    cl::desc("Name of voltage check function to insert"),
-    cl::init("__rockclimb_check"));
+static cl::opt<std::string> CheckFnOpt("rockclimb-check-function",
+                                       cl::desc("Name of voltage check function to insert"),
+                                       cl::init("__rockclimb_check"));
 
-static cl::opt<std::string> SaveRegFnOpt(
-    "rockclimb-save-reg-function",
-    cl::desc("Name of register save function to insert"),
-    cl::init("__rockclimb_save_reg"));
+static cl::opt<std::string> SaveRegFnOpt("rockclimb-save-reg-function",
+                                         cl::desc("Name of register save function to insert"),
+                                         cl::init("__rockclimb_save_reg"));
 
 static cl::opt<bool> LoopUnrollOpt(
     "rockclimb-loop-unroll",
@@ -66,35 +63,30 @@ static cl::opt<bool> LoopUnrollOpt(
 namespace checkpoint {
 namespace {
 
-static bool resolveFeatureToggle(const cl::opt<bool> &opt,
-                                 bool configDefault) {
+static bool resolveFeatureToggle(const cl::opt<bool> &opt, bool configDefault) {
     if (opt.getNumOccurrences() > 0) {
         return opt;
     }
     return configDefault;
 }
 
-static void printPassConfig(const Function &F,
-                            const RockClimbContext &ctx,
-                            bool useDistributedCkpt,
+static void printPassConfig(const Function &F, const RockClimbContext &ctx, bool useDistributedCkpt,
                             bool addDebugMarkers) {
     errs() << "=== RockClimb Pass on " << F.getName() << " ===\n";
     errs() << "  Capacity: " << ctx.params.capacity << "\n";
     errs() << "  E_safe: " << ctx.E_safe << "\n";
-    errs() << "  Distributed checkpointing: "
-           << (useDistributedCkpt ? "enabled" : "disabled") << "\n";
-    errs() << "  Debug markers: "
-           << (addDebugMarkers ? "enabled" : "disabled") << "\n";
+    errs() << "  Distributed checkpointing: " << (useDistributedCkpt ? "enabled" : "disabled")
+           << "\n";
+    errs() << "  Debug markers: " << (addDebugMarkers ? "enabled" : "disabled") << "\n";
     if (ctx.params.checkpoint_store_energy > 0) {
-        errs() << "  Checkpoint store energy: "
-               << ctx.params.checkpoint_store_energy << "\n";
+        errs() << "  Checkpoint store energy: " << ctx.params.checkpoint_store_energy << "\n";
     }
 }
 
-static DenseMap<BasicBlock*, double> computeCheckpointStoreCycles(
-    const std::vector<CheckpointPoint> &checkpointPoints,
-    double storeEnergyPerCheckpoint) {
-    DenseMap<BasicBlock*, double> checkpointStoreCycles;
+static DenseMap<BasicBlock *, double>
+computeCheckpointStoreCycles(const std::vector<CheckpointPoint> &checkpointPoints,
+                             double storeEnergyPerCheckpoint) {
+    DenseMap<BasicBlock *, double> checkpointStoreCycles;
     for (const auto &ckpt : checkpointPoints) {
         if (!ckpt.afterInst) {
             continue;
@@ -124,8 +116,7 @@ static void collectInnermostLoops(Loop *L, SmallVectorImpl<Loop *> &out) {
 bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     std::ifstream file(configPath.str());
     if (!file.is_open()) {
-        errs() << "Error: Cannot open RockClimb config file: "
-               << configPath << "\n";
+        errs() << "Error: Cannot open RockClimb config file: " << configPath << "\n";
         return false;
     }
 
@@ -136,15 +127,13 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     Expected<json::Value> parsed = json::parse(content);
     if (!parsed) {
         consumeError(parsed.takeError());
-        errs() << "Error: JSON parse error in RockClimb config: "
-               << configPath << "\n";
+        errs() << "Error: JSON parse error in RockClimb config: " << configPath << "\n";
         return false;
     }
 
     json::Object *root = parsed->getAsObject();
     if (!root) {
-        errs() << "Error: RockClimb config is not a JSON object: "
-               << configPath << "\n";
+        errs() << "Error: RockClimb config is not a JSON object: " << configPath << "\n";
         return false;
     }
 
@@ -168,8 +157,8 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
 
     auto N_reg = root->getInteger("N_reg");
     if (!N_reg) {
-        errs() << "Error: Missing required field 'N_reg' in RockClimb config: "
-               << configPath << "\n";
+        errs() << "Error: Missing required field 'N_reg' in RockClimb config: " << configPath
+               << "\n";
         return false;
     }
     auto reg_restore_energy = root->getNumber("reg_restore_energy");
@@ -183,11 +172,13 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     std::optional<bool> distributed;
     if (rcSection) {
         auto val = rcSection->getBoolean("distributed_checkpointing");
-        if (val) distributed = *val;
+        if (val)
+            distributed = *val;
     }
     if (!distributed) {
         auto val = root->getBoolean("distributed_checkpointing");
-        if (val) distributed = *val;
+        if (val)
+            distributed = *val;
     }
     if (!distributed) {
         errs() << "Error: Missing required field 'distributed_checkpointing' in RockClimb config: "
@@ -201,13 +192,20 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     params.distributedCheckpointing = *distributed;
 
     // Shared fields (optional for RockClimb — stored for config consistency).
-    if (auto v = root->getNumber("E_pro")) params.E_pro = *v;
-    if (auto v = root->getNumber("E_epi")) params.E_epi = *v;
-    if (auto v = root->getNumber("reg_store_energy")) params.reg_store_energy = *v;
-    if (auto v = root->getNumber("nvm_access_penalty")) params.nvmAccessPenalty = *v;
-    if (auto v = root->getNumber("mem_store_energy_per_byte")) params.memStoreEnergyPerByte = *v;
-    if (auto v = root->getNumber("mem_restore_energy_per_byte")) params.memRestoreEnergyPerByte = *v;
-    if (auto v = root->getInteger("vm_capacity_bytes")) params.vmCapacityBytes = static_cast<unsigned>(*v);
+    if (auto v = root->getNumber("E_pro"))
+        params.E_pro = *v;
+    if (auto v = root->getNumber("E_epi"))
+        params.E_epi = *v;
+    if (auto v = root->getNumber("reg_store_energy"))
+        params.reg_store_energy = *v;
+    if (auto v = root->getNumber("nvm_access_penalty"))
+        params.nvmAccessPenalty = *v;
+    if (auto v = root->getNumber("mem_store_energy_per_byte"))
+        params.memStoreEnergyPerByte = *v;
+    if (auto v = root->getNumber("mem_restore_energy_per_byte"))
+        params.memRestoreEnergyPerByte = *v;
+    if (auto v = root->getInteger("vm_capacity_bytes"))
+        params.vmCapacityBytes = static_cast<unsigned>(*v);
 
     // checkpoint_store_energy: check rockclimb section first, then root.
     params.checkpoint_store_energy = 0.0;
@@ -237,9 +235,8 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
 
 /// Try to unroll loops whose body energy fits within E_safe.
 /// Paper Section IV-C.a: maximize region size by unrolling short loops.
-static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
-                           DominatorTree &DT, AssumptionCache &AC,
-                           EnergyEstimator &estimator, double E_safe) {
+static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE, DominatorTree &DT,
+                           AssumptionCache &AC, EnergyEstimator &estimator, double E_safe) {
     struct UnrollStats {
         unsigned loopsSeen = 0;
         unsigned skippedNotSimplify = 0;
@@ -304,9 +301,8 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
 
             if (bodyEnergy >= E_safe) {
                 stats.skippedBodyTooLarge++;
-                LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName
-                                  << " (body energy " << bodyEnergy
-                                  << " >= E_safe " << E_safe << ")\n");
+                LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName << " (body energy "
+                                  << bodyEnergy << " >= E_safe " << E_safe << ")\n");
                 continue;
             }
 
@@ -315,9 +311,8 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
             unsigned unrollFactor = std::min(maxUnroll, tripCount);
             if (unrollFactor <= 1) {
                 stats.skippedFactorTooSmall++;
-                LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName
-                                  << " (unroll factor " << unrollFactor
-                                  << " from maxUnroll=" << maxUnroll
+                LLVM_DEBUG(dbgs() << "  Loop unroll: skip " << headerName << " (unroll factor "
+                                  << unrollFactor << " from maxUnroll=" << maxUnroll
                                   << ", tripCount=" << tripCount << ")\n");
                 continue;
             }
@@ -331,12 +326,9 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
             ULO.UnrollRemainder = (unrollFactor == tripCount);
             ULO.ForgetAllSCEV = true;
 
-            errs() << "  Unrolling loop at " << headerName
-                   << " (trip count: " << tripCount
-                   << ", body energy: " << bodyEnergy
-                   << ", factor: " << unrollFactor
-                   << (ULO.UnrollRemainder ? ", full" : ", partial")
-                   << ")\n";
+            errs() << "  Unrolling loop at " << headerName << " (trip count: " << tripCount
+                   << ", body energy: " << bodyEnergy << ", factor: " << unrollFactor
+                   << (ULO.UnrollRemainder ? ", full" : ", partial") << ")\n";
 
             LoopUnrollResult res = UnrollLoop(L, ULO, &LI, &SE, &DT, &AC,
                                               /*TTI=*/nullptr,
@@ -344,8 +336,7 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
                                               /*PreserveLCSSA=*/true);
             if (res == LoopUnrollResult::Unmodified) {
                 stats.skippedLLVMRejected++;
-                errs() << "  Loop unroll: LLVM rejected unroll of "
-                       << headerName << "\n";
+                errs() << "  Loop unroll: LLVM rejected unroll of " << headerName << "\n";
                 continue;
             }
 
@@ -367,34 +358,27 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
     if (skippedTotal > 0) {
         errs() << "  Skip reason breakdown:\n";
         if (stats.skippedNotSimplify)
-            errs() << "    - not LoopSimplify form:       "
-                   << stats.skippedNotSimplify << "\n";
+            errs() << "    - not LoopSimplify form:       " << stats.skippedNotSimplify << "\n";
         if (stats.skippedUnknownTrip)
-            errs() << "    - unknown trip count:           "
-                   << stats.skippedUnknownTrip << "\n";
+            errs() << "    - unknown trip count:           " << stats.skippedUnknownTrip << "\n";
         if (stats.skippedBodyTooLarge)
-            errs() << "    - body energy >= E_safe:        "
-                   << stats.skippedBodyTooLarge << "\n";
+            errs() << "    - body energy >= E_safe:        " << stats.skippedBodyTooLarge << "\n";
         if (stats.skippedFactorTooSmall)
-            errs() << "    - unroll factor <= 1:           "
-                   << stats.skippedFactorTooSmall << "\n";
+            errs() << "    - unroll factor <= 1:           " << stats.skippedFactorTooSmall << "\n";
         if (stats.skippedLLVMRejected)
-            errs() << "    - LLVM UnrollLoop rejected:     "
-                   << stats.skippedLLVMRejected << "\n";
+            errs() << "    - LLVM UnrollLoop rejected:     " << stats.skippedLLVMRejected << "\n";
     }
 
     return changed;
 }
 
-PreservedAnalyses RockClimbPass::run(Function &F,
-                                     FunctionAnalysisManager &AM) {
+PreservedAnalyses RockClimbPass::run(Function &F, FunctionAnalysisManager &AM) {
     const auto totalStart = std::chrono::steady_clock::now();
 
     // Create RockClimb context with separate estimator and rockclimb configs
     auto &LI = AM.getResult<LoopAnalysis>(F);
-    auto ctxResult = createRockClimbContext(F, LI,
-                                            EnergyConfigOpt.getValue(),
-                                            RockClimbConfigOpt.getValue());
+    auto ctxResult =
+        createRockClimbContext(F, LI, EnergyConfigOpt.getValue(), RockClimbConfigOpt.getValue());
 
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip()) {
@@ -405,10 +389,9 @@ PreservedAnalyses RockClimbPass::run(Function &F,
 
     auto &ctx = *ctxResult.context;
 
-    bool useDistributedCkpt = resolveFeatureToggle(
-        DistributedCkptOpt, ctx.params.distributedCheckpointing);
-    bool addDebugMarkers =
-        AddDebugMarkersOpt.getValue() || ctx.params.addDebugMarkers;
+    bool useDistributedCkpt =
+        resolveFeatureToggle(DistributedCkptOpt, ctx.params.distributedCheckpointing);
+    bool addDebugMarkers = AddDebugMarkersOpt.getValue() || ctx.params.addDebugMarkers;
 
     printPassConfig(F, ctx, useDistributedCkpt, addDebugMarkers);
 
@@ -426,30 +409,27 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     }
 
     // Algorithm 1 region formation.
-    RockClimbOptimizer optimizer(*ctx.cfg, ctx.E_safe, LI, F,
-                                 ctx.estimator.get());
+    RockClimbOptimizer optimizer(*ctx.cfg, ctx.E_safe, LI, F, ctx.estimator.get());
 
     if (ctx.params.checkpoint_store_energy > 0 && useDistributedCkpt) {
         // Compute CkptCycles once from an initial partition result, then run
         // Algorithm 1 with Cycle = Cycle_ori + CkptCycles.
         auto prelimResult = optimizer.optimize();
         if (!prelimResult.feasible) {
-            errs() << "Region partitioning failed: "
-                   << prelimResult.errorMessage << "\n";
+            errs() << "Region partitioning failed: " << prelimResult.errorMessage << "\n";
             return PreservedAnalyses::all();
         }
 
         DistributedCheckpointing prelimCkpt(prelimResult.regions);
         auto prelimPoints = prelimCkpt.analyze();
-        auto checkpointStoreCycles = computeCheckpointStoreCycles(
-            prelimPoints, ctx.params.checkpoint_store_energy);
+        auto checkpointStoreCycles =
+            computeCheckpointStoreCycles(prelimPoints, ctx.params.checkpoint_store_energy);
         optimizer.setExtraBlockCosts(checkpointStoreCycles);
     }
 
     RockClimbOptimizer::Result result = optimizer.optimize();
     if (!result.feasible) {
-        errs() << "Region partitioning failed: "
-               << result.errorMessage << "\n";
+        errs() << "Region partitioning failed: " << result.errorMessage << "\n";
         return PreservedAnalyses::all();
     }
     std::vector<CheckpointPoint> checkpointPoints;
@@ -490,7 +470,7 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     }
 
     // Convert boundaries to pointer set for instrumenter
-    SmallPtrSet<BasicBlock*, 16> boundarySet;
+    SmallPtrSet<BasicBlock *, 16> boundarySet;
     for (const auto &handle : result.regionBoundaries) {
         boundarySet.insert(RockClimbOptimizer::resolveBlock(handle));
     }
@@ -500,10 +480,8 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     boundarySet.erase(&F.getEntryBlock());
 
     // Instrument the function
-    RockClimbInstrumenter instrumenter(
-        *F.getParent(), CheckFnOpt, SaveRegFnOpt, addDebugMarkers);
-    instrumenter.instrumentFunction(
-        F, boundarySet, checkpointPoints, useDistributedCkpt);
+    RockClimbInstrumenter instrumenter(*F.getParent(), CheckFnOpt, SaveRegFnOpt, addDebugMarkers);
+    instrumenter.instrumentFunction(F, boundarySet, checkpointPoints, useDistributedCkpt);
 
     const auto totalEnd = std::chrono::steady_clock::now();
     double totalExecutionTimeMs =

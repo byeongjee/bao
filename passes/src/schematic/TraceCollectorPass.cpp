@@ -26,8 +26,7 @@ namespace checkpoint {
 // ---------------------------------------------------------------------------
 
 /// Create a global constant string and return a pointer to it.
-static Constant *createGlobalString(Module &M, StringRef str,
-                                     const Twine &name) {
+static Constant *createGlobalString(Module &M, StringRef str, const Twine &name) {
     Constant *strConst = ConstantDataArray::getString(M.getContext(), str);
     auto *GV = new GlobalVariable(M, strConst->getType(), /*isConstant=*/true,
                                   GlobalValue::PrivateLinkage, strConst, name);
@@ -40,22 +39,20 @@ static Constant *createGlobalString(Module &M, StringRef str,
 }
 
 /// Create a global constant array of i8* pointers from a vector of strings.
-static Constant *createStringArray(Module &M,
-                                    const std::vector<std::string> &strings,
-                                    const Twine &name) {
+static Constant *createStringArray(Module &M, const std::vector<std::string> &strings,
+                                   const Twine &name) {
     LLVMContext &Ctx = M.getContext();
     Type *I8PtrTy = PointerType::getUnqual(Ctx);
 
     SmallVector<Constant *, 32> ptrs;
     for (unsigned i = 0; i < strings.size(); i++) {
-        ptrs.push_back(createGlobalString(M, strings[i],
-                                          name + ".str." + Twine(i)));
+        ptrs.push_back(createGlobalString(M, strings[i], name + ".str." + Twine(i)));
     }
 
     ArrayType *arrTy = ArrayType::get(I8PtrTy, strings.size());
     Constant *arr = ConstantArray::get(arrTy, ptrs);
-    auto *GV = new GlobalVariable(M, arrTy, /*isConstant=*/true,
-                                  GlobalValue::PrivateLinkage, arr, name);
+    auto *GV =
+        new GlobalVariable(M, arrTy, /*isConstant=*/true, GlobalValue::PrivateLinkage, arr, name);
     GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
     return ConstantExpr::getInBoundsGetElementPtr(
         arrTy, GV,
@@ -64,8 +61,7 @@ static Constant *createStringArray(Module &M,
 }
 
 /// Create a global constant array of i32 from a vector of ints.
-static Constant *createIntArray(Module &M, const std::vector<int> &values,
-                                 const Twine &name) {
+static Constant *createIntArray(Module &M, const std::vector<int> &values, const Twine &name) {
     LLVMContext &Ctx = M.getContext();
     Type *I32Ty = Type::getInt32Ty(Ctx);
 
@@ -76,38 +72,33 @@ static Constant *createIntArray(Module &M, const std::vector<int> &values,
 
     ArrayType *arrTy = ArrayType::get(I32Ty, values.size());
     Constant *arr = ConstantArray::get(arrTy, elems);
-    auto *GV = new GlobalVariable(M, arrTy, /*isConstant=*/true,
-                                  GlobalValue::PrivateLinkage, arr, name);
+    auto *GV =
+        new GlobalVariable(M, arrTy, /*isConstant=*/true, GlobalValue::PrivateLinkage, arr, name);
     GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
     return ConstantExpr::getInBoundsGetElementPtr(
-        arrTy, GV,
-        ArrayRef<Constant *>{ConstantInt::get(I32Ty, 0),
-                             ConstantInt::get(I32Ty, 0)});
+        arrTy, GV, ArrayRef<Constant *>{ConstantInt::get(I32Ty, 0), ConstantInt::get(I32Ty, 0)});
 }
 
 /// Create a global constant array of i8** (array of string-array pointers).
-static Constant *createStringArrayArray(
-    Module &M,
-    const std::vector<std::vector<std::string>> &arrays,
-    const Twine &name) {
+static Constant *createStringArrayArray(Module &M,
+                                        const std::vector<std::vector<std::string>> &arrays,
+                                        const Twine &name) {
     LLVMContext &Ctx = M.getContext();
     Type *ElemPtrTy = PointerType::getUnqual(Ctx);
 
     SmallVector<Constant *, 16> ptrs;
     for (unsigned i = 0; i < arrays.size(); i++) {
         if (arrays[i].empty()) {
-            ptrs.push_back(ConstantPointerNull::get(
-                cast<PointerType>(ElemPtrTy)));
+            ptrs.push_back(ConstantPointerNull::get(cast<PointerType>(ElemPtrTy)));
         } else {
-            ptrs.push_back(createStringArray(M, arrays[i],
-                                              name + "." + Twine(i)));
+            ptrs.push_back(createStringArray(M, arrays[i], name + "." + Twine(i)));
         }
     }
 
     ArrayType *arrTy = ArrayType::get(ElemPtrTy, arrays.size());
     Constant *arr = ConstantArray::get(arrTy, ptrs);
-    auto *GV = new GlobalVariable(M, arrTy, /*isConstant=*/true,
-                                  GlobalValue::PrivateLinkage, arr, name);
+    auto *GV =
+        new GlobalVariable(M, arrTy, /*isConstant=*/true, GlobalValue::PrivateLinkage, arr, name);
     GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
     return ConstantExpr::getInBoundsGetElementPtr(
         arrTy, GV,
@@ -119,8 +110,7 @@ static Constant *createStringArrayArray(
 // TraceCollectorPass implementation
 // ---------------------------------------------------------------------------
 
-PreservedAnalyses TraceCollectorPass::run(Function &F,
-                                           FunctionAnalysisManager &AM) {
+PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &AM) {
     // Skip declarations
     if (F.isDeclaration())
         return PreservedAnalyses::all();
@@ -217,18 +207,12 @@ PreservedAnalyses TraceCollectorPass::run(Function &F,
     Type *I32Ty = Type::getInt32Ty(Ctx);
     Type *PtrTy = PointerType::getUnqual(Ctx);
 
-    FunctionCallee funcEnterFn = M.getOrInsertFunction(
-        "__trace_func_enter", VoidTy, PtrTy);
-    FunctionCallee bbFn = M.getOrInsertFunction(
-        "__trace_bb", VoidTy, I32Ty);
-    FunctionCallee loopEnterFn = M.getOrInsertFunction(
-        "__trace_loop_enter", VoidTy, I32Ty, I32Ty);
-    FunctionCallee loopIterEndFn = M.getOrInsertFunction(
-        "__trace_loop_iter_end", VoidTy, I32Ty);
-    FunctionCallee loopExitFn = M.getOrInsertFunction(
-        "__trace_loop_exit", VoidTy, I32Ty);
-    FunctionCallee funcExitFn = M.getOrInsertFunction(
-        "__trace_func_exit", VoidTy);
+    FunctionCallee funcEnterFn = M.getOrInsertFunction("__trace_func_enter", VoidTy, PtrTy);
+    FunctionCallee bbFn = M.getOrInsertFunction("__trace_bb", VoidTy, I32Ty);
+    FunctionCallee loopEnterFn = M.getOrInsertFunction("__trace_loop_enter", VoidTy, I32Ty, I32Ty);
+    FunctionCallee loopIterEndFn = M.getOrInsertFunction("__trace_loop_iter_end", VoidTy, I32Ty);
+    FunctionCallee loopExitFn = M.getOrInsertFunction("__trace_loop_exit", VoidTy, I32Ty);
+    FunctionCallee funcExitFn = M.getOrInsertFunction("__trace_func_exit", VoidTy);
 
     // -----------------------------------------------------------------------
     // 4. Emit per-function metadata as a FuncTraceMeta struct
@@ -274,9 +258,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F,
     // Build the metadata struct type to match FuncTraceMeta
     // {i8*, i32, i8**, i32, i32*, i8**, i8**, i32*, i32*, i8***, i32*, i8***}
     StructType *metaStructTy = StructType::create(
-        Ctx,
-        {PtrTy, I32Ty, PtrTy, I32Ty, PtrTy, PtrTy, PtrTy, PtrTy, PtrTy,
-         PtrTy, PtrTy, PtrTy},
+        Ctx, {PtrTy, I32Ty, PtrTy, I32Ty, PtrTy, PtrTy, PtrTy, PtrTy, PtrTy, PtrTy, PtrTy, PtrTy},
         metaPrefix + ".type");
 
     // Create the struct constant
@@ -287,33 +269,25 @@ PreservedAnalyses TraceCollectorPass::run(Function &F,
     metaFields.push_back(ConstantInt::get(I32Ty, loopCount));
 
     if (loopCount > 0) {
-        metaFields.push_back(createIntArray(M, headerIdxVec,
-                                             metaPrefix + ".header_idx"));
-        metaFields.push_back(createStringArray(M, headerNameVec,
-                                                metaPrefix + ".header_names"));
-        metaFields.push_back(createStringArray(M, latchNameVec,
-                                                metaPrefix + ".latch_names"));
-        metaFields.push_back(createIntArray(M, depthVec,
-                                             metaPrefix + ".depths"));
-        metaFields.push_back(createIntArray(M, memberCountVec,
-                                             metaPrefix + ".member_counts"));
-        metaFields.push_back(createStringArrayArray(M, memberNamesVec,
-                                                     metaPrefix + ".member_names"));
-        metaFields.push_back(createIntArray(M, exitingCountVec,
-                                             metaPrefix + ".exiting_counts"));
-        metaFields.push_back(createStringArrayArray(M, exitingNamesVec,
-                                                     metaPrefix + ".exiting_names"));
+        metaFields.push_back(createIntArray(M, headerIdxVec, metaPrefix + ".header_idx"));
+        metaFields.push_back(createStringArray(M, headerNameVec, metaPrefix + ".header_names"));
+        metaFields.push_back(createStringArray(M, latchNameVec, metaPrefix + ".latch_names"));
+        metaFields.push_back(createIntArray(M, depthVec, metaPrefix + ".depths"));
+        metaFields.push_back(createIntArray(M, memberCountVec, metaPrefix + ".member_counts"));
+        metaFields.push_back(
+            createStringArrayArray(M, memberNamesVec, metaPrefix + ".member_names"));
+        metaFields.push_back(createIntArray(M, exitingCountVec, metaPrefix + ".exiting_counts"));
+        metaFields.push_back(
+            createStringArrayArray(M, exitingNamesVec, metaPrefix + ".exiting_names"));
     } else {
         // Null pointers for all loop arrays
         for (int i = 0; i < 8; i++)
-            metaFields.push_back(ConstantPointerNull::get(
-                cast<PointerType>(PtrTy)));
+            metaFields.push_back(ConstantPointerNull::get(cast<PointerType>(PtrTy)));
     }
 
     Constant *metaStruct = ConstantStruct::get(metaStructTy, metaFields);
     auto *metaGV = new GlobalVariable(M, metaStructTy, /*isConstant=*/true,
-                                      GlobalValue::PrivateLinkage, metaStruct,
-                                      metaPrefix);
+                                      GlobalValue::PrivateLinkage, metaStruct, metaPrefix);
 
     // -----------------------------------------------------------------------
     // 5. Insert __trace_func_enter at function entry
@@ -405,8 +379,8 @@ PreservedAnalyses TraceCollectorPass::run(Function &F,
         }
     }
 
-    errs() << "TraceCollectorPass: instrumented " << funcName
-           << " (" << bbCount << " BBs, " << loopCount << " loops)\n";
+    errs() << "TraceCollectorPass: instrumented " << funcName << " (" << bbCount << " BBs, "
+           << loopCount << " loops)\n";
 
     return PreservedAnalyses::none();
 }

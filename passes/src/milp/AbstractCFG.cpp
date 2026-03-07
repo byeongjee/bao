@@ -32,10 +32,10 @@ namespace checkpoint {
 
 namespace {
 
-cl::opt<bool> AbstractCFGVerboseOpt(
-    "abstract-cfg-verbose",
-    cl::desc("Print per-loop abstract CFG summarization skip details"),
-    cl::init(false));
+cl::opt<bool>
+    AbstractCFGVerboseOpt("abstract-cfg-verbose",
+                          cl::desc("Print per-loop abstract CFG summarization skip details"),
+                          cl::init(false));
 
 struct LoopAggregate {
     std::string nodeName;
@@ -72,11 +72,10 @@ static std::vector<Loop *> collectOutermostFirst(LoopInfo &LI) {
     return loops;
 }
 
-static WorstCasePathResult computeWorstCaseWorstCasePathResult(
-    Loop *L,
-    const DenseMap<const BasicBlock *, double> &blockEnergyByBB,
-    LoopInfo &LI,
-    ScalarEvolution &SE) {
+static WorstCasePathResult
+computeWorstCaseWorstCasePathResult(Loop *L,
+                                    const DenseMap<const BasicBlock *, double> &blockEnergyByBB,
+                                    LoopInfo &LI, ScalarEvolution &SE) {
     WorstCasePathResult result;
 
     BasicBlock *Header = L->getHeader();
@@ -90,8 +89,7 @@ static WorstCasePathResult computeWorstCaseWorstCasePathResult(
     DenseMap<const Loop *, double> subLoopTotal;
     DenseMap<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
     for (Loop *SubL : L->getSubLoops()) {
-        auto subPath = computeWorstCaseWorstCasePathResult(SubL, blockEnergyByBB,
-                                                   LI, SE);
+        auto subPath = computeWorstCaseWorstCasePathResult(SubL, blockEnergyByBB, LI, SE);
         if (!subPath.ok) {
             result.error = "sub-loop-energy-unavailable";
             return result;
@@ -155,8 +153,7 @@ static WorstCasePathResult computeWorstCaseWorstCasePathResult(
     DenseMap<const BasicBlock *, const BasicBlock *> bestSucc;
     bool cycleDetected = false;
 
-    std::function<double(const BasicBlock *)> dfs =
-        [&](const BasicBlock *BB) -> double {
+    std::function<double(const BasicBlock *)> dfs = [&](const BasicBlock *BB) -> double {
         if (BB == Latch) {
             return getEnergy(BB);
         }
@@ -246,8 +243,7 @@ static WorstCasePathResult computeWorstCaseWorstCasePathResult(
     return result;
 }
 
-static bool overlapsSelected(Loop *L,
-                             const SmallPtrSetImpl<const BasicBlock *> &selectedBlocks) {
+static bool overlapsSelected(Loop *L, const SmallPtrSetImpl<const BasicBlock *> &selectedBlocks) {
     for (const BasicBlock *BB : L->blocks()) {
         if (selectedBlocks.count(BB)) {
             return true;
@@ -290,8 +286,7 @@ const std::string &AbstractCFG::getNodeName(NodeId node) const {
     return it->second;
 }
 
-const std::set<llvm::GlobalVariable *> &
-AbstractCFG::getEligLiveIn(NodeId block) const {
+const std::set<llvm::GlobalVariable *> &AbstractCFG::getEligLiveIn(NodeId block) const {
     auto it = eligLiveIn_.find(block);
     if (it != eligLiveIn_.end()) {
         return it->second;
@@ -300,8 +295,7 @@ AbstractCFG::getEligLiveIn(NodeId block) const {
     return kEmpty;
 }
 
-bool AbstractCFG::getEligDefIndicator(NodeId block,
-                                      llvm::GlobalVariable *gv) const {
+bool AbstractCFG::getEligDefIndicator(NodeId block, llvm::GlobalVariable *gv) const {
     auto it = eligDefIndicator_.find(std::make_pair(block, gv));
     if (it != eligDefIndicator_.end()) {
         return it->second;
@@ -309,8 +303,7 @@ bool AbstractCFG::getEligDefIndicator(NodeId block,
     return false;
 }
 
-const std::vector<llvm::Value *> &
-AbstractCFG::getIneligibleObjs() const {
+const std::vector<llvm::Value *> &AbstractCFG::getIneligibleObjs() const {
     return ineligibleObjs_;
 }
 
@@ -318,8 +311,7 @@ bool AbstractCFG::isIneligible(llvm::Value *v) const {
     return ineligibleObjSet_.count(v) > 0;
 }
 
-const std::set<llvm::Value *> &
-AbstractCFG::getIneligLiveIn(NodeId block) const {
+const std::set<llvm::Value *> &AbstractCFG::getIneligLiveIn(NodeId block) const {
     auto it = ineligLiveIn_.find(block);
     if (it != ineligLiveIn_.end()) {
         return it->second;
@@ -328,8 +320,7 @@ AbstractCFG::getIneligLiveIn(NodeId block) const {
     return kEmpty;
 }
 
-bool AbstractCFG::getIneligDefIndicator(NodeId block,
-                                        llvm::Value *v) const {
+bool AbstractCFG::getIneligDefIndicator(NodeId block, llvm::Value *v) const {
     auto it = ineligDefIndicator_.find(std::make_pair(block, v));
     if (it != ineligDefIndicator_.end()) {
         return it->second;
@@ -397,12 +388,9 @@ double AbstractCFG::getQReboot() const {
     return 1.0; // Always 1.0 — hardcoded after config unification
 }
 
-AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
-                                        llvm::LoopInfo &LI,
-                                        llvm::ScalarEvolution &SE,
-                                        const CFGAnalysis &cfg,
-                                        const StateAnalysis &state,
-                                        const EnergyModel &energy) {
+AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
+                                        llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
+                                        const StateAnalysis &state, const EnergyModel &energy) {
     AbstractCFGBuildResult out;
     out.model = std::make_unique<AbstractCFG>();
     AbstractCFG &model = *out.model;
@@ -412,8 +400,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     // Stage 1: Copy eligible globals and their sizes/costs.
     model.vmObjs_ = state.getVMObjs();
     for (llvm::GlobalVariable *GV : model.vmObjs_) {
-        model.varSizeBytes_[GV] =
-            static_cast<int>(state.getVarSizeBytes(GV));
+        model.varSizeBytes_[GV] = static_cast<int>(state.getVarSizeBytes(GV));
         model.eSaveByVar_[GV] = energy.getESave(GV);
         model.eRestoreByVar_[GV] = energy.getERestore(GV);
     }
@@ -422,8 +409,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     model.ineligibleObjs_ = state.getIneligibleObjs();
     for (llvm::Value *V : model.ineligibleObjs_) {
         model.ineligibleObjSet_.insert(V);
-        model.varSizeBytes_[V] =
-            static_cast<int>(state.getVarSizeBytes(V));
+        model.varSizeBytes_[V] = static_cast<int>(state.getVarSizeBytes(V));
         model.eSaveByVar_[V] = energy.getESave(V);
         model.eRestoreByVar_[V] = energy.getERestore(V);
     }
@@ -448,24 +434,21 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
     // summaryNodeName -> LoopAggregate
     std::map<std::string, LoopAggregate> summariesByNode;
 
-    const double budget =
-        model.params_.capacity - model.params_.E_pro - model.params_.E_epi;
+    const double budget = model.params_.capacity - model.params_.E_pro - model.params_.E_epi;
 
     for (Loop *L : loops) {
         out.stats.loopsSeen++;
         BasicBlock *loopHeader = L->getHeader();
-        std::string loopHeaderName =
-            loopHeader ? getBlockName(*loopHeader, F) : "<unknown>";
+        std::string loopHeaderName = loopHeader ? getBlockName(*loopHeader, F) : "<unknown>";
         bool isStripMined = hasStripMinedLoopMetadata(L);
         if (isStripMined)
             out.stats.stripMinedLoopsSeen++;
 
-        auto skipLoop = [&](const std::string &reason,
-                            const std::string &details = "") {
+        auto skipLoop = [&](const std::string &reason, const std::string &details = "") {
             out.stats.skippedReasons[reason]++;
             if (AbstractCFGVerboseOpt) {
-                errs() << "AbstractCFG skip " << F.getName() << "::"
-                       << loopHeaderName << " reason=" << reason;
+                errs() << "AbstractCFG skip " << F.getName() << "::" << loopHeaderName
+                       << " reason=" << reason;
                 if (!details.empty()) {
                     errs() << " details=" << details;
                 }
@@ -473,9 +456,8 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             }
             if (isStripMined) {
                 out.stats.stripMinedLoopsSkipped++;
-                errs() << "AbstractCFG warning: strip-mined loop not summarized "
-                       << F.getName() << "::" << loopHeaderName
-                       << " reason=" << reason;
+                errs() << "AbstractCFG warning: strip-mined loop not summarized " << F.getName()
+                       << "::" << loopHeaderName << " reason=" << reason;
                 if (!details.empty()) {
                     errs() << " details=" << details;
                 }
@@ -493,10 +475,8 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         }
         if (!loopHeader || !L->getLoopLatch()) {
             skipLoop("missing-header-or-latch",
-                     "has-header=" +
-                         std::string(loopHeader ? "true" : "false") +
-                         ", has-latch=" +
-                         std::string(L->getLoopLatch() ? "true" : "false"));
+                     "has-header=" + std::string(loopHeader ? "true" : "false") +
+                         ", has-latch=" + std::string(L->getLoopLatch() ? "true" : "false"));
             continue;
         }
         if (containsInvoke(L)) {
@@ -508,17 +488,14 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             continue;
         }
 
-        WorstCasePathResult path = computeWorstCaseWorstCasePathResult(L, blockEnergyByBB,
-                                                         LI, SE);
+        WorstCasePathResult path = computeWorstCaseWorstCasePathResult(L, blockEnergyByBB, LI, SE);
         if (!path.ok) {
-            skipLoop(path.error.empty() ? "unknown-path-summary-error"
-                                        : path.error,
+            skipLoop(path.error.empty() ? "unknown-path-summary-error" : path.error,
                      "path-energy-unavailable");
             continue;
         }
         if (path.energy <= 0.0) {
-            skipLoop("nonpositive-loop-energy",
-                     "path-energy=" + std::to_string(path.energy));
+            skipLoop("nonpositive-loop-energy", "path-energy=" + std::to_string(path.energy));
             continue;
         }
 
@@ -536,8 +513,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             loopTC = static_cast<unsigned>(*markerTC);
         else {
             skipLoop("unknown-loop-trip-count",
-                     "scev-trip-count=" + std::to_string(scevTC) +
-                         ", marker-trip-count=none");
+                     "scev-trip-count=" + std::to_string(scevTC) + ", marker-trip-count=none");
             continue;
         }
 
@@ -555,42 +531,26 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         double restoreLiveInMargin = 0.0;
         double commitDefMargin = 0.0;
         double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-            path.blocksOnPath,
-            state,
-            model.params_,
-            restoreLiveInMargin,
-            commitDefMargin);
+            path.blocksOnPath, state, model.params_, restoreLiveInMargin, commitDefMargin);
 
         const double budgetAfterBoundary = budget - boundaryStateMargin;
         double totalBaseEnergy = path.energy * static_cast<double>(loopTC);
-        double totalNvmPenalty =
-            perIterNvmPenalty * static_cast<double>(loopTC);
+        double totalNvmPenalty = perIterNvmPenalty * static_cast<double>(loopTC);
         double totalEnergyWithNvm = totalBaseEnergy + totalNvmPenalty;
-        if (budgetAfterBoundary <= 0.0 ||
-            !(totalEnergyWithNvm < budgetAfterBoundary)) {
+        if (budgetAfterBoundary <= 0.0 || !(totalEnergyWithNvm < budgetAfterBoundary)) {
             skipLoop("loop-total-exceeds-budget",
                      "path-energy=" + std::to_string(path.energy) +
-                         ", per-iter-path-energy=" +
-                         std::to_string(path.energy) +
-                         ", per-iter-nvm-penalty=" +
-                         std::to_string(perIterNvmPenalty) +
+                         ", per-iter-path-energy=" + std::to_string(path.energy) +
+                         ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
                          ", trip-count=" + std::to_string(loopTC) +
-                         ", total-base-energy=" +
-                         std::to_string(totalBaseEnergy) +
-                         ", total-nvm-penalty=" +
-                         std::to_string(totalNvmPenalty) +
-                         ", total-energy-with-nvm=" +
-                         std::to_string(totalEnergyWithNvm) +
-                         ", nvm-access-margin=" +
-                         std::to_string(perIterNvmPenalty) +
-                         ", restore-livein-margin=" +
-                         std::to_string(restoreLiveInMargin) +
-                         ", commit-def-margin=" +
-                         std::to_string(commitDefMargin) +
-                         ", boundary-state-margin=" +
-                         std::to_string(boundaryStateMargin) +
-                         ", budget-after-boundary=" +
-                         std::to_string(budgetAfterBoundary));
+                         ", total-base-energy=" + std::to_string(totalBaseEnergy) +
+                         ", total-nvm-penalty=" + std::to_string(totalNvmPenalty) +
+                         ", total-energy-with-nvm=" + std::to_string(totalEnergyWithNvm) +
+                         ", nvm-access-margin=" + std::to_string(perIterNvmPenalty) +
+                         ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
+                         ", commit-def-margin=" + std::to_string(commitDefMargin) +
+                         ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
+                         ", budget-after-boundary=" + std::to_string(budgetAfterBoundary));
             continue;
         }
 
@@ -705,10 +665,9 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         for (const auto &[src, dst] : cfg.getEdges()) {
             const std::string &aSrc = concreteToAbstract[src];
             const std::string &aDst = concreteToAbstract[dst];
-            bool isUncollapsedConcreteSelfEdge =
-                (src == dst) &&
-                (aSrc == cfg.getBlockInfo(src).name) &&
-                (aDst == cfg.getBlockInfo(dst).name);
+            bool isUncollapsedConcreteSelfEdge = (src == dst) &&
+                                                 (aSrc == cfg.getBlockInfo(src).name) &&
+                                                 (aDst == cfg.getBlockInfo(dst).name);
             if (aSrc == aDst && !isUncollapsedConcreteSelfEdge) {
                 continue;
             }
@@ -824,8 +783,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         auto summaryIt = summariesByNode.find(nodeName);
         if (summaryIt != summariesByNode.end()) {
             const LoopAggregate &agg = summaryIt->second;
-            llvm::BasicBlock *header =
-                const_cast<llvm::BasicBlock *>(agg.headerBB);
+            llvm::BasicBlock *header = const_cast<llvm::BasicBlock *>(agg.headerBB);
             // Use the preheader as the representative block.
             llvm::BasicBlock *rep = header;
             if (llvm::Loop *L = LI.getLoopFor(header)) {
@@ -835,14 +793,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             model.nodeMap_.setSummaryRepresentative(nodeId, rep);
             // Register all loop-interior blocks → summary NodeId.
             for (const BasicBlock *loopBB : agg.loopBlocks) {
-                model.nodeMap_.setSummaryMember(
-                    nodeId, const_cast<llvm::BasicBlock *>(loopBB));
+                model.nodeMap_.setSummaryMember(nodeId, const_cast<llvm::BasicBlock *>(loopBB));
             }
         } else {
             auto cIt = nameToBBConcrete.find(nodeName);
             if (cIt != nameToBBConcrete.end()) {
-                model.nodeMap_.setConcreteNode(
-                    nodeId, const_cast<llvm::BasicBlock *>(cIt->second));
+                model.nodeMap_.setConcreteNode(nodeId, const_cast<llvm::BasicBlock *>(cIt->second));
             }
         }
     }

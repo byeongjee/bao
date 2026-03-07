@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(CheckpointPass)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Fetch nlohmann/json (header-only JSON library)
 include(FetchContent)
 FetchContent_Declare(json

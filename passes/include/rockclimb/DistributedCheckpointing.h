@@ -26,7 +26,7 @@ struct CheckpointPoint {
 /// Save registers at their last definition point in each region.
 /// This is in contrast to boundary checkpointing which saves at region starts.
 class DistributedCheckpointing {
-public:
+  public:
     /// Construct analyzer for regions.
     /// @param regions Region information from RockClimbOptimizer.
     explicit DistributedCheckpointing(const std::vector<RegionInfo> &regions);
@@ -42,25 +42,24 @@ public:
     /// Get the number of registers that need checkpointing.
     unsigned getCheckpointedRegisterCount() const { return nextRegId_; }
 
-private:
+  private:
     const std::vector<RegionInfo> &regions_;
     unsigned nextRegId_ = 0;
 
     /// Build a set of BasicBlock* from a region's WeakTrackingVH block list.
-    static llvm::SmallPtrSet<llvm::BasicBlock*, 8>
-    makeRegionBlockSet(const RegionInfo &region);
+    static llvm::SmallPtrSet<llvm::BasicBlock *, 8> makeRegionBlockSet(const RegionInfo &region);
 
     /// Compute registers defined in a region.
-    std::set<llvm::Value*> computeDefs(const RegionInfo &region);
+    std::set<llvm::Value *> computeDefs(const RegionInfo &region);
 
     /// Compute registers live at region exit.
-    std::set<llvm::Value*> computeLiveOut(const RegionInfo &region);
+    std::set<llvm::Value *> computeLiveOut(const RegionInfo &region);
 
     /// Assign a unique register ID for NVM storage.
     unsigned assignRegId(llvm::Value *reg);
 
     /// Map from Value* to assigned register ID.
-    std::map<llvm::Value*, unsigned> regIdMap_;
+    std::map<llvm::Value *, unsigned> regIdMap_;
 };
 
 } // namespace checkpoint

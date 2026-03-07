@@ -11,7 +11,7 @@ namespace checkpoint {
 /// Reads cost configuration from a JSON file and sums instruction
 /// costs to estimate energy for each basic block.
 class IRBasedEstimator : public EnergyEstimator {
-public:
+  public:
     /// Create estimator from configuration file.
     /// @param configPath Path to JSON configuration file.
     /// @return Estimator instance, or nullptr on error (with message to errs()).
@@ -21,7 +21,7 @@ public:
     std::string getName() const override;
     double getInstructionCost(const llvm::Instruction &I) override;
 
-private:
+  private:
     /// Private constructor - use create() factory method.
     IRBasedEstimator() = default;
 

@@ -8,20 +8,15 @@
 namespace checkpoint {
 
 RCGSolver::RCGSolver(
-    const std::vector<llvm::BasicBlock *> &pathBlocks,
-    const StateAnalysis &state,
-    const CFGAnalysis &cfg,
-    const SchematicParams &params,
+    const std::vector<llvm::BasicBlock *> &pathBlocks, const StateAnalysis &state,
+    const CFGAnalysis &cfg, const SchematicParams &params,
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
-    const llvm::DenseMap<llvm::BasicBlock *,
-                         std::map<llvm::GlobalVariable *, Placement>>
+    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::GlobalVariable *, Placement>>
         &decidedPlacements,
-    llvm::BasicBlock *startBoundaryBlock,
-    llvm::BasicBlock *endBoundaryBlock)
+    llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
       existingMeta_(existingMeta), decidedPlacements_(decidedPlacements),
-      startBoundaryBlock_(startBoundaryBlock),
-      endBoundaryBlock_(endBoundaryBlock) {}
+      startBoundaryBlock_(startBoundaryBlock), endBoundaryBlock_(endBoundaryBlock) {}
 
 void RCGSolver::buildNodes() {
     nodes_.clear();
@@ -39,12 +34,10 @@ void RCGSolver::buildNodes() {
     }
 
     // End node.
-    nodes_.push_back(
-        Node{Node::End, {}, static_cast<unsigned>(pathBlocks_.size())});
+    nodes_.push_back(Node{Node::End, {}, static_cast<unsigned>(pathBlocks_.size())});
 }
 
-double RCGSolver::getIntervalBudget(unsigned nodeFrom,
-                                     unsigned nodeTo) const {
+double RCGSolver::getIntervalBudget(unsigned nodeFrom, unsigned nodeTo) const {
     double budget = params_.capacity;
 
     bool isStart = (nodeFrom == 0);
@@ -78,8 +71,8 @@ double RCGSolver::getIntervalBudget(unsigned nodeFrom,
     return budget;
 }
 
-std::pair<unsigned, unsigned> RCGSolver::getIntervalRange(
-    unsigned nodeFrom, unsigned nodeTo) const {
+std::pair<unsigned, unsigned> RCGSolver::getIntervalRange(unsigned nodeFrom,
+                                                          unsigned nodeTo) const {
     unsigned startIdx;
     if (nodes_[nodeFrom].kind == Node::Start) {
         startIdx = 0;
@@ -99,15 +92,14 @@ std::pair<unsigned, unsigned> RCGSolver::getIntervalRange(
     return {startIdx, endIdx};
 }
 
-std::vector<llvm::BasicBlock *> RCGSolver::getIntervalBlocks(
-    unsigned nodeFrom, unsigned nodeTo) const {
+std::vector<llvm::BasicBlock *> RCGSolver::getIntervalBlocks(unsigned nodeFrom,
+                                                             unsigned nodeTo) const {
     auto [startIdx, endIdx] = getIntervalRange(nodeFrom, nodeTo);
     if (startIdx > endIdx)
         return {};
 
-    return std::vector<llvm::BasicBlock *>(
-        pathBlocks_.begin() + startIdx,
-        pathBlocks_.begin() + endIdx + 1);
+    return std::vector<llvm::BasicBlock *>(pathBlocks_.begin() + startIdx,
+                                           pathBlocks_.begin() + endIdx + 1);
 }
 
 RCGResult RCGSolver::solve() {
@@ -135,8 +127,7 @@ RCGResult RCGSolver::solve() {
             }
         }
         auto alloc = computeIntervalAllocation(blocks, state_, params_, fixed);
-        double energy = computeIntervalEnergy(
-            blocks, alloc, state_, cfg_, params_, true, true);
+        double energy = computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, true, true);
         alloc.intervalEnergy = energy;
         double budget = getIntervalBudget(0, 1);
 
@@ -178,18 +169,16 @@ RCGResult RCGSolver::solve() {
                 }
             }
 
-            auto alloc = computeIntervalAllocation(
-                blocks, state_, params_, fixed);
+            auto alloc = computeIntervalAllocation(blocks, state_, params_, fixed);
             bool isFirst = (i == 0);
             bool isLast = (j == numNodes - 1);
-            double energy = computeIntervalEnergy(
-                blocks, alloc, state_, cfg_, params_, isFirst, isLast);
+            double energy =
+                computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, isFirst, isLast);
             alloc.intervalEnergy = energy;
             double budget = getIntervalBudget(i, j);
 
             if (energy <= budget) {
-                adj[i].push_back(
-                    RCGEdge{i, j, energy, std::move(alloc), std::move(blocks)});
+                adj[i].push_back(RCGEdge{i, j, energy, std::move(alloc), std::move(blocks)});
             }
         }
     }

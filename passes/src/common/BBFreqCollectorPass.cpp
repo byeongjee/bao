@@ -21,8 +21,7 @@ namespace checkpoint {
 // Helpers (same pattern as TraceCollectorPass)
 // ---------------------------------------------------------------------------
 
-static Constant *createGlobalString(Module &M, StringRef str,
-                                     const Twine &name) {
+static Constant *createGlobalString(Module &M, StringRef str, const Twine &name) {
     Constant *strConst = ConstantDataArray::getString(M.getContext(), str);
     auto *GV = new GlobalVariable(M, strConst->getType(), /*isConstant=*/true,
                                   GlobalValue::PrivateLinkage, strConst, name);
@@ -33,22 +32,20 @@ static Constant *createGlobalString(Module &M, StringRef str,
                              ConstantInt::get(Type::getInt32Ty(M.getContext()), 0)});
 }
 
-static Constant *createStringArray(Module &M,
-                                    const std::vector<std::string> &strings,
-                                    const Twine &name) {
+static Constant *createStringArray(Module &M, const std::vector<std::string> &strings,
+                                   const Twine &name) {
     LLVMContext &Ctx = M.getContext();
     Type *I8PtrTy = PointerType::getUnqual(Ctx);
 
     SmallVector<Constant *, 32> ptrs;
     for (unsigned i = 0; i < strings.size(); i++) {
-        ptrs.push_back(createGlobalString(M, strings[i],
-                                          name + ".str." + Twine(i)));
+        ptrs.push_back(createGlobalString(M, strings[i], name + ".str." + Twine(i)));
     }
 
     ArrayType *arrTy = ArrayType::get(I8PtrTy, strings.size());
     Constant *arr = ConstantArray::get(arrTy, ptrs);
-    auto *GV = new GlobalVariable(M, arrTy, /*isConstant=*/true,
-                                  GlobalValue::PrivateLinkage, arr, name);
+    auto *GV =
+        new GlobalVariable(M, arrTy, /*isConstant=*/true, GlobalValue::PrivateLinkage, arr, name);
     GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
     return ConstantExpr::getInBoundsGetElementPtr(
         arrTy, GV,
@@ -60,8 +57,7 @@ static Constant *createStringArray(Module &M,
 // BBFreqCollectorPass implementation
 // ---------------------------------------------------------------------------
 
-PreservedAnalyses BBFreqCollectorPass::run(Function &F,
-                                            FunctionAnalysisManager &AM) {
+PreservedAnalyses BBFreqCollectorPass::run(Function &F, FunctionAnalysisManager &AM) {
     if (F.isDeclaration())
         return PreservedAnalyses::all();
 
@@ -95,10 +91,8 @@ PreservedAnalyses BBFreqCollectorPass::run(Function &F,
     Type *I64Ty = Type::getInt64Ty(Ctx);
     ArrayType *counterArrTy = ArrayType::get(I64Ty, bbCount);
     auto *counterGV = new GlobalVariable(
-        M, counterArrTy, /*isConstant=*/false,
-        GlobalValue::InternalLinkage,
-        ConstantAggregateZero::get(counterArrTy),
-        "__bb_freq_counters_" + F.getName());
+        M, counterArrTy, /*isConstant=*/false, GlobalValue::InternalLinkage,
+        ConstantAggregateZero::get(counterArrTy), "__bb_freq_counters_" + F.getName());
 
     // -------------------------------------------------------------------
     // 3. Create per-function metadata: function name + BB name array
@@ -116,12 +110,11 @@ PreservedAnalyses BBFreqCollectorPass::run(Function &F,
 
     // void __bb_freq_register(const char *func_name, const char **bb_names,
     //                         int bb_count, long long *counters)
-    FunctionCallee registerFn = M.getOrInsertFunction(
-        "__bb_freq_register", VoidTy, PtrTy, PtrTy, I32Ty, PtrTy);
+    FunctionCallee registerFn =
+        M.getOrInsertFunction("__bb_freq_register", VoidTy, PtrTy, PtrTy, I32Ty, PtrTy);
 
     // void __bb_freq_dump(void)
-    FunctionCallee dumpFn = M.getOrInsertFunction(
-        "__bb_freq_dump", VoidTy);
+    FunctionCallee dumpFn = M.getOrInsertFunction("__bb_freq_dump", VoidTy);
 
     // -------------------------------------------------------------------
     // 5. At function entry: insert __bb_freq_register call
@@ -138,12 +131,8 @@ PreservedAnalyses BBFreqCollectorPass::run(Function &F,
         entryInsertPt = entryBB.getTerminator();
 
     IRBuilder<> entryBuilder(entryInsertPt);
-    entryBuilder.CreateCall(registerFn, {
-        funcNameStr,
-        bbNamesArr,
-        ConstantInt::get(I32Ty, bbCount),
-        counterGV
-    });
+    entryBuilder.CreateCall(registerFn,
+                            {funcNameStr, bbNamesArr, ConstantInt::get(I32Ty, bbCount), counterGV});
 
     // -------------------------------------------------------------------
     // 6. At each BB entry (after PHIs): increment counter[bb_idx]
@@ -174,8 +163,7 @@ PreservedAnalyses BBFreqCollectorPass::run(Function &F,
 
         IRBuilder<> builder(insertPt);
         // GEP into counter array: &counters[idx]
-        Value *counterPtr = builder.CreateConstInBoundsGEP2_32(
-            counterArrTy, counterGV, 0, idx);
+        Value *counterPtr = builder.CreateConstInBoundsGEP2_32(counterArrTy, counterGV, 0, idx);
         // Load current count
         Value *count = builder.CreateLoad(I64Ty, counterPtr);
         // Increment
@@ -199,8 +187,7 @@ PreservedAnalyses BBFreqCollectorPass::run(Function &F,
         }
     }
 
-    errs() << "BBFreqCollectorPass: instrumented " << F.getName()
-           << " (" << bbCount << " BBs)\n";
+    errs() << "BBFreqCollectorPass: instrumented " << F.getName() << " (" << bbCount << " BBs)\n";
 
     return PreservedAnalyses::none();
 }

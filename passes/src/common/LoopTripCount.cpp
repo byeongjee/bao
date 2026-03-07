@@ -10,8 +10,7 @@ namespace {
 constexpr llvm::StringLiteral kTripCountTag = "llvm.loop.tripcount.upper";
 constexpr llvm::StringLiteral kStripMinedTag = "checkpoint.loop.stripmined";
 
-static bool isLoopMetadataTag(const llvm::MDNode *Op,
-                              llvm::StringRef TagName) {
+static bool isLoopMetadataTag(const llvm::MDNode *Op, llvm::StringRef TagName) {
     if (!Op || Op->getNumOperands() < 1)
         return false;
     auto *Tag = llvm::dyn_cast<llvm::MDString>(Op->getOperand(0));
@@ -61,8 +60,7 @@ std::optional<uint64_t> getMarkerTripCount(const llvm::Loop *L) {
         if (!Op || Op->getNumOperands() < 2)
             continue;
         if (isLoopMetadataTag(Op, kTripCountTag)) {
-            auto *Val = llvm::mdconst::dyn_extract<llvm::ConstantInt>(
-                Op->getOperand(1));
+            auto *Val = llvm::mdconst::dyn_extract<llvm::ConstantInt>(Op->getOperand(1));
             if (Val)
                 return Val->getZExtValue();
         }
@@ -92,10 +90,9 @@ void setLoopTripCountMetadata(llvm::Loop *L, uint64_t tripCount) {
     }
 
     // Append the new tripcount entry.
-    llvm::Metadata *TCOps[] = {
-        llvm::MDString::get(Ctx, kTripCountTag),
-        llvm::ConstantAsMetadata::get(
-            llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), tripCount))};
+    llvm::Metadata *TCOps[] = {llvm::MDString::get(Ctx, kTripCountTag),
+                               llvm::ConstantAsMetadata::get(
+                                   llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), tripCount))};
     MDs.push_back(llvm::MDNode::get(Ctx, TCOps));
 
     llvm::MDNode *NewLoopID = llvm::MDNode::getDistinct(Ctx, MDs);
@@ -139,8 +136,7 @@ void setStripMinedLoopMetadata(llvm::Loop *L) {
 
     llvm::Metadata *StripMinedOps[] = {
         llvm::MDString::get(Ctx, kStripMinedTag),
-        llvm::ConstantAsMetadata::get(
-            llvm::ConstantInt::get(llvm::Type::getInt1Ty(Ctx), 1))};
+        llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt1Ty(Ctx), 1))};
     MDs.push_back(llvm::MDNode::get(Ctx, StripMinedOps));
 
     llvm::MDNode *NewLoopID = llvm::MDNode::getDistinct(Ctx, MDs);

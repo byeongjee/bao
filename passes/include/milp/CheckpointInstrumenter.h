@@ -14,18 +14,15 @@ namespace checkpoint {
 
 /// Instruments LLVM IR based on MILP solution.
 class CheckpointInstrumenter {
-public:
-    explicit CheckpointInstrumenter(llvm::Module &M,
-                                    bool addDebugMarkers = false);
+  public:
+    explicit CheckpointInstrumenter(llvm::Module &M, bool addDebugMarkers = false);
 
     /// Instrument a function using the MILP solution and state analysis.
-    unsigned instrumentFunction(llvm::Function &F,
-                                const MILPSolution &solution,
-                                const ICFGView &cfg,
-                                const IStateView &stateView,
+    unsigned instrumentFunction(llvm::Function &F, const MILPSolution &solution,
+                                const ICFGView &cfg, const IStateView &stateView,
                                 const StateAnalysis &state);
 
-private:
+  private:
     llvm::Module &M_;
     bool addDebugMarkers_;
 
@@ -48,18 +45,13 @@ private:
 
     void createShadowGlobals(llvm::Function &F, const MILPSolution &solution,
                              const StateAnalysis &state);
-    void createNVMBackupGlobals(llvm::Function &F,
-                                const MILPSolution &solution,
-                                const StateAnalysis &state,
-                                const ICFGView &cfg);
-    void rewriteAccessesInVMRegions(llvm::Function &F,
-                                    const MILPSolution &solution,
+    void createNVMBackupGlobals(llvm::Function &F, const MILPSolution &solution,
+                                const StateAnalysis &state, const ICFGView &cfg);
+    void rewriteAccessesInVMRegions(llvm::Function &F, const MILPSolution &solution,
                                     const ICFGView &cfg);
 
-    unsigned insertRegionBoundaries(llvm::Function &F,
-                                    const MILPSolution &solution,
-                                    const ICFGView &cfg,
-                                    const IStateView &stateView,
+    unsigned insertRegionBoundaries(llvm::Function &F, const MILPSolution &solution,
+                                    const ICFGView &cfg, const IStateView &stateView,
                                     const StateAnalysis &state);
     void applyMemoryPlacement(const StateAnalysis &state);
 

@@ -7,17 +7,15 @@
 #include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
-#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace checkpoint {
 
-EnergyModel::EnergyModel(const CFGAnalysis &cfg,
-                         const StateAnalysis &state,
-                         const BBFreqLoader &freqLoader,
-                         llvm::Function &F,
+EnergyModel::EnergyModel(const CFGAnalysis &cfg, const StateAnalysis &state,
+                         const BBFreqLoader &freqLoader, llvm::Function &F,
                          const MILPEnergyParams &params)
     : cfg_(cfg), state_(state), params_(params) {
     computeFrequenciesFromFile(freqLoader, F);
@@ -29,8 +27,7 @@ double EnergyModel::getEBase(const llvm::BasicBlock *BB) const {
     return cfg_.getBlockInfo(BB).energyCost;
 }
 
-double EnergyModel::getENvm(const llvm::BasicBlock *BB,
-                             llvm::GlobalVariable *gv) const {
+double EnergyModel::getENvm(const llvm::BasicBlock *BB, llvm::GlobalVariable *gv) const {
     auto key = std::make_pair(BB, gv);
     auto it = eNvm_.find(key);
     if (it != eNvm_.end())
@@ -65,16 +62,14 @@ double EnergyModel::getQReboot() const {
 
 // ---- Private implementation ----
 
-void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader,
-                                              llvm::Function &F) {
+void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader, llvm::Function &F) {
     // Get entry block count from the frequency file.
     llvm::BasicBlock &Entry = F.getEntryBlock();
     auto entryCountOpt = freqLoader.getBlockCount(&Entry);
     if (!entryCountOpt) {
-        llvm::report_fatal_error(
-            llvm::Twine("MILP: entry block frequency missing for function '") +
-                F.getName() + "' in BB frequency file",
-            /*GenCrashDiag=*/false);
+        llvm::report_fatal_error(llvm::Twine("MILP: entry block frequency missing for function '") +
+                                     F.getName() + "' in BB frequency file",
+                                 /*GenCrashDiag=*/false);
     }
     const uint64_t entryCount = std::max<uint64_t>(*entryCountOpt, 1);
 
@@ -99,8 +94,8 @@ void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader,
                 llvm::raw_string_ostream os(blockName);
                 BB.printAsOperand(os, /*PrintType=*/false);
                 llvm::report_fatal_error(
-                    llvm::Twine("MILP: missing BB frequency for reachable block ") +
-                        os.str() + " in function '" + F.getName() + "'",
+                    llvm::Twine("MILP: missing BB frequency for reachable block ") + os.str() +
+                        " in function '" + F.getName() + "'",
                     /*GenCrashDiag=*/false);
             }
             // Unreachable block — assign frequency 0.
@@ -109,8 +104,7 @@ void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader,
         }
 
         // Normalize so entry block has frequency 1.0.
-        double normalized = static_cast<double>(*blockCountOpt) /
-                            static_cast<double>(entryCount);
+        double normalized = static_cast<double>(*blockCountOpt) / static_cast<double>(entryCount);
         fEntry_[&BB] = normalized;
     }
 }
@@ -118,13 +112,11 @@ void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader,
 void EnergyModel::computeNvmPenalties() {
     // E_nvm[b,v] = (loads + stores to v in b) * nvm_access_penalty
     // NVM penalties only apply to globals (eligible + ineligible globals).
-    auto computeForGV = [&](llvm::GlobalVariable *GV,
-                            const llvm::BasicBlock *BB) {
+    auto computeForGV = [&](llvm::GlobalVariable *GV, const llvm::BasicBlock *BB) {
         unsigned loads = state_.getLoadCount(BB, GV);
         unsigned stores = state_.getStoreCount(BB, GV);
         if (loads + stores > 0) {
-            double penalty =
-                static_cast<double>(loads + stores) * params_.nvmAccessPenalty;
+            double penalty = static_cast<double>(loads + stores) * params_.nvmAccessPenalty;
             eNvm_[std::make_pair(BB, GV)] = penalty;
         }
     };
@@ -159,10 +151,8 @@ void EnergyModel::computeSaveRestoreCosts() {
         unsigned sizeBytes = state_.getVarSizeBytes(V);
         if (sizeBytes == 0)
             return;
-        eSaveByVar_[V] =
-            static_cast<double>(sizeBytes) * params_.memStoreEnergyPerByte;
-        eRestoreByVar_[V] =
-            static_cast<double>(sizeBytes) * params_.memRestoreEnergyPerByte;
+        eSaveByVar_[V] = static_cast<double>(sizeBytes) * params_.memStoreEnergyPerByte;
+        eRestoreByVar_[V] = static_cast<double>(sizeBytes) * params_.memRestoreEnergyPerByte;
     };
 
     for (llvm::GlobalVariable *GV : state_.getVMObjs())
@@ -176,8 +166,7 @@ void EnergyModel::computeSaveRestoreCosts() {
 std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configPath) {
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        llvm::errs() << "Error: Cannot open MILP config file: "
-                     << configPath << "\n";
+        llvm::errs() << "Error: Cannot open MILP config file: " << configPath << "\n";
         return std::nullopt;
     }
 
@@ -188,11 +177,14 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
     }
 
     // Required shared fields at root level.
-    const std::vector<std::string> requiredDouble = {
-        "capacity", "E_pro", "E_epi",
-        "reg_store_energy", "reg_restore_energy", "nvm_access_penalty",
-        "mem_store_energy_per_byte", "mem_restore_energy_per_byte"
-    };
+    const std::vector<std::string> requiredDouble = {"capacity",
+                                                     "E_pro",
+                                                     "E_epi",
+                                                     "reg_store_energy",
+                                                     "reg_restore_energy",
+                                                     "nvm_access_penalty",
+                                                     "mem_store_energy_per_byte",
+                                                     "mem_restore_energy_per_byte"};
 
     for (const auto &field : requiredDouble) {
         if (!config.contains(field)) {

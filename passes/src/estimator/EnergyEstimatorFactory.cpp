@@ -5,17 +5,16 @@
 #include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
-#include <nlohmann/json.hpp>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace checkpoint {
 
 EnergyEstimatorFactory EnergyEstimatorFactory::createDefault() {
     EnergyEstimatorFactory factory;
     // Register built-in IR-based estimator
-    factory.registerType("ir", [](const std::string &configPath) {
-        return IRBasedEstimator::create(configPath);
-    });
+    factory.registerType(
+        "ir", [](const std::string &configPath) { return IRBasedEstimator::create(configPath); });
     // Register assembly-based estimator
     factory.registerType("assembly", [](const std::string &configPath) {
         return AssemblyBasedEstimator::create(configPath);
@@ -28,7 +27,7 @@ void EnergyEstimatorFactory::registerType(const std::string &name, CreatorFn cre
 }
 
 EnergyEstimatorPtr EnergyEstimatorFactory::create(const std::string &type,
-                                                   const std::string &configPath) const {
+                                                  const std::string &configPath) const {
     auto it = creators_.find(type);
     if (it == creators_.end()) {
         return nullptr;
@@ -52,8 +51,8 @@ EnergyEstimatorPtr EnergyEstimatorFactory::createFromConfig(const std::string &c
 
     // Get estimator type (required field)
     if (!config.contains("estimator_type")) {
-        llvm::errs() << "Error: Missing required 'estimator_type' field in config: "
-                     << configPath << "\nValid types: ir, assembly\n";
+        llvm::errs() << "Error: Missing required 'estimator_type' field in config: " << configPath
+                     << "\nValid types: ir, assembly\n";
         return nullptr;
     }
     std::string estimatorType = config["estimator_type"].get<std::string>();

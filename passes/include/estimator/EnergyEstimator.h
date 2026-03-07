@@ -10,15 +10,15 @@ namespace checkpoint {
 
 /// Result of energy estimation for a basic block.
 struct EnergyEstimate {
-    double cost;         // Energy cost for the block
-    std::string method;  // Estimation method used (for diagnostics)
+    double cost;        // Energy cost for the block
+    std::string method; // Estimation method used (for diagnostics)
 };
 
 /// Abstract interface for energy estimation.
 /// Different implementations can provide energy estimates based on
 /// IR analysis, assembly analysis, ML models, etc.
 class EnergyEstimator {
-public:
+  public:
     virtual ~EnergyEstimator() = default;
 
     /// Core interface: estimate energy for a basic block.

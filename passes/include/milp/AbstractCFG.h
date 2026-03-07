@@ -35,10 +35,8 @@ struct AbstractCFGStats {
 };
 
 /// MILP view backed by loop-collapsed abstract CFG/state/energy data.
-class AbstractCFG final : public ICFGView,
-                          public IStateView,
-                          public IEnergyView {
-public:
+class AbstractCFG final : public ICFGView, public IStateView, public IEnergyView {
+  public:
     using BlockGVKey = std::pair<NodeId, llvm::GlobalVariable *>;
     using BlockVarKey = std::pair<NodeId, llvm::Value *>;
 
@@ -46,33 +44,23 @@ public:
 
     // ICFGView
     const std::vector<NodeId> &getBlocks() const override { return blocks_; }
-    const std::vector<std::pair<NodeId, NodeId>> &getEdges() const override {
-        return edges_;
-    }
+    const std::vector<std::pair<NodeId, NodeId>> &getEdges() const override { return edges_; }
     NodeId getEntryBlock() const override { return entryBlock_; }
-    const std::vector<NodeId> &getExitBlocks() const override {
-        return exitBlocks_;
-    }
+    const std::vector<NodeId> &getExitBlocks() const override { return exitBlocks_; }
     double getBlockEnergyCost(NodeId block) const override;
     const std::string &getNodeName(NodeId node) const override;
     const NodeMap &getNodeMap() const override { return nodeMap_; }
 
     // IStateView — eligible
-    const std::vector<llvm::GlobalVariable *> &getVMObjs() const override {
-        return vmObjs_;
-    }
-    const std::set<llvm::GlobalVariable *> &
-    getEligLiveIn(NodeId block) const override;
-    bool getEligDefIndicator(NodeId block,
-                             llvm::GlobalVariable *gv) const override;
+    const std::vector<llvm::GlobalVariable *> &getVMObjs() const override { return vmObjs_; }
+    const std::set<llvm::GlobalVariable *> &getEligLiveIn(NodeId block) const override;
+    bool getEligDefIndicator(NodeId block, llvm::GlobalVariable *gv) const override;
 
     // IStateView — ineligible
     const std::vector<llvm::Value *> &getIneligibleObjs() const override;
     bool isIneligible(llvm::Value *v) const override;
-    const std::set<llvm::Value *> &
-    getIneligLiveIn(NodeId block) const override;
-    bool getIneligDefIndicator(NodeId block,
-                               llvm::Value *v) const override;
+    const std::set<llvm::Value *> &getIneligLiveIn(NodeId block) const override;
+    bool getIneligDefIndicator(NodeId block, llvm::Value *v) const override;
 
     // IStateView — shared
     int getVarSizeBytes(llvm::Value *v) const override;
@@ -87,14 +75,11 @@ public:
     double getFBoundary(NodeId block) const override;
     double getQReboot() const override;
 
-private:
+  private:
     friend struct AbstractCFGBuildResult;
-    friend AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
-                                                   llvm::LoopInfo &LI,
-                                                   llvm::ScalarEvolution &SE,
-                                                   const CFGAnalysis &cfg,
-                                                   const StateAnalysis &state,
-                                                   const EnergyModel &energy);
+    friend AbstractCFGBuildResult
+    buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI, llvm::ScalarEvolution &SE,
+                     const CFGAnalysis &cfg, const StateAnalysis &state, const EnergyModel &energy);
 
     NodeMap nodeMap_;
 
@@ -134,11 +119,8 @@ struct AbstractCFGBuildResult {
 };
 
 /// Build loop-collapsed abstract model used by MILP.
-AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
-                                        llvm::LoopInfo &LI,
-                                        llvm::ScalarEvolution &SE,
-                                        const CFGAnalysis &cfg,
-                                        const StateAnalysis &state,
-                                        const EnergyModel &energy);
+AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
+                                        llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
+                                        const StateAnalysis &state, const EnergyModel &energy);
 
 } // namespace checkpoint

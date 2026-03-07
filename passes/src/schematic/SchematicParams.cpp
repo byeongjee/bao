@@ -11,23 +11,24 @@ namespace checkpoint {
 std::optional<SchematicParams> parseSchematicParams(const std::string &configPath) {
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        llvm::errs() << "Error: Cannot open SCHEMATIC config file: "
-                     << configPath << "\n";
+        llvm::errs() << "Error: Cannot open SCHEMATIC config file: " << configPath << "\n";
         return std::nullopt;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::errs() << "Error: JSON parse error in SCHEMATIC config: "
-                     << configPath << "\n";
+        llvm::errs() << "Error: JSON parse error in SCHEMATIC config: " << configPath << "\n";
         return std::nullopt;
     }
 
-    const std::vector<std::string> requiredDouble = {
-        "capacity", "E_pro", "E_epi",
-        "reg_store_energy", "reg_restore_energy", "nvm_access_penalty",
-        "mem_store_energy_per_byte", "mem_restore_energy_per_byte"
-    };
+    const std::vector<std::string> requiredDouble = {"capacity",
+                                                     "E_pro",
+                                                     "E_epi",
+                                                     "reg_store_energy",
+                                                     "reg_restore_energy",
+                                                     "nvm_access_penalty",
+                                                     "mem_store_energy_per_byte",
+                                                     "mem_restore_energy_per_byte"};
 
     for (const auto &field : requiredDouble) {
         if (!config.contains(field)) {
@@ -37,9 +38,7 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
         }
     }
 
-    const std::vector<std::string> requiredUnsigned = {
-        "N_reg", "vm_capacity_bytes", "max_paths"
-    };
+    const std::vector<std::string> requiredUnsigned = {"N_reg", "vm_capacity_bytes", "max_paths"};
     for (const auto &field : requiredUnsigned) {
         if (!config.contains(field)) {
             llvm::errs() << "Error: Missing required field '" << field
@@ -77,8 +76,7 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     }
 
     // Helper to read bool from schematic section or root.
-    auto readBool = [&](const std::string &key,
-                        bool defaultVal) -> std::optional<bool> {
+    auto readBool = [&](const std::string &key, bool defaultVal) -> std::optional<bool> {
         for (const auto *src : {&schSection, &config}) {
             if (src->contains(key)) {
                 if (!(*src)[key].is_boolean()) {
@@ -93,17 +91,21 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     };
 
     auto debugMarkers = readBool("add_debug_markers", false);
-    if (!debugMarkers) return std::nullopt;
+    if (!debugMarkers)
+        return std::nullopt;
     params.addDebugMarkers = *debugMarkers;
 
     auto blockSplitting = readBool("enable_block_splitting", true);
-    if (!blockSplitting) return std::nullopt;
+    if (!blockSplitting)
+        return std::nullopt;
     params.enableBlockSplitting = *blockSplitting;
 
     // Also check disable_block_splitting (inverts enable_block_splitting).
     auto disableBS = readBool("disable_block_splitting", false);
-    if (!disableBS) return std::nullopt;
-    if (*disableBS) params.enableBlockSplitting = false;
+    if (!disableBS)
+        return std::nullopt;
+    if (*disableBS)
+        params.enableBlockSplitting = false;
 
     return params;
 }

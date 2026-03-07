@@ -71,18 +71,18 @@ struct MILPSolution {
 
     /// Count entries with value=true in a pair-keyed map.
     template <typename K>
-    static unsigned countEnabled(
-        const std::map<std::pair<NodeId, K>, bool> &m) {
+    static unsigned countEnabled(const std::map<std::pair<NodeId, K>, bool> &m) {
         unsigned n = 0;
         for (const auto &[key, enabled] : m)
-            if (enabled) ++n;
+            if (enabled)
+                ++n;
         return n;
     }
 };
 
 /// MILP optimizer for checkpoint placement using Gurobi.
 class CheckpointOptimizer {
-public:
+  public:
     CheckpointOptimizer(const MILPInput &input);
 
     bool solve();
@@ -102,7 +102,7 @@ public:
     /// Check feasibility - returns nodes whose base energy exceeds capacity.
     std::vector<NodeId> getInfeasibleBlocks() const;
 
-private:
+  private:
     const ICFGView &cfg_;
     const IStateView &state_;
     const IEnergyView &energy_;
@@ -119,13 +119,13 @@ private:
     using BlockVarKey = std::pair<NodeId, llvm::Value *>;
 
     // MILP variables
-    std::map<NodeId, GRBVar> isRegionStart_;         // x[b]
-    std::map<BlockGVKey, GRBVar> placeInVm_;         // p[b,v] — eligible only
-    std::map<BlockGVKey, GRBVar> needRestore_;       // y[b,v] — eligible only
-    std::map<BlockVarKey, GRBVar> pending_;           // pending[b,v] — all tracked
-    std::map<BlockGVKey, GRBVar> vmPending_;          // vm_pending[b,v] — eligible only
-    std::map<BlockVarKey, GRBVar> commit_;            // commit[b,v] — all tracked
-    std::map<NodeId, GRBVar> energyAccumulated_;     // eaccum[b]
+    std::map<NodeId, GRBVar> isRegionStart_;     // x[b]
+    std::map<BlockGVKey, GRBVar> placeInVm_;     // p[b,v] — eligible only
+    std::map<BlockGVKey, GRBVar> needRestore_;   // y[b,v] — eligible only
+    std::map<BlockVarKey, GRBVar> pending_;      // pending[b,v] — all tracked
+    std::map<BlockGVKey, GRBVar> vmPending_;     // vm_pending[b,v] — eligible only
+    std::map<BlockVarKey, GRBVar> commit_;       // commit[b,v] — all tracked
+    std::map<NodeId, GRBVar> energyAccumulated_; // eaccum[b]
 
     std::map<NodeId, std::vector<NodeId>> predecessors_;
 

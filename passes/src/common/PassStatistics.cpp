@@ -14,8 +14,8 @@ void printCommonStats(llvm::raw_ostream &OS, const CommonStats &stats) {
     OS << "  Regions:                         " << stats.regions << "\n";
     OS << "  Region boundaries:               " << stats.regionBoundaries << "\n";
     OS << "  Runtime calls inserted:          " << stats.runtimeCallsInserted << "\n";
-    OS << "  Compilation time (ms):           "
-       << llvm::format("%.3f", stats.compilationTimeMs) << "\n";
+    OS << "  Compilation time (ms):           " << llvm::format("%.3f", stats.compilationTimeMs)
+       << "\n";
     OS << "  Peak RSS (KB):                   " << stats.peakRSSKb << "\n";
 }
 

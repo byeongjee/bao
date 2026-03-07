@@ -22,8 +22,7 @@ struct WorstCasePathResult {
 
 /// Compute the save (commit) cost for a single tracked value.
 /// Heuristic: ignores non-scalar globals (arrays, structs).
-inline double getSaveCostForValue(llvm::Value *V,
-                                  const StateAnalysis &state,
+inline double getSaveCostForValue(llvm::Value *V, const StateAnalysis &state,
                                   const MILPEnergyParams &params) {
     if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
         llvm::Type *Ty = GV->getValueType();
@@ -42,8 +41,7 @@ inline double getSaveCostForValue(llvm::Value *V,
 
 /// Compute the restore cost for a single tracked value.
 /// Heuristic: ignores non-scalar globals (arrays, structs).
-inline double getRestoreCostForValue(llvm::Value *V,
-                                     const StateAnalysis &state,
+inline double getRestoreCostForValue(llvm::Value *V, const StateAnalysis &state,
                                      const MILPEnergyParams &params) {
     if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
         llvm::Type *Ty = GV->getValueType();
@@ -63,12 +61,10 @@ inline double getRestoreCostForValue(llvm::Value *V,
 /// Compute the total boundary-state energy margin on a path:
 /// restore cost for all live-in variables + commit cost for all defined variables.
 /// q (reboot probability) is intentionally treated as 1.0 for loop-level budgeting.
-inline double computeBoundaryStateMarginOnPath(
-    const llvm::SmallPtrSetImpl<const llvm::BasicBlock *> &pathBlocks,
-    const StateAnalysis &state,
-    const MILPEnergyParams &params,
-    double &restoreLiveInMargin,
-    double &commitDefMargin) {
+inline double
+computeBoundaryStateMarginOnPath(const llvm::SmallPtrSetImpl<const llvm::BasicBlock *> &pathBlocks,
+                                 const StateAnalysis &state, const MILPEnergyParams &params,
+                                 double &restoreLiveInMargin, double &commitDefMargin) {
     std::set<llvm::Value *> liveInVars;
     std::set<llvm::Value *> defVars;
 
