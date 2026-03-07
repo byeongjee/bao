@@ -14,9 +14,9 @@
 #define RNG_SEED 0x0C728394u
 #define ITERATIONS 100000U
 
-static uint32_t g_seed __attribute__((annotate("milp_candidate"))) = RNG_SEED;
+static uint32_t g_seed = RNG_SEED;
 static uint32_t g_totals[NUM_FUNCS]
-    __attribute__((used, annotate("milp_candidate")));
+    __attribute__((used));
 
 static const uint8_t g_bits[256] = {
     0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,

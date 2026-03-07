@@ -18,13 +18,11 @@ namespace checkpoint {
 
 /// Computes candidate-global state data for MILP checkpoint optimization.
 ///
-/// v1 contract:
-/// - Candidates are fixed-address globals annotated with "milp_candidate"
-/// - Intra-procedural analysis only
-/// - Strict unresolved-memory policy (diagnostic + function-level abort)
+/// All directly-accessed globals in the function are candidates for VM/NVM
+/// placement. Intra-procedural analysis only with strict unresolved-memory
+/// policy (diagnostic + function-level abort).
 ///
 /// V_inelig includes:
-/// - Non-candidate globals accessed in the function
 /// - Static allocas (stack slots)
 /// - Cross-block live SSA instructions (virtual registers)
 class StateAnalysis {
@@ -116,7 +114,6 @@ private:
     static const std::set<llvm::GlobalVariable *> emptyGVSet_;
     static const std::set<llvm::Value *> emptyValueSet_;
 
-    bool isMilpCandidateAnnotated(llvm::GlobalVariable *GV) const;
     bool isAllowedDirectCall(const llvm::CallBase &CB) const;
     bool validateInstructionForStrictMode(const llvm::Instruction &I);
     void reportStrictError(const llvm::Instruction &I, const std::string &reason);

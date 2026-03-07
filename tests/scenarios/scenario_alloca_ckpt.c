@@ -3,7 +3,7 @@
  * Phase 2 reads both before writing, making them live-in at the boundary.
  * Expected: @__nvm_alloca_local_var in .nvm; commit/restore memcpy at boundary. */
 
-int g_candidate __attribute__((annotate("milp_candidate")));
+int g_candidate;
 volatile int barrier;
 
 int main(void) {

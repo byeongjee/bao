@@ -74,13 +74,13 @@ static const uint8_t pub_b[ECC_PUB_KEY_SIZE] = {
     0x3E, 0x20, 0xDF, 0x38, 0x62, 0x00, 0x00, 0x00
 };
 
-/* --- Mutable globals (milp_candidate) --- */
+/* --- Mutable globals --- */
 
 __attribute__((used)) static uint8_t sec_a[ECC_PUB_KEY_SIZE]
-    __attribute__((annotate("milp_candidate")));
+   ;
 
 __attribute__((used)) static uint8_t sec_b[ECC_PUB_KEY_SIZE]
-    __attribute__((annotate("milp_candidate")));
+   ;
 
 /* ========================================================================= */
 /*  Bit-vector operations                                                    */

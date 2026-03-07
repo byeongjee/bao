@@ -4,7 +4,7 @@
  * Expected: @__nvm_ssa_N in .nvm; typed store/load for commit/restore;
  * uses of %x in Phase 2 replaced with restored value. */
 
-int g_candidate __attribute__((annotate("milp_candidate")));
+int g_candidate;
 volatile int barrier;
 
 int main(void) {

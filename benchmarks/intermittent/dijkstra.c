@@ -54,7 +54,7 @@ static const uint8_t AdjMatrix[NUM_NODES][NUM_NODES] = {
 };
 
 static uint32_t g_checksum_sink
-    __attribute__((used, annotate("milp_candidate"))) = 0;
+    __attribute__((used)) = 0;
 
 FORCE_INLINE uint16_t dijkstra(uint16_t start, uint16_t end)
 {

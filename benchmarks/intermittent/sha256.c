@@ -28,10 +28,10 @@ typedef struct {
     } buffer;
 } SHA256_CTX;
 
-/* --- Mutable globals (milp_candidate) --- */
+/* --- Mutable globals --- */
 
-SHA256_CTX g_ctx __attribute__((annotate("milp_candidate")));
-uint8_t g_hash[SHA256_HASH_SIZE] __attribute__((annotate("milp_candidate")));
+SHA256_CTX g_ctx;
+uint8_t g_hash[SHA256_HASH_SIZE];
 
 /* --- Const data (no annotation) --- */
 

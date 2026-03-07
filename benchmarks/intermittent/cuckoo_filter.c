@@ -17,7 +17,7 @@ typedef uint16_t index_t; // bucket index
 #define INIT_KEY 0x1
 
 // Storage for the filter (preserved with attribute)
-static fingerprint_t filter[NUM_BUCKETS] __attribute__((used, annotate("milp_candidate")));
+static fingerprint_t filter[NUM_BUCKETS] __attribute__((used));
 
 // LFSR state for random number generation
 static uint16_t lfsr_state;

@@ -1,7 +1,6 @@
 #include "milp/StateAnalysis.h"
 #include "milp/LivenessAnalysis.h"
 
-#include "common/AnnotationUtils.h"
 #include "common/BlockUtils.h"
 
 #include "llvm/Analysis/ValueTracking.h"
@@ -127,10 +126,6 @@ unsigned StateAnalysis::getVarSizeBytes(llvm::Value *v) const {
 
 // ---- Private implementation ----
 
-bool StateAnalysis::isMilpCandidateAnnotated(llvm::GlobalVariable *GV) const {
-    return checkpoint::isMilpCandidateAnnotated(GV, F_.getParent());
-}
-
 void StateAnalysis::identifyVMObjs() {
     llvm::Module *M = F_.getParent();
     if (!M)
@@ -138,39 +133,7 @@ void StateAnalysis::identifyVMObjs() {
 
     const llvm::DataLayout &DL = M->getDataLayout();
 
-    for (llvm::GlobalVariable &GV : M->globals()) {
-        // v1: candidate globals are opt-in via annotate("milp_candidate").
-        if (!isMilpCandidateAnnotated(&GV))
-            continue;
-
-        // Keep only fixed-address, sized globals.
-        if (GV.isDeclaration())
-            continue;
-        if (GV.isConstant())
-            continue;
-        if (GV.getName().starts_with("llvm."))
-            continue;
-        if (GV.getName().starts_with("__nvm_"))
-            continue;
-        if (!GV.getValueType()->isSized())
-            continue;
-
-        vmObjs_.push_back(&GV);
-        vmObjSet_.insert(&GV);
-        unsigned sizeBytes = DL.getTypeAllocSize(GV.getValueType());
-        varSizeBytes_[&GV] = sizeBytes;
-    }
-}
-
-void StateAnalysis::identifyIneligibleObjs() {
-    llvm::Module *M = F_.getParent();
-    if (!M)
-        return;
-
-    const llvm::DataLayout &DL = M->getDataLayout();
-
-    // --- Ineligible globals: non-candidate globals accessed in the function ---
-    std::set<llvm::GlobalVariable *> seenGV;
+    std::set<llvm::GlobalVariable *> seen;
     for (llvm::BasicBlock &BB : F_) {
         for (llvm::Instruction &I : BB) {
             const llvm::Value *Ptr = nullptr;
@@ -188,11 +151,7 @@ void StateAnalysis::identifyIneligibleObjs() {
             if (!GV)
                 continue;
 
-            // Skip candidates — they're already in vmObjs_.
-            if (vmObjSet_.count(GV))
-                continue;
-
-            // Structural filters (same as identifyVMObjs).
+            // Structural filters
             if (GV->isDeclaration())
                 continue;
             if (GV->isConstant())
@@ -205,16 +164,22 @@ void StateAnalysis::identifyIneligibleObjs() {
                 continue;
             if (!GV->getValueType()->isSized())
                 continue;
-
-            if (!seenGV.insert(GV).second)
+            if (!seen.insert(GV).second)
                 continue;
 
-            ineligibleObjs_.push_back(GV);
-            ineligibleObjSet_.insert(GV);
-            unsigned sizeBytes = DL.getTypeAllocSize(GV->getValueType());
-            varSizeBytes_[GV] = sizeBytes;
+            vmObjs_.push_back(GV);
+            vmObjSet_.insert(GV);
+            varSizeBytes_[GV] = DL.getTypeAllocSize(GV->getValueType());
         }
     }
+}
+
+void StateAnalysis::identifyIneligibleObjs() {
+    llvm::Module *M = F_.getParent();
+    if (!M)
+        return;
+
+    const llvm::DataLayout &DL = M->getDataLayout();
 
     // --- Ineligible allocas: static stack allocations ---
     for (llvm::BasicBlock &BB : F_) {

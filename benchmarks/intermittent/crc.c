@@ -60,7 +60,7 @@ static const uint8_t test_data[TEST_DATA_LEN] = {
 /* Mutable global: CRC lookup table */
 static crc crcTable[256]
     __attribute__((used))
-    __attribute__((annotate("milp_candidate")));
+   ;
 
 /*********************************************************************
  * reflect() - Reorder the bits of a binary sequence by reflecting

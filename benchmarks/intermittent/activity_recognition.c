@@ -254,7 +254,7 @@ FORCE_INLINE unsigned recognize_loop(volatile model_t *model) {
 // --- Main ---
 
 // Global model storage
-volatile model_t global_model __attribute__((annotate("milp_candidate")));
+volatile model_t global_model;
 
 __attribute__((noinline)) int main() {
   lfsr_state = 0xACE1u;

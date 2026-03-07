@@ -23,10 +23,10 @@ typedef struct {
     uint32_t state[16];
 } ChaCha20_Ctx;
 
-/* --- Mutable globals (milp_candidate) --- */
+/* --- Mutable globals --- */
 
-ChaCha20_Ctx ctx __attribute__((annotate("milp_candidate")));
-uint8_t enc_output[INPUT_SIZE] __attribute__((annotate("milp_candidate")));
+ChaCha20_Ctx ctx;
+uint8_t enc_output[INPUT_SIZE];
 
 /* --- Const data (no annotation) --- */
 

@@ -3,8 +3,8 @@
  * Expected: hot global gets shadow + rewritten accesses; both get .nvm section.
  * Boundary with commit/restore should reference shadow, not original. */
 
-int g_hot __attribute__((annotate("milp_candidate")));
-int g_cold __attribute__((annotate("milp_candidate")));
+int g_hot;
+int g_cold;
 
 int main(void) {
     g_hot = 1;

@@ -1,12 +1,11 @@
-/* Non-candidate globals get MILP-optimized commit/restore.
- * g_candidate is annotated (V_elig), g_noncandidate is not (V_inelig).
+/* All accessed globals are MILP candidates (V_elig).
+ * Both g_candidate and g_noncandidate are directly accessed, so both
+ * are eligible for VM/NVM placement optimization.
  * Two phases separated by a volatile-guarded branch force a boundary.
  * Phase 2 READS both globals before writing, making them live-in
- * at the boundary so that commit/restore are actually emitted.
- * Expected: candidate gets .nvm + shadow; non-candidate stays in SRAM
- * with __nvm_backup_ in .nvm; commit/restore emitted for both at boundary. */
+ * at the boundary so that commit/restore are actually emitted. */
 
-int g_candidate __attribute__((annotate("milp_candidate")));
+int g_candidate;
 int g_noncandidate;
 volatile int barrier;
 

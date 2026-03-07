@@ -46,7 +46,6 @@ include_directories(
 add_library(CheckpointPass MODULE
     # Common utilities
     src/common/BBNaming.cpp
-    src/common/AnnotationUtils.cpp
     src/common/BlockSplitter.cpp
     src/common/CFGAnalysis.cpp
     src/common/EnergyValidatorPass.cpp

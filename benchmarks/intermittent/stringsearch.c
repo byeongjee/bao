@@ -15,9 +15,9 @@
 
 // --- Mutable globals (MILP candidates) ---
 
-static uint32_t table[256] __attribute__((used, annotate("milp_candidate")));
-static uint32_t len __attribute__((used, annotate("milp_candidate")));
-static char *findme __attribute__((used, annotate("milp_candidate")));
+static uint32_t table[256] __attribute__((used));
+static uint32_t len __attribute__((used));
+static char *findme __attribute__((used));
 
 // --- Const data ---
 

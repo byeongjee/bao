@@ -14,7 +14,7 @@
 
 // --- Mutable globals (MILP candidates) ---
 
-float g_output __attribute__((annotate("milp_candidate")));
+float g_output;
 
 // --- Const test data (from data.h) ---
 

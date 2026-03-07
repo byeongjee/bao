@@ -18,18 +18,18 @@
 #define MAXSIZE  256
 #define MAXWAVES 4
 
-/* --- Mutable globals (milp_candidate) --- */
+/* --- Mutable globals --- */
 
-static float realin[MAXSIZE]  __attribute__((annotate("milp_candidate")));
-static float imagin[MAXSIZE]  __attribute__((annotate("milp_candidate")));
-static float realout[MAXSIZE] __attribute__((annotate("milp_candidate")));
-static float imagout[MAXSIZE] __attribute__((annotate("milp_candidate")));
-static float Coeff[MAXWAVES]  __attribute__((annotate("milp_candidate")));
-static float Amp[MAXWAVES]    __attribute__((annotate("milp_candidate")));
+static float realin[MAXSIZE] ;
+static float imagin[MAXSIZE] ;
+static float realout[MAXSIZE];
+static float imagout[MAXSIZE];
+static float Coeff[MAXWAVES] ;
+static float Amp[MAXWAVES]   ;
 
 /* --- Simple LCG RNG (from ulswap-bench common.c) --- */
 
-static uint32_t _myrand_seed __attribute__((annotate("milp_candidate"))) = 1234;
+static uint32_t _myrand_seed = 1234;
 
 FORCE_INLINE void my_srand(uint32_t new_seed)
 {

@@ -25,10 +25,10 @@ typedef struct {
     uint32_t num;
 } poly1305_ctx_t;
 
-/* --- Mutable globals (milp_candidate) --- */
+/* --- Mutable globals --- */
 
-poly1305_ctx_t g_ctx __attribute__((annotate("milp_candidate")));
-uint8_t g_hash[16] __attribute__((annotate("milp_candidate")));
+poly1305_ctx_t g_ctx;
+uint8_t g_hash[16];
 
 /* --- Const data (no annotation) --- */
 

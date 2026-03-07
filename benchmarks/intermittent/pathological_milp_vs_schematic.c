@@ -20,9 +20,9 @@
     } while (0)
 
 static uint32_t g_state
-    __attribute__((used, annotate("milp_candidate"))) = 0x12345678u;
+    __attribute__((used)) = 0x12345678u;
 static uint32_t g_ring[8]
-    __attribute__((used, annotate("milp_candidate")));
+    __attribute__((used));
 
 int main(void) {
     uint32_t x = g_state ^ 0x9e3779b9u;

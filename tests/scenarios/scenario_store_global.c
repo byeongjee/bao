@@ -3,7 +3,7 @@
  * Blocks large enough to force a boundary.
  * Expected: __checkpoint_store_mem call in the instrumented IR. */
 
-int g_data __attribute__((annotate("milp_candidate")));
+int g_data;
 volatile int barrier;
 
 int main(void) {
