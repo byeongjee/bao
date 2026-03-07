@@ -12,6 +12,8 @@
 #define FALSE 0
 #define BITS_PER_WORD (sizeof(uint32_t) * 8)
 
+#define FORCE_INLINE static inline __attribute__((always_inline))
+
 #define MAXSIZE  256
 #define MAXWAVES 4
 
@@ -28,12 +30,12 @@ static float Amp[MAXWAVES]    __attribute__((annotate("milp_candidate")));
 
 static uint32_t _myrand_seed __attribute__((annotate("milp_candidate"))) = 1234;
 
-static void my_srand(uint32_t new_seed)
+FORCE_INLINE void my_srand(uint32_t new_seed)
 {
     _myrand_seed = new_seed;
 }
 
-static uint32_t my_rand(void)
+FORCE_INLINE uint32_t my_rand(void)
 {
     _myrand_seed = (uint32_t)(1103515245 * _myrand_seed + 12345);
     return _myrand_seed;
@@ -41,7 +43,7 @@ static uint32_t my_rand(void)
 
 /* --- FFT helper routines (from fftmisc.c) --- */
 
-static int32_t IsPowerOfTwo(uint32_t x)
+FORCE_INLINE int32_t IsPowerOfTwo(uint32_t x)
 {
     if (x < 2)
         return FALSE;
@@ -52,23 +54,25 @@ static int32_t IsPowerOfTwo(uint32_t x)
     return TRUE;
 }
 
-static uint32_t NumberOfBitsNeeded(uint32_t PowerOfTwo)
+FORCE_INLINE uint32_t NumberOfBitsNeeded(uint32_t PowerOfTwo)
 {
     uint32_t i;
 
     for (i = 0;; i++)
     {
+        __loop_tripcount(32);  /* at most 32 bits */
         if (PowerOfTwo & (1 << i))
             return i;
     }
 }
 
-static uint32_t ReverseBits(uint32_t index, uint32_t NumBits)
+FORCE_INLINE uint32_t ReverseBits(uint32_t index, uint32_t NumBits)
 {
     uint32_t i, rev;
 
     for (i = rev = 0; i < NumBits; i++)
     {
+        __loop_tripcount(8);  /* log2(MAXSIZE) = 8 */
         rev = (rev << 1) | (index & 1);
         index >>= 1;
     }
@@ -78,7 +82,7 @@ static uint32_t ReverseBits(uint32_t index, uint32_t NumBits)
 
 /* --- FFT core (from fourierf.c) --- */
 
-static void fft_float(
+FORCE_INLINE void fft_float(
     uint32_t NumSamples,
     int32_t  InverseTransform,
     float    *RealIn,
@@ -101,6 +105,7 @@ static void fft_float(
     /* Simultaneous data copy and bit-reversal ordering into outputs */
     for (i = 0; i < NumSamples; i++)
     {
+        __loop_tripcount(MAXSIZE);  /* 256 */
         j = ReverseBits(i, NumBits);
         RealOut[j] = RealIn[i];
         ImagOut[j] = (ImagIn == NULL) ? 0.0f : ImagIn[i];
@@ -110,6 +115,7 @@ static void fft_float(
     BlockEnd = 1;
     for (BlockSize = 2; BlockSize <= NumSamples; BlockSize <<= 1)
     {
+        __loop_tripcount(8);  /* log2(MAXSIZE) = 8 */
         double delta_angle = angle_numerator / (double)BlockSize;
         double sm2 = sin(-2 * delta_angle);
         double sm1 = sin(-delta_angle);
@@ -120,6 +126,7 @@ static void fft_float(
 
         for (i = 0; i < NumSamples; i += BlockSize)
         {
+            __loop_tripcount(MAXSIZE);  /* at most 256 */
             ar[2] = cm2;
             ar[1] = cm1;
 
@@ -128,6 +135,7 @@ static void fft_float(
 
             for (j = i, n = 0; n < BlockEnd; j++, n++)
             {
+                __loop_tripcount(MAXSIZE / 2);  /* at most 128 */
                 ar[0] = w * ar[1] - ar[2];
                 ar[2] = ar[1];
                 ar[1] = ar[0];
@@ -158,6 +166,7 @@ static void fft_float(
 
         for (i = 0; i < NumSamples; i++)
         {
+            __loop_tripcount(MAXSIZE);  /* 256 */
             RealOut[i] /= denom;
             ImagOut[i] /= denom;
         }
@@ -175,14 +184,17 @@ int main(void)
     /* Makes MAXWAVES waves of random amplitude and period */
     for (i = 0; i < MAXWAVES; i++)
     {
+        __loop_tripcount(MAXWAVES);  /* 4 */
         Coeff[i] = my_rand() % 1000;
         Amp[i]   = my_rand() % 1000;
     }
     for (i = 0; i < MAXSIZE; i++)
     {
+        __loop_tripcount(MAXSIZE);  /* 256 */
         realin[i] = 0;
         for (j = 0; j < MAXWAVES; j++)
         {
+            __loop_tripcount(MAXWAVES);  /* 4 */
             if (my_rand() % 2)
             {
                 realin[i] += Coeff[j] * cos(Amp[j] * i);
