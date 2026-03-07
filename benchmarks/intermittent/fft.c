@@ -3,6 +3,7 @@
  * Based on Don Cross FFT implementation (public domain) from MiBench/ulswap-bench.
  * Merged into single file: fftmisc.c + fourierf.c + main.c + common RNG.
  */
+#include <stddef.h>
 #include <stdint.h>
 #include <math.h>
 #include "loop_tripcount.h"
