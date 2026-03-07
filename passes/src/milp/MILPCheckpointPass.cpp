@@ -9,6 +9,7 @@
 #include "milp/StateAnalysis.h"
 
 #include "common/BlockUtils.h"
+#include "common/PassStatistics.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -151,11 +152,22 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
 
         errs() << "Optimization failed\n";
 
-        errs() << "=== MILP Checkpoint Insertion Statistics ===\n";
-        errs() << "  Basic blocks (concrete):         " << ctx.cfg->getBlocks().size()
-               << "\n";
-        errs() << "  Edges (concrete):                " << ctx.cfg->getEdges().size()
-               << "\n";
+        {
+            CommonStats common;
+            common.passName = "MILP";
+            common.functionName = F.getName().str();
+            common.basicBlocks = ctx.cfg->getBlocks().size();
+            common.edges = ctx.cfg->getEdges().size();
+            common.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+            common.regions = 0;
+            common.regionBoundaries = 0;
+            common.runtimeCallsInserted = 0;
+            common.compilationTimeMs = totalExecutionTimeMs;
+            common.peakRSSKb = getPeakRSSKb();
+            printCommonStats(errs(), common);
+        }
+
+        errs() << "  --- MILP-specific ---\n";
         errs() << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes
                << "\n";
         errs() << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges
@@ -172,8 +184,6 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
                << abstractCFG.stats.stripMinedLoopsSummarized << "\n";
         errs() << "  Strip-mined loops skipped:       "
                << abstractCFG.stats.stripMinedLoopsSkipped << "\n";
-        errs() << "  Candidate globals (V_elig):      "
-               << ctx.stateAnalysis->getVMObjs().size() << "\n";
         errs() << "  Ineligible globals:              " << ineligGlobalCount << "\n";
         errs() << "  Ineligible allocas:              " << ineligAllocaCount << "\n";
         errs() << "  Ineligible SSA registers:        " << ineligSSACount << "\n";
@@ -183,10 +193,6 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         errs() << "  Optimal solution:                no (solver failed)\n";
         errs() << "  Solve time (ms):                 "
                << llvm::format("%.3f", solveTimeMs) << "\n";
-        errs() << "  Compilation time (ms):           "
-               << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
-        errs() << "  Peak RSS (KB):                   "
-               << getPeakRSSKb() << "\n";
         if (!abstractCFG.stats.skippedReasons.empty()) {
             errs() << "  Abstract CFG skip reasons:\n";
             for (const auto &[reason, count] : abstractCFG.stats.skippedReasons) {
@@ -235,11 +241,23 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
     // Statistics summary
-    errs() << "=== MILP Checkpoint Insertion Statistics ===\n";
-    errs() << "  Basic blocks (concrete):         " << ctx.cfg->getBlocks().size()
-           << "\n";
-    errs() << "  Edges (concrete):                " << ctx.cfg->getEdges().size()
-           << "\n";
+    {
+        CommonStats common;
+        common.passName = "MILP";
+        common.functionName = F.getName().str();
+        common.basicBlocks = ctx.cfg->getBlocks().size();
+        common.edges = ctx.cfg->getEdges().size();
+        common.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+        common.regions = solution.regionStarts.size();
+        common.regionBoundaries =
+            solution.regionStarts.empty() ? 0 : solution.regionStarts.size() - 1;
+        common.runtimeCallsInserted = inserted;
+        common.compilationTimeMs = totalExecutionTimeMs;
+        common.peakRSSKb = getPeakRSSKb();
+        printCommonStats(errs(), common);
+    }
+
+    errs() << "  --- MILP-specific ---\n";
     errs() << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes
            << "\n";
     errs() << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges
@@ -256,8 +274,6 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
            << abstractCFG.stats.stripMinedLoopsSummarized << "\n";
     errs() << "  Strip-mined loops skipped:       "
            << abstractCFG.stats.stripMinedLoopsSkipped << "\n";
-    errs() << "  Candidate globals (V_elig):      "
-           << ctx.stateAnalysis->getVMObjs().size() << "\n";
     errs() << "  Ineligible globals:              " << ineligGlobalCount << "\n";
     errs() << "  Ineligible allocas:              " << ineligAllocaCount << "\n";
     errs() << "  Ineligible SSA registers:        " << ineligSSACount << "\n";
@@ -270,20 +286,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
         errs() << "  Optimal solution:                no (MIP gap: "
                << solution.mipGap << ")\n";
     }
-    errs() << "  Regions:                         " << solution.regionStarts.size()
-           << "\n";
-    errs() << "  Region boundaries inserted:      "
-           << (solution.regionStarts.empty() ? 0 : solution.regionStarts.size() - 1)
-           << "\n";
     errs() << "  Boundary commits enabled:        " << commitCount << "\n";
     errs() << "  Boundary restores enabled:       " << restoreCount << "\n";
-    errs() << "  Runtime calls inserted:          " << inserted << "\n";
     errs() << "  Solve time (ms):                 "
            << llvm::format("%.3f", solveTimeMs) << "\n";
-    errs() << "  Compilation time (ms):           "
-           << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
-    errs() << "  Peak RSS (KB):                   "
-           << getPeakRSSKb() << "\n";
     if (!abstractCFG.stats.skippedReasons.empty()) {
         errs() << "  Abstract CFG skip reasons:\n";
         for (const auto &[reason, count] : abstractCFG.stats.skippedReasons) {

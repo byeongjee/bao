@@ -53,6 +53,7 @@ add_library(CheckpointPass MODULE
     src/common/LoopTripCount.cpp
     src/common/BBFreqCollectorPass.cpp
     src/common/PassRegistry.cpp
+    src/common/PassStatistics.cpp
     src/common/TripCountAnnotationPass.cpp
     # Energy estimators
     src/estimator/AssemblyBasedEstimator.cpp

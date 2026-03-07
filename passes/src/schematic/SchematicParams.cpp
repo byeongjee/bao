@@ -48,6 +48,11 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
         }
     }
 
+    // SCHEMATIC-specific section (unified format) or root (legacy).
+    nlohmann::json schSection;
+    if (config.contains("schematic") && config["schematic"].is_object())
+        schSection = config["schematic"];
+
     SchematicParams params;
     params.capacity = config["capacity"].get<double>();
     params.E_pro = config["E_pro"].get<double>();
@@ -59,39 +64,46 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     params.memStoreEnergyPerByte = config["mem_store_energy_per_byte"].get<double>();
     params.memRestoreEnergyPerByte = config["mem_restore_energy_per_byte"].get<double>();
     params.vmCapacityBytes = config["vm_capacity_bytes"].get<unsigned>();
-    params.maxPaths = config["max_paths"].get<unsigned>();
 
-    params.addDebugMarkers = false;
-    if (config.contains("add_debug_markers")) {
-        if (!config["add_debug_markers"].is_boolean()) {
-            llvm::errs() << "Error: Field 'add_debug_markers' must be boolean"
-                         << " in SCHEMATIC config: " << configPath << "\n";
-            return std::nullopt;
-        }
-        params.addDebugMarkers = config["add_debug_markers"].get<bool>();
+    // max_paths: check schematic section first, then root.
+    if (schSection.contains("max_paths")) {
+        params.maxPaths = schSection["max_paths"].get<unsigned>();
+    } else if (config.contains("max_paths")) {
+        params.maxPaths = config["max_paths"].get<unsigned>();
+    } else {
+        llvm::errs() << "Error: Missing required field 'max_paths'"
+                     << " in SCHEMATIC config: " << configPath << "\n";
+        return std::nullopt;
     }
 
-    params.enableBlockSplitting = true;
-    if (config.contains("enable_block_splitting")) {
-        if (!config["enable_block_splitting"].is_boolean()) {
-            llvm::errs() << "Error: Field 'enable_block_splitting' must be "
-                         << "boolean in SCHEMATIC config: " << configPath
-                         << "\n";
-            return std::nullopt;
+    // Helper to read bool from schematic section or root.
+    auto readBool = [&](const std::string &key,
+                        bool defaultVal) -> std::optional<bool> {
+        for (const auto *src : {&schSection, &config}) {
+            if (src->contains(key)) {
+                if (!(*src)[key].is_boolean()) {
+                    llvm::errs() << "Error: Field '" << key << "' must be boolean"
+                                 << " in SCHEMATIC config: " << configPath << "\n";
+                    return std::nullopt;
+                }
+                return (*src)[key].get<bool>();
+            }
         }
-        params.enableBlockSplitting =
-            config["enable_block_splitting"].get<bool>();
-    }
-    if (config.contains("disable_block_splitting")) {
-        if (!config["disable_block_splitting"].is_boolean()) {
-            llvm::errs() << "Error: Field 'disable_block_splitting' must be "
-                         << "boolean in SCHEMATIC config: " << configPath
-                         << "\n";
-            return std::nullopt;
-        }
-        params.enableBlockSplitting =
-            !config["disable_block_splitting"].get<bool>();
-    }
+        return defaultVal;
+    };
+
+    auto debugMarkers = readBool("add_debug_markers", false);
+    if (!debugMarkers) return std::nullopt;
+    params.addDebugMarkers = *debugMarkers;
+
+    auto blockSplitting = readBool("enable_block_splitting", true);
+    if (!blockSplitting) return std::nullopt;
+    params.enableBlockSplitting = *blockSplitting;
+
+    // Also check disable_block_splitting (inverts enable_block_splitting).
+    auto disableBS = readBool("disable_block_splitting", false);
+    if (!disableBS) return std::nullopt;
+    if (*disableBS) params.enableBlockSplitting = false;
 
     return params;
 }

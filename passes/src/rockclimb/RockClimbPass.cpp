@@ -4,7 +4,7 @@
 #include "rockclimb/RockClimbInstrumenter.h"
 #include "rockclimb/RockClimbOptimizer.h"
 #include "common/BlockUtils.h"
-
+#include "common/PassStatistics.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -79,7 +79,7 @@ static void printPassConfig(const Function &F,
                             bool useDistributedCkpt,
                             bool addDebugMarkers) {
     errs() << "=== RockClimb Pass on " << F.getName() << " ===\n";
-    errs() << "  E_input: " << ctx.params.E_input << "\n";
+    errs() << "  Capacity: " << ctx.params.capacity << "\n";
     errs() << "  E_safe: " << ctx.E_safe << "\n";
     errs() << "  Distributed checkpointing: "
            << (useDistributedCkpt ? "enabled" : "disabled") << "\n";
@@ -118,8 +118,9 @@ static void collectInnermostLoops(Loop *L, SmallVectorImpl<Loop *> &out) {
 
 } // namespace
 
-// Parse RockClimb-specific parameters from flat JSON config.
-// checkpoint_store_energy and add_debug_markers are optional.
+// Parse RockClimb parameters from JSON config.
+// Supports unified config format (shared fields at root + "rockclimb" section)
+// and legacy flat format (E_input at root) for backward compatibility.
 bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     std::ifstream file(configPath.str());
     if (!file.is_open()) {
@@ -147,13 +148,24 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
         return false;
     }
 
-    // All fields required - flat JSON (no rockclimb_parameters wrapper)
-    auto E_input = root->getNumber("E_input");
-    if (!E_input) {
-        errs() << "Error: Missing required field 'E_input' in RockClimb config: "
-               << configPath << "\n";
-        return false;
+    // Determine the RockClimb-specific section (unified format) or use root (legacy).
+    json::Object *rcSection = nullptr;
+    if (auto *rcVal = root->get("rockclimb")) {
+        rcSection = rcVal->getAsObject();
     }
+
+    // Read capacity: try "capacity" at root first, fall back to legacy "E_input".
+    auto capacity = root->getNumber("capacity");
+    if (!capacity) {
+        auto E_input = root->getNumber("E_input");
+        if (!E_input) {
+            errs() << "Error: Missing required field 'capacity' (or legacy 'E_input')"
+                   << " in RockClimb config: " << configPath << "\n";
+            return false;
+        }
+        capacity = E_input;
+    }
+
     auto N_reg = root->getInteger("N_reg");
     if (!N_reg) {
         errs() << "Error: Missing required field 'N_reg' in RockClimb config: "
@@ -166,25 +178,49 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
                << configPath << "\n";
         return false;
     }
-    auto distributed = root->getBoolean("distributed_checkpointing");
+
+    // distributed_checkpointing: check rockclimb section first, then root.
+    std::optional<bool> distributed;
+    if (rcSection) {
+        auto val = rcSection->getBoolean("distributed_checkpointing");
+        if (val) distributed = *val;
+    }
+    if (!distributed) {
+        auto val = root->getBoolean("distributed_checkpointing");
+        if (val) distributed = *val;
+    }
     if (!distributed) {
         errs() << "Error: Missing required field 'distributed_checkpointing' in RockClimb config: "
                << configPath << "\n";
         return false;
     }
 
-    params.E_input = *E_input;
+    params.capacity = *capacity;
     params.N_reg = static_cast<unsigned>(*N_reg);
     params.reg_restore_energy = *reg_restore_energy;
     params.distributedCheckpointing = *distributed;
 
-    // Optional: checkpoint_store_energy (defaults to 0)
-    auto ckptStoreEnergy = root->getNumber("checkpoint_store_energy");
-    if (ckptStoreEnergy) {
-        params.checkpoint_store_energy = *ckptStoreEnergy;
+    // Shared fields (optional for RockClimb — stored for config consistency).
+    if (auto v = root->getNumber("E_pro")) params.E_pro = *v;
+    if (auto v = root->getNumber("E_epi")) params.E_epi = *v;
+    if (auto v = root->getNumber("reg_store_energy")) params.reg_store_energy = *v;
+    if (auto v = root->getNumber("nvm_access_penalty")) params.nvmAccessPenalty = *v;
+    if (auto v = root->getNumber("mem_store_energy_per_byte")) params.memStoreEnergyPerByte = *v;
+    if (auto v = root->getNumber("mem_restore_energy_per_byte")) params.memRestoreEnergyPerByte = *v;
+    if (auto v = root->getInteger("vm_capacity_bytes")) params.vmCapacityBytes = static_cast<unsigned>(*v);
+
+    // checkpoint_store_energy: check rockclimb section first, then root.
+    params.checkpoint_store_energy = 0.0;
+    if (rcSection) {
+        if (auto v = rcSection->getNumber("checkpoint_store_energy"))
+            params.checkpoint_store_energy = *v;
+    }
+    if (params.checkpoint_store_energy == 0.0) {
+        if (auto v = root->getNumber("checkpoint_store_energy"))
+            params.checkpoint_store_energy = *v;
     }
 
-    // Optional: add_debug_markers (defaults to false)
+    // add_debug_markers: check root level.
     params.addDebugMarkers = false;
     if (root->get("add_debug_markers")) {
         auto addDebugMarkers = root->getBoolean("add_debug_markers");
@@ -473,15 +509,22 @@ PreservedAnalyses RockClimbPass::run(Function &F,
     double totalExecutionTimeMs =
         std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
-    errs() << "\n=== RockClimb Metrics ===\n";
-    errs() << "  Basic blocks: " << ctx.cfg->getBlocks().size() << "\n";
-    errs() << "  Edges: " << ctx.cfg->getEdges().size() << "\n";
-    errs() << "  Regions: " << result.regions.size() << "\n";
-    errs() << "  Boundary checks: " << boundarySet.size() << "\n";
-    errs() << "  Register checkpoints: " << checkpointPoints.size() << "\n";
-    errs() << "  Compilation time (ms): "
-           << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
-    errs() << "  Peak RSS (KB): " << getPeakRSSKb() << "\n";
+    CommonStats common;
+    common.passName = "RockClimb";
+    common.functionName = F.getName().str();
+    common.basicBlocks = ctx.cfg->getBlocks().size();
+    common.edges = ctx.cfg->getEdges().size();
+    common.candidateGlobals = 0; // RockClimb does not run StateAnalysis
+    common.regions = result.regions.size();
+    common.regionBoundaries = boundarySet.size();
+    common.runtimeCallsInserted = boundarySet.size() + checkpointPoints.size();
+    common.compilationTimeMs = totalExecutionTimeMs;
+    common.peakRSSKb = getPeakRSSKb();
+    printCommonStats(errs(), common);
+
+    errs() << "  --- RockClimb-specific ---\n";
+    errs() << "  Boundary checks:                 " << boundarySet.size() << "\n";
+    errs() << "  Register checkpoints:            " << checkpointPoints.size() << "\n";
 
     // We modified the IR
     return PreservedAnalyses::none();

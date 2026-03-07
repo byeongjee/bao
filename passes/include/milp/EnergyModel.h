@@ -18,13 +18,13 @@ struct MILPEnergyParams {
     double capacity;               // E_buf: energy buffer capacity
     double E_pro;                  // Prologue energy at region boundary
     double E_epi;                  // Epilogue energy at region boundary
+    unsigned N_reg = 16;           // Number of registers (shared field)
     double regStoreEnergy;         // Energy to store one SSA reg to FRAM
     double regRestoreEnergy;       // Energy to restore one SSA reg from FRAM
     double nvmAccessPenalty;       // Extra energy per NVM access vs VM
     double memStoreEnergyPerByte;  // Energy per byte for VM->FRAM copy
     double memRestoreEnergyPerByte; // Energy per byte for FRAM->VM copy
     unsigned vmCapacityBytes;      // VM (SRAM) capacity in bytes
-    double qRebootProb;            // Probability of reboot at boundary
     bool loopStripMiningEnabled = false; // Enable loop strip-mining pass
     bool addDebugMarkers = false;    // Emit debug marker calls for register save/restore
 };

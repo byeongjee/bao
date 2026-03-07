@@ -1,7 +1,9 @@
 {
-  "E_input": 507.87,
+  "capacity": 507.87,
   "N_reg": 16,
   "reg_restore_energy": 2.0,
-  "distributed_checkpointing": true,
+  "rockclimb": {
+    "distributed_checkpointing": true
+  },
   "add_debug_markers": false
 }

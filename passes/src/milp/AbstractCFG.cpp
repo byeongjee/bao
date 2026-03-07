@@ -504,7 +504,7 @@ double AbstractCFG::getFBoundary(NodeId block) const {
 }
 
 double AbstractCFG::getQReboot() const {
-    return params_.qRebootProb;
+    return 1.0; // Always 1.0 — hardcoded after config unification
 }
 
 AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,

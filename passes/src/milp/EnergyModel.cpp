@@ -60,7 +60,7 @@ double EnergyModel::getFEntry(const llvm::BasicBlock *BB) const {
 }
 
 double EnergyModel::getQReboot() const {
-    return params_.qRebootProb;
+    return 1.0; // Always 1.0 — hardcoded after config unification
 }
 
 // ---- Private implementation ----
@@ -187,12 +187,11 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
         return std::nullopt;
     }
 
-    // All fields are required - flat JSON (no energy_parameters wrapper)
+    // Required shared fields at root level.
     const std::vector<std::string> requiredDouble = {
         "capacity", "E_pro", "E_epi",
         "reg_store_energy", "reg_restore_energy", "nvm_access_penalty",
-        "mem_store_energy_per_byte", "mem_restore_energy_per_byte",
-        "q_reboot_probability"
+        "mem_store_energy_per_byte", "mem_restore_energy_per_byte"
     };
 
     for (const auto &field : requiredDouble) {
@@ -218,25 +217,42 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
     params.memStoreEnergyPerByte = config["mem_store_energy_per_byte"].get<double>();
     params.memRestoreEnergyPerByte = config["mem_restore_energy_per_byte"].get<double>();
     params.vmCapacityBytes = config["vm_capacity_bytes"].get<unsigned>();
-    params.qRebootProb = config["q_reboot_probability"].get<double>();
+
+    // N_reg: optional shared field (default 16).
+    if (config.contains("N_reg"))
+        params.N_reg = config["N_reg"].get<unsigned>();
+
+    // q_reboot_probability: accepted but ignored (always 1.0).
+
+    // MILP-specific fields: check "milp" section first, then root (backward compat).
+    nlohmann::json milpSection;
+    if (config.contains("milp") && config["milp"].is_object())
+        milpSection = config["milp"];
+
+    // loop_strip_mining_enabled
     params.loopStripMiningEnabled = false;
-    if (config.contains("loop_strip_mining_enabled")) {
-        if (!config["loop_strip_mining_enabled"].is_boolean()) {
-            llvm::errs() << "Error: Field 'loop_strip_mining_enabled' must be boolean"
-                         << " in MILP config: " << configPath << "\n";
-            return std::nullopt;
+    auto readBool = [&](const std::string &key, bool &out) -> bool {
+        // Check milp section first, then root.
+        for (const auto *src : {&milpSection, &config}) {
+            if (src->contains(key)) {
+                if (!(*src)[key].is_boolean()) {
+                    llvm::errs() << "Error: Field '" << key << "' must be boolean"
+                                 << " in MILP config: " << configPath << "\n";
+                    return false;
+                }
+                out = (*src)[key].get<bool>();
+                return true;
+            }
         }
-        params.loopStripMiningEnabled = config["loop_strip_mining_enabled"].get<bool>();
-    }
+        return true; // not found, keep default
+    };
+
+    if (!readBool("loop_strip_mining_enabled", params.loopStripMiningEnabled))
+        return std::nullopt;
+
     params.addDebugMarkers = false;
-    if (config.contains("add_debug_markers")) {
-        if (!config["add_debug_markers"].is_boolean()) {
-            llvm::errs() << "Error: Field 'add_debug_markers' must be boolean"
-                         << " in MILP config: " << configPath << "\n";
-            return std::nullopt;
-        }
-        params.addDebugMarkers = config["add_debug_markers"].get<bool>();
-    }
+    if (!readBool("add_debug_markers", params.addDebugMarkers))
+        return std::nullopt;
 
     return params;
 }

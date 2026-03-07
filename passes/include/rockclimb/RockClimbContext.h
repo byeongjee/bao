@@ -9,16 +9,23 @@ namespace checkpoint {
 
 /// RockClimb-specific parameters from config.
 struct RockClimbParams {
-    double E_input;                // Harvestable energy per cycle (same units as energy model)
+    double capacity;               // Energy buffer capacity (was E_input)
+    double E_pro = 0.0;            // Prologue energy (shared field, unused by algorithm)
+    double E_epi = 0.0;            // Epilogue energy (shared field, unused by algorithm)
     unsigned N_reg;                // Number of registers
+    double reg_store_energy = 0.0; // Energy to store one register (shared field)
     double reg_restore_energy;      // Energy to restore one register
+    double nvmAccessPenalty = 0.0; // NVM access penalty (shared field, unused by algorithm)
+    double memStoreEnergyPerByte = 0.0;   // Energy per byte store (shared field)
+    double memRestoreEnergyPerByte = 0.0; // Energy per byte restore (shared field)
+    unsigned vmCapacityBytes = 0;  // VM capacity (shared field, unused by algorithm)
     bool distributedCheckpointing; // Enable distributed register checkpointing
     bool addDebugMarkers = false;  // Emit debug marker calls for runtime counters
     double checkpoint_store_energy = 0.0; // Energy cost per checkpoint store (for CkptCycles)
 
-    /// Calculate E_safe = E_input - E_restore.
+    /// Calculate E_safe = capacity - E_restore.
     double calculateESafe() const {
-        return E_input - N_reg * reg_restore_energy;
+        return capacity - N_reg * reg_restore_energy;
     }
 };
 

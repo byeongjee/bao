@@ -2,11 +2,11 @@
   "capacity": 100.0,
   "E_pro": 5.0,
   "E_epi": 3.0,
+  "N_reg": 16,
   "reg_store_energy": 2.0,
   "reg_restore_energy": 2.0,
   "nvm_access_penalty": 1.5,
   "mem_store_energy_per_byte": 0.5,
   "mem_restore_energy_per_byte": 0.5,
-  "vm_capacity_bytes": 2048,
-  "q_reboot_probability": 1.0
+  "vm_capacity_bytes": 2048
 }

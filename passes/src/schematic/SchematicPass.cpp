@@ -9,6 +9,7 @@
 #include "schematic/SchematicSolution.h"
 #include "schematic/TraceLoader.h"
 #include "common/BlockUtils.h"
+#include "common/PassStatistics.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -409,27 +410,28 @@ PreservedAnalyses SchematicPass::run(Function &F,
         std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
     // Step 13: Print statistics.
-    errs() << "=== SCHEMATIC Checkpoint Insertion Statistics ===\n";
-    errs() << "  Function:                        " << F.getName() << "\n";
-    errs() << "  Basic blocks:                    " << ctx.cfg->getBlocks().size()
-           << "\n";
-    errs() << "  Edges:                           " << ctx.cfg->getEdges().size()
-           << "\n";
+    {
+        CommonStats common;
+        common.passName = "SCHEMATIC";
+        common.functionName = F.getName().str();
+        common.basicBlocks = ctx.cfg->getBlocks().size();
+        common.edges = ctx.cfg->getEdges().size();
+        common.candidateGlobals = state.getVMObjs().size();
+        common.regions = solution.regions.size();
+        common.regionBoundaries = solution.enabledCheckpoints.size();
+        common.runtimeCallsInserted = inserted;
+        common.compilationTimeMs = totalExecutionTimeMs;
+        common.peakRSSKb = getPeakRSSKb();
+        printCommonStats(errs(), common);
+    }
+
+    errs() << "  --- SCHEMATIC-specific ---\n";
     errs() << "  Paths analyzed:                  " << solution.pathsAnalyzed
            << "\n";
-    errs() << "  Candidate globals (V_elig):      "
-           << state.getVMObjs().size() << "\n";
     errs() << "  Enabled checkpoints:             "
            << solution.enabledCheckpoints.size() << "\n";
     errs() << "  Loop decisions:                  "
            << solution.loopDecisions.size() << "\n";
-    errs() << "  Regions:                         " << solution.regions.size()
-           << "\n";
-    errs() << "  Runtime calls inserted:          " << inserted << "\n";
-    errs() << "  Compilation time (ms):           "
-           << llvm::format("%.3f", totalExecutionTimeMs) << "\n";
-    errs() << "  Peak RSS (KB):                   "
-           << getPeakRSSKb() << "\n";
     errs() << "  Trace-guided:                    yes\n";
 
     return PreservedAnalyses::none();

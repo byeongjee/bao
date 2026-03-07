@@ -28,27 +28,27 @@ _SUCCESS_CASES = [
     (
         "test_rockclimb_linear",
         "test_rockclimb_linear.c",
-        {"exit": 0, "stderr_contains": "RockClimb Metrics"},
+        {"exit": 0, "stderr_contains": "Checkpoint Insertion Statistics"},
     ),
     (
         "test_rockclimb_loop",
         "test_rockclimb_loop.c",
-        {"exit": 0, "stderr_contains": "RockClimb Metrics"},
+        {"exit": 0, "stderr_contains": "Checkpoint Insertion Statistics"},
     ),
     (
         "test_rockclimb_nested",
         "test_rockclimb_nested.c",
-        {"exit": 0, "stderr_contains": "RockClimb Metrics"},
+        {"exit": 0, "stderr_contains": "Checkpoint Insertion Statistics"},
     ),
     (
         "test_rockclimb_diamond",
         "test_rockclimb_diamond.c",
-        {"exit": 0, "stderr_contains": "RockClimb Metrics"},
+        {"exit": 0, "stderr_contains": "Checkpoint Insertion Statistics"},
     ),
     (
         "test_rockclimb_liveout",
         "test_rockclimb_liveout.c",
-        {"exit": 0, "stderr_contains": "RockClimb Metrics"},
+        {"exit": 0, "stderr_contains": "Checkpoint Insertion Statistics"},
     ),
 ]
 
