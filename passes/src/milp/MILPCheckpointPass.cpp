@@ -223,18 +223,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F,
                                         *abstractCFG.model,
                                         *ctx.stateAnalysis);
 
-    unsigned commitCount = 0;
-    for (const auto &[key, enabled] : solution.commit) {
-        (void)key;
-        if (enabled)
-            commitCount++;
-    }
-    unsigned restoreCount = 0;
-    for (const auto &[key, enabled] : solution.needRestore) {
-        (void)key;
-        if (enabled)
-            restoreCount++;
-    }
+    unsigned commitCount = MILPSolution::countEnabled(solution.commit);
+    unsigned restoreCount = MILPSolution::countEnabled(solution.needRestore);
 
     const auto totalEnd = std::chrono::steady_clock::now();
     double totalExecutionTimeMs =

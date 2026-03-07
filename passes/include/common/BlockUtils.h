@@ -3,7 +3,9 @@
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 
+#include <iterator>
 #include <string>
 #include <sys/resource.h>
 
@@ -37,6 +39,18 @@ inline std::string getBlockName(const llvm::BasicBlock &BB,
 inline std::string getBlockName(const llvm::BasicBlock *BB,
                                 const llvm::Function &F) {
     return getBlockName(*BB, F);
+}
+
+/// Return an insert point after all PHIs and AllocaInsts in a block.
+/// Falls back to before the terminator if the block is otherwise empty.
+inline llvm::BasicBlock::iterator
+getInsertPointAfterAllocas(llvm::BasicBlock &BB) {
+    auto it = BB.getFirstNonPHIIt();
+    while (it != BB.end() && llvm::isa<llvm::AllocaInst>(&*it))
+        ++it;
+    if (it == BB.end())
+        it = std::prev(BB.end());
+    return it;
 }
 
 /// Get peak resident set size in KB.

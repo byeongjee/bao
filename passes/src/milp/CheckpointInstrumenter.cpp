@@ -1,4 +1,5 @@
 #include "milp/CheckpointInstrumenter.h"
+#include "common/BlockUtils.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/IRBuilder.h"
@@ -242,11 +243,8 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
         const std::vector<NodeId> &nodes = itNodeVec->second;
         std::set<NodeId> nodeSet(nodes.begin(), nodes.end());
 
-        llvm::BasicBlock::iterator insertIt = BB.getFirstNonPHIIt();
-        // Skip past allocas so runtime calls that reference alloca pointers
-        // are placed after the alloca definitions (dominance requirement).
-        while (insertIt != BB.end() && llvm::isa<llvm::AllocaInst>(&*insertIt))
-            ++insertIt;
+        llvm::BasicBlock::iterator insertIt =
+            checkpoint::getInsertPointAfterAllocas(BB);
         if (insertIt == BB.end()) {
             continue;
         }
@@ -267,13 +265,9 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
 
             // Commit dirty data while the region is still active.
             std::set<llvm::Value *> commitVars;
-            for (const auto &[key, enabled] : solution.commit) {
-                if (!enabled)
-                    continue;
-                if (!nodeSet.count(key.first))
-                    continue;
-                commitVars.insert(key.second);
-            }
+            for (NodeId n : nodeSet)
+                for (llvm::Value *V : solution.getCommitVarsAt(n))
+                    commitVars.insert(V);
 
             for (llvm::Value *V : commitVars) {
                 unsigned sizeBytes = state.getVarSizeBytes(V);
@@ -359,13 +353,9 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(
 
         // Eligible restores (needRestore).
         std::set<llvm::GlobalVariable *> restoreGVs;
-        for (const auto &[key, enabled] : solution.needRestore) {
-            if (!enabled)
-                continue;
-            if (!nodeSet.count(key.first))
-                continue;
-            restoreGVs.insert(key.second);
-        }
+        for (NodeId n : nodeSet)
+            for (llvm::GlobalVariable *GV : solution.getRestoreGVsAt(n))
+                restoreGVs.insert(GV);
 
         for (llvm::GlobalVariable *GV : restoreGVs) {
             unsigned sizeBytes = state.getVarSizeBytes(GV);

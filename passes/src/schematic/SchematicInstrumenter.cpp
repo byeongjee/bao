@@ -1,4 +1,5 @@
 #include "schematic/SchematicInstrumenter.h"
+#include "common/BlockUtils.h"
 
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
@@ -435,10 +436,8 @@ unsigned SchematicInstrumenter::instrumentFunction(
     // Step 6: Insert entry prologue after allocas in entry block.
     {
         llvm::BasicBlock &entryBB = F.getEntryBlock();
-        llvm::BasicBlock::iterator insertPt = entryBB.getFirstNonPHIIt();
-        while (insertPt != entryBB.end() &&
-               llvm::isa<llvm::AllocaInst>(&*insertPt))
-            ++insertPt;
+        llvm::BasicBlock::iterator insertPt =
+            getInsertPointAfterAllocas(entryBB);
         llvm::IRBuilder<> builder(&entryBB, insertPt);
         builder.CreateCall(prologueFn_);
         inserted++;

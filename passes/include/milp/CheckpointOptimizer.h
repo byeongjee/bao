@@ -50,6 +50,34 @@ struct MILPSolution {
 
     /// MIP optimality gap (0.0 for optimal, >0 for feasible).
     double mipGap = 0.0;
+
+    /// Get all Value*s with commit=true at a given node.
+    std::set<llvm::Value *> getCommitVarsAt(NodeId node) const {
+        std::set<llvm::Value *> result;
+        for (const auto &[key, enabled] : commit)
+            if (enabled && key.first == node)
+                result.insert(key.second);
+        return result;
+    }
+
+    /// Get all GlobalVariable*s with needRestore=true at a given node.
+    std::set<llvm::GlobalVariable *> getRestoreGVsAt(NodeId node) const {
+        std::set<llvm::GlobalVariable *> result;
+        for (const auto &[key, enabled] : needRestore)
+            if (enabled && key.first == node)
+                result.insert(key.second);
+        return result;
+    }
+
+    /// Count entries with value=true in a pair-keyed map.
+    template <typename K>
+    static unsigned countEnabled(
+        const std::map<std::pair<NodeId, K>, bool> &m) {
+        unsigned n = 0;
+        for (const auto &[key, enabled] : m)
+            if (enabled) ++n;
+        return n;
+    }
 };
 
 /// MILP optimizer for checkpoint placement using Gurobi.

@@ -3,8 +3,10 @@
 #include "common/AnnotationUtils.h"
 #include "common/BlockUtils.h"
 #include "common/LoopTripCount.h"
+#include "common/LoopUtils.h"
 #include "estimator/EnergyEstimatorFactory.h"
 #include "milp/EnergyModel.h"
+#include "milp/EnergyPathUtils.h"
 #include "milp/StateAnalysis.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -70,12 +72,7 @@ struct PlanResult {
     std::string skipDetail;
 };
 
-struct EnergyPathResult {
-    bool ok = false;
-    double energy = 0.0;
-    SmallPtrSet<const BasicBlock *, 16> blocksOnPath;
-    std::string error;
-};
+using checkpoint::WorstCasePathResult;
 
 enum class VisitState {
     Unvisited = 0,
@@ -92,26 +89,14 @@ struct LoopStripMiningStats {
     std::vector<std::pair<std::string, uint64_t>> chosenKByHeader;
 };
 
+struct HeaderPhiInfo {
+    PHINode *headerPhi;
+    PHINode *outerPhi;
+    Value   *initVal;
+};
 
-static bool containsInvoke(const Loop *L) {
-    for (BasicBlock *BB : L->blocks()) {
-        for (Instruction &I : *BB) {
-            if (isa<InvokeInst>(I)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-static Loop *getDirectChildLoop(const Loop *Parent, const BasicBlock *BB,
-                                const LoopInfo &LI) {
-    Loop *Inner = LI.getLoopFor(BB);
-    if (!Inner || Inner == Parent) return nullptr;
-    while (Inner->getParentLoop() != Parent) Inner = Inner->getParentLoop();
-    return Inner;
-}
-
+using checkpoint::containsInvoke;
+using checkpoint::getDirectChildLoop;
 using checkpoint::getMarkerTripCount;
 using checkpoint::removeLoopTripCountMetadata;
 using checkpoint::removeStripMinedLoopMetadata;
@@ -122,12 +107,12 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
                                                     ScalarEvolution &SE,
                                                     const BasicBlock *ExitingBlock);
 
-static EnergyPathResult computeWorstCaseIterationEnergy(
+static WorstCasePathResult computeWorstCaseIterationEnergy(
     Loop *L,
     const DenseMap<const BasicBlock *, double> &blockEnergy,
     LoopInfo &LI,
     ScalarEvolution &SE) {
-    EnergyPathResult result;
+    WorstCasePathResult result;
 
     BasicBlock *Header = L->getHeader();
     BasicBlock *Latch = L->getLoopLatch();
@@ -343,45 +328,7 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L,
     return backedgeValue;
 }
 
-static double getSaveCostForValue(llvm::Value *V,
-                                  const checkpoint::StateAnalysis &state,
-                                  const checkpoint::MILPEnergyParams &params) {
-    if (auto *GV = dyn_cast<GlobalVariable>(V)) {
-        Type *Ty = GV->getValueType();
-        if (Ty->isArrayTy() || Ty->isStructTy()) {
-            // Heuristic: ignore non-scalar globals in chunking margin.
-            return 0.0;
-        }
-    }
-    if (auto *I = dyn_cast<Instruction>(V)) {
-        if (!isa<AllocaInst>(I))
-            return params.regStoreEnergy;
-    }
-    unsigned sizeBytes = state.getVarSizeBytes(V);
-    if (sizeBytes == 0)
-        return 0.0;
-    return static_cast<double>(sizeBytes) * params.memStoreEnergyPerByte;
-}
-
-static double getRestoreCostForValue(llvm::Value *V,
-                                     const checkpoint::StateAnalysis &state,
-                                     const checkpoint::MILPEnergyParams &params) {
-    if (auto *GV = dyn_cast<GlobalVariable>(V)) {
-        Type *Ty = GV->getValueType();
-        if (Ty->isArrayTy() || Ty->isStructTy()) {
-            // Heuristic: ignore non-scalar globals in chunking margin.
-            return 0.0;
-        }
-    }
-    if (auto *I = dyn_cast<Instruction>(V)) {
-        if (!isa<AllocaInst>(I))
-            return params.regRestoreEnergy;
-    }
-    unsigned sizeBytes = state.getVarSizeBytes(V);
-    if (sizeBytes == 0)
-        return 0.0;
-    return static_cast<double>(sizeBytes) * params.memRestoreEnergyPerByte;
-}
+using checkpoint::computeBoundaryStateMarginOnPath;
 
 static double computeNvmAccessMarginOnPath(
     const SmallPtrSetImpl<const BasicBlock *> &pathBlocks,
@@ -409,43 +356,6 @@ static double computeNvmAccessMarginOnPath(
         }
     }
     return nvmAccessMargin;
-}
-
-static double computeBoundaryStateMarginOnPath(
-    const SmallPtrSetImpl<const BasicBlock *> &pathBlocks,
-    const checkpoint::StateAnalysis &state,
-    const checkpoint::MILPEnergyParams &params,
-    double &restoreLiveInMargin,
-    double &commitDefMargin) {
-    std::set<Value *> liveInVars;
-    std::set<Value *> defVars;
-
-    for (const BasicBlock *BB : pathBlocks) {
-        for (GlobalVariable *GV : state.getEligLiveIn(BB))
-            liveInVars.insert(GV);
-        for (Value *V : state.getIneligLiveIn(BB))
-            liveInVars.insert(V);
-
-        for (GlobalVariable *GV : state.getVMObjs()) {
-            if (state.getEligDefIndicator(BB, GV))
-                defVars.insert(GV);
-        }
-        for (Value *V : state.getIneligibleObjs()) {
-            if (state.getIneligDefIndicator(BB, V))
-                defVars.insert(V);
-        }
-    }
-
-    restoreLiveInMargin = 0.0;
-    for (Value *V : liveInVars)
-        restoreLiveInMargin += getRestoreCostForValue(V, state, params);
-
-    commitDefMargin = 0.0;
-    for (Value *V : defVars)
-        commitDefMargin += getSaveCostForValue(V, state, params);
-
-    // q is intentionally treated as 1.0 for strip-mining budgeting.
-    return restoreLiveInMargin + commitDefMargin;
 }
 
 static PlanResult buildRewritePlan(
@@ -492,7 +402,7 @@ static PlanResult buildRewritePlan(
         return result;
     }
 
-    EnergyPathResult iterEnergy =
+    WorstCasePathResult iterEnergy =
         computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok) {
         result.skipReason = iterEnergy.error;
@@ -643,18 +553,18 @@ static void refreshBlockEnergy(Function &F,
     }
 }
 
-struct ChunkReclampResult {
+struct ChunkBudgetResult {
     bool ok = false;
     uint64_t maxK = 0;
     double iterEnergy = 0.0;
     std::string error;
 };
 
-static ChunkReclampResult recomputeChunkKWithOverhead(
+static ChunkBudgetResult recomputeChunkKWithOverhead(
     Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
     const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
     ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
-    ChunkReclampResult out;
+    ChunkBudgetResult out;
 
     double budget = params.capacity - params.E_pro - params.E_epi;
     if (budget <= 0.0) {
@@ -662,7 +572,7 @@ static ChunkReclampResult recomputeChunkKWithOverhead(
         return out;
     }
 
-    EnergyPathResult iterEnergy =
+    WorstCasePathResult iterEnergy =
         computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok || iterEnergy.energy <= 0.0) {
         out.error = iterEnergy.error.empty() ? "post-chunk-iter-energy-unavailable"
@@ -884,11 +794,6 @@ static bool stripMineLoop(const LoopRewritePlan &plan,
     PHINode *OuterIV = OHB.CreatePHI(IVTy, 2, "outer.iv");
 
     // Forward non-IV Header PHIs through the outer loop
-    struct HeaderPhiInfo {
-        PHINode *headerPhi;
-        PHINode *outerPhi;
-        Value   *initVal;
-    };
     SmallVector<HeaderPhiInfo, 4> headerPhiForwarding;
     for (PHINode &PN : Header->phis()) {
         if (&PN == IV) continue;
@@ -1072,11 +977,6 @@ static bool chunkLoop(const LoopRewritePlan &plan,
     // ── Phase 4: Build outer.header — forward all header PHIs through outer PHIs ──
     IRBuilder<> OHB(OuterHeader);
 
-    struct HeaderPhiInfo {
-        PHINode *headerPhi;
-        PHINode *outerPhi;
-        Value   *initVal;
-    };
     SmallVector<HeaderPhiInfo, 8> headerPhiForwarding;
     for (PHINode &PN : Header->phis()) {
         Value *InitVal = PN.getIncomingValueForBlock(Preheader);
@@ -1349,7 +1249,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F,
             } else {
                 reclampState = &postState;
             }
-            ChunkReclampResult reclamp = recomputeChunkKWithOverhead(
+            ChunkBudgetResult reclamp = recomputeChunkKWithOverhead(
                 L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
             if (!reclamp.ok) {
                 stats.skippedReasons["chunk-k-reclamp-unavailable"]++;

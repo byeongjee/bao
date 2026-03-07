@@ -3,7 +3,9 @@
 #include "common/BlockUtils.h"
 #include "common/CFGAnalysis.h"
 #include "common/LoopTripCount.h"
+#include "common/LoopUtils.h"
 #include "milp/EnergyModel.h"
+#include "milp/EnergyPathUtils.h"
 #include "milp/StateAnalysis.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -35,13 +37,6 @@ cl::opt<bool> AbstractCFGVerboseOpt(
     cl::desc("Print per-loop abstract CFG summarization skip details"),
     cl::init(false));
 
-struct PathSummary {
-    bool ok = false;
-    double energy = 0.0;
-    SmallPtrSet<const BasicBlock *, 16> blocksOnPath;
-    std::string error;
-};
-
 struct LoopAggregate {
     std::string nodeName;
     const BasicBlock *headerBB = nullptr;
@@ -62,25 +57,6 @@ enum class VisitState {
     Visited,
 };
 
-static bool containsInvoke(const Loop *L) {
-    for (const BasicBlock *BB : L->blocks()) {
-        for (const Instruction &I : *BB) {
-            if (isa<InvokeInst>(I)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-static Loop *getDirectChildLoop(const Loop *Parent, const BasicBlock *BB,
-                                const LoopInfo &LI) {
-    Loop *Inner = LI.getLoopFor(BB);
-    if (!Inner || Inner == Parent) return nullptr;
-    while (Inner->getParentLoop() != Parent) Inner = Inner->getParentLoop();
-    return Inner;
-}
-
 static void collectOutermostFirst(Loop *L, std::vector<Loop *> &out) {
     out.push_back(L);
     for (Loop *Sub : L->getSubLoops()) {
@@ -96,12 +72,12 @@ static std::vector<Loop *> collectOutermostFirst(LoopInfo &LI) {
     return loops;
 }
 
-static PathSummary computeWorstCasePathSummary(
+static WorstCasePathResult computeWorstCaseWorstCasePathResult(
     Loop *L,
     const DenseMap<const BasicBlock *, double> &blockEnergyByBB,
     LoopInfo &LI,
     ScalarEvolution &SE) {
-    PathSummary result;
+    WorstCasePathResult result;
 
     BasicBlock *Header = L->getHeader();
     BasicBlock *Latch = L->getLoopLatch();
@@ -114,7 +90,7 @@ static PathSummary computeWorstCasePathSummary(
     DenseMap<const Loop *, double> subLoopTotal;
     DenseMap<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
     for (Loop *SubL : L->getSubLoops()) {
-        auto subPath = computeWorstCasePathSummary(SubL, blockEnergyByBB,
+        auto subPath = computeWorstCaseWorstCasePathResult(SubL, blockEnergyByBB,
                                                    LI, SE);
         if (!subPath.ok) {
             result.error = "sub-loop-energy-unavailable";
@@ -268,92 +244,6 @@ static PathSummary computeWorstCasePathSummary(
     result.energy = energy;
     result.blocksOnPath = std::move(pathBlocks);
     return result;
-}
-
-static double getSaveCostForValue(llvm::Value *V,
-                                  const StateAnalysis &state,
-                                  const MILPEnergyParams &params) {
-    if (auto *GV = dyn_cast<GlobalVariable>(V)) {
-        Type *Ty = GV->getValueType();
-        if (Ty->isArrayTy() || Ty->isStructTy()) {
-            // Heuristic: ignore non-scalar globals in summary margin.
-            return 0.0;
-        }
-    }
-    if (auto *I = dyn_cast<Instruction>(V)) {
-        if (!isa<AllocaInst>(I)) {
-            return params.regStoreEnergy;
-        }
-    }
-    unsigned sizeBytes = state.getVarSizeBytes(V);
-    if (sizeBytes == 0)
-        return 0.0;
-    return static_cast<double>(sizeBytes) * params.memStoreEnergyPerByte;
-}
-
-static double getRestoreCostForValue(llvm::Value *V,
-                                     const StateAnalysis &state,
-                                     const MILPEnergyParams &params) {
-    if (auto *GV = dyn_cast<GlobalVariable>(V)) {
-        Type *Ty = GV->getValueType();
-        if (Ty->isArrayTy() || Ty->isStructTy()) {
-            // Heuristic: ignore non-scalar globals in summary margin.
-            return 0.0;
-        }
-    }
-    if (auto *I = dyn_cast<Instruction>(V)) {
-        if (!isa<AllocaInst>(I)) {
-            return params.regRestoreEnergy;
-        }
-    }
-    unsigned sizeBytes = state.getVarSizeBytes(V);
-    if (sizeBytes == 0)
-        return 0.0;
-    return static_cast<double>(sizeBytes) * params.memRestoreEnergyPerByte;
-}
-
-static double computeBoundaryStateMarginOnPath(
-    const SmallPtrSetImpl<const BasicBlock *> &pathBlocks,
-    const StateAnalysis &state,
-    const std::vector<llvm::GlobalVariable *> &vmObjs,
-    const std::vector<llvm::Value *> &ineligibleObjs,
-    const MILPEnergyParams &params,
-    double &restoreLiveInMargin,
-    double &commitDefMargin) {
-    std::set<llvm::Value *> liveInVars;
-    std::set<llvm::Value *> defVars;
-
-    for (const BasicBlock *BB : pathBlocks) {
-        for (llvm::GlobalVariable *GV : state.getEligLiveIn(BB)) {
-            liveInVars.insert(GV);
-        }
-        for (llvm::Value *V : state.getIneligLiveIn(BB)) {
-            liveInVars.insert(V);
-        }
-        for (llvm::GlobalVariable *GV : vmObjs) {
-            if (state.getEligDefIndicator(BB, GV)) {
-                defVars.insert(GV);
-            }
-        }
-        for (llvm::Value *V : ineligibleObjs) {
-            if (state.getIneligDefIndicator(BB, V)) {
-                defVars.insert(V);
-            }
-        }
-    }
-
-    restoreLiveInMargin = 0.0;
-    for (llvm::Value *V : liveInVars) {
-        // q is intentionally treated as 1.0 for loop-summary eligibility.
-        restoreLiveInMargin += getRestoreCostForValue(V, state, params);
-    }
-
-    commitDefMargin = 0.0;
-    for (llvm::Value *V : defVars) {
-        commitDefMargin += getSaveCostForValue(V, state, params);
-    }
-
-    return restoreLiveInMargin + commitDefMargin;
 }
 
 static bool overlapsSelected(Loop *L,
@@ -618,7 +508,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
             continue;
         }
 
-        PathSummary path = computeWorstCasePathSummary(L, blockEnergyByBB,
+        WorstCasePathResult path = computeWorstCaseWorstCasePathResult(L, blockEnergyByBB,
                                                          LI, SE);
         if (!path.ok) {
             skipLoop(path.error.empty() ? "unknown-path-summary-error"
@@ -667,8 +557,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F,
         double boundaryStateMargin = computeBoundaryStateMarginOnPath(
             path.blocksOnPath,
             state,
-            model.vmObjs_,
-            model.ineligibleObjs_,
             model.params_,
             restoreLiveInMargin,
             commitDefMargin);

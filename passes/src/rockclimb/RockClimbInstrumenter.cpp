@@ -4,23 +4,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IRBuilder.h"
 
-#include <iterator>
-
 namespace checkpoint {
-namespace {
-
-static llvm::BasicBlock::iterator getBoundaryInsertPoint(llvm::BasicBlock &BB) {
-    llvm::BasicBlock::iterator insertPt = BB.getFirstNonPHIIt();
-    while (insertPt != BB.end() && llvm::isa<llvm::AllocaInst>(&*insertPt)) {
-        ++insertPt;
-    }
-    if (insertPt == BB.end()) {
-        insertPt = std::prev(BB.end());
-    }
-    return insertPt;
-}
-
-} // namespace
 
 RockClimbInstrumenter::RockClimbInstrumenter(llvm::Module &M,
                                              llvm::StringRef checkFnName,
@@ -85,7 +69,7 @@ void RockClimbInstrumenter::declareNVMStorage(unsigned numRegs) {
 }
 
 void RockClimbInstrumenter::insertBoundaryCheck(llvm::BasicBlock &BB) {
-    llvm::BasicBlock::iterator InsertPt = getBoundaryInsertPoint(BB);
+    llvm::BasicBlock::iterator InsertPt = getInsertPointAfterAllocas(BB);
     llvm::IRBuilder<> Builder(&*InsertPt);
 
     // Marker order mirrors MILP transition semantics at a boundary:
@@ -185,7 +169,7 @@ unsigned RockClimbInstrumenter::instrumentFunction(
 
     if (addDebugMarkers_) {
         llvm::BasicBlock &Entry = F.getEntryBlock();
-        llvm::BasicBlock::iterator InsertPt = getBoundaryInsertPoint(Entry);
+        llvm::BasicBlock::iterator InsertPt = getInsertPointAfterAllocas(Entry);
         llvm::IRBuilder<> Builder(&*InsertPt);
         Builder.CreateCall(prologueCallee_, {});
     }
