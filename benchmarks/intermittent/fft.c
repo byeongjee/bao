@@ -44,17 +44,6 @@ FORCE_INLINE uint32_t my_rand(void)
 
 /* --- FFT helper routines (from fftmisc.c) --- */
 
-FORCE_INLINE int32_t IsPowerOfTwo(uint32_t x)
-{
-    if (x < 2)
-        return FALSE;
-
-    if (x & (x - 1))
-        return FALSE;
-
-    return TRUE;
-}
-
 FORCE_INLINE uint32_t NumberOfBitsNeeded(uint32_t PowerOfTwo)
 {
     uint32_t i;
