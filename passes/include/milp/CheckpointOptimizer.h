@@ -99,6 +99,8 @@ private:
     std::map<BlockVarKey, GRBVar> commit_;            // commit[b,v] — all tracked
     std::map<NodeId, GRBVar> energyAccumulated_;     // eaccum[b]
 
+    std::map<NodeId, std::vector<NodeId>> predecessors_;
+
     void buildModel();
     void addVariables();
     void addObjective();
@@ -106,15 +108,15 @@ private:
     void extractSolution();
 
     // Constraint helpers
-    void addC1_EntryRegionStart();
-    void addC3_VMCapacity();
-    void addC4_NeedVolLinearization();
-    void addC5_PlacementPropagation();
-    void addC6_PendingPropagation();
-    void addC7_CommitModel();
-    void addC8_EnergyInit();
-    void addC9_EnergyPropagation();
-    void addC10_BufferSafety();
+    void constrainEntryAsRegionStart();
+    void constrainVMCapacity();
+    void constrainNeedRestoreLinearization();
+    void constrainPlacementPropagation();
+    void constrainPendingStatePropagation();
+    void constrainCommitAtRegionBoundary();
+    void constrainEnergyInitAtRegionStart();
+    void constrainEnergyPropagation();
+    void constrainEnergyWithinCapacity();
 
     // Expression builders (linear in decision variables)
     GRBLinExpr buildEBlk(NodeId block);
