@@ -308,15 +308,6 @@ FORCE_INLINE void InvMixColumns(state_t *state)
     }
 }
 
-FORCE_INLINE void XorWithIv(uint8_t *buf, const uint8_t *Iv)
-{
-    uint8_t i;
-    for (i = 0; i < AES_BLOCKLEN; ++i) {
-        __loop_tripcount(16);
-        buf[i] ^= Iv[i];
-    }
-}
-
 FORCE_INLINE void Cipher(state_t *state, const uint8_t *RoundKey)
 {
     uint8_t round = 0;

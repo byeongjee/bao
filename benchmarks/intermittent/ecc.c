@@ -39,10 +39,6 @@ typedef bitvec_t scalar_t;
 
 static const gf2elem_t polynomial  = { 0x00000001, 0x00000000, 0x00000400, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000200 };
 static const gf2elem_t coeff_b     = { 0x7d8f90ad, 0x81fe115f, 0x20e9ce42, 0x213b333b, 0x0923bb58, 0x332c7f8c, 0x647ede6c, 0x00000066 };
-static const gf2elem_t base_x      = { 0x71fd558b, 0xf8f8eb73, 0x391f8b36, 0x5fef65bc, 0x39f1bb75, 0x8313bb21, 0xc9dfcbac, 0x000000fa };
-static const gf2elem_t base_y      = { 0x01f81052, 0x36716f7e, 0xf867a7ca, 0xbf8a0bef, 0xe58528be, 0x03350678, 0x6a08a419, 0x00000100 };
-static const scalar_t  base_order  = { 0x03cfe0d7, 0x22031d26, 0xe72f8a69, 0x0013e974, 0x00000000, 0x00000000, 0x00000000, 0x00000100 };
-
 /* --- Key data for NIST B-233 (const, no annotation) --- */
 
 static const uint8_t prv_a[ECC_PRV_KEY_SIZE] = {
@@ -93,11 +89,6 @@ __attribute__((used)) static uint8_t sec_b[ECC_PUB_KEY_SIZE]
 FORCE_INLINE int bitvec_get_bit(const bitvec_t x, const uint32_t idx)
 {
     return ((x[idx / 32U] >> (idx & 31U)) & 1U);
-}
-
-FORCE_INLINE void bitvec_clr_bit(bitvec_t x, const uint32_t idx)
-{
-    x[idx / 32U] &= ~(1U << (idx & 31U));
 }
 
 FORCE_INLINE void bitvec_copy(bitvec_t x, const bitvec_t y)
