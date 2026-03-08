@@ -280,7 +280,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         fi
 
         # Check for failure
-        if ! echo "$full_output" | grep -q "SCHEMATIC Checkpoint Insertion Statistics"; then
+        if ! echo "$full_output" | grep -q "Checkpoint Insertion Statistics"; then
             echo "  FAILED (SCHEMATIC pass error)"
             [[ "$VERBOSE" -eq 0 ]] && echo "$full_output" | tail -5
             echo "$row_name,$cap_label,failed${FAIL_COLS}" >> "$OUTPUT_CSV"

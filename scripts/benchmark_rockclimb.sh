@@ -132,7 +132,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         fi
 
         # Check for compilation failure (no RockClimb metrics at all)
-        if ! echo "$full_output" | grep -q "RockClimb Metrics"; then
+        if ! echo "$full_output" | grep -q "Checkpoint Insertion Statistics"; then
             echo "  FAILED (compilation error)"
             echo "$row_name,$cap_label,failed,,,,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
