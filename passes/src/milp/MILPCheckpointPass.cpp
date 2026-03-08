@@ -47,13 +47,13 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     if (BBFreqFileOpt.getValue().empty()) {
         report_fatal_error("MILP requires -bb-freq-file=<path> (run bb-freq-collect pipeline "
                            "first to generate BB frequency data)",
-                           /*GenCrashDiag=*/false);
+                           /*gen_crash_diag=*/false);
     }
     auto freqLoader = BBFreqLoader::load(BBFreqFileOpt.getValue(), F);
     if (!freqLoader) {
         report_fatal_error(Twine("Failed to load BB frequency file '") + BBFreqFileOpt.getValue() +
                                "' for function '" + F.getName() + "'",
-                           /*GenCrashDiag=*/false);
+                           /*gen_crash_diag=*/false);
     }
     errs() << "MILP: using BB frequency file for function " << F.getName() << "\n";
 

@@ -69,7 +69,7 @@ void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader, llv
     if (!entryCountOpt) {
         llvm::report_fatal_error(llvm::Twine("MILP: entry block frequency missing for function '") +
                                      F.getName() + "' in BB frequency file",
-                                 /*GenCrashDiag=*/false);
+                                 /*gen_crash_diag=*/false);
     }
     const uint64_t entryCount = std::max<uint64_t>(*entryCountOpt, 1);
 
@@ -96,7 +96,7 @@ void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader, llv
                 llvm::report_fatal_error(
                     llvm::Twine("MILP: missing BB frequency for reachable block ") + os.str() +
                         " in function '" + F.getName() + "'",
-                    /*GenCrashDiag=*/false);
+                    /*gen_crash_diag=*/false);
             }
             // Unreachable block — assign frequency 0.
             fEntry_[&BB] = 0.0;

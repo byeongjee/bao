@@ -97,7 +97,6 @@ using checkpoint::containsInvoke;
 using checkpoint::getDirectChildLoop;
 using checkpoint::getMarkerTripCount;
 using checkpoint::removeLoopTripCountMetadata;
-using checkpoint::removeStripMinedLoopMetadata;
 using checkpoint::setLoopTripCountMetadata;
 using checkpoint::setStripMinedLoopMetadata;
 
@@ -435,7 +434,7 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         return result;
     }
 
-    uint64_t K = static_cast<uint64_t>(rawK);
+    auto K = static_cast<uint64_t>(rawK);
     if (K <= 1) {
         result.skipReason = "k-not-beneficial";
         return result;
@@ -473,7 +472,7 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     // ── Tier 2: Chunking fallback ──
     // Only needs: latch has a BranchInst with backedge to header
     BasicBlock *Header = L->getHeader();
-    BranchInst *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
+    auto *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
     if (!LatchBr) {
         result.skipReason = "latch-not-branch-inst";
         return result;
@@ -577,7 +576,7 @@ recomputeChunkKWithOverhead(Loop *L, const DenseMap<const BasicBlock *, double> 
         return out;
     }
 
-    uint64_t maxK = static_cast<uint64_t>(rawK);
+    auto maxK = static_cast<uint64_t>(rawK);
     if (maxK > std::numeric_limits<unsigned>::max()) {
         maxK = std::numeric_limits<unsigned>::max();
     }
@@ -721,11 +720,11 @@ static bool stripMineLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolu
     Type *IVTy = IV->getType();
 
     // ── Phase 2: Find exit condition ──
-    BranchInst *ExitBr = dyn_cast<BranchInst>(ExitingBB->getTerminator());
+    auto *ExitBr = dyn_cast<BranchInst>(ExitingBB->getTerminator());
     if (!ExitBr || !ExitBr->isConditional())
         return false;
 
-    ICmpInst *ExitCmp = dyn_cast<ICmpInst>(ExitBr->getCondition());
+    auto *ExitCmp = dyn_cast<ICmpInst>(ExitBr->getCondition());
     if (!ExitCmp)
         return false;
 
@@ -923,7 +922,7 @@ static bool chunkLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution
         return false;
 
     // ── Phase 2: Find latch backedge index (which successor == Header) ──
-    BranchInst *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
+    auto *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
     if (!LatchBr)
         return false;
 
@@ -1170,7 +1169,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     }
 
     for (auto &[headerHandle, plan] : worklist) {
-        BasicBlock *Header = dyn_cast_or_null<BasicBlock>(headerHandle);
+        auto *Header = dyn_cast_or_null<BasicBlock>(headerHandle);
         if (!Header) {
             stats.skippedReasons["loop-header-erased-after-prior-rewrite"]++;
             continue;

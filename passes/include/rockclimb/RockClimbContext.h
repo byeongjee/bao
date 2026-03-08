@@ -76,9 +76,8 @@ inline RockClimbContextResult createRockClimbContext(llvm::Function &F, llvm::Lo
             s = RockClimbContextResult::Status::MissingConfig;
             break;
         case ContextResult<BaseContext>::Status::EstimatorFailed:
-            s = RockClimbContextResult::Status::EstimatorFailed;
-            break;
         default:
+            // All unmapped BaseContext errors fall through to EstimatorFailed.
             s = RockClimbContextResult::Status::EstimatorFailed;
             break;
         }

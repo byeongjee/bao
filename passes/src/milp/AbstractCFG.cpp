@@ -783,7 +783,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
         auto summaryIt = summariesByNode.find(nodeName);
         if (summaryIt != summariesByNode.end()) {
             const LoopAggregate &agg = summaryIt->second;
-            llvm::BasicBlock *header = const_cast<llvm::BasicBlock *>(agg.headerBB);
+            auto *header = const_cast<llvm::BasicBlock *>(agg.headerBB);
             // Use the preheader as the representative block.
             llvm::BasicBlock *rep = header;
             if (llvm::Loop *L = LI.getLoopFor(header)) {

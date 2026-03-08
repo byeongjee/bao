@@ -182,7 +182,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 report_fatal_error(Twine("SCHEMATIC infeasible segment in function '") +
                                        F.getName() + "', path #" + Twine(solution.pathsAnalyzed) +
                                        ": " + result.errorMessage,
-                                   /*GenCrashDiag=*/false);
+                                   /*gen_crash_diag=*/false);
             }
 
             // Update solution from RCG result.
@@ -233,7 +233,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     //   [analyzed predecessor] → unfixed blocks (greedy walk) → [analyzed successor]
     // and run the same RCG analysis on it.
     for (const BasicBlock *constBB : ctx.cfg->getBlocks()) {
-        BasicBlock *BB = const_cast<BasicBlock *>(constBB);
+        auto *BB = const_cast<BasicBlock *>(constBB);
         auto metaIt = solution.blockMeta.find(BB);
         if (metaIt != solution.blockMeta.end() && metaIt->second.analyzed)
             continue;
@@ -298,7 +298,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             report_fatal_error(Twine("SCHEMATIC infeasible synthetic path in function '") +
                                    F.getName() + "', uncovered block '" + BB->getName() +
                                    "': " + result.errorMessage,
-                               /*GenCrashDiag=*/false);
+                               /*gen_crash_diag=*/false);
         }
 
         // Update solution (same logic as Step 9).
@@ -366,10 +366,13 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             }
         }
 
+        // Two independent reasons to insert a checkpoint on this edge:
+        // (a) VM/NVM allocation differs across the edge, or
+        // (b) not enough energy to reach dst's next checkpoint.
+        // Both result in the same action (inserting a checkpoint) intentionally.
         if (allocsDiffer) {
             solution.enabledCheckpoints.insert(edge);
         } else if (srcMeta->second.E_left < dstMeta->second.E_to_leave) {
-            // Not enough energy to reach dst's checkpoint — need boundary.
             solution.enabledCheckpoints.insert(edge);
         }
         // else: E_left >= E_to_leave → no checkpoint needed.

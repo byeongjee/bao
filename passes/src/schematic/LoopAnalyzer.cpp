@@ -314,7 +314,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             llvm::report_fatal_error(
                 llvm::Twine("SCHEMATIC infeasible loop body path at header '") + header->getName() +
                     "': " + result.errorMessage,
-                /*GenCrashDiag=*/false);
+                /*gen_crash_diag=*/false);
         }
 
         // Update solution from RCG result.
@@ -405,7 +405,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    unsigned numIt = static_cast<unsigned>(std::floor(availableEnergy / E_loop));
+    auto numIt = static_cast<unsigned>(std::floor(availableEnergy / E_loop));
 
     if (numIt >= maxTripCount) {
         // Entire loop fits — no checkpoint needed.

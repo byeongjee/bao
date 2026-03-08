@@ -295,6 +295,8 @@ llvm::BasicBlock *RockClimbOptimizer::splitBlock(llvm::BasicBlock *BB, double th
 
     // Re-check for call sites in both halves
     bool origHasCall = blockHasCallSite(*BB);
+    // NOLINTNEXTLINE(clang-analyzer-core.FixedAddressDereference) newBB is a valid LLVM split
+    // result, not a sentinel
     bool newHasCall = blockHasCallSite(*newBB);
 
     // Update call site blocks

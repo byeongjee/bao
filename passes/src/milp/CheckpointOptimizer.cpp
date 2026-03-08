@@ -65,7 +65,7 @@ static std::map<NodeId, std::vector<NodeId>> buildPredecessorMap(const ICFGView 
 }
 
 /// Linearize z = a AND b for binary variables: z <= a, z <= b, z >= a+b-1.
-static void addAndLinearization(GRBModel &model, GRBVar z, GRBVar a, GRBVar b,
+static void addAndLinearization(GRBModel &model, const GRBVar &z, const GRBVar &a, const GRBVar &b,
                                 const std::string &namePrefix) {
     model.addConstr(z <= a, namePrefix + "_le_a");
     model.addConstr(z <= b, namePrefix + "_le_b");

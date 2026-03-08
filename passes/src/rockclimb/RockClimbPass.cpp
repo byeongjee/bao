@@ -173,12 +173,12 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
     if (rcSection) {
         auto val = rcSection->getBoolean("distributed_checkpointing");
         if (val)
-            distributed = *val;
+            distributed = val;
     }
     if (!distributed) {
         auto val = root->getBoolean("distributed_checkpointing");
         if (val)
-            distributed = *val;
+            distributed = val;
     }
     if (!distributed) {
         errs() << "Error: Missing required field 'distributed_checkpointing' in RockClimb config: "
@@ -307,7 +307,7 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE, Domin
             }
 
             // Calculate unroll factor: how many iterations fit in E_safe.
-            unsigned maxUnroll = static_cast<unsigned>(E_safe / bodyEnergy);
+            auto maxUnroll = static_cast<unsigned>(E_safe / bodyEnergy);
             unsigned unrollFactor = std::min(maxUnroll, tripCount);
             if (unrollFactor <= 1) {
                 stats.skippedFactorTooSmall++;
