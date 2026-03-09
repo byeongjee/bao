@@ -43,7 +43,7 @@ MachineInstr *MachineDistributedCheckpointing::findLastDef(const MachineRegionIn
     for (MachineBasicBlock *MBB : region.blocks) {
         for (MachineInstr &MI : *MBB) {
             for (const MachineOperand &MO : MI.operands()) {
-                if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical()) {
+                if (MO.isReg() && MO.isDef() && !MO.isDead() && MO.getReg().isPhysical()) {
                     if (TRI->regsOverlap(MO.getReg(), reg))
                         lastDef = &MI;
                 }
