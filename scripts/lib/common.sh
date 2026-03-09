@@ -111,7 +111,7 @@ compile_to_ir() {
         [[ -n "$_SYSROOT_FLAGS" ]] && flags="$flags $_SYSROOT_FLAGS"
     else
         flags="--target=msp430-elf -S -emit-llvm -O$clang_opt_level -D__MSP430FR5994__"
-        flags="$flags -I$PROJECT_DIR/passes/include -I$MSP430GCC_SUPPORT_PATH/include -I$MSP430GCC_SUPPORT_PATH/msp430-elf/include"
+        flags="$flags -I$PROJECT_DIR/passes/include -isystem $MSP430GCC_SUPPORT_PATH/include -isystem $MSP430GCC_SUPPORT_PATH/msp430-elf/include"
     fi
 
     [[ "$clang_opt_level" == "0" ]] && flags="$flags -Xclang -disable-O0-optnone"
