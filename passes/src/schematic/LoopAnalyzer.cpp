@@ -169,9 +169,18 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     // 3. Run RCG solver on each path.
+    // Use header/latch as boundary blocks if they have existing placements.
+    llvm::BasicBlock *loopLatch = L->getLoopLatch();
+    llvm::BasicBlock *startBound = nullptr;
+    llvm::BasicBlock *endBound = nullptr;
+    if (solution.decidedPlacements.count(header))
+        startBound = header;
+    if (loopLatch && solution.decidedPlacements.count(loopLatch))
+        endBound = loopLatch;
+
     for (const auto &path : bodyPaths) {
         RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta,
-                         solution.decidedPlacements, nullptr, nullptr, tracker_);
+                         solution.decidedPlacements, startBound, endBound, tracker_);
         RCGResult result = solver.solve();
         if (!result.feasible) {
             llvm::errs() << "SCHEMATIC infeasible: energy capacity too small for loop at '"
@@ -321,11 +330,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 solution.blockMeta[BB].analyzed = true;
             }
 
-            // 4. Re-compute E_to_leave by simple forward energy accumulation
-            //    through body paths to get header and latch E_to_leave.
-            //    Re-propagate: seed header, walk forward, update E_to_leave backward.
+            // 4. Re-compute E_to_leave by backward energy accumulation
+            //    and E_left by forward energy accumulation through body paths.
             {
-                // Simple forward pass: accumulate execution energy through each path.
+                // Backward pass: accumulate E_to_leave from latch to header.
                 for (const auto &path : bodyPaths) {
                     double accum = params_.E_epi + params_.N_reg * params_.regStoreEnergy +
                                    params_.loopIncrementCostNvm;
@@ -347,6 +355,33 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                         auto &meta = solution.blockMeta[BB];
                         if (accum > meta.E_to_leave)
                             meta.E_to_leave = accum;
+                    }
+                }
+
+                // Forward pass: propagate E_left from header through body paths.
+                double eleftSeed =
+                    params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+                for (const auto &[gv, place] : bodyAlloc.placement) {
+                    if (place == Placement::VM)
+                        eleftSeed -= params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
+                }
+                for (const auto &path : bodyPaths) {
+                    double accum = 0.0;
+                    for (unsigned b = 0; b < path.size(); ++b) {
+                        llvm::BasicBlock *BB = path[b];
+                        double bbE = cfg_.getBlockInfo(BB).energyCost;
+                        for (const auto &[gv, place] : bodyAlloc.placement) {
+                            if (place != Placement::VM)
+                                continue;
+                            unsigned loads = state_.getLoadCount(BB, gv);
+                            unsigned stores = state_.getStoreCount(BB, gv);
+                            bbE -= params_.nvmAccessPenalty * (loads + stores);
+                        }
+                        accum += bbE;
+                        double newELeft = eleftSeed - accum;
+                        auto &meta = solution.blockMeta[BB];
+                        if (newELeft < meta.E_left)
+                            meta.E_left = newELeft;
                     }
                 }
             }
@@ -389,6 +424,19 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     solution.loopDecisions[header] = decision;
+
+    // Adjust E_left/E_to_leave for loop blocks when multiple iterations per charge.
+    if (decision.numIterationsPerCharge > 1) {
+        unsigned adjIter = decision.numIterationsPerCharge;
+        if (decision.loopFitsEntirely)
+            adjIter = static_cast<unsigned>(maxTripCount);
+        double adj = (adjIter - 1) * E_loop;
+        for (llvm::BasicBlock *BB : L->getBlocksVector()) {
+            auto &meta = solution.blockMeta[BB];
+            meta.E_to_leave += adj;
+            meta.E_left -= adj;
+        }
+    }
 
     return true;
 }

@@ -38,14 +38,9 @@ std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
     // needRestore: true if the first access to v in the interval is a load.
     bool needRestore = false;
     for (llvm::BasicBlock *BB : intervalBlocks) {
-        unsigned loads = state.getLoadCount(BB, v);
-        unsigned stores = state.getStoreCount(BB, v);
-        if (loads > 0) {
-            needRestore = true;
-            break;
-        }
-        if (stores > 0) {
-            needRestore = false;
+        auto firstOp = state.getFirstOpIsLoad(BB, v);
+        if (firstOp.has_value()) {
+            needRestore = *firstOp; // true if first op is load
             break;
         }
     }
@@ -200,17 +195,18 @@ double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBloc
                              bool isLastInterval) {
 
     // E_restore: checkpoint restore cost at interval start.
-    // NOTE: A more optimal implementation would only include restore costs for
-    // variables where needRestore is true (first access is a load), but the
-    // reference SCHEMATIC algorithm unconditionally restores all VM variables
-    // at interval boundaries.
+    // Only charge variables where needRestore is true (first access is a load).
     double E_restore = 0.0;
     if (!isFirstInterval) {
         E_restore = params.E_pro + params.N_reg * params.regRestoreEnergy;
         for (const auto &[gv, place] : allocation.placement) {
             if (place != Placement::VM)
                 continue;
-            E_restore += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
+            auto flagIt = allocation.livenessFlags.find(gv);
+            bool needRestore =
+                flagIt != allocation.livenessFlags.end() ? flagIt->second.first : true;
+            if (needRestore)
+                E_restore += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
         }
     }
 
@@ -230,13 +226,17 @@ double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBloc
     }
 
     // E_save: checkpoint save cost at interval end.
+    // Only charge variables where needSave is true.
     double E_save = 0.0;
     if (!isLastInterval) {
         E_save = params.E_epi + params.N_reg * params.regStoreEnergy;
         for (const auto &[gv, place] : allocation.placement) {
             if (place != Placement::VM)
                 continue;
-            E_save += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
+            auto flagIt = allocation.livenessFlags.find(gv);
+            bool needSave = flagIt != allocation.livenessFlags.end() ? flagIt->second.second : true;
+            if (needSave)
+                E_save += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
         }
     }
 
