@@ -123,6 +123,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         -e "$ENERGY_CONFIG" \
         -s "$PROJECT_DIR/benchmarks/sample_schematic_config_10uF.json" \
         -o "$TMPDIR/${bench_name}" \
+        -Oc 0 \
         --local $VERBOSE_FLAG \
         -I "$PROJECT_DIR/passes/runtime" \
         --trace-only \
@@ -171,6 +172,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
             -e "$ENERGY_CONFIG"
             -s "$cap_config"
             -t "$trace_json"
+            -Oc 0
             --local
             -I "$PROJECT_DIR/passes/runtime"
             --verbose
