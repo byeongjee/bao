@@ -32,6 +32,9 @@ source "$SCRIPT_DIR/lib/common.sh"
 # Pass plugin
 MACHINE_PASS_LIB="$PROJECT_DIR/passes/build/rockclimb-backend/RockClimbMachinePass.so"
 
+# BB debug info pass plugin (for assign-bb-debuginfo)
+BB_DEBUGINFO_LIB="$PROJECT_DIR/passes/build/bb-debuginfo/BBDebugInfoPass.so"
+
 # bb-energy-analyzer
 BB_ANALYZER="$PROJECT_DIR/passes/build/bb-energy-analyzer/bb-energy-analyzer"
 
@@ -72,7 +75,7 @@ done
 [[ ! -f "$MACHINE_PASS_LIB" ]] && { echo "Error: $MACHINE_PASS_LIB not found. Build with: cd passes/build && make RockClimbMachinePass" >&2; exit 1; }
 
 if [[ "$PRECOMPUTED_ENERGY" == "true" ]]; then
-    [[ ! -f "$PASS_LIB" ]] && { echo "Error: $PASS_LIB not found (needed for assign-bb-debuginfo). Build with: cd passes/build && make" >&2; exit 1; }
+    [[ ! -f "$BB_DEBUGINFO_LIB" ]] && { echo "Error: $BB_DEBUGINFO_LIB not found (needed for assign-bb-debuginfo). Build with: cd passes/build && make BBDebugInfoPass" >&2; exit 1; }
     [[ ! -f "$BB_ANALYZER" ]] && { echo "Error: $BB_ANALYZER not found. Build with: cd passes/build && make bb-energy-analyzer" >&2; exit 1; }
 fi
 
@@ -88,7 +91,7 @@ echo "=== Step 1: C → LLVM IR (clang -O${CLANG_OPT_LEVEL}) ==="
 if [[ "$PRECOMPUTED_ENERGY" == "true" ]]; then
     # Step 2: Assign BB debug info for DWARF-based energy analysis
     echo "=== Step 2: Assign BB debug info ==="
-    "$OPT" -load-pass-plugin="$PASS_LIB" \
+    "$OPT" -load-pass-plugin="$BB_DEBUGINFO_LIB" \
         -passes=assign-bb-debuginfo \
         -bb-mapping="${OUTPUT}.bb_mapping.json" \
         -S "${OUTPUT}.ll" -o "${OUTPUT}.bbinfo.ll"
@@ -106,10 +109,9 @@ if [[ "$PRECOMPUTED_ENERGY" == "true" ]]; then
     # Step 3c: bb-energy-analyzer: compute per-BB energy from real assembly
     echo "=== Step 3c: bb-energy-analyzer → per-BB energy JSON ==="
     "$BB_ANALYZER" \
-        -elf "${OUTPUT}.energy.o" \
-        -energy-config "$ESTIMATOR_CONFIG" \
-        -bb-mapping "${OUTPUT}.bb_mapping.json" \
-        -o "${OUTPUT}.bb_energy.json"
+        --energy-params "$ESTIMATOR_CONFIG" \
+        --bb-mapping "${OUTPUT}.bb_mapping.json" \
+        "${OUTPUT}.energy.o" > "${OUTPUT}.bb_energy.json"
 
     # Step 4: Run RockClimb machine pass on MIR with pre-computed energy
     echo "=== Step 4: RockClimb Machine Pass (pre-computed energy) ==="
@@ -199,3 +201,4 @@ echo "  MIR (pre-pass):    ${OUTPUT}.mir"
 echo "  MIR (post-pass):   ${OUTPUT}.instrumented.mir"
 echo "  Assembly:          ${OUTPUT}.s"
 [[ "$LINK" == "true" ]] && echo "  ELF:               ${OUTPUT}.elf"
+exit 0
