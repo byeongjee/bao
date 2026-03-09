@@ -66,9 +66,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
             if (!valid)
                 continue;
 
-            unsigned count = traceObj["count"].get<unsigned>();
-            ep.count = count;
-            ep.probability = static_cast<double>(count);
+            ep.count = traceObj["count"].get<unsigned>();
             result.functionPaths.push_back(std::move(ep));
         }
 
@@ -170,9 +168,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                     if (!valid)
                         continue;
 
-                    unsigned count = traceObj["count"].get<unsigned>();
-                    ep.count = count;
-                    ep.probability = static_cast<double>(count);
+                    ep.count = traceObj["count"].get<unsigned>();
                     llt.iterationPaths.push_back(std::move(ep));
                 }
 

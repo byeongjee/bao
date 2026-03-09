@@ -19,7 +19,7 @@ class LoopAnalyzer {
   public:
     LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
                  const SchematicStateAnalysis &state, const SchematicParams &params,
-                 VMAddressTracker *tracker = nullptr);
+                 VMAddressTracker *tracker);
 
     /// Set loaded loop traces from TraceLoader for trace-guided analysis.
     void setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces);
