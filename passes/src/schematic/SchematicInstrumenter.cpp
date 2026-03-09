@@ -389,7 +389,8 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
         // checkpoint logic (mandatory or conditional) handles it in Step 7.
         bool isLoopBackEdge = false;
         for (const auto &[header, dec] : solution.loopDecisions) {
-            bool handledByLoopLogic = dec.mandatoryBackEdge || dec.numIterationsPerCharge > 0;
+            bool handledByLoopLogic =
+                dec.mandatoryBackEdge || (dec.numIterationsPerCharge > 0 && !dec.loopFitsEntirely);
             if (!handledByLoopLogic || !dec.loop)
                 continue;
 
@@ -428,7 +429,7 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
                                                          &decision.bodyAllocation, state);
                 }
             }
-        } else if (decision.numIterationsPerCharge > 0) {
+        } else if (decision.numIterationsPerCharge > 0 && !decision.loopFitsEntirely) {
             // Conditional: checkpoint every N iterations.
             inserted += insertLoopConditionalCheckpoint(header, decision, state);
         }

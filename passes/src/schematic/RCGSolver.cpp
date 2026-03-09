@@ -48,7 +48,11 @@ double RCGSolver::getIntervalBudget(unsigned nodeFrom, unsigned nodeTo) const {
     double E_left_budget = params_.capacity;
     double E_to_leave_budget = params_.capacity;
 
-    if (isStart && startBoundaryBlock_) {
+    if (isStart && !startBoundaryBlock_) {
+        // First interval with no boundary: subtract default restore cost
+        // (reference: schematic.py:184 uses energy_budget - chkpt_restore).
+        E_left_budget = params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+    } else if (isStart && startBoundaryBlock_) {
         auto it = existingMeta_.find(startBoundaryBlock_);
         if (it != existingMeta_.end()) {
             E_left_budget = it->second.E_left;
