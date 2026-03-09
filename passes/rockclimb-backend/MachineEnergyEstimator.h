@@ -6,6 +6,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 
+#include <set>
 #include <string>
 
 namespace checkpoint {
@@ -24,6 +25,15 @@ class MachineEnergyEstimator {
 
     /// Estimate energy for a single machine instruction
     double estimateInstruction(const llvm::MachineInstr &MI) const;
+
+    /// Collect all energy parameter keys required by the given function.
+    /// Returns a sorted set of keys (e.g., "mov_register_register").
+    /// Keys missing from the config are marked in the second set.
+    void collectRequiredKeys(const llvm::MachineFunction &MF, std::set<std::string> &allKeys,
+                             std::set<std::string> &missingKeys) const;
+
+    /// Get the energy key for a single instruction (for diagnostics)
+    std::string getInstructionKey(const llvm::MachineInstr &MI) const;
 
   private:
     bbanalyzer::EnergyModel model_;

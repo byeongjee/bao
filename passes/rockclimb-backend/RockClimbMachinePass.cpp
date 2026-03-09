@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 using namespace llvm;
@@ -26,6 +27,11 @@ static cl::opt<std::string>
     RockClimbMachineEnergyConfigOpt("rockclimb-machine-energy-config",
                                     cl::desc("Path to assembly energy config JSON"),
                                     cl::value_desc("filename"), cl::init(""));
+
+static cl::opt<bool>
+    RockClimbMachineDumpEnergyKeysOpt("rockclimb-machine-dump-energy-keys",
+                                      cl::desc("Print all required energy parameter keys and exit"),
+                                      cl::init(false));
 
 namespace checkpoint {
 
@@ -156,6 +162,38 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
 
     // Create energy estimator from assembly energy config
     MachineEnergyEstimator estimator(RockClimbMachineEnergyConfigOpt.getValue());
+
+    // Dump all required energy keys if requested
+    if (RockClimbMachineDumpEnergyKeysOpt) {
+        std::set<std::string> allKeys, missingKeys;
+        estimator.collectRequiredKeys(MF, allKeys, missingKeys);
+
+        errs() << "\n=== Required Energy Parameter Keys (" << MF.getName() << ") ===\n";
+        for (const auto &key : allKeys) {
+            bool missing = missingKeys.count(key);
+            errs() << "  " << key;
+            if (missing)
+                errs() << "  [MISSING]";
+            errs() << "\n";
+        }
+        errs() << "\nTotal: " << allKeys.size() << " keys, " << missingKeys.size()
+               << " missing\n\n";
+
+        if (!missingKeys.empty()) {
+            errs() << "Missing keys as JSON snippet:\n";
+            errs() << "{\n";
+            bool first = true;
+            for (const auto &key : missingKeys) {
+                if (!first)
+                    errs() << ",\n";
+                errs() << "  \"" << key << "\": 0.0";
+                first = false;
+            }
+            errs() << "\n}\n\n";
+        }
+
+        return false;
+    }
 
     // Get MachineLoopInfo
     auto &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
