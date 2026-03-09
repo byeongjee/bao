@@ -371,9 +371,12 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
 
             updateSolutionFromIntervals(result);
         }
+
+        // Propagate energy after each path so subsequent paths see updated values.
+        propagateEnergy();
     }
 
-    // Fix 2: Propagate energy BEFORE Step 9b so boundary blocks have correct values.
+    // Propagate energy before Step 9b so boundary blocks have correct values.
     propagateEnergy();
 
     // Step 9b: Analyze uncovered blocks (Python: find_and_analyse_not_fixed_paths).
@@ -476,15 +479,25 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
             continue;
 
-        // Check if allocations differ.
+        // Check if allocations differ (union-based: missing key = NVM).
         auto srcAlloc = solution.decidedPlacements.find(srcBB);
         auto dstAlloc = solution.decidedPlacements.find(dstBB);
         bool allocsDiffer = false;
-        if (srcAlloc != solution.decidedPlacements.end() &&
-            dstAlloc != solution.decidedPlacements.end()) {
-            for (const auto &[gv, place] : srcAlloc->second) {
-                auto it = dstAlloc->second.find(gv);
-                if (it != dstAlloc->second.end() && it->second != place) {
+        {
+            std::map<llvm::Value *, Placement> srcMap, dstMap;
+            if (srcAlloc != solution.decidedPlacements.end())
+                srcMap = srcAlloc->second;
+            if (dstAlloc != solution.decidedPlacements.end())
+                dstMap = dstAlloc->second;
+            std::set<llvm::Value *> allKeys;
+            for (const auto &[k, _] : srcMap)
+                allKeys.insert(k);
+            for (const auto &[k, _] : dstMap)
+                allKeys.insert(k);
+            for (llvm::Value *v : allKeys) {
+                Placement pS = srcMap.count(v) ? srcMap[v] : Placement::NVM;
+                Placement pD = dstMap.count(v) ? dstMap[v] : Placement::NVM;
+                if (pS != pD) {
                     allocsDiffer = true;
                     break;
                 }

@@ -262,8 +262,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    // Reference: nb_it = (budget - latch.E_to_leave) // energy_one_it - 1
-    double availableEnergy = params_.capacity - latchEToLeave;
+    // Reference: nb_it = (budget - header.E_to_leave) // energy_one_it - 1
+    double availableEnergy = params_.capacity - headerEToLeave;
     if (availableEnergy <= 0.0) {
         // Can't fit one checkpoint + one iteration.
         decision.mandatoryBackEdge = true;
@@ -327,7 +327,12 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             {
                 // Simple forward pass: accumulate execution energy through each path.
                 for (const auto &path : bodyPaths) {
-                    double accum = 0.0;
+                    double accum = params_.E_epi + params_.N_reg * params_.regStoreEnergy +
+                                   params_.loopIncrementCostNvm;
+                    for (const auto &[gv, place] : bodyAlloc.placement) {
+                        if (place == Placement::VM)
+                            accum += params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
+                    }
                     for (int b = static_cast<int>(path.size()) - 1; b >= 0; --b) {
                         llvm::BasicBlock *BB = path[b];
                         double bbE = cfg_.getBlockInfo(BB).energyCost;
@@ -359,7 +364,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 break;
 
             // 6. Recompute nb_it.
-            availableEnergy = params_.capacity - latchEToLeave;
+            availableEnergy = params_.capacity - headerEToLeave;
             if (availableEnergy <= 0.0)
                 break;
             rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
@@ -382,21 +387,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     solution.loopDecisions[header] = decision;
-
-    // Scale E_left and E_to_leave for loop blocks (reference: schematic.py:625-628, 641-643).
-    unsigned nbIter = decision.numIterationsPerCharge;
-    if (nbIter == 0)
-        nbIter = static_cast<unsigned>(maxTripCount); // entire loop fits
-    if (nbIter > 1) {
-        double loopScale = (nbIter - 1) * E_loop;
-        for (llvm::BasicBlock *BB : L->getBlocksVector()) {
-            auto it = solution.blockMeta.find(BB);
-            if (it == solution.blockMeta.end())
-                continue;
-            it->second.E_to_leave += loopScale;
-            it->second.E_left -= loopScale;
-        }
-    }
 
     return true;
 }
