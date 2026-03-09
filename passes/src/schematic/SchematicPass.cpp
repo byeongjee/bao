@@ -3,6 +3,7 @@
 #include "common/BlockUtils.h"
 #include "common/PassStatistics.h"
 #include "milp/CheckpointContext.h"
+#include "schematic/IntervalAllocator.h"
 #include "schematic/LoopAnalyzer.h"
 #include "schematic/RCGSolver.h"
 #include "schematic/SchematicInstrumenter.h"
@@ -87,6 +88,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
 
     SchematicSolution solution;
+    VMAddressTracker vmTracker;
 
     // Step 6: Load traces (optional).
     std::optional<LoadedTraces> loadedTraces;
@@ -98,7 +100,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
 
     // Step 7: Loop analysis.
-    LoopAnalyzer loopAnalyzer(LI, SE, *ctx.cfg, state, params);
+    LoopAnalyzer loopAnalyzer(LI, SE, *ctx.cfg, state, params, &vmTracker);
     if (loadedTraces)
         loopAnalyzer.setLoadedLoopTraces(loadedTraces->loopTraces);
 
@@ -173,7 +175,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             llvm::BasicBlock *endBound = s < endBoundaries.size() ? endBoundaries[s] : nullptr;
 
             RCGSolver solver(segments[s], state, *ctx.cfg, params, solution.blockMeta,
-                             solution.decidedPlacements, startBound, endBound);
+                             solution.decidedPlacements, startBound, endBound, &vmTracker);
             RCGResult result = solver.solve();
 
             if (!result.feasible) {
@@ -289,7 +291,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
 
         // Run RCG on the synthetic path.
         RCGSolver solver(synPath, state, *ctx.cfg, params, solution.blockMeta,
-                         solution.decidedPlacements, startBound, endBound);
+                         solution.decidedPlacements, startBound, endBound, &vmTracker);
         RCGResult result = solver.solve();
 
         if (!result.feasible) {
@@ -333,6 +335,142 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             }
 
             solution.regions.push_back({blocks, alloc});
+        }
+    }
+
+    // Step 9c: CFG-based energy propagation (reference: cfg_modification.py:171-317).
+    // Propagate E_left forward and E_to_leave backward through disabled
+    // checkpoint chains in the CFG.
+    {
+        // Helper: compute per-block energy with VM savings.
+        auto getBlockExecEnergy = [&](BasicBlock *BB) -> double {
+            double E = ctx.cfg->getBlockInfo(BB).energyCost;
+            auto allocIt = solution.decidedPlacements.find(BB);
+            if (allocIt != solution.decidedPlacements.end()) {
+                for (const auto &[gv, place] : allocIt->second) {
+                    if (place != Placement::VM)
+                        continue;
+                    unsigned loads = state.getLoadCount(BB, gv);
+                    unsigned stores = state.getStoreCount(BB, gv);
+                    E -= params.nvmAccessPenalty * (loads + stores);
+                }
+            }
+            return E;
+        };
+
+        // Compute per-variable save/restore overhead for a block's allocation.
+        auto getVarRestoreCost = [&](BasicBlock *BB) -> double {
+            double cost = 0.0;
+            auto allocIt = solution.decidedPlacements.find(BB);
+            if (allocIt != solution.decidedPlacements.end()) {
+                for (const auto &[gv, place] : allocIt->second) {
+                    if (place != Placement::VM)
+                        continue;
+                    cost += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
+                }
+            }
+            return cost;
+        };
+
+        auto getVarSaveCost = [&](BasicBlock *BB) -> double {
+            double cost = 0.0;
+            auto allocIt = solution.decidedPlacements.find(BB);
+            if (allocIt != solution.decidedPlacements.end()) {
+                for (const auto &[gv, place] : allocIt->second) {
+                    if (place != Placement::VM)
+                        continue;
+                    cost += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
+                }
+            }
+            return cost;
+        };
+
+        // Forward propagation of E_left: from each enabled checkpoint,
+        // traverse forward through disabled edges.
+        // E_left at checkpoint start = capacity - E_pro - reg_restore - var_restore
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto &[src, dst] : ctx.cfg->getEdges()) {
+                auto *srcBB = const_cast<BasicBlock *>(src);
+                auto *dstBB = const_cast<BasicBlock *>(dst);
+                CFGEdge edge{srcBB, dstBB};
+
+                // Skip enabled checkpoints — they reset energy.
+                if (solution.enabledCheckpoints.count(edge))
+                    continue;
+
+                auto srcIt = solution.blockMeta.find(srcBB);
+                auto dstIt = solution.blockMeta.find(dstBB);
+                if (srcIt == solution.blockMeta.end() || !srcIt->second.analyzed)
+                    continue;
+                if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
+                    continue;
+
+                // Propagate: E_left(dst) = min(E_left(dst), E_left(src) - E_exec(dst))
+                double dstExecEnergy = getBlockExecEnergy(dstBB);
+                double newELeft = srcIt->second.E_left - dstExecEnergy;
+                if (newELeft < dstIt->second.E_left) {
+                    solution.blockMeta[dstBB].E_left = newELeft;
+                    changed = true;
+                }
+            }
+        }
+
+        // Backward propagation of E_to_leave: from each enabled checkpoint,
+        // traverse backward through disabled edges.
+        // E_to_leave = energy needed to reach next checkpoint (including save costs).
+        changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto &[src, dst] : ctx.cfg->getEdges()) {
+                auto *srcBB = const_cast<BasicBlock *>(src);
+                auto *dstBB = const_cast<BasicBlock *>(dst);
+                CFGEdge edge{srcBB, dstBB};
+
+                // At enabled checkpoints, E_to_leave of src includes save costs.
+                if (solution.enabledCheckpoints.count(edge)) {
+                    double saveE =
+                        params.E_epi + params.N_reg * params.regStoreEnergy + getVarSaveCost(srcBB);
+                    if (saveE > solution.blockMeta[srcBB].E_to_leave) {
+                        solution.blockMeta[srcBB].E_to_leave = saveE;
+                        changed = true;
+                    }
+                    continue;
+                }
+
+                auto srcIt = solution.blockMeta.find(srcBB);
+                auto dstIt = solution.blockMeta.find(dstBB);
+                if (srcIt == solution.blockMeta.end() || !srcIt->second.analyzed)
+                    continue;
+                if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
+                    continue;
+
+                // Propagate backward: E_to_leave(src) = max(E_to_leave(src),
+                //                     E_exec(src) + E_to_leave(dst))
+                double srcExecEnergy = getBlockExecEnergy(srcBB);
+                double newEToLeave = srcExecEnergy + dstIt->second.E_to_leave;
+                if (newEToLeave > srcIt->second.E_to_leave) {
+                    solution.blockMeta[srcBB].E_to_leave = newEToLeave;
+                    changed = true;
+                }
+            }
+        }
+
+        // Also set E_left at checkpoint entry points.
+        for (const auto &ckpt : solution.enabledCheckpoints) {
+            BasicBlock *dstBB = ckpt.dst;
+            auto dstIt = solution.blockMeta.find(dstBB);
+            if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
+                continue;
+
+            double restoreE =
+                params.E_pro + params.N_reg * params.regRestoreEnergy + getVarRestoreCost(dstBB);
+            double dstExecEnergy = getBlockExecEnergy(dstBB);
+            double newELeft = params.capacity - restoreE - dstExecEnergy;
+            if (newELeft < dstIt->second.E_left) {
+                solution.blockMeta[dstBB].E_left = newELeft;
+            }
         }
     }
 

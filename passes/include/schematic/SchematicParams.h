@@ -17,6 +17,7 @@ struct SchematicParams {
     double memStoreEnergyPerByte;     // Energy per byte for VM->FRAM copy
     double memRestoreEnergyPerByte;   // Energy per byte for FRAM->VM copy
     unsigned vmCapacityBytes;         // VM (SRAM) capacity in bytes
+    double loopIncrementCostNvm;      // Energy of loop counter increment in NVM
     unsigned maxPaths;                // Maximum paths to enumerate
     bool addDebugMarkers = false;     // Emit debug marker calls
     bool enableBlockSplitting = true; // Split oversized blocks before solving

@@ -5,49 +5,62 @@
 
 namespace checkpoint {
 
-std::pair<bool, bool>
-computeLivenessFlags(llvm::Value *v, const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                     const SchematicStateAnalysis &state,
-                     const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
+void VMAddressTracker::reset() {
+    allocatedVars_.clear();
+    topAddress_ = 0;
+}
 
-    // live_start: true if the first access to v in the interval is a load.
-    bool liveStart = false;
+std::optional<unsigned> VMAddressTracker::getExistingAddress(llvm::Value *v) const {
+    auto it = allocatedVars_.find(v);
+    if (it != allocatedVars_.end())
+        return it->second;
+    return std::nullopt;
+}
+
+unsigned VMAddressTracker::recordAllocation(llvm::Value *v, unsigned size) {
+    unsigned addr = topAddress_;
+    allocatedVars_[v] = addr;
+    topAddress_ += size;
+    return addr;
+}
+
+unsigned VMAddressTracker::getTopAddress() const {
+    return topAddress_;
+}
+
+std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
+                                              const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                                              const SchematicStateAnalysis &state) {
+
+    // needRestore: true if the first access to v in the interval is a load.
+    bool needRestore = false;
     for (llvm::BasicBlock *BB : intervalBlocks) {
         unsigned loads = state.getLoadCount(BB, v);
         unsigned stores = state.getStoreCount(BB, v);
         if (loads > 0) {
-            liveStart = true;
+            needRestore = true;
             break;
         }
         if (stores > 0) {
-            liveStart = false;
+            needRestore = false;
             break;
         }
     }
 
-    // live_end: if postIntervalBlocks provided, true if v is accessed in any
-    // post-interval block. Otherwise conservatively true (assume live-out).
-    bool liveEnd;
-    if (postIntervalBlocks) {
-        liveEnd = false;
-        for (llvm::BasicBlock *BB : *postIntervalBlocks) {
-            if (state.getLoadCount(BB, v) > 0 || state.getStoreCount(BB, v) > 0) {
-                liveEnd = true;
-                break;
-            }
-        }
-    } else {
-        liveEnd = true;
-    }
+    // NOTE: A more optimal implementation would compute needSave based on
+    // liveness analysis (whether the variable is live-out of the interval),
+    // but the reference SCHEMATIC algorithm unconditionally assumes save is needed.
+    bool needSave = true;
 
-    return {liveStart, liveEnd};
+    return {needRestore, needSave};
 }
 
 RegionAllocation
 computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                           const SchematicStateAnalysis &state, const SchematicParams &params,
                           const std::map<llvm::Value *, Placement> &fixedPlacements,
-                          const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
+                          VMAddressTracker *tracker, const RegionAllocation *startConstraint,
+                          const RegionAllocation *endConstraint) {
 
     RegionAllocation result;
 
@@ -57,7 +70,12 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
     for (const auto &[v, place] : fixedPlacements) {
         if (place == Placement::VM) {
             unsigned size = state.getVarSizeBytes(v);
-            result.vmOffsets[v] = result.vmBytesUsed;
+            if (tracker) {
+                auto existing = tracker->getExistingAddress(v);
+                result.vmOffsets[v] = existing ? *existing : tracker->recordAllocation(v, size);
+            } else {
+                result.vmOffsets[v] = result.vmBytesUsed;
+            }
             result.vmBytesUsed += size;
         }
     }
@@ -67,8 +85,8 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         llvm::Value *v;
         double gain;
         unsigned size;
-        bool liveStart;
-        bool liveEnd;
+        bool needRestore;
+        bool needSave;
     };
     std::vector<CandidateEntry> candidates;
 
@@ -85,35 +103,68 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         if (nR == 0 && nW == 0)
             continue;
 
-        auto [liveStart, liveEnd] =
-            computeLivenessFlags(v, intervalBlocks, state, postIntervalBlocks);
+        auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
+
+        // Reference lines 186-190: if startConstraint exists and variable
+        // needs restore, or endConstraint exists and variable needs save,
+        // force to NVM (skip as candidate).
+        bool forcedNvm = false;
+        if (startConstraint && needRestore && startConstraint->placement.count(v)) {
+            forcedNvm = true;
+        }
+        if (endConstraint && needSave && endConstraint->placement.count(v)) {
+            forcedNvm = true;
+        }
+        if (forcedNvm) {
+            result.placement[v] = Placement::NVM;
+            result.livenessFlags[v] = {needRestore, needSave};
+            continue;
+        }
 
         unsigned size = state.getVarSizeBytes(v);
-        double E_sr = params.memRestoreEnergyPerByte * size * (liveStart ? 1.0 : 0.0) +
-                      params.memStoreEnergyPerByte * size * (liveEnd ? 1.0 : 0.0);
+        double E_sr = params.memRestoreEnergyPerByte * size * (needRestore ? 1.0 : 0.0) +
+                      params.memStoreEnergyPerByte * size * (needSave ? 1.0 : 0.0);
         double gain = params.nvmAccessPenalty * (nR + nW) - E_sr;
 
-        candidates.push_back({v, gain, size, liveStart, liveEnd});
+        candidates.push_back({v, gain, size, needRestore, needSave});
     }
 
-    // Sort positive-gain candidates by gain/size descending (density-based greedy).
+    // Sort positive-gain candidates by raw gain descending.
+    // Tie-break: prefer smaller size (packs more variables into VM).
     std::sort(candidates.begin(), candidates.end(),
               [](const CandidateEntry &a, const CandidateEntry &b) {
-                  double densA = a.size > 0 ? a.gain / a.size : 0.0;
-                  double densB = b.size > 0 ? b.gain / b.size : 0.0;
-                  return densA > densB;
+                  if (a.gain != b.gain)
+                      return a.gain > b.gain;
+                  return a.size < b.size;
               });
 
     // Greedy pack into VM.
     for (const auto &c : candidates) {
+        // If tracker knows this variable, reuse its address (matching reference
+        // lines 208-213: previously allocated variables are always placed in VM).
+        if (tracker) {
+            auto existing = tracker->getExistingAddress(c.v);
+            if (existing) {
+                result.placement[c.v] = Placement::VM;
+                result.vmOffsets[c.v] = *existing;
+                result.vmBytesUsed += c.size;
+                result.livenessFlags[c.v] = {c.needRestore, c.needSave};
+                continue;
+            }
+        }
+
         if (c.gain > 0.0 && result.vmBytesUsed + c.size <= params.vmCapacityBytes) {
             result.placement[c.v] = Placement::VM;
-            result.vmOffsets[c.v] = result.vmBytesUsed;
+            if (tracker) {
+                result.vmOffsets[c.v] = tracker->recordAllocation(c.v, c.size);
+            } else {
+                result.vmOffsets[c.v] = result.vmBytesUsed;
+            }
             result.vmBytesUsed += c.size;
-            result.livenessFlags[c.v] = {c.liveStart, c.liveEnd};
+            result.livenessFlags[c.v] = {c.needRestore, c.needSave};
         } else {
             result.placement[c.v] = Placement::NVM;
-            result.livenessFlags[c.v] = {c.liveStart, c.liveEnd};
+            result.livenessFlags[c.v] = {c.needRestore, c.needSave};
         }
     }
 
@@ -124,20 +175,20 @@ double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBloc
                              const RegionAllocation &allocation,
                              const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
                              const SchematicParams &params, bool isFirstInterval,
-                             bool isLastInterval,
-                             const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
+                             bool isLastInterval) {
 
     // E_restore: checkpoint restore cost at interval start.
+    // NOTE: A more optimal implementation would only include restore costs for
+    // variables where needRestore is true (first access is a load), but the
+    // reference SCHEMATIC algorithm unconditionally restores all VM variables
+    // at interval boundaries.
     double E_restore = 0.0;
     if (!isFirstInterval) {
         E_restore = params.E_pro + params.N_reg * params.regRestoreEnergy;
         for (const auto &[gv, place] : allocation.placement) {
             if (place != Placement::VM)
                 continue;
-            auto flagIt = allocation.livenessFlags.find(gv);
-            if (flagIt != allocation.livenessFlags.end() && flagIt->second.first) {
-                E_restore += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
-            }
+            E_restore += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
         }
     }
 
@@ -163,10 +214,7 @@ double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBloc
         for (const auto &[gv, place] : allocation.placement) {
             if (place != Placement::VM)
                 continue;
-            auto flagIt = allocation.livenessFlags.find(gv);
-            if (flagIt != allocation.livenessFlags.end() && flagIt->second.second) {
-                E_save += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
-            }
+            E_save += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
         }
     }
 

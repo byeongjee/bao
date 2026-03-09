@@ -13,8 +13,9 @@
 namespace checkpoint {
 
 LoopAnalyzer::LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
-                           const SchematicStateAnalysis &state, const SchematicParams &params)
-    : LI_(LI), SE_(SE), cfg_(cfg), state_(state), params_(params) {}
+                           const SchematicStateAnalysis &state, const SchematicParams &params,
+                           VMAddressTracker *tracker)
+    : LI_(LI), SE_(SE), cfg_(cfg), state_(state), params_(params), tracker_(tracker) {}
 
 void LoopAnalyzer::setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces) {
     loadedLoopTraces_ = traces;
@@ -130,144 +131,6 @@ LoopAnalyzer::buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &
     return alloc;
 }
 
-double LoopAnalyzer::computeMaxIterationEnergy(llvm::Loop *L, const RegionAllocation &allocation,
-                                               const SchematicSolution &solution) const {
-
-    llvm::BasicBlock *header = L->getHeader();
-    std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
-    std::set<llvm::BasicBlock *> loopBlockSet(loopBlocks.begin(), loopBlocks.end());
-
-    // Build DAG of direct children blocks (only this nesting level).
-    // Assign per-block energy.
-    llvm::DenseMap<llvm::BasicBlock *, double> blockEnergy;
-
-    for (llvm::BasicBlock *BB : loopBlocks) {
-        llvm::Loop *innerLoop = LI_.getLoopFor(BB);
-
-        // Skip blocks in inner loops that aren't inner loop headers.
-        if (innerLoop && innerLoop != L && BB != innerLoop->getHeader())
-            continue;
-
-        if (innerLoop && innerLoop != L && BB == innerLoop->getHeader()) {
-            // Inner loop header — check if it has a checkpoint decision.
-            auto decIt = solution.loopDecisions.find(BB);
-            if (decIt != solution.loopDecisions.end()) {
-                const auto &dec = decIt->second;
-                if (dec.numIterationsPerCharge == 0 && !dec.mandatoryBackEdge) {
-                    // No checkpoint: entire inner loop fits in one charge.
-                    // Use maxTripCount * E_loop.
-                    auto tc = getMaxTripCount(innerLoop);
-                    double tripCount = tc ? static_cast<double>(*tc) : 1.0;
-                    blockEnergy[BB] = tripCount * dec.E_loop;
-                } else {
-                    // Has checkpoint: bounded by one charge cycle.
-                    blockEnergy[BB] = params_.capacity;
-                }
-            } else {
-                // No decision yet — use base energy cost.
-                blockEnergy[BB] = cfg_.getBlockInfo(BB).energyCost;
-            }
-        } else {
-            // Normal block: base cost minus NVM savings for VM-placed vars.
-            double E = cfg_.getBlockInfo(BB).energyCost;
-            for (const auto &[gv, place] : allocation.placement) {
-                if (place != Placement::VM)
-                    continue;
-                unsigned loads = state_.getLoadCount(BB, gv);
-                unsigned stores = state_.getStoreCount(BB, gv);
-                E -= params_.nvmAccessPenalty * (loads + stores);
-            }
-            blockEnergy[BB] = E;
-        }
-    }
-
-    // Identify latch blocks.
-    std::set<llvm::BasicBlock *> latches;
-    if (llvm::BasicBlock *latch = L->getLoopLatch()) {
-        latches.insert(latch);
-    } else {
-        for (llvm::BasicBlock *pred : predecessors(header)) {
-            if (L->contains(pred))
-                latches.insert(pred);
-        }
-    }
-
-    // Longest path via topological order on the loop body DAG.
-    // Topological sort via Kahn's algorithm on the restricted set.
-    std::set<llvm::BasicBlock *> dagBlocks;
-    for (const auto &[BB, _] : blockEnergy)
-        dagBlocks.insert(BB);
-
-    llvm::DenseMap<llvm::BasicBlock *, unsigned> inDegree;
-    llvm::DenseMap<llvm::BasicBlock *, llvm::SmallVector<llvm::BasicBlock *, 4>> dagSucc;
-
-    for (llvm::BasicBlock *BB : dagBlocks) {
-        inDegree[BB] = 0;
-    }
-
-    for (llvm::BasicBlock *BB : dagBlocks) {
-        for (llvm::BasicBlock *succ : successors(BB)) {
-            // Skip back-edges.
-            if (succ == header)
-                continue;
-            // Map inner loop blocks to their header.
-            llvm::BasicBlock *target = succ;
-            if (dagBlocks.count(succ) == 0) {
-                llvm::Loop *succLoop = LI_.getLoopFor(succ);
-                if (succLoop && succLoop != L)
-                    target = succLoop->getHeader();
-            }
-            if (dagBlocks.count(target) && target != BB) {
-                dagSucc[BB].push_back(target);
-                inDegree[target]++;
-            }
-        }
-    }
-
-    // Kahn's topological sort.
-    std::vector<llvm::BasicBlock *> topoOrder;
-    std::vector<llvm::BasicBlock *> queue;
-    for (llvm::BasicBlock *BB : dagBlocks) {
-        if (inDegree[BB] == 0)
-            queue.push_back(BB);
-    }
-
-    while (!queue.empty()) {
-        llvm::BasicBlock *BB = queue.back();
-        queue.pop_back();
-        topoOrder.push_back(BB);
-        for (llvm::BasicBlock *succ : dagSucc[BB]) {
-            if (--inDegree[succ] == 0)
-                queue.push_back(succ);
-        }
-    }
-
-    // Longest path from header.
-    llvm::DenseMap<llvm::BasicBlock *, double> dist;
-    for (llvm::BasicBlock *BB : dagBlocks)
-        dist[BB] = -1.0;
-    dist[header] = blockEnergy[header];
-
-    for (llvm::BasicBlock *BB : topoOrder) {
-        if (dist[BB] < 0.0)
-            continue;
-        for (llvm::BasicBlock *succ : dagSucc[BB]) {
-            double newDist = dist[BB] + blockEnergy[succ];
-            if (newDist > dist[succ])
-                dist[succ] = newDist;
-        }
-    }
-
-    // Maximum across all blocks in the DAG.
-    double maxEnergy = 0.0;
-    for (llvm::BasicBlock *BB : dagBlocks) {
-        if (dist[BB] > maxEnergy)
-            maxEnergy = dist[BB];
-    }
-
-    return maxEnergy;
-}
-
 bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     llvm::BasicBlock *header = L->getHeader();
 
@@ -307,7 +170,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // 3. Run RCG solver on each path.
     for (const auto &path : bodyPaths) {
         RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta,
-                         solution.decidedPlacements, nullptr, nullptr);
+                         solution.decidedPlacements, nullptr, nullptr, tracker_);
         RCGResult result = solver.solve();
         if (!result.feasible) {
             llvm::errs() << "SCHEMATIC infeasible: energy capacity too small for loop at '"
@@ -368,9 +231,22 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    // 6. Allocations match — compute energy per iteration.
+    // 6. Allocations match — compute energy per iteration using reference formula:
+    //    E_loop = header.E_to_leave - latch.E_to_leave + loop_increment_cost_nvm
     RegionAllocation bodyAlloc = buildBoundaryAllocation(headerAlloc);
-    double E_loop = computeMaxIterationEnergy(L, bodyAlloc, solution);
+    double headerEToLeave = 0.0;
+    double latchEToLeave = 0.0;
+    {
+        auto hMeta = solution.blockMeta.find(header);
+        if (hMeta != solution.blockMeta.end())
+            headerEToLeave = hMeta->second.E_to_leave;
+        if (latch) {
+            auto lMeta = solution.blockMeta.find(latch);
+            if (lMeta != solution.blockMeta.end())
+                latchEToLeave = lMeta->second.E_to_leave;
+        }
+    }
+    double E_loop = headerEToLeave - latchEToLeave + params_.loopIncrementCostNvm;
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
 
@@ -404,6 +280,44 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     auto numIt = static_cast<unsigned>(std::floor(availableEnergy / E_loop));
+
+    // Convergence loop (reference lines 574-617): if loop has only disabled
+    // checkpoints and numIt > 1, re-estimate variable accesses scaled by
+    // min(numIt, maxTripCount) iterations and re-compute allocation until
+    // numIt converges.
+    bool hasEnabledCheckpoints = false;
+    for (const auto &ckpt : solution.enabledCheckpoints) {
+        // Check if any enabled checkpoint is a back-edge of this loop.
+        if (ckpt.dst == header && L->contains(ckpt.src)) {
+            hasEnabledCheckpoints = true;
+            break;
+        }
+    }
+
+    if (!hasEnabledCheckpoints && numIt > 1) {
+        for (unsigned iter = 0; iter < 15; ++iter) {
+            unsigned prevNumIt = numIt;
+
+            // Re-compute checkpoint overhead and available energy.
+            E_ckpt = params_.E_pro + params_.E_epi +
+                     params_.N_reg * (params_.regStoreEnergy + params_.regRestoreEnergy);
+            for (const auto &[gv, place] : bodyAlloc.placement) {
+                if (place != Placement::VM)
+                    continue;
+                unsigned size = state_.getVarSizeBytes(gv);
+                E_ckpt +=
+                    params_.memStoreEnergyPerByte * size + params_.memRestoreEnergyPerByte * size;
+            }
+
+            availableEnergy = params_.capacity - E_ckpt;
+            if (availableEnergy <= 0.0)
+                break;
+
+            numIt = static_cast<unsigned>(std::floor(availableEnergy / E_loop));
+            if (numIt == prevNumIt)
+                break; // Converged.
+        }
+    }
 
     if (numIt >= maxTripCount) {
         // Entire loop fits — no checkpoint needed.

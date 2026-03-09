@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace checkpoint {
@@ -12,10 +13,12 @@ RCGSolver::RCGSolver(
     const CFGAnalysis &cfg, const SchematicParams &params,
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
     const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
-    llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock)
+    llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock,
+    VMAddressTracker *tracker)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
       existingMeta_(existingMeta), decidedPlacements_(decidedPlacements),
-      startBoundaryBlock_(startBoundaryBlock), endBoundaryBlock_(endBoundaryBlock) {}
+      startBoundaryBlock_(startBoundaryBlock), endBoundaryBlock_(endBoundaryBlock),
+      tracker_(tracker) {}
 
 void RCGSolver::buildNodes() {
     nodes_.clear();
@@ -114,6 +117,26 @@ RCGResult RCGSolver::solve() {
 
     unsigned numNodes = nodes_.size();
 
+    // Build start/end constraint allocations from boundary blocks.
+    std::optional<RegionAllocation> startConstraintAlloc;
+    std::optional<RegionAllocation> endConstraintAlloc;
+    if (startBoundaryBlock_) {
+        auto it = decidedPlacements_.find(startBoundaryBlock_);
+        if (it != decidedPlacements_.end()) {
+            RegionAllocation a;
+            a.placement = it->second;
+            startConstraintAlloc = std::move(a);
+        }
+    }
+    if (endBoundaryBlock_) {
+        auto it = decidedPlacements_.find(endBoundaryBlock_);
+        if (it != decidedPlacements_.end()) {
+            RegionAllocation a;
+            a.placement = it->second;
+            endConstraintAlloc = std::move(a);
+        }
+    }
+
     // Single-interval shortcut: Start + End only, no candidate edges.
     if (numNodes == 2) {
         auto blocks = getIntervalBlocks(0, 1);
@@ -125,7 +148,9 @@ RCGResult RCGSolver::solve() {
                     fixed[gv] = place;
             }
         }
-        auto alloc = computeIntervalAllocation(blocks, state_, params_, fixed);
+        const RegionAllocation *sc = startConstraintAlloc ? &*startConstraintAlloc : nullptr;
+        const RegionAllocation *ec = endConstraintAlloc ? &*endConstraintAlloc : nullptr;
+        auto alloc = computeIntervalAllocation(blocks, state_, params_, fixed, tracker_, sc, ec);
         double energy = computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, true, true);
         alloc.intervalEnergy = energy;
         double budget = getIntervalBudget(0, 1);
@@ -173,9 +198,14 @@ RCGResult RCGSolver::solve() {
                 }
             }
 
-            auto alloc = computeIntervalAllocation(blocks, state_, params_, fixed);
             bool isFirst = (i == 0);
             bool isLast = (j == numNodes - 1);
+            const RegionAllocation *sc =
+                (isFirst && startConstraintAlloc) ? &*startConstraintAlloc : nullptr;
+            const RegionAllocation *ec =
+                (isLast && endConstraintAlloc) ? &*endConstraintAlloc : nullptr;
+            auto alloc =
+                computeIntervalAllocation(blocks, state_, params_, fixed, tracker_, sc, ec);
             double energy =
                 computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, isFirst, isLast);
             alloc.intervalEnergy = energy;

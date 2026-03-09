@@ -22,6 +22,8 @@ struct RCGResult {
     std::string errorMessage;
 };
 
+class VMAddressTracker;
+
 class RCGSolver {
   public:
     RCGSolver(const std::vector<llvm::BasicBlock *> &pathBlocks,
@@ -31,7 +33,7 @@ class RCGSolver {
               const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>>
                   &decidedPlacements,
               llvm::BasicBlock *startBoundaryBlock = nullptr,
-              llvm::BasicBlock *endBoundaryBlock = nullptr);
+              llvm::BasicBlock *endBoundaryBlock = nullptr, VMAddressTracker *tracker = nullptr);
 
     RCGResult solve();
 
@@ -52,6 +54,7 @@ class RCGSolver {
         &decidedPlacements_;
     llvm::BasicBlock *startBoundaryBlock_;
     llvm::BasicBlock *endBoundaryBlock_;
+    VMAddressTracker *tracker_;
 
     std::vector<Node> nodes_;
 

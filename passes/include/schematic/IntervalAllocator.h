@@ -6,32 +6,48 @@
 #include "schematic/SchematicStateAnalysis.h"
 
 #include <map>
+#include <optional>
 #include <utility>
 #include <vector>
 
 namespace checkpoint {
 
-/// Compute live_start and live_end flags for variable v in an interval.
-/// live_start: 1 if first access to v is a read (needs restore at interval start)
-/// live_end: 1 if v is live-out of interval (needs save at interval end)
-std::pair<bool, bool>
-computeLivenessFlags(llvm::Value *v, const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                     const SchematicStateAnalysis &state,
-                     const std::vector<llvm::BasicBlock *> *postIntervalBlocks = nullptr);
+/// Tracks VM address assignments across intervals within a function.
+/// Variables that were previously allocated in VM reuse their address.
+/// Matches reference: `already_allocated_variables` + `top_address`.
+class VMAddressTracker {
+  public:
+    void reset();
+    std::optional<unsigned> getExistingAddress(llvm::Value *v) const;
+    unsigned recordAllocation(llvm::Value *v, unsigned size);
+    unsigned getTopAddress() const;
+
+  private:
+    std::map<llvm::Value *, unsigned> allocatedVars_;
+    unsigned topAddress_ = 0;
+};
+
+/// Compute needRestore and needSave flags for variable v in an interval.
+/// needRestore: true if first access to v is a read (needs restore at interval start)
+/// needSave: always true (reference SCHEMATIC algorithm unconditionally saves)
+std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
+                                              const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                                              const SchematicStateAnalysis &state);
 
 /// Compute optimal greedy allocation for an interval (spec §6.2).
-RegionAllocation
-computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                          const SchematicStateAnalysis &state, const SchematicParams &params,
-                          const std::map<llvm::Value *, Placement> &fixedPlacements = {},
-                          const std::vector<llvm::BasicBlock *> *postIntervalBlocks = nullptr);
+/// startConstraint/endConstraint: if set, variables that need restore/save
+/// and exist in the constraint allocation are forced to NVM (reference lines 186-190).
+RegionAllocation computeIntervalAllocation(
+    const std::vector<llvm::BasicBlock *> &intervalBlocks, const SchematicStateAnalysis &state,
+    const SchematicParams &params, const std::map<llvm::Value *, Placement> &fixedPlacements = {},
+    VMAddressTracker *tracker = nullptr, const RegionAllocation *startConstraint = nullptr,
+    const RegionAllocation *endConstraint = nullptr);
 
 /// Compute total interval energy (spec §7.2).
 double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                              const RegionAllocation &allocation,
                              const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
                              const SchematicParams &params, bool isFirstInterval,
-                             bool isLastInterval,
-                             const std::vector<llvm::BasicBlock *> *postIntervalBlocks = nullptr);
+                             bool isLastInterval);
 
 } // namespace checkpoint

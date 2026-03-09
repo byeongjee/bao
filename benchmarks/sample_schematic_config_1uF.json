@@ -9,6 +9,7 @@
   "mem_store_energy_per_byte": 0.95,
   "mem_restore_energy_per_byte": 0.95,
   "vm_capacity_bytes": 2048,
+  "loop_increment_cost_nvm": 7.6,
   "max_paths": 10,
   "add_debug_markers": true
 }

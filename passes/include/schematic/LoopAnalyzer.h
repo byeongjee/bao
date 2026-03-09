@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/CFGAnalysis.h"
+#include "schematic/IntervalAllocator.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
 #include "schematic/SchematicStateAnalysis.h"
@@ -17,7 +18,8 @@ namespace checkpoint {
 class LoopAnalyzer {
   public:
     LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
-                 const SchematicStateAnalysis &state, const SchematicParams &params);
+                 const SchematicStateAnalysis &state, const SchematicParams &params,
+                 VMAddressTracker *tracker = nullptr);
 
     /// Set loaded loop traces from TraceLoader for trace-guided analysis.
     void setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces);
@@ -31,6 +33,7 @@ class LoopAnalyzer {
     const CFGAnalysis &cfg_;
     const SchematicStateAnalysis &state_;
     const SchematicParams &params_;
+    VMAddressTracker *tracker_;
 
     std::vector<LoadedLoopTrace> loadedLoopTraces_;
 
@@ -45,12 +48,6 @@ class LoopAnalyzer {
 
     RegionAllocation
     buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const;
-
-    /// Compute worst-case per-iteration energy via longest path in loop body DAG.
-    /// Inner loops with numIterationsPerCharge==0 (entire loop fits in one charge)
-    /// are collapsed to E_loop * tripCount to avoid energy underestimation.
-    double computeMaxIterationEnergy(llvm::Loop *L, const RegionAllocation &allocation,
-                                     const SchematicSolution &solution) const;
 };
 
 } // namespace checkpoint

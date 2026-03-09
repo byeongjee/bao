@@ -28,7 +28,8 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
                                                      "reg_restore_energy",
                                                      "nvm_access_penalty",
                                                      "mem_store_energy_per_byte",
-                                                     "mem_restore_energy_per_byte"};
+                                                     "mem_restore_energy_per_byte",
+                                                     "loop_increment_cost_nvm"};
 
     for (const auto &field : requiredDouble) {
         if (!config.contains(field)) {
@@ -38,7 +39,7 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
         }
     }
 
-    const std::vector<std::string> requiredUnsigned = {"N_reg", "vm_capacity_bytes", "max_paths"};
+    const std::vector<std::string> requiredUnsigned = {"N_reg", "vm_capacity_bytes"};
     for (const auto &field : requiredUnsigned) {
         if (!config.contains(field)) {
             llvm::errs() << "Error: Missing required field '" << field
@@ -63,6 +64,7 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     params.memStoreEnergyPerByte = config["mem_store_energy_per_byte"].get<double>();
     params.memRestoreEnergyPerByte = config["mem_restore_energy_per_byte"].get<double>();
     params.vmCapacityBytes = config["vm_capacity_bytes"].get<unsigned>();
+    params.loopIncrementCostNvm = config["loop_increment_cost_nvm"].get<double>();
 
     // max_paths: check schematic section first, then root.
     if (schSection.contains("max_paths")) {
