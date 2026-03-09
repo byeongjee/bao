@@ -215,15 +215,19 @@ RCGResult RCGSolver::solve() {
             alloc.intervalEnergy = energy;
             double budget = getIntervalBudget(i, j);
 
+            // Capture values before potential move.
+            size_t blockCount = blocks.size();
+            llvm::BasicBlock *firstBlock = blocks.empty() ? nullptr : blocks[0];
+
             if (energy < budget) {
                 adj[i].push_back(RCGEdge{i, j, energy, std::move(alloc), std::move(blocks)});
             }
 
             // Track the minimum single-block interval for diagnostics.
-            if (blocks.size() == 1 && energy < minSingleBlockEnergy) {
+            if (blockCount == 1 && energy < minSingleBlockEnergy) {
                 minSingleBlockEnergy = energy;
                 minSingleBlockBudget = budget;
-                minSingleBlockBB = blocks[0];
+                minSingleBlockBB = firstBlock;
             }
         }
     }

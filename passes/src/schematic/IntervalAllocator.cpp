@@ -1,5 +1,8 @@
 #include "schematic/IntervalAllocator.h"
 
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instructions.h"
+
 #include <algorithm>
 #include <vector>
 
@@ -60,7 +63,7 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                           const SchematicStateAnalysis &state, const SchematicParams &params,
                           const std::map<llvm::Value *, Placement> &fixedPlacements,
                           VMAddressTracker *tracker, const RegionAllocation *startConstraint,
-                          const RegionAllocation *endConstraint) {
+                          const RegionAllocation *endConstraint, unsigned accessScale) {
 
     RegionAllocation result;
 
@@ -94,7 +97,8 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         if (fixedPlacements.count(v))
             continue;
 
-        // Accumulate access counts across interval.
+        // Accumulate access counts across interval, scaled by accessScale
+        // (used by convergence loop to account for multiple iterations).
         unsigned nR = 0, nW = 0;
         for (llvm::BasicBlock *BB : intervalBlocks) {
             nR += state.getLoadCount(BB, v);
@@ -102,6 +106,8 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         }
         if (nR == 0 && nW == 0)
             continue;
+        nR *= accessScale;
+        nW *= accessScale;
 
         auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
 
@@ -116,6 +122,18 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
             forcedNvm = true;
         }
         if (forcedNvm) {
+            result.placement[v] = Placement::NVM;
+            result.livenessFlags[v] = {needRestore, needSave};
+            continue;
+        }
+
+        // Reference: memory_allocator.py:179-181 — force pointer-type variables to NVM.
+        bool isPointerType = false;
+        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(v))
+            isPointerType = GV->getValueType()->isPointerTy();
+        else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(v))
+            isPointerType = AI->getAllocatedType()->isPointerTy();
+        if (isPointerType) {
             result.placement[v] = Placement::NVM;
             result.livenessFlags[v] = {needRestore, needSave};
             continue;
