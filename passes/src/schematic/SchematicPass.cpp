@@ -116,6 +116,192 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
     std::vector<EnumeratedPath> paths = loadedTraces->functionPaths;
 
+    // Energy helper lambdas (used by propagateEnergy and interval processing).
+    auto getBlockExecEnergy = [&](BasicBlock *BB) -> double {
+        double E = ctx.cfg->getBlockInfo(BB).energyCost;
+        auto allocIt = solution.decidedPlacements.find(BB);
+        if (allocIt != solution.decidedPlacements.end()) {
+            for (const auto &[gv, place] : allocIt->second) {
+                if (place != Placement::VM)
+                    continue;
+                unsigned loads = state.getLoadCount(BB, gv);
+                unsigned stores = state.getStoreCount(BB, gv);
+                E -= params.nvmAccessPenalty * (loads + stores);
+            }
+        }
+        return E;
+    };
+
+    auto getVarRestoreCost = [&](BasicBlock *BB) -> double {
+        double cost = 0.0;
+        auto allocIt = solution.decidedPlacements.find(BB);
+        if (allocIt != solution.decidedPlacements.end()) {
+            for (const auto &[gv, place] : allocIt->second) {
+                if (place != Placement::VM)
+                    continue;
+                cost += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
+            }
+        }
+        return cost;
+    };
+
+    auto getVarSaveCost = [&](BasicBlock *BB) -> double {
+        double cost = 0.0;
+        auto allocIt = solution.decidedPlacements.find(BB);
+        if (allocIt != solution.decidedPlacements.end()) {
+            for (const auto &[gv, place] : allocIt->second) {
+                if (place != Placement::VM)
+                    continue;
+                cost += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
+            }
+        }
+        return cost;
+    };
+
+    // CFG-based energy propagation (reference: cfg_modification.py:171-317).
+    // Propagates E_left forward and E_to_leave backward through disabled
+    // checkpoint chains. Order: Phase 3 (seed checkpoint entries) → forward → backward.
+    auto propagateEnergy = [&]() {
+        // Phase 3: Initialize E_left at checkpoint entry points (Fix 4: before forward prop).
+        for (const auto &ckpt : solution.enabledCheckpoints) {
+            BasicBlock *dstBB = ckpt.dst;
+            auto dstIt = solution.blockMeta.find(dstBB);
+            if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
+                continue;
+            double restoreE =
+                params.E_pro + params.N_reg * params.regRestoreEnergy + getVarRestoreCost(dstBB);
+            double dstExecEnergy = getBlockExecEnergy(dstBB);
+            double newELeft = params.capacity - restoreE - dstExecEnergy;
+            if (newELeft < dstIt->second.E_left)
+                solution.blockMeta[dstBB].E_left = newELeft;
+        }
+
+        // Forward propagation of E_left through disabled edges.
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto &[src, dst] : ctx.cfg->getEdges()) {
+                auto *srcBB = const_cast<BasicBlock *>(src);
+                auto *dstBB = const_cast<BasicBlock *>(dst);
+                CFGEdge edge{srcBB, dstBB};
+
+                if (solution.enabledCheckpoints.count(edge))
+                    continue;
+
+                // Fix 5: Skip loop back-edges.
+                if (Loop *L = LI.getLoopFor(dstBB)) {
+                    if (dstBB == L->getHeader() && L->contains(srcBB))
+                        continue;
+                }
+
+                auto srcIt = solution.blockMeta.find(srcBB);
+                auto dstIt = solution.blockMeta.find(dstBB);
+                if (srcIt == solution.blockMeta.end() || !srcIt->second.analyzed)
+                    continue;
+                if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
+                    continue;
+
+                double dstExecEnergy = getBlockExecEnergy(dstBB);
+                double newELeft = srcIt->second.E_left - dstExecEnergy;
+                if (newELeft < dstIt->second.E_left) {
+                    solution.blockMeta[dstBB].E_left = newELeft;
+                    changed = true;
+                }
+            }
+        }
+
+        // Backward propagation of E_to_leave through disabled edges.
+        changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto &[src, dst] : ctx.cfg->getEdges()) {
+                auto *srcBB = const_cast<BasicBlock *>(src);
+                auto *dstBB = const_cast<BasicBlock *>(dst);
+                CFGEdge edge{srcBB, dstBB};
+
+                // At enabled checkpoints, E_to_leave includes save + exec cost (Fix 3).
+                if (solution.enabledCheckpoints.count(edge)) {
+                    double saveE =
+                        params.E_epi + params.N_reg * params.regStoreEnergy + getVarSaveCost(srcBB);
+                    saveE += getBlockExecEnergy(srcBB);
+                    if (saveE > solution.blockMeta[srcBB].E_to_leave) {
+                        solution.blockMeta[srcBB].E_to_leave = saveE;
+                        changed = true;
+                    }
+                    continue;
+                }
+
+                // Fix 5: Skip loop back-edges.
+                if (Loop *L = LI.getLoopFor(dstBB)) {
+                    if (dstBB == L->getHeader() && L->contains(srcBB))
+                        continue;
+                }
+
+                auto srcIt = solution.blockMeta.find(srcBB);
+                auto dstIt = solution.blockMeta.find(dstBB);
+                if (srcIt == solution.blockMeta.end() || !srcIt->second.analyzed)
+                    continue;
+                if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
+                    continue;
+
+                double srcExecEnergy = getBlockExecEnergy(srcBB);
+                double newEToLeave = srcExecEnergy + dstIt->second.E_to_leave;
+                if (newEToLeave > srcIt->second.E_to_leave) {
+                    solution.blockMeta[srcBB].E_to_leave = newEToLeave;
+                    changed = true;
+                }
+            }
+        }
+    };
+
+    // Helper: update solution blockMeta from RCG interval results (Fix 1: backward E_to_leave).
+    auto updateSolutionFromIntervals = [&](const RCGResult &result) {
+        for (const auto &ckpt : result.selectedCheckpoints)
+            solution.enabledCheckpoints.insert(ckpt);
+
+        for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
+            const auto &blocks = result.intervalBlocks[i];
+            const auto &alloc = result.allocations[i];
+
+            // Forward pass: compute E_left and collect per-block energies.
+            std::vector<double> blockEnergies(blocks.size());
+            double energyAccum = 0.0;
+            for (unsigned b = 0; b < blocks.size(); ++b) {
+                BasicBlock *BB = blocks[b];
+                double bbEnergy = ctx.cfg->getBlockInfo(BB).energyCost;
+                for (const auto &[gv, place] : alloc.placement) {
+                    if (place != Placement::VM)
+                        continue;
+                    unsigned loads = state.getLoadCount(BB, gv);
+                    unsigned stores = state.getStoreCount(BB, gv);
+                    bbEnergy -= params.nvmAccessPenalty * (loads + stores);
+                }
+                blockEnergies[b] = bbEnergy;
+                energyAccum += bbEnergy;
+
+                auto &meta = solution.blockMeta[BB];
+                double newELeft = alloc.intervalEnergy - energyAccum;
+                if (!meta.analyzed || newELeft < meta.E_left)
+                    meta.E_left = newELeft;
+                meta.analyzed = true;
+
+                for (const auto &[gv, place] : alloc.placement)
+                    solution.decidedPlacements[BB][gv] = place;
+            }
+
+            // Backward pass: compute E_to_leave (Fix 1).
+            double energyToEnd = 0.0;
+            for (int b = static_cast<int>(blocks.size()) - 1; b >= 0; --b) {
+                energyToEnd += blockEnergies[b];
+                auto &meta = solution.blockMeta[blocks[b]];
+                if (energyToEnd > meta.E_to_leave)
+                    meta.E_to_leave = energyToEnd;
+            }
+
+            solution.regions.push_back({blocks, alloc});
+        }
+    };
+
     // Step 9: Analyze each path.
     for (const auto &ep : paths) {
         solution.pathsAnalyzed++;
@@ -185,48 +371,12 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 return PreservedAnalyses::all();
             }
 
-            // Update solution from RCG result.
-            for (const auto &ckpt : result.selectedCheckpoints)
-                solution.enabledCheckpoints.insert(ckpt);
-
-            for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
-                const auto &blocks = result.intervalBlocks[i];
-                const auto &alloc = result.allocations[i];
-
-                // Compute energy consumed up to each block for E_left/E_to_leave.
-                double energyAccum = 0.0;
-                for (unsigned b = 0; b < blocks.size(); ++b) {
-                    llvm::BasicBlock *BB = blocks[b];
-                    double bbEnergy = ctx.cfg->getBlockInfo(BB).energyCost;
-                    // Subtract NVM savings for VM-placed vars.
-                    for (const auto &[gv, place] : alloc.placement) {
-                        if (place != Placement::VM)
-                            continue;
-                        unsigned loads = state.getLoadCount(BB, gv);
-                        unsigned stores = state.getStoreCount(BB, gv);
-                        bbEnergy -= params.nvmAccessPenalty * (loads + stores);
-                    }
-                    energyAccum += bbEnergy;
-
-                    auto &meta = solution.blockMeta[BB];
-                    // Monotonic updates.
-                    double newELeft = alloc.intervalEnergy - energyAccum;
-                    if (!meta.analyzed || newELeft < meta.E_left)
-                        meta.E_left = newELeft;
-                    if (!meta.analyzed || energyAccum > meta.E_to_leave)
-                        meta.E_to_leave = energyAccum;
-                    meta.analyzed = true;
-
-                    // Update decided placements.
-                    for (const auto &[gv, place] : alloc.placement)
-                        solution.decidedPlacements[BB][gv] = place;
-                }
-
-                // Store as region.
-                solution.regions.push_back({blocks, alloc});
-            }
+            updateSolutionFromIntervals(result);
         }
     }
+
+    // Fix 2: Propagate energy BEFORE Step 9b so boundary blocks have correct values.
+    propagateEnergy();
 
     // Step 9b: Analyze uncovered blocks (Python: find_and_analyse_not_fixed_paths).
     // For each block not yet analyzed, build a synthetic path:
@@ -301,217 +451,54 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             return PreservedAnalyses::all();
         }
 
-        // Update solution (same logic as Step 9).
-        for (const auto &ckpt : result.selectedCheckpoints)
-            solution.enabledCheckpoints.insert(ckpt);
-
-        for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
-            const auto &blocks = result.intervalBlocks[i];
-            const auto &alloc = result.allocations[i];
-
-            double energyAccum = 0.0;
-            for (unsigned b = 0; b < blocks.size(); ++b) {
-                BasicBlock *blk = blocks[b];
-                double bbEnergy = ctx.cfg->getBlockInfo(blk).energyCost;
-                for (const auto &[gv, place] : alloc.placement) {
-                    if (place != Placement::VM)
-                        continue;
-                    unsigned loads = state.getLoadCount(blk, gv);
-                    unsigned stores = state.getStoreCount(blk, gv);
-                    bbEnergy -= params.nvmAccessPenalty * (loads + stores);
-                }
-                energyAccum += bbEnergy;
-
-                auto &meta = solution.blockMeta[blk];
-                double newELeft = alloc.intervalEnergy - energyAccum;
-                if (!meta.analyzed || newELeft < meta.E_left)
-                    meta.E_left = newELeft;
-                if (!meta.analyzed || energyAccum > meta.E_to_leave)
-                    meta.E_to_leave = energyAccum;
-                meta.analyzed = true;
-
-                for (const auto &[gv, place] : alloc.placement)
-                    solution.decidedPlacements[blk][gv] = place;
-            }
-
-            solution.regions.push_back({blocks, alloc});
-        }
+        updateSolutionFromIntervals(result);
     }
 
-    // Step 9c: CFG-based energy propagation (reference: cfg_modification.py:171-317).
-    // Propagate E_left forward and E_to_leave backward through disabled
-    // checkpoint chains in the CFG.
-    {
-        // Helper: compute per-block energy with VM savings.
-        auto getBlockExecEnergy = [&](BasicBlock *BB) -> double {
-            double E = ctx.cfg->getBlockInfo(BB).energyCost;
-            auto allocIt = solution.decidedPlacements.find(BB);
-            if (allocIt != solution.decidedPlacements.end()) {
-                for (const auto &[gv, place] : allocIt->second) {
-                    if (place != Placement::VM)
-                        continue;
-                    unsigned loads = state.getLoadCount(BB, gv);
-                    unsigned stores = state.getStoreCount(BB, gv);
-                    E -= params.nvmAccessPenalty * (loads + stores);
-                }
-            }
-            return E;
-        };
+    // Fix 2: Propagate energy AFTER Step 9b before Step 10.
+    propagateEnergy();
 
-        // Compute per-variable save/restore overhead for a block's allocation.
-        auto getVarRestoreCost = [&](BasicBlock *BB) -> double {
-            double cost = 0.0;
-            auto allocIt = solution.decidedPlacements.find(BB);
-            if (allocIt != solution.decidedPlacements.end()) {
-                for (const auto &[gv, place] : allocIt->second) {
-                    if (place != Placement::VM)
-                        continue;
-                    cost += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
-                }
-            }
-            return cost;
-        };
-
-        auto getVarSaveCost = [&](BasicBlock *BB) -> double {
-            double cost = 0.0;
-            auto allocIt = solution.decidedPlacements.find(BB);
-            if (allocIt != solution.decidedPlacements.end()) {
-                for (const auto &[gv, place] : allocIt->second) {
-                    if (place != Placement::VM)
-                        continue;
-                    cost += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
-                }
-            }
-            return cost;
-        };
-
-        // Forward propagation of E_left: from each enabled checkpoint,
-        // traverse forward through disabled edges.
-        // E_left at checkpoint start = capacity - E_pro - reg_restore - var_restore
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (const auto &[src, dst] : ctx.cfg->getEdges()) {
-                auto *srcBB = const_cast<BasicBlock *>(src);
-                auto *dstBB = const_cast<BasicBlock *>(dst);
-                CFGEdge edge{srcBB, dstBB};
-
-                // Skip enabled checkpoints — they reset energy.
-                if (solution.enabledCheckpoints.count(edge))
-                    continue;
-
-                auto srcIt = solution.blockMeta.find(srcBB);
-                auto dstIt = solution.blockMeta.find(dstBB);
-                if (srcIt == solution.blockMeta.end() || !srcIt->second.analyzed)
-                    continue;
-                if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
-                    continue;
-
-                // Propagate: E_left(dst) = min(E_left(dst), E_left(src) - E_exec(dst))
-                double dstExecEnergy = getBlockExecEnergy(dstBB);
-                double newELeft = srcIt->second.E_left - dstExecEnergy;
-                if (newELeft < dstIt->second.E_left) {
-                    solution.blockMeta[dstBB].E_left = newELeft;
-                    changed = true;
-                }
-            }
-        }
-
-        // Backward propagation of E_to_leave: from each enabled checkpoint,
-        // traverse backward through disabled edges.
-        // E_to_leave = energy needed to reach next checkpoint (including save costs).
-        changed = true;
-        while (changed) {
-            changed = false;
-            for (const auto &[src, dst] : ctx.cfg->getEdges()) {
-                auto *srcBB = const_cast<BasicBlock *>(src);
-                auto *dstBB = const_cast<BasicBlock *>(dst);
-                CFGEdge edge{srcBB, dstBB};
-
-                // At enabled checkpoints, E_to_leave of src includes save costs.
-                if (solution.enabledCheckpoints.count(edge)) {
-                    double saveE =
-                        params.E_epi + params.N_reg * params.regStoreEnergy + getVarSaveCost(srcBB);
-                    if (saveE > solution.blockMeta[srcBB].E_to_leave) {
-                        solution.blockMeta[srcBB].E_to_leave = saveE;
-                        changed = true;
-                    }
-                    continue;
-                }
-
-                auto srcIt = solution.blockMeta.find(srcBB);
-                auto dstIt = solution.blockMeta.find(dstBB);
-                if (srcIt == solution.blockMeta.end() || !srcIt->second.analyzed)
-                    continue;
-                if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
-                    continue;
-
-                // Propagate backward: E_to_leave(src) = max(E_to_leave(src),
-                //                     E_exec(src) + E_to_leave(dst))
-                double srcExecEnergy = getBlockExecEnergy(srcBB);
-                double newEToLeave = srcExecEnergy + dstIt->second.E_to_leave;
-                if (newEToLeave > srcIt->second.E_to_leave) {
-                    solution.blockMeta[srcBB].E_to_leave = newEToLeave;
-                    changed = true;
-                }
-            }
-        }
-
-        // Also set E_left at checkpoint entry points.
-        for (const auto &ckpt : solution.enabledCheckpoints) {
-            BasicBlock *dstBB = ckpt.dst;
-            auto dstIt = solution.blockMeta.find(dstBB);
-            if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
+    // Step 10: Resolve remaining potential edges between analyzed blocks (Fix 6: fixed-point).
+    bool step10Changed = true;
+    while (step10Changed) {
+        step10Changed = false;
+        for (const auto &[src, dst] : ctx.cfg->getEdges()) {
+            CFGEdge edge{const_cast<BasicBlock *>(src), const_cast<BasicBlock *>(dst)};
+            if (solution.enabledCheckpoints.count(edge))
                 continue;
 
-            double restoreE =
-                params.E_pro + params.N_reg * params.regRestoreEnergy + getVarRestoreCost(dstBB);
-            double dstExecEnergy = getBlockExecEnergy(dstBB);
-            double newELeft = params.capacity - restoreE - dstExecEnergy;
-            if (newELeft < dstIt->second.E_left) {
-                solution.blockMeta[dstBB].E_left = newELeft;
-            }
-        }
-    }
+            auto srcMeta = solution.blockMeta.find(const_cast<BasicBlock *>(src));
+            auto dstMeta = solution.blockMeta.find(const_cast<BasicBlock *>(dst));
+            if (srcMeta == solution.blockMeta.end() || !srcMeta->second.analyzed)
+                continue;
+            if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
+                continue;
 
-    // Step 10: Resolve remaining potential edges between analyzed blocks.
-    for (const auto &[src, dst] : ctx.cfg->getEdges()) {
-        CFGEdge edge{const_cast<BasicBlock *>(src), const_cast<BasicBlock *>(dst)};
-        if (solution.enabledCheckpoints.count(edge))
-            continue;
-
-        auto srcMeta = solution.blockMeta.find(const_cast<BasicBlock *>(src));
-        auto dstMeta = solution.blockMeta.find(const_cast<BasicBlock *>(dst));
-        if (srcMeta == solution.blockMeta.end() || !srcMeta->second.analyzed)
-            continue;
-        if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
-            continue;
-
-        // Check if allocations differ.
-        auto srcAlloc = solution.decidedPlacements.find(const_cast<BasicBlock *>(src));
-        auto dstAlloc = solution.decidedPlacements.find(const_cast<BasicBlock *>(dst));
-        bool allocsDiffer = false;
-        if (srcAlloc != solution.decidedPlacements.end() &&
-            dstAlloc != solution.decidedPlacements.end()) {
-            for (const auto &[gv, place] : srcAlloc->second) {
-                auto it = dstAlloc->second.find(gv);
-                if (it != dstAlloc->second.end() && it->second != place) {
-                    allocsDiffer = true;
-                    break;
+            // Check if allocations differ.
+            auto srcAlloc = solution.decidedPlacements.find(const_cast<BasicBlock *>(src));
+            auto dstAlloc = solution.decidedPlacements.find(const_cast<BasicBlock *>(dst));
+            bool allocsDiffer = false;
+            if (srcAlloc != solution.decidedPlacements.end() &&
+                dstAlloc != solution.decidedPlacements.end()) {
+                for (const auto &[gv, place] : srcAlloc->second) {
+                    auto it = dstAlloc->second.find(gv);
+                    if (it != dstAlloc->second.end() && it->second != place) {
+                        allocsDiffer = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        // Two independent reasons to insert a checkpoint on this edge:
-        // (a) VM/NVM allocation differs across the edge, or
-        // (b) not enough energy to reach dst's next checkpoint.
-        // Both result in the same action (inserting a checkpoint) intentionally.
-        if (allocsDiffer) {
-            solution.enabledCheckpoints.insert(edge);
-        } else if (srcMeta->second.E_left < dstMeta->second.E_to_leave) {
-            solution.enabledCheckpoints.insert(edge);
+            // Two independent reasons to insert a checkpoint on this edge:
+            // (a) VM/NVM allocation differs across the edge, or
+            // (b) not enough energy to reach dst's next checkpoint.
+            if (allocsDiffer || srcMeta->second.E_left <= dstMeta->second.E_to_leave) {
+                solution.enabledCheckpoints.insert(edge);
+                step10Changed = true;
+            }
         }
-        // else: E_left >= E_to_leave → no checkpoint needed.
+        // Fix 6: Re-propagate after inserting new checkpoints.
+        if (step10Changed)
+            propagateEnergy();
     }
 
     // Step 11: Collect statistics.

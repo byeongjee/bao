@@ -109,10 +109,10 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         // needs restore, or endConstraint exists and variable needs save,
         // force to NVM (skip as candidate).
         bool forcedNvm = false;
-        if (startConstraint && needRestore && startConstraint->placement.count(v)) {
+        if (startConstraint && needRestore) {
             forcedNvm = true;
         }
-        if (endConstraint && needSave && endConstraint->placement.count(v)) {
+        if (endConstraint && needSave) {
             forcedNvm = true;
         }
         if (forcedNvm) {
@@ -140,32 +140,36 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
 
     // Greedy pack into VM.
     for (const auto &c : candidates) {
-        // If tracker knows this variable, reuse its address (matching reference
-        // lines 208-213: previously allocated variables are always placed in VM).
-        if (tracker) {
-            auto existing = tracker->getExistingAddress(c.v);
-            if (existing) {
+        if (c.gain > 0.0) {
+            // If tracker knows this variable, reuse its address (reference
+            // lines 206-213: previously allocated variables reuse their VM address,
+            // but only when gain > 0).
+            if (tracker) {
+                auto existing = tracker->getExistingAddress(c.v);
+                if (existing) {
+                    result.placement[c.v] = Placement::VM;
+                    result.vmOffsets[c.v] = *existing;
+                    result.vmBytesUsed += c.size;
+                    result.livenessFlags[c.v] = {c.needRestore, c.needSave};
+                    continue;
+                }
+            }
+
+            if (result.vmBytesUsed + c.size <= params.vmCapacityBytes) {
                 result.placement[c.v] = Placement::VM;
-                result.vmOffsets[c.v] = *existing;
+                if (tracker) {
+                    result.vmOffsets[c.v] = tracker->recordAllocation(c.v, c.size);
+                } else {
+                    result.vmOffsets[c.v] = result.vmBytesUsed;
+                }
                 result.vmBytesUsed += c.size;
                 result.livenessFlags[c.v] = {c.needRestore, c.needSave};
                 continue;
             }
         }
 
-        if (c.gain > 0.0 && result.vmBytesUsed + c.size <= params.vmCapacityBytes) {
-            result.placement[c.v] = Placement::VM;
-            if (tracker) {
-                result.vmOffsets[c.v] = tracker->recordAllocation(c.v, c.size);
-            } else {
-                result.vmOffsets[c.v] = result.vmBytesUsed;
-            }
-            result.vmBytesUsed += c.size;
-            result.livenessFlags[c.v] = {c.needRestore, c.needSave};
-        } else {
-            result.placement[c.v] = Placement::NVM;
-            result.livenessFlags[c.v] = {c.needRestore, c.needSave};
-        }
+        result.placement[c.v] = Placement::NVM;
+        result.livenessFlags[c.v] = {c.needRestore, c.needSave};
     }
 
     return result;

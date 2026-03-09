@@ -2,7 +2,7 @@
   "version": "1.0",
   "estimator_type": "ir",
   "energy_parameters": {
-    "capacity": 30.0,
+    "capacity": 500.0,
     "instruction_costs": {
       "simple_arithmetic": 1,
       "complex_arithmetic": 1,
@@ -26,7 +26,7 @@
     "nvm_access_penalty": 2.0,
     "mem_store_energy_per_byte": 0.5,
     "mem_restore_energy_per_byte": 0.5,
-    "vm_capacity_bytes": 16,
+    "vm_capacity_bytes": 128,
     "q_reboot_probability": 1.0
   }
 }

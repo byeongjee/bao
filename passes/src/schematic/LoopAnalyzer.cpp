@@ -187,6 +187,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             const auto &alloc = result.allocations[i];
 
             // Update decided placements and block metadata.
+            // NOTE: E_left/E_to_leave are not computed here because the
+            // energy propagation model (SchematicPass Step 9c) handles them
+            // separately. Setting values here could interfere with the
+            // fixed-point propagation loops.
             for (llvm::BasicBlock *BB : blocks) {
                 for (const auto &[gv, place] : alloc.placement)
                     solution.decidedPlacements[BB][gv] = place;
@@ -279,7 +283,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    auto numIt = static_cast<unsigned>(std::floor(availableEnergy / E_loop));
+    // Reference: nb_it_with_budget = (budget - energy_to_leave) // energy_one_it - 1
+    // The -1 accounts for needing energy to leave after the last iteration.
+    int rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
+    auto numIt = static_cast<unsigned>(std::max(rawNumIt, 0));
 
     // Convergence loop (reference lines 574-617): if loop has only disabled
     // checkpoints and numIt > 1, re-estimate variable accesses scaled by
@@ -294,6 +301,13 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         }
     }
 
+    // TODO: The convergence loop should re-estimate variable access counts
+    // scaled by min(numIt, maxTripCount) iterations, re-compute memory
+    // allocation, re-propagate energy, and re-compute E_loop/numIt until
+    // convergence (reference lines 574-617). Currently, bodyAlloc and E_loop
+    // are not recomputed, so this loop converges immediately. This is a known
+    // limitation that may cause suboptimal iteration counts for loops where
+    // re-allocation would change the energy profile.
     if (!hasEnabledCheckpoints && numIt > 1) {
         for (unsigned iter = 0; iter < 15; ++iter) {
             unsigned prevNumIt = numIt;
@@ -313,13 +327,14 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             if (availableEnergy <= 0.0)
                 break;
 
-            numIt = static_cast<unsigned>(std::floor(availableEnergy / E_loop));
-            if (numIt == prevNumIt)
-                break; // Converged.
+            rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
+            numIt = static_cast<unsigned>(std::max(rawNumIt, 0));
+            if (numIt >= prevNumIt)
+                break; // Converged (reference: continue only while numIt < prevNumIt).
         }
     }
 
-    if (numIt >= maxTripCount) {
+    if (numIt > maxTripCount) {
         // Entire loop fits — no checkpoint needed.
         decision.numIterationsPerCharge = 0;
     } else if (numIt < 3) {

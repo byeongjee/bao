@@ -47,12 +47,16 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
     // -----------------------------------------------------------------------
     if (funcObj.contains("traces") && funcObj["traces"].is_array()) {
         for (const auto &traceObj : funcObj["traces"]) {
-            if (!traceObj.contains("path") || !traceObj.contains("count"))
+            // Accept both our format ("path"/"count") and reference format
+            // ("trace"/"nb_execution").
+            const char *pathKey = traceObj.contains("path") ? "path" : "trace";
+            const char *countKey = traceObj.contains("count") ? "count" : "nb_execution";
+            if (!traceObj.contains(pathKey) || !traceObj.contains(countKey))
                 continue;
 
             EnumeratedPath ep;
             bool valid = true;
-            for (const auto &bbName : traceObj["path"]) {
+            for (const auto &bbName : traceObj[pathKey]) {
                 std::string name = bbName.get<std::string>();
                 auto it = nameToBlock_.find(StringRef(name));
                 if (it == nameToBlock_.end()) {
@@ -66,7 +70,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
             if (!valid)
                 continue;
 
-            ep.count = traceObj["count"].get<unsigned>();
+            ep.count = traceObj[countKey].get<unsigned>();
             result.functionPaths.push_back(std::move(ep));
         }
 
@@ -149,12 +153,14 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
             // Parse iteration traces
             if (loopObj.contains("traces") && loopObj["traces"].is_array()) {
                 for (const auto &traceObj : loopObj["traces"]) {
-                    if (!traceObj.contains("path") || !traceObj.contains("count"))
+                    const char *lpPathKey = traceObj.contains("path") ? "path" : "trace";
+                    const char *lpCountKey = traceObj.contains("count") ? "count" : "nb_execution";
+                    if (!traceObj.contains(lpPathKey) || !traceObj.contains(lpCountKey))
                         continue;
 
                     EnumeratedPath ep;
                     bool valid = true;
-                    for (const auto &bbName : traceObj["path"]) {
+                    for (const auto &bbName : traceObj[lpPathKey]) {
                         std::string name = bbName.get<std::string>();
                         auto it = nameToBlock_.find(StringRef(name));
                         if (it == nameToBlock_.end()) {
@@ -168,7 +174,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                     if (!valid)
                         continue;
 
-                    ep.count = traceObj["count"].get<unsigned>();
+                    ep.count = traceObj[lpCountKey].get<unsigned>();
                     llt.iterationPaths.push_back(std::move(ep));
                 }
 

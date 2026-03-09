@@ -63,7 +63,11 @@ double RCGSolver::getIntervalBudget(unsigned nodeFrom, unsigned nodeTo) const {
     }
 
     if (isStart && startBoundaryBlock_ && isEnd && endBoundaryBlock_) {
-        budget = std::min(E_left_budget, E_to_leave_budget);
+        // Reference: cost + energy_to_leave < energy_left
+        // i.e. cost < energy_left - energy_to_leave
+        auto it = existingMeta_.find(endBoundaryBlock_);
+        double E_to_leave = (it != existingMeta_.end()) ? it->second.E_to_leave : 0.0;
+        budget = E_left_budget - E_to_leave;
     } else if (isStart && startBoundaryBlock_) {
         budget = E_left_budget;
     } else if (isEnd && endBoundaryBlock_) {
@@ -155,7 +159,7 @@ RCGResult RCGSolver::solve() {
         alloc.intervalEnergy = energy;
         double budget = getIntervalBudget(0, 1);
 
-        if (energy <= budget) {
+        if (energy < budget) {
             result.feasible = true;
             result.totalCost = energy;
             result.allocations.push_back(std::move(alloc));
@@ -211,7 +215,7 @@ RCGResult RCGSolver::solve() {
             alloc.intervalEnergy = energy;
             double budget = getIntervalBudget(i, j);
 
-            if (energy <= budget) {
+            if (energy < budget) {
                 adj[i].push_back(RCGEdge{i, j, energy, std::move(alloc), std::move(blocks)});
             }
 
