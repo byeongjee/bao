@@ -98,7 +98,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         echo "[$count/$total] Running $row_name ..."
 
         run_cmd=(
-            "$SCRIPT_DIR/compile_and_flash.sh"
+            "$SCRIPT_DIR/compile_and_run.sh"
             --mode milp
             --runtime mock-counter
             -e "$ENERGY_CONFIG"
@@ -112,7 +112,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         run_cmd_display="${run_cmd_display% }"
         echo "  Command: $run_cmd_display"
 
-        # Run compile_and_flash, capture all output regardless of exit code
+        # Run compile_and_run, capture all output regardless of exit code
         full_output=$("${run_cmd[@]}" 2>&1) || true
 
         if [[ "$VERBOSE" -eq 1 ]]; then
