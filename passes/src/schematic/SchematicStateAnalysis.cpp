@@ -2,6 +2,7 @@
 
 #include "common/BlockUtils.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -329,6 +330,9 @@ void SchematicStateAnalysis::computeAccessMaps() {
                     storeCounts_[key]++;
 
                 // Track first operation type per (BB, GV) pair.
+                // When both Ref and Mod are set (e.g., read-modify-write or AA
+                // imprecision), conservatively treat as load-first to ensure
+                // restore is charged.
                 if ((isRef || isMod) && firstOpIsLoad_.find(key) == firstOpIsLoad_.end())
                     firstOpIsLoad_[key] = isRef;
             }
@@ -344,7 +348,6 @@ void SchematicStateAnalysis::computeAccessMaps() {
             continue;
 
         // Collect all load/store users of this alloca (through GEP/bitcast chains).
-        llvm::SmallVector<llvm::Instruction *, 16> accessInsts;
         llvm::SmallVector<std::pair<llvm::Instruction *, bool>, 16> accessInfo; // (inst, isLoad)
         llvm::SmallVector<llvm::Value *, 8> worklist;
         worklist.push_back(AI);
@@ -373,6 +376,11 @@ void SchematicStateAnalysis::computeAccessMaps() {
             }
         }
 
+        // Build map for O(1) instruction lookup.
+        llvm::DenseMap<llvm::Instruction *, bool> accessMap;
+        for (const auto &[inst, isLoad] : accessInfo)
+            accessMap.try_emplace(inst, isLoad);
+
         // Determine first operation type per BB by iterating instructions in order.
         for (llvm::BasicBlock &BB2 : F_) {
             auto key = std::make_pair(static_cast<const llvm::BasicBlock *>(&BB2),
@@ -384,16 +392,11 @@ void SchematicStateAnalysis::computeAccessMaps() {
             if (firstOpIsLoad_.find(key) != firstOpIsLoad_.end())
                 continue;
             for (llvm::Instruction &I2 : BB2) {
-                bool found = false;
-                for (const auto &[inst, isLoad] : accessInfo) {
-                    if (inst == &I2) {
-                        firstOpIsLoad_[key] = isLoad;
-                        found = true;
-                        break;
-                    }
-                }
-                if (found)
+                auto it = accessMap.find(&I2);
+                if (it != accessMap.end()) {
+                    firstOpIsLoad_[key] = it->second;
                     break;
+                }
             }
         }
     }
