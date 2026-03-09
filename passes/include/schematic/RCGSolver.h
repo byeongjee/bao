@@ -1,9 +1,9 @@
 #pragma once
 
 #include "common/CFGAnalysis.h"
-#include "milp/StateAnalysis.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
+#include "schematic/SchematicStateAnalysis.h"
 
 #include "llvm/ADT/DenseMap.h"
 
@@ -24,10 +24,11 @@ struct RCGResult {
 
 class RCGSolver {
   public:
-    RCGSolver(const std::vector<llvm::BasicBlock *> &pathBlocks, const StateAnalysis &state,
-              const CFGAnalysis &cfg, const SchematicParams &params,
+    RCGSolver(const std::vector<llvm::BasicBlock *> &pathBlocks,
+              const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
+              const SchematicParams &params,
               const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
-              const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::GlobalVariable *, Placement>>
+              const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>>
                   &decidedPlacements,
               llvm::BasicBlock *startBoundaryBlock = nullptr,
               llvm::BasicBlock *endBoundaryBlock = nullptr);
@@ -43,11 +44,11 @@ class RCGSolver {
     };
 
     const std::vector<llvm::BasicBlock *> &pathBlocks_;
-    const StateAnalysis &state_;
+    const SchematicStateAnalysis &state_;
     const CFGAnalysis &cfg_;
     const SchematicParams &params_;
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta_;
-    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::GlobalVariable *, Placement>>
+    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>>
         &decidedPlacements_;
     llvm::BasicBlock *startBoundaryBlock_;
     llvm::BasicBlock *endBoundaryBlock_;

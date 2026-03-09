@@ -6,8 +6,8 @@
 namespace checkpoint {
 
 std::pair<bool, bool>
-computeLivenessFlags(llvm::GlobalVariable *v, const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                     const StateAnalysis &state,
+computeLivenessFlags(llvm::Value *v, const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                     const SchematicStateAnalysis &state,
                      const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
 
     // live_start: true if the first access to v in the interval is a load.
@@ -45,8 +45,8 @@ computeLivenessFlags(llvm::GlobalVariable *v, const std::vector<llvm::BasicBlock
 
 RegionAllocation
 computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                          const StateAnalysis &state, const SchematicParams &params,
-                          const std::map<llvm::GlobalVariable *, Placement> &fixedPlacements,
+                          const SchematicStateAnalysis &state, const SchematicParams &params,
+                          const std::map<llvm::Value *, Placement> &fixedPlacements,
                           const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
 
     RegionAllocation result;
@@ -54,25 +54,25 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
     // Copy fixed placements and compute initial VM usage.
     result.placement = fixedPlacements;
     result.vmBytesUsed = 0;
-    for (const auto &[gv, place] : fixedPlacements) {
+    for (const auto &[v, place] : fixedPlacements) {
         if (place == Placement::VM) {
-            unsigned size = state.getVarSizeBytes(gv);
-            result.vmOffsets[gv] = result.vmBytesUsed;
+            unsigned size = state.getVarSizeBytes(v);
+            result.vmOffsets[v] = result.vmBytesUsed;
             result.vmBytesUsed += size;
         }
     }
 
     // Candidate struct for greedy packing.
-    struct Candidate {
-        llvm::GlobalVariable *gv;
+    struct CandidateEntry {
+        llvm::Value *v;
         double gain;
         unsigned size;
         bool liveStart;
         bool liveEnd;
     };
-    std::vector<Candidate> candidates;
+    std::vector<CandidateEntry> candidates;
 
-    for (llvm::GlobalVariable *v : state.getVMObjs()) {
+    for (llvm::Value *v : state.getCandidates()) {
         if (fixedPlacements.count(v))
             continue;
 
@@ -97,22 +97,23 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
     }
 
     // Sort positive-gain candidates by gain/size descending (density-based greedy).
-    std::sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) {
-        double densA = a.size > 0 ? a.gain / a.size : 0.0;
-        double densB = b.size > 0 ? b.gain / b.size : 0.0;
-        return densA > densB;
-    });
+    std::sort(candidates.begin(), candidates.end(),
+              [](const CandidateEntry &a, const CandidateEntry &b) {
+                  double densA = a.size > 0 ? a.gain / a.size : 0.0;
+                  double densB = b.size > 0 ? b.gain / b.size : 0.0;
+                  return densA > densB;
+              });
 
     // Greedy pack into VM.
     for (const auto &c : candidates) {
         if (c.gain > 0.0 && result.vmBytesUsed + c.size <= params.vmCapacityBytes) {
-            result.placement[c.gv] = Placement::VM;
-            result.vmOffsets[c.gv] = result.vmBytesUsed;
+            result.placement[c.v] = Placement::VM;
+            result.vmOffsets[c.v] = result.vmBytesUsed;
             result.vmBytesUsed += c.size;
-            result.livenessFlags[c.gv] = {c.liveStart, c.liveEnd};
+            result.livenessFlags[c.v] = {c.liveStart, c.liveEnd};
         } else {
-            result.placement[c.gv] = Placement::NVM;
-            result.livenessFlags[c.gv] = {c.liveStart, c.liveEnd};
+            result.placement[c.v] = Placement::NVM;
+            result.livenessFlags[c.v] = {c.liveStart, c.liveEnd};
         }
     }
 
@@ -120,9 +121,10 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
 }
 
 double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                             const RegionAllocation &allocation, const StateAnalysis &state,
-                             const CFGAnalysis &cfg, const SchematicParams &params,
-                             bool isFirstInterval, bool isLastInterval,
+                             const RegionAllocation &allocation,
+                             const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
+                             const SchematicParams &params, bool isFirstInterval,
+                             bool isLastInterval,
                              const std::vector<llvm::BasicBlock *> *postIntervalBlocks) {
 
     // E_restore: checkpoint restore cost at interval start.

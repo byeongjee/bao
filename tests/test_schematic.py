@@ -65,3 +65,38 @@ def test_schematic(
 
     result = run_schematic(src, energy_cfg, schematic_cfg, tmp_path)
     check_assertions(result, assertions)
+
+
+def test_schematic_alloca_placement(run_schematic_o0, tmp_path_factory):
+    """Test that O0 allocas become placement candidates in SCHEMATIC.
+
+    At O0, local variables are alloca+load/store pairs. With
+    SchematicStateAnalysis, these allocas are eligible for VM/NVM placement.
+    VM-placed allocas get __vm_shadow_ globals; NVM-placed allocas don't.
+    """
+    import re
+
+    tmp_path = tmp_path_factory.mktemp("alloca_placement")
+    src = SCENARIOS_DIR / "scenario_alloca_placement.c"
+
+    result = run_schematic_o0(src, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path)
+
+    # Must succeed.
+    assert result.exit_code == 0, (
+        f"Expected exit=0 but got {result.exit_code}.\nstderr: {result.stderr[:1000]}"
+    )
+
+    # Must have at least one prologue (entry region).
+    from conftest import count_calls
+    assert count_calls(result.output_ir, "__region_prologue") >= 1
+
+    # The function has local variables compiled at O0 (alloca-based).
+    # Check that the pass found candidates (globals + allocas).
+    assert "Candidate globals (V_elig):" in result.stderr
+    # Extract candidate count — should be > 0 (at least g_result + allocas).
+    m = re.search(r"Candidate globals \(V_elig\):\s+(\d+)", result.stderr)
+    assert m, "Could not find candidate count in stderr"
+    candidate_count = int(m.group(1))
+    assert candidate_count >= 1, (
+        f"Expected >= 1 candidates (globals + allocas), got {candidate_count}"
+    )

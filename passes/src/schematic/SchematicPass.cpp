@@ -3,12 +3,12 @@
 #include "common/BlockUtils.h"
 #include "common/PassStatistics.h"
 #include "milp/CheckpointContext.h"
-#include "milp/StateAnalysis.h"
 #include "schematic/LoopAnalyzer.h"
 #include "schematic/RCGSolver.h"
 #include "schematic/SchematicInstrumenter.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
+#include "schematic/SchematicStateAnalysis.h"
 #include "schematic/TraceLoader.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -77,8 +77,8 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         }
     }
 
-    // Step 5: Run StateAnalysis.
-    StateAnalysis state(F, AA, *ctx.cfg);
+    // Step 5: Run SchematicStateAnalysis.
+    SchematicStateAnalysis state(F, AA, *ctx.cfg);
     if (state.hasAnalysisErrors()) {
         state.printAnalysisErrors(errs());
         errs() << "Skipping SCHEMATIC instrumentation for function " << F.getName()
@@ -401,7 +401,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         common.functionName = F.getName().str();
         common.basicBlocks = ctx.cfg->getBlocks().size();
         common.edges = ctx.cfg->getEdges().size();
-        common.candidateGlobals = state.getVMObjs().size();
+        common.candidateGlobals = state.getCandidates().size();
         common.regions = solution.regions.size();
         common.regionBoundaries = solution.enabledCheckpoints.size();
         common.runtimeCallsInserted = inserted;

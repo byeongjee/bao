@@ -31,75 +31,61 @@ void SchematicInstrumenter::declareRuntimeFunctions() {
 
 void SchematicInstrumenter::createShadowGlobals(llvm::Function &F,
                                                 const SchematicSolution &solution,
-                                                const StateAnalysis &state) {
+                                                const SchematicStateAnalysis &state) {
 
     shadowMap_.clear();
 
-    // Collect all candidate globals that have Placement::VM in any region.
-    std::set<llvm::GlobalVariable *> vmPlacedGVs;
+    // Collect all candidates (globals + allocas) that have Placement::VM in any region.
+    std::set<llvm::Value *> vmPlacedVals;
     for (const auto &region : solution.regions) {
-        for (const auto &[gv, place] : region.allocation.placement) {
+        for (const auto &[v, place] : region.allocation.placement) {
             if (place == Placement::VM)
-                vmPlacedGVs.insert(gv);
+                vmPlacedVals.insert(v);
         }
     }
     // Also check loop decisions.
     for (const auto &[header, dec] : solution.loopDecisions) {
-        for (const auto &[gv, place] : dec.bodyAllocation.placement) {
+        for (const auto &[v, place] : dec.bodyAllocation.placement) {
             if (place == Placement::VM)
-                vmPlacedGVs.insert(gv);
+                vmPlacedVals.insert(v);
         }
     }
 
-    for (llvm::GlobalVariable *GV : vmPlacedGVs) {
-        auto *shadow = new llvm::GlobalVariable(
-            M_, GV->getValueType(), /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
-            llvm::Constant::getNullValue(GV->getValueType()), "__vm_shadow_" + GV->getName().str());
-        shadow->setAlignment(GV->getAlign());
-        shadowMap_[GV] = shadow;
-    }
-}
-
-void SchematicInstrumenter::createIneligibleBackups(llvm::Function &F, const StateAnalysis &state) {
-
-    ineligBackupMap_.clear();
-    ineligCheckpointObjs_.clear();
-
-    unsigned ssaCounter = 0;
-    for (llvm::Value *V : state.getIneligibleObjs()) {
-        llvm::Type *backupType = nullptr;
-        std::string backupName;
+    for (llvm::Value *V : vmPlacedVals) {
+        llvm::Type *shadowType = nullptr;
+        std::string shadowName;
+        llvm::MaybeAlign shadowAlign;
 
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-            backupType = GV->getValueType();
-            backupName = "__nvm_backup_" + GV->getName().str();
+            shadowType = GV->getValueType();
+            shadowName = "__vm_shadow_" + GV->getName().str();
+            shadowAlign = GV->getAlign();
         } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-            auto *arraySizeCI = llvm::dyn_cast<llvm::ConstantInt>(AI->getArraySize());
-            if (arraySizeCI) {
-                uint64_t elemCount = arraySizeCI->getZExtValue();
-                if (elemCount <= 1)
-                    backupType = AI->getAllocatedType();
-                else
-                    backupType = llvm::ArrayType::get(AI->getAllocatedType(), elemCount);
-            } else {
-                backupType = AI->getAllocatedType();
-            }
-            backupName = "__nvm_alloca_" +
-                         (AI->hasName() ? AI->getName().str() : std::to_string(ssaCounter++));
-        } else if (auto *Inst = llvm::dyn_cast<llvm::Instruction>(V)) {
-            backupType = Inst->getType();
-            backupName = "__nvm_ssa_" + std::to_string(ssaCounter++);
+            shadowType = AI->getAllocatedType();
+            shadowName = "__vm_shadow_" + (AI->hasName() ? AI->getName().str() : "alloca");
+            shadowAlign = AI->getAlign();
         } else {
             continue;
         }
 
-        auto *backup = new llvm::GlobalVariable(
-            M_, backupType, /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
-            llvm::Constant::getNullValue(backupType), backupName);
-        backup->setSection(".nvm");
-        ineligBackupMap_[V] = backup;
-        ineligCheckpointObjs_.push_back(V);
+        auto *shadow = new llvm::GlobalVariable(
+            M_, shadowType, /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
+            llvm::Constant::getNullValue(shadowType), shadowName);
+        if (shadowAlign)
+            shadow->setAlignment(*shadowAlign);
+        shadowMap_[V] = shadow;
     }
+}
+
+void SchematicInstrumenter::createIneligibleBackups(llvm::Function &F,
+                                                    const SchematicStateAnalysis &state) {
+
+    ineligBackupMap_.clear();
+    ineligCheckpointObjs_.clear();
+
+    // With SchematicStateAnalysis, ineligible objects are cross-block SSA values
+    // only. These are covered by the runtime's register save/restore mechanism
+    // (N_reg), so no NVM backup globals are needed.
 }
 
 llvm::BasicBlock *SchematicInstrumenter::splitEdge(llvm::BasicBlock *src, llvm::BasicBlock *dst) {
@@ -139,21 +125,33 @@ void SchematicInstrumenter::rewriteAccessesInRegion(const std::vector<llvm::Basi
                                                     const RegionAllocation &allocation) {
 
     for (llvm::BasicBlock *BB : blocks) {
-        for (const auto &[GV, place] : allocation.placement) {
+        for (const auto &[V, place] : allocation.placement) {
             if (place != Placement::VM)
                 continue;
-            auto shadowIt = shadowMap_.find(GV);
+            auto shadowIt = shadowMap_.find(V);
             if (shadowIt == shadowMap_.end())
                 continue;
 
             llvm::GlobalVariable *shadow = shadowIt->second;
-            for (llvm::Instruction &I : *BB) {
-                for (unsigned i = 0; i < I.getNumOperands(); ++i) {
-                    if (I.getOperand(i) == GV) {
-                        I.setOperand(i, shadow);
-                    } else if (auto *C = llvm::dyn_cast<llvm::Constant>(I.getOperand(i))) {
-                        if (auto *replaced = replaceGVInConstant(C, GV, shadow))
-                            I.setOperand(i, replaced);
+
+            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+                // Global: replace direct references and constant expressions.
+                for (llvm::Instruction &I : *BB) {
+                    for (unsigned i = 0; i < I.getNumOperands(); ++i) {
+                        if (I.getOperand(i) == GV) {
+                            I.setOperand(i, shadow);
+                        } else if (auto *C = llvm::dyn_cast<llvm::Constant>(I.getOperand(i))) {
+                            if (auto *replaced = replaceGVInConstant(C, GV, shadow))
+                                I.setOperand(i, replaced);
+                        }
+                    }
+                }
+            } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
+                // Alloca: replace uses of the alloca pointer with shadow global.
+                for (llvm::Instruction &I : *BB) {
+                    for (unsigned i = 0; i < I.getNumOperands(); ++i) {
+                        if (I.getOperand(i) == AI)
+                            I.setOperand(i, shadow);
                     }
                 }
             }
@@ -164,61 +162,50 @@ void SchematicInstrumenter::rewriteAccessesInRegion(const std::vector<llvm::Basi
 unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptBB,
                                                          const RegionAllocation *endingAlloc,
                                                          const RegionAllocation *startingAlloc,
-                                                         const StateAnalysis &state) {
+                                                         const SchematicStateAnalysis &state) {
 
     unsigned inserted = 0;
     llvm::IRBuilder<> builder(ckptBB, ckptBB->getFirstInsertionPt());
 
     // Phase 1: Save ending region's VM vars with live_end=true.
+    // For globals: memcpy shadow -> GV (SRAM -> FRAM).
+    // For allocas: memcpy shadow -> alloca (SRAM -> FRAM stack).
     if (endingAlloc) {
-        for (const auto &[gv, place] : endingAlloc->placement) {
+        for (const auto &[v, place] : endingAlloc->placement) {
             if (place != Placement::VM)
                 continue;
-            auto flagIt = endingAlloc->livenessFlags.find(gv);
+            auto flagIt = endingAlloc->livenessFlags.find(v);
             if (flagIt == endingAlloc->livenessFlags.end() || !flagIt->second.second)
                 continue; // live_end = false
 
-            auto shadowIt = shadowMap_.find(gv);
+            auto shadowIt = shadowMap_.find(v);
             if (shadowIt == shadowMap_.end())
                 continue;
 
-            unsigned sizeBytes = state.getVarSizeBytes(gv);
+            unsigned sizeBytes = state.getVarSizeBytes(v);
             llvm::Value *size =
                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
-            builder.CreateMemCpy(gv, gv->getAlign(), shadowIt->second, shadowIt->second->getAlign(),
-                                 size);
-            if (addDebugMarkers_)
-                builder.CreateCall(storeMemFn_, {gv, shadowIt->second, size});
+            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(v)) {
+                builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
+                                     shadowIt->second->getAlign(), size);
+                if (addDebugMarkers_)
+                    builder.CreateCall(storeMemFn_, {GV, shadowIt->second, size});
+            } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(v)) {
+                builder.CreateMemCpy(AI, AI->getAlign(), shadowIt->second,
+                                     shadowIt->second->getAlign(), size);
+                if (addDebugMarkers_)
+                    builder.CreateCall(storeMemFn_, {AI, shadowIt->second, size});
+            }
             inserted++;
         }
     }
 
     // Phase 2: Save ineligible objects to NVM backups.
-    for (llvm::Value *V : ineligCheckpointObjs_) {
-        auto backupIt = ineligBackupMap_.find(V);
-        if (backupIt == ineligBackupMap_.end())
-            continue;
-
-        unsigned sizeBytes = state.getVarSizeBytes(V);
-        if (sizeBytes == 0)
-            continue;
-        llvm::Value *size =
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-            builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(), GV, GV->getAlign(),
-                                 size);
-            if (addDebugMarkers_)
-                builder.CreateCall(storeMemFn_, {backupIt->second, GV, size});
-        } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-            builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(), AI, AI->getAlign(),
-                                 size);
-            if (addDebugMarkers_)
-                builder.CreateCall(storeMemFn_, {backupIt->second, AI, size});
-        }
-        inserted++;
-    }
+    // Note: with SchematicStateAnalysis, ineligible objects are cross-block SSA
+    // values only. SSA values cannot be memcpy'd — they are handled by the
+    // runtime's register save/restore mechanism (N_reg covers them).
+    // This phase is kept as a placeholder for future extensions.
 
     // Phase 3: Epilogue + register save markers.
     builder.CreateCall(epilogueFn_);
@@ -246,61 +233,49 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
     }
 
     // Phase 5: Restore starting region's VM vars with live_start=true.
+    // For globals: memcpy GV -> shadow (FRAM -> SRAM).
+    // For allocas: memcpy alloca -> shadow (FRAM stack -> SRAM).
     if (startingAlloc) {
-        for (const auto &[gv, place] : startingAlloc->placement) {
+        for (const auto &[v, place] : startingAlloc->placement) {
             if (place != Placement::VM)
                 continue;
-            auto flagIt = startingAlloc->livenessFlags.find(gv);
+            auto flagIt = startingAlloc->livenessFlags.find(v);
             if (flagIt == startingAlloc->livenessFlags.end() || !flagIt->second.first)
                 continue; // live_start = false
 
-            auto shadowIt = shadowMap_.find(gv);
+            auto shadowIt = shadowMap_.find(v);
             if (shadowIt == shadowMap_.end())
                 continue;
 
-            unsigned sizeBytes = state.getVarSizeBytes(gv);
+            unsigned sizeBytes = state.getVarSizeBytes(v);
             llvm::Value *size =
                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
 
-            builder.CreateMemCpy(shadowIt->second, shadowIt->second->getAlign(), gv, gv->getAlign(),
-                                 size);
-            if (addDebugMarkers_)
-                builder.CreateCall(restoreMemFn_, {shadowIt->second, gv, size});
+            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(v)) {
+                builder.CreateMemCpy(shadowIt->second, shadowIt->second->getAlign(), GV,
+                                     GV->getAlign(), size);
+                if (addDebugMarkers_)
+                    builder.CreateCall(restoreMemFn_, {shadowIt->second, GV, size});
+            } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(v)) {
+                builder.CreateMemCpy(shadowIt->second, shadowIt->second->getAlign(), AI,
+                                     AI->getAlign(), size);
+                if (addDebugMarkers_)
+                    builder.CreateCall(restoreMemFn_, {shadowIt->second, AI, size});
+            }
             inserted++;
         }
     }
 
     // Phase 6: Restore ineligible objects from NVM backups.
-    for (llvm::Value *V : ineligCheckpointObjs_) {
-        auto backupIt = ineligBackupMap_.find(V);
-        if (backupIt == ineligBackupMap_.end())
-            continue;
-
-        unsigned sizeBytes = state.getVarSizeBytes(V);
-        if (sizeBytes == 0)
-            continue;
-        llvm::Value *size =
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-            builder.CreateMemCpy(GV, GV->getAlign(), backupIt->second, backupIt->second->getAlign(),
-                                 size);
-            if (addDebugMarkers_)
-                builder.CreateCall(restoreMemFn_, {GV, backupIt->second, size});
-        } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-            builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second, backupIt->second->getAlign(),
-                                 size);
-            if (addDebugMarkers_)
-                builder.CreateCall(restoreMemFn_, {AI, backupIt->second, size});
-        }
-        inserted++;
-    }
+    // Same as Phase 2 — SSA values are covered by register save/restore.
 
     return inserted;
 }
 
-unsigned SchematicInstrumenter::insertLoopConditionalCheckpoint(
-    llvm::BasicBlock *header, const LoopCheckpointDecision &decision, const StateAnalysis &state) {
+unsigned
+SchematicInstrumenter::insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
+                                                       const LoopCheckpointDecision &decision,
+                                                       const SchematicStateAnalysis &state) {
 
     unsigned inserted = 0;
     llvm::LLVMContext &Ctx = M_.getContext();
@@ -373,16 +348,18 @@ unsigned SchematicInstrumenter::insertLoopConditionalCheckpoint(
 
 unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
                                                    const SchematicSolution &solution,
-                                                   const StateAnalysis &state) {
+                                                   const SchematicStateAnalysis &state) {
 
     unsigned inserted = 0;
 
     // Step 1: Declare runtime functions.
     declareRuntimeFunctions();
 
-    // Step 2: Apply .nvm section to candidate globals.
-    for (llvm::GlobalVariable *GV : state.getVMObjs())
-        GV->setSection(".nvm");
+    // Step 2: Apply .nvm section to candidate globals (not allocas).
+    for (llvm::Value *V : state.getCandidates()) {
+        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
+            GV->setSection(".nvm");
+    }
 
     // Step 3: Create shadow globals.
     createShadowGlobals(F, solution, state);

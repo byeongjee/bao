@@ -1,9 +1,9 @@
 #pragma once
 
 #include "common/CFGAnalysis.h"
-#include "milp/StateAnalysis.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
+#include "schematic/SchematicStateAnalysis.h"
 #include "schematic/TraceLoader.h"
 
 #include "llvm/Analysis/LoopInfo.h"
@@ -17,7 +17,7 @@ namespace checkpoint {
 class LoopAnalyzer {
   public:
     LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
-                 const StateAnalysis &state, const SchematicParams &params);
+                 const SchematicStateAnalysis &state, const SchematicParams &params);
 
     /// Set loaded loop traces from TraceLoader for trace-guided analysis.
     void setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces);
@@ -29,7 +29,7 @@ class LoopAnalyzer {
     llvm::LoopInfo &LI_;
     llvm::ScalarEvolution &SE_;
     const CFGAnalysis &cfg_;
-    const StateAnalysis &state_;
+    const SchematicStateAnalysis &state_;
     const SchematicParams &params_;
 
     std::vector<LoadedLoopTrace> loadedLoopTraces_;
@@ -40,11 +40,11 @@ class LoopAnalyzer {
     std::vector<std::vector<llvm::BasicBlock *>>
     enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const;
 
-    bool placementsDiffer(const std::map<llvm::GlobalVariable *, Placement> &a,
-                          const std::map<llvm::GlobalVariable *, Placement> &b) const;
+    bool placementsDiffer(const std::map<llvm::Value *, Placement> &a,
+                          const std::map<llvm::Value *, Placement> &b) const;
 
     RegionAllocation
-    buildBoundaryAllocation(const std::map<llvm::GlobalVariable *, Placement> &placement) const;
+    buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const;
 
     /// Compute worst-case per-iteration energy via longest path in loop body DAG.
     /// Inner loops with numIterationsPerCharge==0 (entire loop fits in one charge)

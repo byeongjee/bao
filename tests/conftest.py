@@ -326,6 +326,83 @@ def run_schematic(tools, compile_to_ir):
     return _run_schematic
 
 
+@pytest.fixture(scope="session")
+def run_schematic_o0(tools, compile_to_ir):
+    """Return a callable that runs the SCHEMATIC pipeline without mem2reg (O0 alloca mode)."""
+
+    def _run_schematic_o0(
+        src: str | Path,
+        energy_config: str | Path,
+        schematic_config: str | Path,
+        tmp_path: Path,
+    ) -> PassResult:
+        src = str(src)
+        energy_config = str(energy_config)
+        schematic_config = str(schematic_config)
+        input_ll = str(tmp_path / "input.ll")
+        compile_to_ir(src, input_ll, mem2reg=False)
+
+        # Annotate trip counts
+        ann_ll = str(tmp_path / "annotated.ll")
+        r = _run([
+            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+            "-passes=tripcount-annotation",
+            "-S", input_ll, "-o", ann_ll,
+        ])
+        if r.returncode != 0:
+            raise RuntimeError(f"tripcount-annotation failed: {r.stderr}")
+
+        # Instrument for trace collection
+        trace_ll = str(tmp_path / "trace_inst.ll")
+        r = _run([
+            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+            "-passes=trace-collect",
+            f"-energy-config={energy_config}",
+            "-S", ann_ll, "-o", trace_ll,
+        ])
+        if r.returncode != 0:
+            raise RuntimeError(f"trace-collect failed: {r.stderr}")
+
+        # Compile and run to get schematic_trace.json
+        trace_bin = str(tmp_path / "trace_run")
+        r = _run([
+            tools["clang"], *tools["sysroot_flags"], "-O0",
+            trace_ll, str(SCHEMATIC_TRACE_RUNTIME), "-o", trace_bin,
+        ])
+        if r.returncode != 0:
+            raise RuntimeError(f"trace compile failed: {r.stderr}")
+
+        _run([trace_bin], cwd=str(tmp_path))
+
+        trace_json = tmp_path / "schematic_trace.json"
+        if not trace_json.exists():
+            raise RuntimeError("Trace collection did not produce schematic_trace.json")
+
+        # Run SCHEMATIC pass
+        output_ll = str(tmp_path / "output.ll")
+        r = _run([
+            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+            "-passes=tripcount-annotation,schematic",
+            f"-energy-config={energy_config}",
+            f"-schematic-config={schematic_config}",
+            f"-schematic-trace={trace_json}",
+            "-S", ann_ll, "-o", output_ll,
+        ])
+
+        output_ir = ""
+        if os.path.exists(output_ll):
+            output_ir = Path(output_ll).read_text()
+
+        return PassResult(
+            exit_code=r.returncode,
+            stdout=r.stdout,
+            stderr=r.stderr,
+            output_ir=output_ir,
+        )
+
+    return _run_schematic_o0
+
+
 # ---------------------------------------------------------------------------
 # IR assertion helpers
 # ---------------------------------------------------------------------------

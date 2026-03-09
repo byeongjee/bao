@@ -8,11 +8,10 @@
 namespace checkpoint {
 
 RCGSolver::RCGSolver(
-    const std::vector<llvm::BasicBlock *> &pathBlocks, const StateAnalysis &state,
+    const std::vector<llvm::BasicBlock *> &pathBlocks, const SchematicStateAnalysis &state,
     const CFGAnalysis &cfg, const SchematicParams &params,
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
-    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::GlobalVariable *, Placement>>
-        &decidedPlacements,
+    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
     llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
       existingMeta_(existingMeta), decidedPlacements_(decidedPlacements),
@@ -118,7 +117,7 @@ RCGResult RCGSolver::solve() {
     // Single-interval shortcut: Start + End only, no candidate edges.
     if (numNodes == 2) {
         auto blocks = getIntervalBlocks(0, 1);
-        std::map<llvm::GlobalVariable *, Placement> fixed;
+        std::map<llvm::Value *, Placement> fixed;
         for (llvm::BasicBlock *BB : blocks) {
             auto it = decidedPlacements_.find(BB);
             if (it != decidedPlacements_.end()) {
@@ -165,7 +164,7 @@ RCGResult RCGSolver::solve() {
                 continue;
 
             // Collect fixed placements for these blocks.
-            std::map<llvm::GlobalVariable *, Placement> fixed;
+            std::map<llvm::Value *, Placement> fixed;
             for (llvm::BasicBlock *BB : blocks) {
                 auto it = decidedPlacements_.find(BB);
                 if (it != decidedPlacements_.end()) {
