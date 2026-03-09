@@ -377,6 +377,8 @@ void SchematicStateAnalysis::computeAccessMaps() {
         }
 
         // Build map for O(1) instruction lookup.
+        // try_emplace keeps the first entry; duplicates from different GEP
+        // chains targeting the same instruction have the same isLoad value.
         llvm::DenseMap<llvm::Instruction *, bool> accessMap;
         for (const auto &[inst, isLoad] : accessInfo)
             accessMap.try_emplace(inst, isLoad);
