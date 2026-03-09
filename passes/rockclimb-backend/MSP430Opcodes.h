@@ -34,6 +34,18 @@ enum Opcode : unsigned {
     CALLi = 473,   // Call with immediate/symbol operand
     MOV16ri = 534, // Move immediate to 16-bit register
     MOV16rr = 538, // Move 16-bit register to register
+    MOV8rr = 549,  // Move 8-bit register to register
+};
+
+// Sub-register index (from MSP430GenRegisterInfoEnums.inc)
+enum SubRegIndex : unsigned {
+    subreg_8bit = 1, // 8-bit sub-register of a 16-bit register
+};
+
+// Register class IDs (from MSP430GenRegisterInfoEnums.inc)
+enum RegClassID : unsigned {
+    GR8RegClassID = 0,
+    GR16RegClassID = 1,
 };
 
 } // namespace msp430

@@ -94,7 +94,18 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
 
     // Insert: MOV physReg, R14  (second argument: register value)
     // MSP430 calling convention: R12=arg1, R14=arg2
-    BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::MOV16rr), msp430::R14).addReg(ckpt.reg);
+    // If the register is an 8-bit sub-register (GR8), promote to its 16-bit
+    // super-register. Saving the full 16-bit register is safe — the 8-bit value
+    // lives in the low byte.
+    MCRegister srcReg = ckpt.reg;
+    const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(srcReg);
+    if (RC && RC->getID() == msp430::GR8RegClassID) {
+        const TargetRegisterClass *GR16RC = TRI->getRegClass(msp430::GR16RegClassID);
+        MCRegister superReg = TRI->getMatchingSuperReg(srcReg, msp430::subreg_8bit, GR16RC);
+        if (superReg)
+            srcReg = superReg;
+    }
+    BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::MOV16rr), msp430::R14).addReg(srcReg);
 
     // Insert: CALL __rockclimb_save_reg
     MachineInstr *CallMI = BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::CALLi))
