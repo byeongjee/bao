@@ -13,7 +13,6 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-OUTPUT_CSV="$PROJECT_DIR/benchmarks/rockclimb_benchmark_summary.csv"
 VERBOSE=0
 FILTER_BENCHMARKS=()
 
@@ -27,7 +26,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_energy_config_ir.json"
+ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_assembly_energy_params.json"
+OUTPUT_CSV="${OUTPUT_CSV:-$PROJECT_DIR/benchmarks/rockclimb_machine_benchmark_summary.csv}"
 
 CAPACITOR_CONFIGS=(
     "100nF:$PROJECT_DIR/benchmarks/sample_rockclimb_config_100nF.json"
@@ -97,23 +97,55 @@ for bench_path in "${BENCHMARKS[@]}"; do
         row_name="${bench_name}-${cap_label}"
         echo "[$count/$total] Running $row_name ..."
 
+        TMP_DIR=$(mktemp -d)
+        trap "rm -rf $TMP_DIR" EXIT
+
         run_cmd=(
-            "$SCRIPT_DIR/compile_and_run.sh"
-            --mode rockclimb
-            --runtime mock-counter
+            "$SCRIPT_DIR/compile_rockclimb_machine.sh"
             -e "$ENERGY_CONFIG"
             -c "$cap_config"
-            --local
-            -I "$PROJECT_DIR/passes/runtime"
+            -o "$TMP_DIR/$bench_name"
             --verbose
+            --link --mock-counter
             "$bench_path"
         )
         printf -v run_cmd_display '%q ' "${run_cmd[@]}"
         run_cmd_display="${run_cmd_display% }"
         echo "  Command: $run_cmd_display"
 
-        # Run compile_and_run, capture all output regardless of exit code
-        full_output=$("${run_cmd[@]}" 2>&1) || true
+        # Run compile, capture all output regardless of exit code
+        compile_output=$("${run_cmd[@]}" 2>&1) || true
+
+        # Flash via mspdebug
+        flash_output=""
+        if [[ -f "$TMP_DIR/${bench_name}.elf" ]]; then
+            flash_output=$(mspdebug tilib "prog $TMP_DIR/${bench_name}.elf" 2>&1) || true
+        fi
+
+        # Read serial output with timeout (program runs and prints counter summary)
+        serial_output=""
+        SERIAL_DEV=$(ls /dev/tty.usbmodem* 2>/dev/null | head -1)
+        if [[ -z "$SERIAL_DEV" ]]; then
+            SERIAL_DEV=$(ls /dev/ttyACM* 2>/dev/null | head -1)
+        fi
+        if [[ -n "$SERIAL_DEV" && -f "$TMP_DIR/${bench_name}.elf" ]]; then
+            # Configure serial port
+            stty -f "$SERIAL_DEV" 9600 cs8 -cstopb -parenb raw 2>/dev/null || \
+                stty -F "$SERIAL_DEV" 9600 cs8 -cstopb -parenb raw 2>/dev/null || true
+            # Read with timeout
+            timeout 30 cat "$SERIAL_DEV" > "$TMP_DIR/serial.out" 2>/dev/null &
+            SERIAL_PID=$!
+            sleep 1
+            # Reset device to start execution
+            mspdebug tilib "reset" "run" 2>/dev/null &
+            # Wait for output or timeout
+            wait $SERIAL_PID 2>/dev/null || true
+            serial_output=$(cat "$TMP_DIR/serial.out" 2>/dev/null) || true
+        fi
+
+        # Merge compile stderr + serial output for stat extraction
+        full_output="${compile_output}
+${serial_output}"
 
         if [[ "$VERBOSE" -eq 1 ]]; then
             echo "$full_output"

@@ -44,6 +44,7 @@ PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 ROCKCLIMB_RUNTIME="$PROJECT_DIR/passes/runtime/rockclimb_runtime.c"
 ROCKCLIMB_BOOT="$PROJECT_DIR/passes/runtime/rockclimb_boot.S"
 ROCKCLIMB_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/rockclimb_mock_ckpt_counter.c"
+ROCKCLIMB_MACHINE_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/rockclimb_machine_mock_ckpt_counter.c"
 ROCKCLIMB_LINKER="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
 
 MILP_RUNTIME="$PROJECT_DIR/passes/runtime/milp_runtime.c"

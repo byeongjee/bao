@@ -12,6 +12,9 @@
 #   -o <output>          Output base name (default: build/<input>)
 #   -Oc <level>          Clang optimization level (default: 2)
 #   --verbose            Show detailed pass output
+#   --link               Assemble + link to produce .elf
+#   --mock-counter       Link with mock counter runtime (implies --link)
+#   --linker <script>    Linker script (default: rockclimb_msp430fr5994.ld)
 #   -h, --help           Show this help message
 #
 # Pipeline:
@@ -32,9 +35,12 @@ ROCKCLIMB_CONFIG=""
 OUTPUT=""
 CLANG_OPT_LEVEL="2"
 VERBOSE="false"
+LINK="false"
+MOCK_COUNTER="false"
+LINKER_SCRIPT=""
 INPUT=""
 
-usage() { sed -n '2,18p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \?//'; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -43,6 +49,9 @@ while [[ $# -gt 0 ]]; do
         -o) OUTPUT="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         --verbose) VERBOSE="true"; shift ;;
+        --link) LINK="true"; shift ;;
+        --mock-counter) MOCK_COUNTER="true"; LINK="true"; shift ;;
+        --linker) LINKER_SCRIPT="$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) INPUT="$1"; shift ;;
@@ -92,8 +101,42 @@ echo "=== Step 4: MIR → Assembly (start-after=virtregrewriter) ==="
 "$LLC" -march=msp430 -start-after=virtregrewriter \
     "${OUTPUT}.instrumented.mir" -o "${OUTPUT}.s"
 
+# Step 5 (optional): Assemble + link
+if [[ "$LINK" == "true" ]]; then
+    echo "=== Step 5: Assemble + Link ==="
+
+    # Assemble to object
+    $GCC -mmcu=$DEVICE -msmall -c "${OUTPUT}.s" -o "${OUTPUT}.o"
+
+    # Determine linker script
+    [[ -z "$LINKER_SCRIPT" ]] && LINKER_SCRIPT="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
+
+    if [[ "$MOCK_COUNTER" == "true" ]]; then
+        MOCK_COUNTER_SRC="$PROJECT_DIR/passes/runtime/rockclimb_machine_mock_ckpt_counter.c"
+        [[ ! -f "$MOCK_COUNTER_SRC" ]] && { echo "Error: $MOCK_COUNTER_SRC not found" >&2; exit 1; }
+
+        $GCC -mmcu=$DEVICE -msmall -O2 \
+            -I"$MSP430GCC_SUPPORT_PATH/include" \
+            -I"$PROJECT_DIR/passes/runtime" \
+            -c "$MOCK_COUNTER_SRC" -o "${OUTPUT}.mock.o"
+
+        $GCC -mmcu=$DEVICE -msmall \
+            -L"$MSP430GCC_SUPPORT_PATH/include" \
+            -T "$LINKER_SCRIPT" \
+            "${OUTPUT}.o" "${OUTPUT}.mock.o" -o "${OUTPUT}.elf"
+    else
+        $GCC -mmcu=$DEVICE -msmall \
+            -L"$MSP430GCC_SUPPORT_PATH/include" \
+            -T "$LINKER_SCRIPT" \
+            "${OUTPUT}.o" -o "${OUTPUT}.elf"
+    fi
+
+    $SIZE "${OUTPUT}.elf"
+fi
+
 echo "=== Done ==="
 echo "  LLVM IR:           ${OUTPUT}.ll"
 echo "  MIR (pre-pass):    ${OUTPUT}.mir"
 echo "  MIR (post-pass):   ${OUTPUT}.instrumented.mir"
 echo "  Assembly:          ${OUTPUT}.s"
+[[ "$LINK" == "true" ]] && echo "  ELF:               ${OUTPUT}.elf"
