@@ -153,6 +153,11 @@ RCGResult RCGSolver::solve() {
     // Adjacency list.
     std::vector<std::vector<RCGEdge>> adj(numNodes);
 
+    // Track the smallest single-block interval energy and its budget for diagnostics.
+    double minSingleBlockEnergy = std::numeric_limits<double>::infinity();
+    double minSingleBlockBudget = 0.0;
+    llvm::BasicBlock *minSingleBlockBB = nullptr;
+
     for (unsigned i = 0; i < numNodes; ++i) {
         for (unsigned j = i + 1; j < numNodes; ++j) {
             auto blocks = getIntervalBlocks(i, j);
@@ -179,6 +184,13 @@ RCGResult RCGSolver::solve() {
 
             if (energy <= budget) {
                 adj[i].push_back(RCGEdge{i, j, energy, std::move(alloc), std::move(blocks)});
+            }
+
+            // Track the minimum single-block interval for diagnostics.
+            if (blocks.size() == 1 && energy < minSingleBlockEnergy) {
+                minSingleBlockEnergy = energy;
+                minSingleBlockBudget = budget;
+                minSingleBlockBB = blocks[0];
             }
         }
     }
@@ -207,7 +219,14 @@ RCGResult RCGSolver::solve() {
     unsigned endNode = numNodes - 1;
     if (dist[endNode] == INF) {
         result.feasible = false;
-        result.errorMessage = "SCHEMATIC RCG: no feasible path from Start to End";
+        std::string msg = "SCHEMATIC RCG: no feasible path from Start to End — "
+                          "energy capacity too small for this path";
+        if (minSingleBlockBB) {
+            msg += " (smallest single-block interval: block '" + minSingleBlockBB->getName().str() +
+                   "' requires energy " + std::to_string(minSingleBlockEnergy) + " but budget is " +
+                   std::to_string(minSingleBlockBudget) + ")";
+        }
+        result.errorMessage = msg;
         return result;
     }
 
