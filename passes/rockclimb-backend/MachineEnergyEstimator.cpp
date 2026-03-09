@@ -170,4 +170,45 @@ std::string MachineEnergyEstimator::getAddressingMode(const MachineInstr &MI,
     return "";
 }
 
+std::string MachineEnergyEstimator::getInstructionKey(const MachineInstr &MI) const {
+    if (MI.isPseudo() || MI.isDebugInstr() || MI.isImplicitDef() || MI.isKill() || MI.isLabel())
+        return "";
+
+    const TargetInstrInfo *TII = MI.getParent()->getParent()->getSubtarget().getInstrInfo();
+    StringRef opName = TII->getName(MI.getOpcode());
+
+    std::string mnemonic = extractMnemonic(opName);
+    std::string suffix = extractSuffix(opName);
+    std::string addrMode = getAddressingMode(MI, suffix);
+
+    if (addrMode.empty())
+        return mnemonic;
+    return mnemonic + "_" + addrMode;
+}
+
+void MachineEnergyEstimator::collectRequiredKeys(const MachineFunction &MF,
+                                                 std::set<std::string> &allKeys,
+                                                 std::set<std::string> &missingKeys) const {
+    for (const MachineBasicBlock &MBB : MF) {
+        for (const MachineInstr &MI : MBB) {
+            if (MI.isPseudo() || MI.isDebugInstr() || MI.isImplicitDef() || MI.isKill() ||
+                MI.isLabel())
+                continue;
+
+            const TargetInstrInfo *TII = MI.getParent()->getParent()->getSubtarget().getInstrInfo();
+            StringRef opName = TII->getName(MI.getOpcode());
+
+            std::string mnemonic = extractMnemonic(opName);
+            std::string suffix = extractSuffix(opName);
+            std::string addrMode = getAddressingMode(MI, suffix);
+
+            std::string key = addrMode.empty() ? mnemonic : mnemonic + "_" + addrMode;
+            allKeys.insert(key);
+
+            if (!model_.hasEnergy(mnemonic, addrMode))
+                missingKeys.insert(key);
+        }
+    }
+}
+
 } // namespace checkpoint
