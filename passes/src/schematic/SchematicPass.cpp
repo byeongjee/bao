@@ -20,8 +20,6 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include <chrono>
 #include <deque>
@@ -179,10 +177,10 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             RCGResult result = solver.solve();
 
             if (!result.feasible) {
-                report_fatal_error(Twine("SCHEMATIC infeasible segment in function '") +
-                                       F.getName() + "', path #" + Twine(solution.pathsAnalyzed) +
-                                       ": " + result.errorMessage,
-                                   /*gen_crash_diag=*/false);
+                errs() << "SCHEMATIC infeasible: energy capacity too small for function '"
+                       << F.getName() << "', path #" << solution.pathsAnalyzed << ": "
+                       << result.errorMessage << "\n";
+                return PreservedAnalyses::all();
             }
 
             // Update solution from RCG result.
@@ -295,10 +293,10 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         RCGResult result = solver.solve();
 
         if (!result.feasible) {
-            report_fatal_error(Twine("SCHEMATIC infeasible synthetic path in function '") +
-                                   F.getName() + "', uncovered block '" + BB->getName() +
-                                   "': " + result.errorMessage,
-                               /*gen_crash_diag=*/false);
+            errs() << "SCHEMATIC infeasible: energy capacity too small for function '"
+                   << F.getName() << "', uncovered block '" << BB->getName()
+                   << "': " << result.errorMessage << "\n";
+            return PreservedAnalyses::all();
         }
 
         // Update solution (same logic as Step 9).

@@ -5,7 +5,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/CFG.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <cmath>
@@ -311,10 +310,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                          solution.decidedPlacements, nullptr, nullptr);
         RCGResult result = solver.solve();
         if (!result.feasible) {
-            llvm::report_fatal_error(
-                llvm::Twine("SCHEMATIC infeasible loop body path at header '") + header->getName() +
-                    "': " + result.errorMessage,
-                /*gen_crash_diag=*/false);
+            llvm::errs() << "SCHEMATIC infeasible: energy capacity too small for loop at '"
+                         << header->getName() << "': " << result.errorMessage << "\n";
+            return false;
         }
 
         // Update solution from RCG result.
