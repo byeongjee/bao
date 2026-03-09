@@ -9,6 +9,7 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
@@ -236,7 +237,8 @@ bool parseRockClimbParams(StringRef configPath, RockClimbParams &params) {
 /// Try to unroll loops whose body energy fits within E_safe.
 /// Paper Section IV-C.a: maximize region size by unrolling short loops.
 static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE, DominatorTree &DT,
-                           AssumptionCache &AC, EnergyEstimator &estimator, double E_safe) {
+                           AssumptionCache &AC, TargetTransformInfo &TTI,
+                           EnergyEstimator &estimator, double E_safe) {
     struct UnrollStats {
         unsigned loopsSeen = 0;
         unsigned skippedNotSimplify = 0;
@@ -331,7 +333,7 @@ static bool tryUnrollLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE, Domin
                    << (ULO.UnrollRemainder ? ", full" : ", partial") << ")\n";
 
             LoopUnrollResult res = UnrollLoop(L, ULO, &LI, &SE, &DT, &AC,
-                                              /*TTI=*/nullptr,
+                                              /*TTI=*/&TTI,
                                               /*ORE=*/nullptr,
                                               /*PreserveLCSSA=*/true);
             if (res == LoopUnrollResult::Unmodified) {
@@ -400,8 +402,9 @@ PreservedAnalyses RockClimbPass::run(Function &F, FunctionAnalysisManager &AM) {
         auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
         auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
         auto &AC = AM.getResult<AssumptionAnalysis>(F);
+        auto &TTI = AM.getResult<TargetIRAnalysis>(F);
 
-        if (tryUnrollLoops(F, LI, SE, DT, AC, *ctx.estimator, ctx.E_safe)) {
+        if (tryUnrollLoops(F, LI, SE, DT, AC, TTI, *ctx.estimator, ctx.E_safe)) {
             errs() << "  Loop unrolling applied, rebuilding CFG...\n";
             // Rebuild CFG analysis after unrolling
             ctx.cfg = std::make_unique<CFGAnalysis>(F, LI, *ctx.estimator);
