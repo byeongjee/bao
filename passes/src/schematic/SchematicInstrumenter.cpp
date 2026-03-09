@@ -291,36 +291,54 @@ SchematicInstrumenter::insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
     checkBB->getTerminator()->eraseFromParent();
     checkBB->setName("schematic_loop_check");
 
+    // Record PHI values for checkBB before modifying predecessors.
+    // SplitEdge replaced latch with checkBB in header's PHIs.
+    llvm::SmallVector<std::pair<llvm::PHINode *, llvm::Value *>, 4> phiEntries;
+    for (llvm::PHINode &PHI : header->phis()) {
+        int idx = PHI.getBasicBlockIndex(checkBB);
+        if (idx >= 0)
+            phiEntries.push_back({&PHI, PHI.getIncomingValue(idx)});
+    }
+    // Remove checkBB from PHIs (it will no longer branch directly to header).
+    for (auto &[PHI, _] : phiEntries)
+        PHI->removeIncomingValue(checkBB, /*DeletePHIIfEmpty=*/false);
+
+    // Reference: compare counter >= (numIt - 2) using signed comparison.
+    // Counter starts at 0, incremented only on non-checkpoint path.
+    // numIt >= 3 guaranteed (LoopAnalyzer sets mandatory for numIt < 3).
     llvm::IRBuilder<> checkBuilder(checkBB);
     llvm::Value *counterVal = checkBuilder.CreateLoad(I32Ty, counter);
-    // Evaluate the checkpoint condition before increment so counter=0
-    // triggers the initial ("0-th") checkpoint.
-    llvm::Value *rem = checkBuilder.CreateURem(counterVal, llvm::ConstantInt::get(I32Ty, numIt));
-    llvm::Value *cond = checkBuilder.CreateICmpEQ(rem, llvm::ConstantInt::get(I32Ty, 0));
-    llvm::Value *incremented = checkBuilder.CreateAdd(counterVal, llvm::ConstantInt::get(I32Ty, 1));
-    checkBuilder.CreateStore(incremented, counter);
+    llvm::Value *threshold = llvm::ConstantInt::get(I32Ty, numIt - 2);
+    llvm::Value *cond = checkBuilder.CreateICmpSGE(counterVal, threshold);
+
+    // Create increment BB (counter++, branch to header).
+    llvm::BasicBlock *incrBB =
+        llvm::BasicBlock::Create(Ctx, "schematic_loop_incr", header->getParent(), header);
 
     // Create checkpoint BB.
     llvm::BasicBlock *ckptBB =
         llvm::BasicBlock::Create(Ctx, "schematic_loop_ckpt", header->getParent(), header);
 
-    // checkBB: if counter % numIt == 0, goto ckptBB, else goto header.
-    checkBuilder.CreateCondBr(cond, ckptBB, header);
+    // checkBB: if counter >= threshold, goto ckptBB, else goto incrBB.
+    checkBuilder.CreateCondBr(cond, ckptBB, incrBB);
 
-    // Fill checkpoint BB: full save/restore sequence, then branch to header.
+    // incrBB: increment counter, branch to header.
+    llvm::IRBuilder<> incrBuilder(incrBB);
+    llvm::Value *incremented = incrBuilder.CreateAdd(counterVal, llvm::ConstantInt::get(I32Ty, 1));
+    incrBuilder.CreateStore(incremented, counter);
+    incrBuilder.CreateBr(header);
+
+    // ckptBB: full save/restore sequence, reset counter to 0, branch to header.
     inserted +=
         insertCheckpointSequence(ckptBB, &decision.bodyAllocation, &decision.bodyAllocation, state);
     llvm::IRBuilder<> ckptBuilder(ckptBB);
+    ckptBuilder.CreateStore(llvm::ConstantInt::get(I32Ty, 0), counter);
     ckptBuilder.CreateBr(header);
 
-    // Update PHI nodes in header for the new ckptBB predecessor.
-    // SplitEdge already replaced latch with checkBB in header's PHIs.
-    // Now checkBB conditionally branches to header or ckptBB→header,
-    // so header has two new predecessors: checkBB (false) and ckptBB (true).
-    for (llvm::PHINode &PHI : header->phis()) {
-        llvm::Value *checkVal = PHI.getIncomingValueForBlock(checkBB);
-        if (checkVal)
-            PHI.addIncoming(checkVal, ckptBB);
+    // Update PHI nodes: add entries for both incrBB and ckptBB predecessors.
+    for (auto &[PHI, val] : phiEntries) {
+        PHI->addIncoming(val, incrBB);
+        PHI->addIncoming(val, ckptBB);
     }
 
     return inserted;

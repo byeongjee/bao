@@ -321,25 +321,34 @@ void SchematicStateAnalysis::computeAccessMaps() {
     }
 
     // Process candidate allocas via user scanning.
+    // Walk through GEP/bitcast chains to find all loads/stores that
+    // ultimately reference the alloca (important for structs/arrays at -O0).
     for (llvm::Value *V : candidates_) {
         auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V);
         if (!AI)
             continue;
 
-        for (const llvm::User *U : AI->users()) {
-            if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(U)) {
-                if (llvm::getUnderlyingObject(LI->getPointerOperand()->stripPointerCasts()) == AI) {
+        llvm::SmallVector<llvm::Value *, 8> worklist;
+        worklist.push_back(AI);
+        while (!worklist.empty()) {
+            llvm::Value *cur = worklist.pop_back_val();
+            for (const llvm::User *U : cur->users()) {
+                if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(U)) {
                     auto key =
                         std::make_pair(static_cast<const llvm::BasicBlock *>(LI->getParent()),
                                        static_cast<llvm::Value *>(AI));
                     loadCounts_[key]++;
-                }
-            } else if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(U)) {
-                if (llvm::getUnderlyingObject(SI->getPointerOperand()->stripPointerCasts()) == AI) {
-                    auto key =
-                        std::make_pair(static_cast<const llvm::BasicBlock *>(SI->getParent()),
-                                       static_cast<llvm::Value *>(AI));
-                    storeCounts_[key]++;
+                } else if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(U)) {
+                    // Only count when alloca is the store target, not the stored value.
+                    if (SI->getPointerOperand() == cur) {
+                        auto key =
+                            std::make_pair(static_cast<const llvm::BasicBlock *>(SI->getParent()),
+                                           static_cast<llvm::Value *>(AI));
+                        storeCounts_[key]++;
+                    }
+                } else if (llvm::isa<llvm::GetElementPtrInst>(U) ||
+                           llvm::isa<llvm::BitCastInst>(U)) {
+                    worklist.push_back(const_cast<llvm::Value *>(llvm::cast<llvm::Value>(U)));
                 }
             }
         }
