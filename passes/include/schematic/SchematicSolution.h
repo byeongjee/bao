@@ -3,7 +3,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Value.h"
 
 #include <limits>
 #include <map>
@@ -28,12 +28,12 @@ struct CFGEdge {
 };
 
 struct RegionAllocation {
-    std::map<llvm::GlobalVariable *, Placement> placement;
-    std::map<llvm::GlobalVariable *, unsigned> vmOffsets; // byte offset in VM
+    std::map<llvm::Value *, Placement> placement;
+    std::map<llvm::Value *, unsigned> vmOffsets; // byte offset in VM
     /// Liveness flags per variable: (live_start, live_end).
     /// live_start=true means restore needed at interval start.
     /// live_end=true means save needed at interval end.
-    std::map<llvm::GlobalVariable *, std::pair<bool, bool>> livenessFlags;
+    std::map<llvm::Value *, std::pair<bool, bool>> livenessFlags;
     unsigned vmBytesUsed = 0;
     double intervalEnergy = 0.0;
 };
@@ -65,8 +65,7 @@ struct SchematicSolution {
     llvm::DenseMap<llvm::BasicBlock *, LoopCheckpointDecision> loopDecisions;
     /// Per-block decided variable placements from earlier analyses.
     /// Enforces allocation consistency across paths (spec §12.2).
-    llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::GlobalVariable *, Placement>>
-        decidedPlacements;
+    llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> decidedPlacements;
     unsigned pathsAnalyzed = 0;
     unsigned totalVmVariables = 0;
     unsigned totalNvmVariables = 0;

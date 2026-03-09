@@ -13,7 +13,7 @@
 namespace checkpoint {
 
 LoopAnalyzer::LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
-                           const StateAnalysis &state, const SchematicParams &params)
+                           const SchematicStateAnalysis &state, const SchematicParams &params)
     : LI_(LI), SE_(SE), cfg_(cfg), state_(state), params_(params) {}
 
 void LoopAnalyzer::setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces) {
@@ -96,18 +96,18 @@ LoopAnalyzer::enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const {
     return result;
 }
 
-bool LoopAnalyzer::placementsDiffer(const std::map<llvm::GlobalVariable *, Placement> &a,
-                                    const std::map<llvm::GlobalVariable *, Placement> &b) const {
+bool LoopAnalyzer::placementsDiffer(const std::map<llvm::Value *, Placement> &a,
+                                    const std::map<llvm::Value *, Placement> &b) const {
     // Check all keys in union.
-    std::set<llvm::GlobalVariable *> allKeys;
+    std::set<llvm::Value *> allKeys;
     for (const auto &[k, _] : a)
         allKeys.insert(k);
     for (const auto &[k, _] : b)
         allKeys.insert(k);
 
-    for (llvm::GlobalVariable *gv : allKeys) {
-        auto itA = a.find(gv);
-        auto itB = b.find(gv);
+    for (llvm::Value *v : allKeys) {
+        auto itA = a.find(v);
+        auto itB = b.find(v);
         Placement pA = (itA != a.end()) ? itA->second : Placement::NVM;
         Placement pB = (itB != b.end()) ? itB->second : Placement::NVM;
         if (pA != pB)
@@ -116,8 +116,8 @@ bool LoopAnalyzer::placementsDiffer(const std::map<llvm::GlobalVariable *, Place
     return false;
 }
 
-RegionAllocation LoopAnalyzer::buildBoundaryAllocation(
-    const std::map<llvm::GlobalVariable *, Placement> &placement) const {
+RegionAllocation
+LoopAnalyzer::buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const {
     RegionAllocation alloc;
     alloc.placement = placement;
     alloc.vmBytesUsed = 0;
@@ -338,13 +338,13 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     // 4. Get header and latch allocations from decided placements.
-    std::map<llvm::GlobalVariable *, Placement> headerAlloc;
+    std::map<llvm::Value *, Placement> headerAlloc;
     auto hdIt = solution.decidedPlacements.find(header);
     if (hdIt != solution.decidedPlacements.end())
         headerAlloc = hdIt->second;
 
     llvm::BasicBlock *latch = L->getLoopLatch();
-    std::map<llvm::GlobalVariable *, Placement> latchAlloc;
+    std::map<llvm::Value *, Placement> latchAlloc;
     if (latch) {
         auto ltIt = solution.decidedPlacements.find(latch);
         if (ltIt != solution.decidedPlacements.end())

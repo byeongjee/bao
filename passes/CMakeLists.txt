@@ -78,6 +78,7 @@ add_library(CheckpointPass MODULE
     # SCHEMATIC (greedy heuristic baseline)
     src/schematic/SchematicParams.cpp
     src/schematic/SchematicPass.cpp
+    src/schematic/SchematicStateAnalysis.cpp
     src/schematic/IntervalAllocator.cpp
 
     src/schematic/RCGSolver.cpp
