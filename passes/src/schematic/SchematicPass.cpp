@@ -205,13 +205,17 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 double dstExecEnergy = getBlockExecEnergy(dstBB);
 
                 // Loop-aware scaling (reference: cfg_modification.py:293-295).
-                // When entering a loop header, add (nb_iter-1) * cost_one_it.
-                if (auto loopIt = solution.loopDecisions.find(dstBB);
-                    loopIt != solution.loopDecisions.end() && !fwdVisitedLoopHeaders.count(dstBB)) {
-                    fwdVisitedLoopHeaders.insert(dstBB);
-                    unsigned nbIter = loopIt->second.numIterationsPerCharge;
-                    if (nbIter > 1)
-                        dstExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
+                // Any block in a loop triggers scaling (not just headers).
+                if (Loop *L = LI.getLoopFor(dstBB)) {
+                    BasicBlock *header = L->getHeader();
+                    if (auto loopIt = solution.loopDecisions.find(header);
+                        loopIt != solution.loopDecisions.end() &&
+                        !fwdVisitedLoopHeaders.count(header)) {
+                        fwdVisitedLoopHeaders.insert(header);
+                        unsigned nbIter = loopIt->second.numIterationsPerCharge;
+                        if (nbIter > 1)
+                            dstExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
+                    }
                 }
 
                 double newELeft = srcIt->second.E_left - dstExecEnergy;
@@ -260,12 +264,17 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 double srcExecEnergy = getBlockExecEnergy(srcBB);
 
                 // Loop-aware scaling (reference: cfg_modification.py:232-234).
-                if (auto loopIt = solution.loopDecisions.find(srcBB);
-                    loopIt != solution.loopDecisions.end() && !bwdVisitedLoopHeaders.count(srcBB)) {
-                    bwdVisitedLoopHeaders.insert(srcBB);
-                    unsigned nbIter = loopIt->second.numIterationsPerCharge;
-                    if (nbIter > 1)
-                        srcExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
+                // Any block in a loop triggers scaling (not just headers).
+                if (Loop *L = LI.getLoopFor(srcBB)) {
+                    BasicBlock *header = L->getHeader();
+                    if (auto loopIt = solution.loopDecisions.find(header);
+                        loopIt != solution.loopDecisions.end() &&
+                        !bwdVisitedLoopHeaders.count(header)) {
+                        bwdVisitedLoopHeaders.insert(header);
+                        unsigned nbIter = loopIt->second.numIterationsPerCharge;
+                        if (nbIter > 1)
+                            srcExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
+                    }
                 }
 
                 double newEToLeave = srcExecEnergy + dstIt->second.E_to_leave;

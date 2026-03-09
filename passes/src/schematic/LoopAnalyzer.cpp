@@ -262,8 +262,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    // Reference: nb_it = (budget - header.E_to_leave) // energy_one_it - 1
-    double availableEnergy = params_.capacity - headerEToLeave;
+    // Reference: nb_it = (budget - latch.E_to_leave) // energy_one_it - 1
+    double availableEnergy = params_.capacity - latchEToLeave;
     if (availableEnergy <= 0.0) {
         // Can't fit one checkpoint + one iteration.
         decision.mandatoryBackEdge = true;
@@ -373,8 +373,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     if (numIt > maxTripCount) {
-        // Entire loop fits — no checkpoint needed.
-        decision.numIterationsPerCharge = 0;
+        // Entire loop fits — no checkpoint needed, but use maxTripCount for
+        // energy scaling so propagation accounts for all iterations.
+        decision.numIterationsPerCharge = static_cast<unsigned>(maxTripCount);
+        decision.loopFitsEntirely = true;
     } else if (numIt < 3) {
         // Too few iterations per charge — checkpoint every iteration.
         decision.mandatoryBackEdge = true;

@@ -48,6 +48,7 @@ struct BlockMetadata {
 struct LoopCheckpointDecision {
     llvm::Loop *loop = nullptr;
     bool mandatoryBackEdge = false;      // alloc(H) != alloc(L)
+    bool loopFitsEntirely = false;       // entire loop fits without checkpoint
     unsigned numIterationsPerCharge = 0; // conditional checkpoint interval
     double E_loop = 0.0;                 // per-iteration energy
     RegionAllocation bodyAllocation;
