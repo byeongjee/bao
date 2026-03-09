@@ -28,22 +28,6 @@ bool RockClimbMachineInstrumenter::verifyConstants() const {
     };
 
     checkOpcode(msp430::CALLi, "CALLi");
-    checkOpcode(msp430::MOV16ri, "MOV16ri");
-    checkOpcode(msp430::MOV16rr, "MOV16rr");
-
-    // Verify register names
-    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
-    auto checkReg = [&](unsigned reg, const char *expected) {
-        StringRef name = TRI->getName(reg);
-        if (name != expected) {
-            errs() << "RockClimbMachineInstrumenter: register " << reg << " is '" << name
-                   << "', expected '" << expected << "'\n";
-            ok = false;
-        }
-    };
-
-    checkReg(msp430::R12, "R12");
-    checkReg(msp430::R14, "R14");
 
     return ok;
 }
@@ -89,25 +73,7 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
     DebugLoc DL = ckpt.afterInst->getDebugLoc();
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
 
-    // Insert: MOV #regId, R12  (first argument: register slot index)
-    BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::MOV16ri), msp430::R12).addImm(ckpt.regId);
-
-    // Insert: MOV physReg, R14  (second argument: register value)
-    // MSP430 calling convention: R12=arg1, R14=arg2
-    // If the register is an 8-bit sub-register (GR8), promote to its 16-bit
-    // super-register. Saving the full 16-bit register is safe — the 8-bit value
-    // lives in the low byte.
-    MCRegister srcReg = ckpt.reg;
-    const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(srcReg);
-    if (RC && RC->getID() == msp430::GR8RegClassID) {
-        const TargetRegisterClass *GR16RC = TRI->getRegClass(msp430::GR16RegClassID);
-        MCRegister superReg = TRI->getMatchingSuperReg(srcReg, msp430::subreg_8bit, GR16RC);
-        if (superReg)
-            srcReg = superReg;
-    }
-    BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::MOV16rr), msp430::R14).addReg(srcReg);
-
-    // Insert: CALL __rockclimb_save_reg
+    // Insert: CALL __rockclimb_save_reg (no arguments — real runtime inlines saves)
     MachineInstr *CallMI = BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::CALLi))
                                .addExternalSymbol("__rockclimb_save_reg");
 

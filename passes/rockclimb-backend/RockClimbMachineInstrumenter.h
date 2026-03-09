@@ -11,7 +11,7 @@ namespace checkpoint {
 /// Inserts machine-level checkpoint calls via BuildMI for MSP430.
 ///
 /// At region boundaries: CALL __rockclimb_check
-/// At register saves:    MOV #regId, R12; MOV physReg, R14; CALL __rockclimb_save_reg
+/// At register saves:    CALL __rockclimb_save_reg
 class RockClimbMachineInstrumenter {
   public:
     explicit RockClimbMachineInstrumenter(llvm::MachineFunction &MF);

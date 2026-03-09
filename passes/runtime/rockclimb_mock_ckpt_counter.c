@@ -35,9 +35,7 @@ void __rockclimb_check(void) {
     cnt_check++;
 }
 
-void __rockclimb_save_reg(uint8_t reg_id, uint16_t value) {
-    (void)reg_id;
-    (void)value;
+void __rockclimb_save_reg(void) {
     cnt_save_reg++;
 }
 
@@ -73,8 +71,7 @@ void __rockclimb_recover(void) {
     cnt_recover++;
 }
 
-__attribute__((destructor))
-void __rockclimb_print_counts(void) {
+__attribute__((destructor)) void __rockclimb_print_counts(void) {
     printf("=== RockClimb Checkpoint Counter Summary ===\n");
     printf("  __rockclimb_check:        %u\n", cnt_check);
     printf("  __rockclimb_save_reg:     %u\n", cnt_save_reg);
