@@ -92,9 +92,7 @@ void __rockclimb_check(void) {
     cnt_check++;
 }
 
-void __rockclimb_save_reg(uint8_t reg_id, uint16_t value) {
-    (void)reg_id;
-    (void)value;
+void __rockclimb_save_reg(void) {
     cnt_save_reg++;
 }
 

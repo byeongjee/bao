@@ -78,10 +78,8 @@ void __rockclimb_check(void);
  * Called at the last definition point of each live-out register
  * within a region (distributed checkpointing strategy).
  *
- * @param reg_id  Register identifier (0 to ROCKCLIMB_MAX_REGS-1)
- * @param value   Register value to save
  */
-void __rockclimb_save_reg(uint8_t reg_id, uint16_t value);
+void __rockclimb_save_reg(void);
 
 /*
  * Optional debug marker API (MILP-style counters).
@@ -116,7 +114,7 @@ void __rockclimb_recover(void)
 #if defined(__ELF__)
     __attribute__((noreturn))
 #endif
-;
+    ;
 
 #ifdef __cplusplus
 }
