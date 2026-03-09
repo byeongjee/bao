@@ -28,6 +28,11 @@ static cl::opt<std::string>
                                     cl::desc("Path to assembly energy config JSON"),
                                     cl::value_desc("filename"), cl::init(""));
 
+static cl::opt<std::string> RockClimbMachineEnergyDataOpt(
+    "rockclimb-machine-energy-data",
+    cl::desc("Pre-computed per-BB energy JSON (from bb-energy-analyzer)"),
+    cl::value_desc("filename"), cl::init(""));
+
 static cl::opt<bool>
     RockClimbMachineDumpEnergyKeysOpt("rockclimb-machine-dump-energy-keys",
                                       cl::desc("Print all required energy parameter keys and exit"),
@@ -140,8 +145,10 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
         errs() << "Error: -rockclimb-machine-config not specified\n";
         return false;
     }
-    if (RockClimbMachineEnergyConfigOpt.empty()) {
-        errs() << "Error: -rockclimb-machine-energy-config not specified\n";
+    bool hasPrecomputed = !RockClimbMachineEnergyDataOpt.empty();
+    if (!hasPrecomputed && RockClimbMachineEnergyConfigOpt.empty()) {
+        errs() << "Error: Either -rockclimb-machine-energy-data or "
+                  "-rockclimb-machine-energy-config must be specified\n";
         return false;
     }
 
@@ -158,13 +165,38 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     errs() << "  N_reg: " << params.N_reg << "\n";
     errs() << "  Distributed checkpointing: "
            << (params.distributedCheckpointing ? "enabled" : "disabled") << "\n";
+    errs() << "  Energy estimation: "
+           << (hasPrecomputed ? "pre-computed (bb-energy-analyzer)" : "MIR instruction-level")
+           << "\n";
     errs() << "  Basic blocks: " << MF.size() << "\n";
 
-    // Create energy estimator from assembly energy config
-    MachineEnergyEstimator estimator(RockClimbMachineEnergyConfigOpt.getValue());
+    // Create energy estimator
+    std::unique_ptr<MachineEnergyEstimator> estimatorOwned;
+    MachineEnergyEstimator *estimatorPtr = nullptr;
 
-    // Dump all required energy keys if requested
+    if (hasPrecomputed) {
+        estimatorOwned =
+            MachineEnergyEstimator::fromPrecomputed(RockClimbMachineEnergyDataOpt.getValue());
+        if (!estimatorOwned) {
+            errs() << "Error: Failed to load pre-computed energy data\n";
+            return false;
+        }
+        estimatorPtr = estimatorOwned.get();
+    } else {
+        estimatorOwned =
+            std::make_unique<MachineEnergyEstimator>(RockClimbMachineEnergyConfigOpt.getValue());
+        estimatorPtr = estimatorOwned.get();
+    }
+
+    MachineEnergyEstimator &estimator = *estimatorPtr;
+
+    // Dump all required energy keys if requested (only for instruction-level mode)
     if (RockClimbMachineDumpEnergyKeysOpt) {
+        if (estimator.isPrecomputed()) {
+            errs() << "Note: --dump-energy-keys has no effect with pre-computed energy data\n";
+            return false;
+        }
+
         std::set<std::string> allKeys, missingKeys;
         estimator.collectRequiredKeys(MF, allKeys, missingKeys);
 

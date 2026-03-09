@@ -11,6 +11,9 @@ using json = nlohmann::json;
 namespace bbanalyzer {
 
 EnergyModel::EnergyModel(const std::string &configPath) {
+    if (configPath.empty())
+        return;
+
     std::ifstream file(configPath);
     if (!file.is_open()) {
         errs() << "error: failed to open energy config file '" << configPath << "'\n";
@@ -33,30 +36,27 @@ EnergyModel::EnergyModel(const std::string &configPath) {
             }
         }
 
-        errs() << "Loaded " << costs_.size() << " energy cost entries from '"
-               << configPath << "'\n";
+        errs() << "Loaded " << costs_.size() << " energy cost entries from '" << configPath
+               << "'\n";
 
     } catch (const json::exception &e) {
-        errs() << "error: failed to parse energy config '" << configPath
-               << "': " << e.what() << "\n";
+        errs() << "error: failed to parse energy config '" << configPath << "': " << e.what()
+               << "\n";
     }
 }
 
-std::string EnergyModel::makeKey(const std::string &mnemonic,
-                                  const std::string &addrMode) {
+std::string EnergyModel::makeKey(const std::string &mnemonic, const std::string &addrMode) {
     if (addrMode.empty()) {
         return mnemonic;
     }
     return mnemonic + "_" + addrMode;
 }
 
-bool EnergyModel::hasEnergy(const std::string &mnemonic,
-                            const std::string &addrMode) const {
+bool EnergyModel::hasEnergy(const std::string &mnemonic, const std::string &addrMode) const {
     return costs_.find(makeKey(mnemonic, addrMode)) != costs_.end();
 }
 
-double EnergyModel::getEnergy(const std::string &mnemonic,
-                              const std::string &addrMode) const {
+double EnergyModel::getEnergy(const std::string &mnemonic, const std::string &addrMode) const {
     std::string key = makeKey(mnemonic, addrMode);
 
     auto it = costs_.find(key);
@@ -73,8 +73,8 @@ double EnergyModel::getEnergy(const std::string &mnemonic,
     // Emit warning for unknown instruction/mode combo
     static std::unordered_map<std::string, bool> warned;
     if (warned.find(key) == warned.end()) {
-        errs() << "warning: no energy cost for '" << key
-               << "', using default (" << defaultEnergy_ << ")\n";
+        errs() << "warning: no energy cost for '" << key << "', using default (" << defaultEnergy_
+               << ")\n";
         warned[key] = true;
     }
 

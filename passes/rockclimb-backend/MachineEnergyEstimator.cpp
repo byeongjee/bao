@@ -7,6 +7,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <sstream>
 
 using namespace llvm;
 
@@ -15,7 +18,81 @@ namespace checkpoint {
 MachineEnergyEstimator::MachineEnergyEstimator(const std::string &configPath)
     : model_(configPath) {}
 
+MachineEnergyEstimator::MachineEnergyEstimator() : model_("") {}
+
+std::unique_ptr<MachineEnergyEstimator>
+MachineEnergyEstimator::fromPrecomputed(const std::string &energyDataPath) {
+    std::ifstream file(energyDataPath);
+    if (!file.is_open()) {
+        errs() << "Error: Cannot open pre-computed energy data: " << energyDataPath << "\n";
+        return nullptr;
+    }
+
+    std::stringstream buf;
+    buf << file.rdbuf();
+
+    nlohmann::json data = nlohmann::json::parse(buf.str(), nullptr, false);
+    if (data.is_discarded()) {
+        errs() << "Error: JSON parse error in energy data: " << energyDataPath << "\n";
+        return nullptr;
+    }
+
+    auto estimator = std::unique_ptr<MachineEnergyEstimator>(new MachineEnergyEstimator());
+    estimator->usePrecomputed_ = true;
+
+    if (!data.contains("functions") || !data["functions"].is_object()) {
+        errs() << "Error: Energy data missing 'functions' object\n";
+        return nullptr;
+    }
+
+    for (auto &[funcName, funcData] : data["functions"].items()) {
+        if (!funcData.contains("bb_energy") || !funcData["bb_energy"].is_object())
+            continue;
+        auto &funcMap = estimator->precomputedEnergy_[funcName];
+        for (auto &[bbName, bbData] : funcData["bb_energy"].items()) {
+            if (bbData.contains("energy") && bbData["energy"].is_number())
+                funcMap[bbName] = bbData["energy"].get<double>();
+        }
+    }
+
+    errs() << "Loaded pre-computed BB energy for " << estimator->precomputedEnergy_.size()
+           << " function(s) from " << energyDataPath << "\n";
+    return estimator;
+}
+
+double MachineEnergyEstimator::lookupPrecomputed(const MachineBasicBlock &MBB) const {
+    const MachineFunction *MF = MBB.getParent();
+    std::string funcName = MF->getName().str();
+
+    auto funcIt = precomputedEnergy_.find(funcName);
+    if (funcIt == precomputedEnergy_.end())
+        return -1.0;
+
+    // Try the MBB name first
+    std::string bbName;
+    if (MBB.hasName()) {
+        bbName = MBB.getName().str();
+    } else {
+        // Match assign-bb-debuginfo convention: "bb" + 0-based index
+        bbName = "bb" + std::to_string(MBB.getNumber());
+    }
+
+    auto bbIt = funcIt->second.find(bbName);
+    if (bbIt != funcIt->second.end())
+        return bbIt->second;
+
+    return -1.0;
+}
+
 double MachineEnergyEstimator::estimateBlock(const MachineBasicBlock &MBB) const {
+    if (usePrecomputed_) {
+        double energy = lookupPrecomputed(MBB);
+        if (energy >= 0.0)
+            return energy;
+        // Fall through to instruction-level estimation if not found
+        // (only works if model_ was loaded with a config)
+    }
+
     double total = 0.0;
     for (const MachineInstr &MI : MBB) {
         total += estimateInstruction(MI);

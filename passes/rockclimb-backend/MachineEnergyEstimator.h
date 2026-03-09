@@ -6,19 +6,28 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 
+#include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 
 namespace checkpoint {
 
 /// Computes per-MachineBasicBlock energy costs using MSP430 opcodes
 /// and the existing EnergyModel from bb-energy-analyzer.
 ///
-/// Maps LLVM opcode names (e.g., MOV16rr, ADD8ri) to assembly mnemonics
-/// and addressing mode strings matching the energy config JSON format.
+/// Two modes:
+/// 1. Instruction-level estimation: maps LLVM opcode names to assembly mnemonics
+///    and addressing mode strings matching the energy config JSON format.
+/// 2. Pre-computed: loads per-BB energy from bb-energy-analyzer output JSON.
 class MachineEnergyEstimator {
   public:
     explicit MachineEnergyEstimator(const std::string &configPath);
+
+    /// Load pre-computed per-BB energy from bb-energy-analyzer output JSON.
+    /// Falls back to instruction-level estimation for blocks not in the data.
+    static std::unique_ptr<MachineEnergyEstimator>
+    fromPrecomputed(const std::string &energyDataPath);
 
     /// Estimate total energy for a machine basic block
     double estimateBlock(const llvm::MachineBasicBlock &MBB) const;
@@ -35,8 +44,21 @@ class MachineEnergyEstimator {
     /// Get the energy key for a single instruction (for diagnostics)
     std::string getInstructionKey(const llvm::MachineInstr &MI) const;
 
+    /// Whether this estimator uses pre-computed BB energy data
+    bool isPrecomputed() const { return usePrecomputed_; }
+
   private:
+    /// Private constructor for pre-computed mode (no EnergyModel config needed)
+    MachineEnergyEstimator();
+
     bbanalyzer::EnergyModel model_;
+    bool usePrecomputed_ = false;
+
+    /// Pre-computed per-BB energy: functionName -> (bbName -> energy)
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> precomputedEnergy_;
+
+    /// Lookup pre-computed energy for a MBB. Returns negative if not found.
+    double lookupPrecomputed(const llvm::MachineBasicBlock &MBB) const;
 
     /// Extract base mnemonic from LLVM opcode name (e.g., "MOV16rr" → "mov")
     static std::string extractMnemonic(llvm::StringRef opName);
