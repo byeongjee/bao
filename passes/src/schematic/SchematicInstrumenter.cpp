@@ -77,17 +77,6 @@ void SchematicInstrumenter::createShadowGlobals(llvm::Function &F,
     }
 }
 
-void SchematicInstrumenter::createIneligibleBackups(llvm::Function &F,
-                                                    const SchematicStateAnalysis &state) {
-
-    ineligBackupMap_.clear();
-    ineligCheckpointObjs_.clear();
-
-    // With SchematicStateAnalysis, ineligible objects are cross-block SSA values
-    // only. These are covered by the runtime's register save/restore mechanism
-    // (N_reg), so no NVM backup globals are needed.
-}
-
 llvm::BasicBlock *SchematicInstrumenter::splitEdge(llvm::BasicBlock *src, llvm::BasicBlock *dst) {
     return llvm::SplitEdge(src, dst);
 }
@@ -201,13 +190,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
         }
     }
 
-    // Phase 2: Save ineligible objects to NVM backups.
-    // Note: with SchematicStateAnalysis, ineligible objects are cross-block SSA
-    // values only. SSA values cannot be memcpy'd — they are handled by the
-    // runtime's register save/restore mechanism (N_reg covers them).
-    // This phase is kept as a placeholder for future extensions.
-
-    // Phase 3: Epilogue + register save markers.
+    // Phase 2: Epilogue + register save markers.
     builder.CreateCall(epilogueFn_);
     inserted++;
     if (addDebugMarkers_) {
@@ -219,7 +202,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
         }
     }
 
-    // Phase 4: Prologue + register restore markers.
+    // Phase 3: Prologue + register restore markers.
     builder.CreateCall(prologueFn_);
     inserted++;
     if (addDebugMarkers_) {
@@ -232,7 +215,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
         }
     }
 
-    // Phase 5: Restore starting region's VM vars with live_start=true.
+    // Phase 4: Restore starting region's VM vars with live_start=true.
     // For globals: memcpy GV -> shadow (FRAM -> SRAM).
     // For allocas: memcpy alloca -> shadow (FRAM stack -> SRAM).
     if (startingAlloc) {
@@ -265,9 +248,6 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
             inserted++;
         }
     }
-
-    // Phase 6: Restore ineligible objects from NVM backups.
-    // Same as Phase 2 — SSA values are covered by register save/restore.
 
     return inserted;
 }
@@ -364,14 +344,11 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
     // Step 3: Create shadow globals.
     createShadowGlobals(F, solution, state);
 
-    // Step 4: Create ineligible backups.
-    createIneligibleBackups(F, state);
-
-    // Step 5: Rewrite accesses in regions.
+    // Step 4: Rewrite accesses in regions.
     for (const auto &region : solution.regions)
         rewriteAccessesInRegion(region.blocks, region.allocation);
 
-    // Step 6: Insert entry prologue after allocas in entry block.
+    // Step 5: Insert entry prologue after allocas in entry block.
     {
         llvm::BasicBlock &entryBB = F.getEntryBlock();
         llvm::BasicBlock::iterator insertPt = getInsertPointAfterAllocas(entryBB);
@@ -380,7 +357,7 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
         inserted++;
     }
 
-    // Step 7: Insert checkpoints at enabled edges.
+    // Step 6: Insert checkpoints at enabled edges.
     // Build a lookup from regions for ending/starting allocations.
     // Map each block to its region allocation.
     llvm::DenseMap<llvm::BasicBlock *, const RegionAllocation *> blockToAlloc;
@@ -391,7 +368,7 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
 
     for (const CFGEdge &edge : solution.enabledCheckpoints) {
         // Skip only the true loop back-edge (latch -> header) when loop
-        // checkpoint logic (mandatory or conditional) handles it in Step 8.
+        // checkpoint logic (mandatory or conditional) handles it in Step 7.
         bool isLoopBackEdge = false;
         for (const auto &[header, dec] : solution.loopDecisions) {
             bool handledByLoopLogic = dec.mandatoryBackEdge || dec.numIterationsPerCharge > 0;
@@ -420,7 +397,7 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
         inserted += insertCheckpointSequence(ckptBB, endingAlloc, startingAlloc, state);
     }
 
-    // Step 8: Handle loop conditional checkpoints.
+    // Step 7: Handle loop conditional checkpoints.
     for (const auto &[header, decision] : solution.loopDecisions) {
         if (decision.mandatoryBackEdge) {
             // Mandatory: checkpoint every iteration via back-edge.

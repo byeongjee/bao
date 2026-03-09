@@ -37,11 +37,12 @@ std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
 /// Compute optimal greedy allocation for an interval (spec §6.2).
 /// startConstraint/endConstraint: if set, variables that need restore/save
 /// and exist in the constraint allocation are forced to NVM (reference lines 186-190).
-RegionAllocation computeIntervalAllocation(
-    const std::vector<llvm::BasicBlock *> &intervalBlocks, const SchematicStateAnalysis &state,
-    const SchematicParams &params, const std::map<llvm::Value *, Placement> &fixedPlacements = {},
-    VMAddressTracker *tracker = nullptr, const RegionAllocation *startConstraint = nullptr,
-    const RegionAllocation *endConstraint = nullptr);
+RegionAllocation
+computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                          const SchematicStateAnalysis &state, const SchematicParams &params,
+                          const std::map<llvm::Value *, Placement> &fixedPlacements,
+                          VMAddressTracker *tracker, const RegionAllocation *startConstraint,
+                          const RegionAllocation *endConstraint);
 
 /// Compute total interval energy (spec §7.2).
 double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBlocks,

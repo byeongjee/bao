@@ -97,18 +97,6 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
         return std::nullopt;
     params.addDebugMarkers = *debugMarkers;
 
-    auto blockSplitting = readBool("enable_block_splitting", true);
-    if (!blockSplitting)
-        return std::nullopt;
-    params.enableBlockSplitting = *blockSplitting;
-
-    // Also check disable_block_splitting (inverts enable_block_splitting).
-    auto disableBS = readBool("disable_block_splitting", false);
-    if (!disableBS)
-        return std::nullopt;
-    if (*disableBS)
-        params.enableBlockSplitting = false;
-
     return params;
 }
 

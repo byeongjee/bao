@@ -32,8 +32,8 @@ class RCGSolver {
               const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
               const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>>
                   &decidedPlacements,
-              llvm::BasicBlock *startBoundaryBlock = nullptr,
-              llvm::BasicBlock *endBoundaryBlock = nullptr, VMAddressTracker *tracker = nullptr);
+              llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock,
+              VMAddressTracker *tracker);
 
     RCGResult solve();
 

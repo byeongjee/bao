@@ -30,9 +30,9 @@ struct CFGEdge {
 struct RegionAllocation {
     std::map<llvm::Value *, Placement> placement;
     std::map<llvm::Value *, unsigned> vmOffsets; // byte offset in VM
-    /// Liveness flags per variable: (live_start, live_end).
-    /// live_start=true means restore needed at interval start.
-    /// live_end=true means save needed at interval end.
+    /// Save/restore flags per variable: (needRestore, needSave).
+    /// needRestore=true means restore needed at interval start (first access is a load).
+    /// needSave=true means save needed at interval end (always true in reference algorithm).
     std::map<llvm::Value *, std::pair<bool, bool>> livenessFlags;
     unsigned vmBytesUsed = 0;
     double intervalEnergy = 0.0;

@@ -31,15 +31,11 @@ class SchematicInstrumenter {
 
     /// Shadow globals: original Value (GV or alloca) -> VM shadow GV
     std::map<llvm::Value *, llvm::GlobalVariable *> shadowMap_;
-    /// Backups for ineligible objects (cross-block SSA values only).
-    std::map<llvm::Value *, llvm::GlobalVariable *> ineligBackupMap_;
-    std::vector<llvm::Value *> ineligCheckpointObjs_;
 
     void declareRuntimeFunctions();
 
     void createShadowGlobals(llvm::Function &F, const SchematicSolution &solution,
                              const SchematicStateAnalysis &state);
-    void createIneligibleBackups(llvm::Function &F, const SchematicStateAnalysis &state);
 
     llvm::BasicBlock *splitEdge(llvm::BasicBlock *src, llvm::BasicBlock *dst);
 

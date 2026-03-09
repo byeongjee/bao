@@ -15,7 +15,6 @@ namespace checkpoint {
 /// A single entry-to-exit (or header-to-latch) path with execution metadata.
 struct EnumeratedPath {
     std::vector<llvm::BasicBlock *> blocks;
-    double probability = 0.0;
     unsigned count = 0; // execution count from trace (0 = unobserved)
 };
 
