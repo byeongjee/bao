@@ -120,3 +120,6 @@ add_subdirectory(bb-debuginfo)
 
 # Build BB energy analyzer tool (standalone executable, no Gurobi dependency)
 add_subdirectory(bb-energy-analyzer)
+
+# Build RockClimb machine-level pass (post-regalloc, no Gurobi dependency)
+add_subdirectory(rockclimb-backend)
