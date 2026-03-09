@@ -403,6 +403,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 break;
 
             // 6. Recompute nb_it.
+            // Reference uses header.E_to_leave here (not latch as in the
+            // initial computation) because after re-propagation the header's
+            // E_to_leave reflects the updated allocation costs.
             availableEnergy = params_.capacity - headerEToLeave;
             if (availableEnergy <= 0.0)
                 break;
