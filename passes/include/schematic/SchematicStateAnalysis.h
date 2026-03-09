@@ -8,6 +8,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -35,6 +36,12 @@ class SchematicStateAnalysis {
 
     unsigned getLoadCount(const llvm::BasicBlock *BB, llvm::Value *v) const;
     unsigned getStoreCount(const llvm::BasicBlock *BB, llvm::Value *v) const;
+
+    // -- First operation type --
+
+    /// Returns true if first operation on v in BB is a load, false if store.
+    /// Returns nullopt if v is not accessed in BB.
+    std::optional<bool> getFirstOpIsLoad(const llvm::BasicBlock *BB, llvm::Value *v) const;
 
     // -- Variable sizes --
 
@@ -73,6 +80,9 @@ class SchematicStateAnalysis {
     // Access maps: (block, value) -> count
     std::map<std::pair<const llvm::BasicBlock *, llvm::Value *>, unsigned> loadCounts_;
     std::map<std::pair<const llvm::BasicBlock *, llvm::Value *>, unsigned> storeCounts_;
+
+    // First operation type: (block, value) -> true if first op is load
+    std::map<std::pair<const llvm::BasicBlock *, llvm::Value *>, bool> firstOpIsLoad_;
 
     std::vector<std::string> analysisErrors_;
 

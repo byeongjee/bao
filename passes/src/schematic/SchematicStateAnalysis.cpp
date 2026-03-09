@@ -42,6 +42,14 @@ unsigned SchematicStateAnalysis::getStoreCount(const llvm::BasicBlock *BB, llvm:
     return it != storeCounts_.end() ? it->second : 0;
 }
 
+std::optional<bool> SchematicStateAnalysis::getFirstOpIsLoad(const llvm::BasicBlock *BB,
+                                                             llvm::Value *v) const {
+    auto it = firstOpIsLoad_.find(std::make_pair(BB, v));
+    if (it != firstOpIsLoad_.end())
+        return it->second;
+    return std::nullopt;
+}
+
 unsigned SchematicStateAnalysis::getVarSizeBytes(llvm::Value *v) const {
     auto it = varSizeBytes_.find(v);
     return it != varSizeBytes_.end() ? it->second : 0;
@@ -312,10 +320,17 @@ void SchematicStateAnalysis::computeAccessMaps() {
                 llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
                 auto key = std::make_pair(BBKey, static_cast<llvm::Value *>(GV));
 
-                if (llvm::isRefSet(MRI))
+                bool isRef = llvm::isRefSet(MRI);
+                bool isMod = llvm::isModSet(MRI);
+
+                if (isRef)
                     loadCounts_[key]++;
-                if (llvm::isModSet(MRI))
+                if (isMod)
                     storeCounts_[key]++;
+
+                // Track first operation type per (BB, GV) pair.
+                if ((isRef || isMod) && firstOpIsLoad_.find(key) == firstOpIsLoad_.end())
+                    firstOpIsLoad_[key] = isRef;
             }
         }
     }
@@ -328,6 +343,9 @@ void SchematicStateAnalysis::computeAccessMaps() {
         if (!AI)
             continue;
 
+        // Collect all load/store users of this alloca (through GEP/bitcast chains).
+        llvm::SmallVector<llvm::Instruction *, 16> accessInsts;
+        llvm::SmallVector<std::pair<llvm::Instruction *, bool>, 16> accessInfo; // (inst, isLoad)
         llvm::SmallVector<llvm::Value *, 8> worklist;
         worklist.push_back(AI);
         while (!worklist.empty()) {
@@ -338,6 +356,7 @@ void SchematicStateAnalysis::computeAccessMaps() {
                         std::make_pair(static_cast<const llvm::BasicBlock *>(LI->getParent()),
                                        static_cast<llvm::Value *>(AI));
                     loadCounts_[key]++;
+                    accessInfo.push_back({const_cast<llvm::LoadInst *>(LI), true});
                 } else if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(U)) {
                     // Only count when alloca is the store target, not the stored value.
                     if (SI->getPointerOperand() == cur) {
@@ -345,11 +364,36 @@ void SchematicStateAnalysis::computeAccessMaps() {
                             std::make_pair(static_cast<const llvm::BasicBlock *>(SI->getParent()),
                                            static_cast<llvm::Value *>(AI));
                         storeCounts_[key]++;
+                        accessInfo.push_back({const_cast<llvm::StoreInst *>(SI), false});
                     }
                 } else if (llvm::isa<llvm::GetElementPtrInst>(U) ||
                            llvm::isa<llvm::BitCastInst>(U)) {
                     worklist.push_back(const_cast<llvm::Value *>(llvm::cast<llvm::Value>(U)));
                 }
+            }
+        }
+
+        // Determine first operation type per BB by iterating instructions in order.
+        for (llvm::BasicBlock &BB2 : F_) {
+            auto key = std::make_pair(static_cast<const llvm::BasicBlock *>(&BB2),
+                                      static_cast<llvm::Value *>(AI));
+            if (loadCounts_.find(key) == loadCounts_.end() &&
+                storeCounts_.find(key) == storeCounts_.end())
+                continue;
+            // Already recorded — skip.
+            if (firstOpIsLoad_.find(key) != firstOpIsLoad_.end())
+                continue;
+            for (llvm::Instruction &I2 : BB2) {
+                bool found = false;
+                for (const auto &[inst, isLoad] : accessInfo) {
+                    if (inst == &I2) {
+                        firstOpIsLoad_[key] = isLoad;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found)
+                    break;
             }
         }
     }
