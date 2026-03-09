@@ -1,5 +1,6 @@
 #include "schematic/LoopAnalyzer.h"
 #include "common/LoopTripCount.h"
+#include "schematic/IntervalAllocator.h"
 #include "schematic/RCGSolver.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -254,17 +255,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
 
-    // Checkpoint overhead.
-    double E_ckpt = params_.E_pro + params_.E_epi +
-                    params_.N_reg * (params_.regStoreEnergy + params_.regRestoreEnergy);
-    // Add VM save/restore costs for the body allocation.
-    for (const auto &[gv, place] : bodyAlloc.placement) {
-        if (place != Placement::VM)
-            continue;
-        unsigned size = state_.getVarSizeBytes(gv);
-        E_ckpt += params_.memStoreEnergyPerByte * size + params_.memRestoreEnergyPerByte * size;
-    }
-
     if (E_loop <= 0.0) {
         // Degenerate case.
         decision.numIterationsPerCharge = 0;
@@ -272,9 +262,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    double availableEnergy = params_.capacity - E_ckpt;
+    // Reference: nb_it = (budget - latch.E_to_leave) // energy_one_it - 1
+    double availableEnergy = params_.capacity - latchEToLeave;
     if (availableEnergy <= 0.0) {
-        // Can't even fit one checkpoint + one iteration.
+        // Can't fit one checkpoint + one iteration.
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         solution.loopDecisions[header] = decision;
@@ -283,8 +274,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    // Reference: nb_it_with_budget = (budget - energy_to_leave) // energy_one_it - 1
-    // The -1 accounts for needing energy to leave after the last iteration.
     int rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
     auto numIt = static_cast<unsigned>(std::max(rawNumIt, 0));
 
@@ -301,36 +290,80 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         }
     }
 
-    // TODO: The convergence loop should re-estimate variable access counts
-    // scaled by min(numIt, maxTripCount) iterations, re-compute memory
-    // allocation, re-propagate energy, and re-compute E_loop/numIt until
-    // convergence (reference lines 574-617). Currently, bodyAlloc and E_loop
-    // are not recomputed, so this loop converges immediately. This is a known
-    // limitation that may cause suboptimal iteration counts for loops where
-    // re-allocation would change the energy profile.
+    // Convergence loop (reference lines 574-617): re-estimate variable accesses
+    // scaled by min(numIt, maxTripCount), re-allocate, re-propagate energy,
+    // and re-compute nb_it until convergence.
     if (!hasEnabledCheckpoints && numIt > 1) {
+        std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
+        unsigned oldNumIt = 0;
         for (unsigned iter = 0; iter < 15; ++iter) {
-            unsigned prevNumIt = numIt;
+            if (oldNumIt != 0 && numIt >= oldNumIt)
+                break; // Converged
+            oldNumIt = numIt;
 
-            // Re-compute checkpoint overhead and available energy.
-            E_ckpt = params_.E_pro + params_.E_epi +
-                     params_.N_reg * (params_.regStoreEnergy + params_.regRestoreEnergy);
-            for (const auto &[gv, place] : bodyAlloc.placement) {
-                if (place != Placement::VM)
-                    continue;
-                unsigned size = state_.getVarSizeBytes(gv);
-                E_ckpt +=
-                    params_.memStoreEnergyPerByte * size + params_.memRestoreEnergyPerByte * size;
+            // 1. Scale access counts by min(numIt, maxTripCount).
+            unsigned scaledIters =
+                static_cast<unsigned>(std::min(static_cast<uint64_t>(numIt), maxTripCount));
+
+            // 2. Re-compute allocation with scaled accesses.
+            std::map<llvm::Value *, Placement> fixed;
+            auto hdIt2 = solution.decidedPlacements.find(header);
+            if (hdIt2 != solution.decidedPlacements.end())
+                fixed = hdIt2->second;
+            RegionAllocation newAlloc = computeIntervalAllocation(
+                loopBlocks, state_, params_, fixed, tracker_, nullptr, nullptr, scaledIters);
+            bodyAlloc = newAlloc;
+
+            // 3. Apply allocation to loop blocks.
+            for (llvm::BasicBlock *BB : loopBlocks) {
+                for (const auto &[gv, place] : bodyAlloc.placement)
+                    solution.decidedPlacements[BB][gv] = place;
+                solution.blockMeta[BB].analyzed = true;
             }
 
-            availableEnergy = params_.capacity - E_ckpt;
-            if (availableEnergy <= 0.0)
+            // 4. Re-compute E_to_leave by simple forward energy accumulation
+            //    through body paths to get header and latch E_to_leave.
+            //    Re-propagate: seed header, walk forward, update E_to_leave backward.
+            {
+                // Simple forward pass: accumulate execution energy through each path.
+                for (const auto &path : bodyPaths) {
+                    double accum = 0.0;
+                    for (int b = static_cast<int>(path.size()) - 1; b >= 0; --b) {
+                        llvm::BasicBlock *BB = path[b];
+                        double bbE = cfg_.getBlockInfo(BB).energyCost;
+                        for (const auto &[gv, place] : bodyAlloc.placement) {
+                            if (place != Placement::VM)
+                                continue;
+                            unsigned loads = state_.getLoadCount(BB, gv);
+                            unsigned stores = state_.getStoreCount(BB, gv);
+                            bbE -= params_.nvmAccessPenalty * (loads + stores);
+                        }
+                        accum += bbE;
+                        auto &meta = solution.blockMeta[BB];
+                        if (accum > meta.E_to_leave)
+                            meta.E_to_leave = accum;
+                    }
+                }
+            }
+
+            // 5. Recompute E_loop.
+            auto hMeta2 = solution.blockMeta.find(header);
+            auto lMeta2 = latch ? solution.blockMeta.find(latch) : solution.blockMeta.end();
+            headerEToLeave = (hMeta2 != solution.blockMeta.end()) ? hMeta2->second.E_to_leave : 0.0;
+            latchEToLeave = (lMeta2 != solution.blockMeta.end()) ? lMeta2->second.E_to_leave : 0.0;
+            E_loop = headerEToLeave - latchEToLeave + params_.loopIncrementCostNvm;
+            decision.E_loop = E_loop;
+            decision.bodyAllocation = bodyAlloc;
+
+            if (E_loop <= 0.0)
                 break;
 
+            // 6. Recompute nb_it.
+            availableEnergy = params_.capacity - latchEToLeave;
+            if (availableEnergy <= 0.0)
+                break;
             rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
             numIt = static_cast<unsigned>(std::max(rawNumIt, 0));
-            if (numIt >= prevNumIt)
-                break; // Converged (reference: continue only while numIt < prevNumIt).
         }
     }
 
@@ -349,6 +382,22 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     solution.loopDecisions[header] = decision;
+
+    // Scale E_left and E_to_leave for loop blocks (reference: schematic.py:625-628, 641-643).
+    unsigned nbIter = decision.numIterationsPerCharge;
+    if (nbIter == 0)
+        nbIter = static_cast<unsigned>(maxTripCount); // entire loop fits
+    if (nbIter > 1) {
+        double loopScale = (nbIter - 1) * E_loop;
+        for (llvm::BasicBlock *BB : L->getBlocksVector()) {
+            auto it = solution.blockMeta.find(BB);
+            if (it == solution.blockMeta.end())
+                continue;
+            it->second.E_to_leave += loopScale;
+            it->second.E_left -= loopScale;
+        }
+    }
+
     return true;
 }
 

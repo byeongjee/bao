@@ -177,6 +177,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         }
 
         // Forward propagation of E_left through disabled edges.
+        std::set<BasicBlock *> fwdVisitedLoopHeaders;
         bool changed = true;
         while (changed) {
             changed = false;
@@ -188,7 +189,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 if (solution.enabledCheckpoints.count(edge))
                     continue;
 
-                // Fix 5: Skip loop back-edges.
+                // Skip loop back-edges.
                 if (Loop *L = LI.getLoopFor(dstBB)) {
                     if (dstBB == L->getHeader() && L->contains(srcBB))
                         continue;
@@ -202,6 +203,17 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                     continue;
 
                 double dstExecEnergy = getBlockExecEnergy(dstBB);
+
+                // Loop-aware scaling (reference: cfg_modification.py:293-295).
+                // When entering a loop header, add (nb_iter-1) * cost_one_it.
+                if (auto loopIt = solution.loopDecisions.find(dstBB);
+                    loopIt != solution.loopDecisions.end() && !fwdVisitedLoopHeaders.count(dstBB)) {
+                    fwdVisitedLoopHeaders.insert(dstBB);
+                    unsigned nbIter = loopIt->second.numIterationsPerCharge;
+                    if (nbIter > 1)
+                        dstExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
+                }
+
                 double newELeft = srcIt->second.E_left - dstExecEnergy;
                 if (newELeft < dstIt->second.E_left) {
                     solution.blockMeta[dstBB].E_left = newELeft;
@@ -211,6 +223,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         }
 
         // Backward propagation of E_to_leave through disabled edges.
+        std::set<BasicBlock *> bwdVisitedLoopHeaders;
         changed = true;
         while (changed) {
             changed = false;
@@ -219,7 +232,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 auto *dstBB = const_cast<BasicBlock *>(dst);
                 CFGEdge edge{srcBB, dstBB};
 
-                // At enabled checkpoints, E_to_leave includes save + exec cost (Fix 3).
+                // At enabled checkpoints, E_to_leave includes save + exec cost.
                 if (solution.enabledCheckpoints.count(edge)) {
                     double saveE =
                         params.E_epi + params.N_reg * params.regStoreEnergy + getVarSaveCost(srcBB);
@@ -231,7 +244,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                     continue;
                 }
 
-                // Fix 5: Skip loop back-edges.
+                // Skip loop back-edges.
                 if (Loop *L = LI.getLoopFor(dstBB)) {
                     if (dstBB == L->getHeader() && L->contains(srcBB))
                         continue;
@@ -245,6 +258,16 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                     continue;
 
                 double srcExecEnergy = getBlockExecEnergy(srcBB);
+
+                // Loop-aware scaling (reference: cfg_modification.py:232-234).
+                if (auto loopIt = solution.loopDecisions.find(srcBB);
+                    loopIt != solution.loopDecisions.end() && !bwdVisitedLoopHeaders.count(srcBB)) {
+                    bwdVisitedLoopHeaders.insert(srcBB);
+                    unsigned nbIter = loopIt->second.numIterationsPerCharge;
+                    if (nbIter > 1)
+                        srcExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
+                }
+
                 double newEToLeave = srcExecEnergy + dstIt->second.E_to_leave;
                 if (newEToLeave > srcIt->second.E_to_leave) {
                     solution.blockMeta[srcBB].E_to_leave = newEToLeave;
@@ -254,7 +277,10 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         }
     };
 
-    // Helper: update solution blockMeta from RCG interval results (Fix 1: backward E_to_leave).
+    // Helper: update solution from RCG interval results.
+    // Only sets analyzed flag, placements, and regions. E_left/E_to_leave are
+    // handled entirely by propagateEnergy() (reference delegates to
+    // propagate_energy_left / propagate_energy_to_leave).
     auto updateSolutionFromIntervals = [&](const RCGResult &result) {
         for (const auto &ckpt : result.selectedCheckpoints)
             solution.enabledCheckpoints.insert(ckpt);
@@ -263,39 +289,11 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             const auto &blocks = result.intervalBlocks[i];
             const auto &alloc = result.allocations[i];
 
-            // Forward pass: compute E_left and collect per-block energies.
-            std::vector<double> blockEnergies(blocks.size());
-            double energyAccum = 0.0;
-            for (unsigned b = 0; b < blocks.size(); ++b) {
-                BasicBlock *BB = blocks[b];
-                double bbEnergy = ctx.cfg->getBlockInfo(BB).energyCost;
-                for (const auto &[gv, place] : alloc.placement) {
-                    if (place != Placement::VM)
-                        continue;
-                    unsigned loads = state.getLoadCount(BB, gv);
-                    unsigned stores = state.getStoreCount(BB, gv);
-                    bbEnergy -= params.nvmAccessPenalty * (loads + stores);
-                }
-                blockEnergies[b] = bbEnergy;
-                energyAccum += bbEnergy;
-
+            for (BasicBlock *BB : blocks) {
                 auto &meta = solution.blockMeta[BB];
-                double newELeft = alloc.intervalEnergy - energyAccum;
-                if (!meta.analyzed || newELeft < meta.E_left)
-                    meta.E_left = newELeft;
                 meta.analyzed = true;
-
                 for (const auto &[gv, place] : alloc.placement)
                     solution.decidedPlacements[BB][gv] = place;
-            }
-
-            // Backward pass: compute E_to_leave (Fix 1).
-            double energyToEnd = 0.0;
-            for (int b = static_cast<int>(blocks.size()) - 1; b >= 0; --b) {
-                energyToEnd += blockEnergies[b];
-                auto &meta = solution.blockMeta[blocks[b]];
-                if (energyToEnd > meta.E_to_leave)
-                    meta.E_to_leave = energyToEnd;
             }
 
             solution.regions.push_back({blocks, alloc});
@@ -457,48 +455,49 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     // Fix 2: Propagate energy AFTER Step 9b before Step 10.
     propagateEnergy();
 
-    // Step 10: Resolve remaining potential edges between analyzed blocks (Fix 6: fixed-point).
-    bool step10Changed = true;
-    while (step10Changed) {
-        step10Changed = false;
-        for (const auto &[src, dst] : ctx.cfg->getEdges()) {
-            CFGEdge edge{const_cast<BasicBlock *>(src), const_cast<BasicBlock *>(dst)};
-            if (solution.enabledCheckpoints.count(edge))
-                continue;
+    // Step 10: Single pass — resolve remaining potential edges (reference: schematic.py:468-502).
+    for (const auto &[src, dst] : ctx.cfg->getEdges()) {
+        auto *srcBB = const_cast<BasicBlock *>(src);
+        auto *dstBB = const_cast<BasicBlock *>(dst);
+        CFGEdge edge{srcBB, dstBB};
+        if (solution.enabledCheckpoints.count(edge))
+            continue;
 
-            auto srcMeta = solution.blockMeta.find(const_cast<BasicBlock *>(src));
-            auto dstMeta = solution.blockMeta.find(const_cast<BasicBlock *>(dst));
-            if (srcMeta == solution.blockMeta.end() || !srcMeta->second.analyzed)
+        // Skip loop back-edges (handled by LoopAnalyzer).
+        if (Loop *L = LI.getLoopFor(dstBB)) {
+            if (dstBB == L->getHeader() && L->contains(srcBB))
                 continue;
-            if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
-                continue;
+        }
 
-            // Check if allocations differ.
-            auto srcAlloc = solution.decidedPlacements.find(const_cast<BasicBlock *>(src));
-            auto dstAlloc = solution.decidedPlacements.find(const_cast<BasicBlock *>(dst));
-            bool allocsDiffer = false;
-            if (srcAlloc != solution.decidedPlacements.end() &&
-                dstAlloc != solution.decidedPlacements.end()) {
-                for (const auto &[gv, place] : srcAlloc->second) {
-                    auto it = dstAlloc->second.find(gv);
-                    if (it != dstAlloc->second.end() && it->second != place) {
-                        allocsDiffer = true;
-                        break;
-                    }
+        auto srcMeta = solution.blockMeta.find(srcBB);
+        auto dstMeta = solution.blockMeta.find(dstBB);
+        if (srcMeta == solution.blockMeta.end() || !srcMeta->second.analyzed)
+            continue;
+        if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
+            continue;
+
+        // Check if allocations differ.
+        auto srcAlloc = solution.decidedPlacements.find(srcBB);
+        auto dstAlloc = solution.decidedPlacements.find(dstBB);
+        bool allocsDiffer = false;
+        if (srcAlloc != solution.decidedPlacements.end() &&
+            dstAlloc != solution.decidedPlacements.end()) {
+            for (const auto &[gv, place] : srcAlloc->second) {
+                auto it = dstAlloc->second.find(gv);
+                if (it != dstAlloc->second.end() && it->second != place) {
+                    allocsDiffer = true;
+                    break;
                 }
             }
-
-            // Two independent reasons to insert a checkpoint on this edge:
-            // (a) VM/NVM allocation differs across the edge, or
-            // (b) not enough energy to reach dst's next checkpoint.
-            if (allocsDiffer || srcMeta->second.E_left <= dstMeta->second.E_to_leave) {
-                solution.enabledCheckpoints.insert(edge);
-                step10Changed = true;
-            }
         }
-        // Fix 6: Re-propagate after inserting new checkpoints.
-        if (step10Changed)
+
+        if (allocsDiffer || srcMeta->second.E_left <= dstMeta->second.E_to_leave) {
+            // Insufficient energy or incompatible allocations → enable checkpoint.
+            solution.enabledCheckpoints.insert(edge);
+        } else {
+            // Sufficient energy, compatible allocations → propagate energy through.
             propagateEnergy();
+        }
     }
 
     // Step 11: Collect statistics.
