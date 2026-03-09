@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parse output.log from benchmark_milp.sh --verbose to extract
+"""Parse output.log from run_milp.sh --verbose to extract
 the relationship between capacitor size and loop strip-mining K values."""
 
 import re

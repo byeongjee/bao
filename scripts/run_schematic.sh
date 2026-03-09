@@ -8,10 +8,10 @@
 #   2. Per capacitor: compile_and_run.sh --mode schematic -t <trace.json>
 #
 # Usage:
-#   ./scripts/benchmark_schematic.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#   ./scripts/run_schematic.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
 #
 # If benchmark names are given, only those are run (matched by filename without .c).
-# Example: ./scripts/benchmark_schematic.sh sha256 aes
+# Example: ./scripts/run_schematic.sh sha256 aes
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -184,6 +184,13 @@ for bench_path in "${BENCHMARKS[@]}"; do
 
         if [[ "$VERBOSE" -eq 1 ]]; then
             echo "$full_output"
+        fi
+
+        # Check for infeasibility
+        if echo "$full_output" | grep -q "SCHEMATIC infeasible"; then
+            echo "  INFEASIBLE (energy capacity too small)"
+            echo "$row_name,$cap_label,infeasible${FAIL_COLS}" >> "$OUTPUT_CSV"
+            continue
         fi
 
         # Check for failure

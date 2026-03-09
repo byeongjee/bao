@@ -4,10 +4,10 @@
 # and capacitor sizes. Outputs a CSV summary.
 #
 # Usage:
-#   ./scripts/benchmark_milp.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#   ./scripts/run_milp.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
 #
 # If benchmark names are given, only those are run (matched by filename without .c).
-# Example: ./scripts/benchmark_milp.sh crc chacha20 rsa
+# Example: ./scripts/run_milp.sh crc chacha20 rsa
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
