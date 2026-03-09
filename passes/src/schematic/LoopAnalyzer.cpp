@@ -334,6 +334,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             //    and E_left by forward energy accumulation through body paths.
             {
                 // Backward pass: accumulate E_to_leave from latch to header.
+                // NOTE: The save/restore seeds unconditionally charge all VM
+                // variables (not using livenessFlags). This is intentionally
+                // conservative and matches the reference implementation's
+                // convergence loop behavior.
                 for (const auto &path : bodyPaths) {
                     double accum = params_.E_epi + params_.N_reg * params_.regStoreEnergy +
                                    params_.loopIncrementCostNvm;
@@ -426,6 +430,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     solution.loopDecisions[header] = decision;
 
     // Adjust E_left/E_to_leave for loop blocks when multiple iterations per charge.
+    // E_left may go negative after adjustment — this is expected and correctly
+    // reflects that the block's remaining energy budget is consumed by subsequent
+    // iterations. Downstream propagateEnergy() handles negative E_left correctly.
     if (decision.numIterationsPerCharge > 1) {
         unsigned adjIter = decision.numIterationsPerCharge;
         if (decision.loopFitsEntirely)
