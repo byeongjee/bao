@@ -4,7 +4,7 @@
 # and capacitor sizes. Outputs a CSV summary.
 #
 # Usage:
-#   ./scripts/run_milp.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#   ./scripts/run_milp.sh [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
 #
 # If benchmark names are given, only those are run (matched by filename without .c).
 # Example: ./scripts/run_milp.sh crc chacha20 rsa
@@ -16,12 +16,14 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 OUTPUT_CSV="$PROJECT_DIR/benchmarks/milp_benchmark_summary.csv"
 VERBOSE=0
 FILTER_BENCHMARKS=()
+FILTER_CAPS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) OUTPUT_CSV="$2"; shift 2 ;;
         -v|--verbose) VERBOSE=1; shift ;;
-        -h|--help) echo "Usage: $0 [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
+        --cap) FILTER_CAPS+=("$2"); shift 2 ;;
+        -h|--help) echo "Usage: $0 [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) FILTER_BENCHMARKS+=("$1"); shift ;;
     esac
@@ -29,11 +31,31 @@ done
 
 ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_energy_config_ir.json"
 
-CAPACITOR_CONFIGS=(
+ALL_CAPACITOR_CONFIGS=(
     "1uF:$PROJECT_DIR/benchmarks/sample_milp_config_1uF.json"
     "10uF:$PROJECT_DIR/benchmarks/sample_milp_config_10uF.json"
     "100uF:$PROJECT_DIR/benchmarks/sample_milp_config_100uF.json"
 )
+
+# Filter capacitor configs if --cap specified
+CAPACITOR_CONFIGS=()
+if [[ ${#FILTER_CAPS[@]} -gt 0 ]]; then
+    for cap_entry in "${ALL_CAPACITOR_CONFIGS[@]}"; do
+        cap_label="${cap_entry%%:*}"
+        for fc in "${FILTER_CAPS[@]}"; do
+            if [[ "$cap_label" == "$fc" ]]; then
+                CAPACITOR_CONFIGS+=("$cap_entry")
+                break
+            fi
+        done
+    done
+    if [[ ${#CAPACITOR_CONFIGS[@]} -eq 0 ]]; then
+        echo "Error: No matching capacitor sizes. Available: 1uF, 10uF, 100uF" >&2
+        exit 1
+    fi
+else
+    CAPACITOR_CONFIGS=("${ALL_CAPACITOR_CONFIGS[@]}")
+fi
 
 # Find benchmarks
 BENCHMARKS=()
