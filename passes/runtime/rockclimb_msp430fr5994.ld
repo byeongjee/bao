@@ -263,19 +263,6 @@ SECTIONS
     PROVIDE (__persistent_end = .);
   } > FRAM
 
-  /* RockClimb NVM storage section.
-     This section holds checkpoint data that must survive power failures.
-     Unlike .persistent, this is explicitly placed in a dedicated NVM region
-     at the start of FRAM (0x4000-0x43FF). */
-  .nvm :
-  {
-    . = ALIGN(2);
-    PROVIDE (__nvm_start = .);
-    *(.nvm)
-    . = ALIGN(2);
-    PROVIDE (__nvm_end = .);
-  } > NVM
-
   .tinyram : {} > TINYRAM
 
   .lower.data :
@@ -429,6 +416,21 @@ SECTIONS
     . = ALIGN(2);
     *(.upper.text.* .upper.text)
   } > HIFRAM
+
+  /* RockClimb NVM storage section.
+     Placed AFTER .text so that .rodata (in FRAM) is the first loadable
+     section in the ELF.  This prevents the linker from including ELF
+     headers in the .nvm LOAD segment, which would push the segment's
+     PhysAddr below 0x4000 into unmapped memory and cause the flash
+     programmer to skip it. */
+  .nvm :
+  {
+    . = ALIGN(2);
+    PROVIDE (__nvm_start = .);
+    *(.nvm)
+    . = ALIGN(2);
+    PROVIDE (__nvm_end = .);
+  } > NVM
 
   .infoA (NOLOAD) : {} > INFOA              /* MSP430 INFO FLASH MEMORY SEGMENTS */
   .infoB (NOLOAD) : {} > INFOB

@@ -7,7 +7,10 @@
  * The RockClimb machine pass increments these counters inline using
  * ADD.W instructions (no function calls) when add_debug_markers=true.
  *
- * Counter summary is printed over UART at program exit via destructor.
+ * Benchmarks call debug_init() at start of main() and debug_exit()
+ * at end. Guarded by DEBUG_COUNTERS macro — compiles to no-ops without it.
+ * Constructor/destructor attributes are broken on msp430-elf-gcc 9.3.1.
+ *
  * All counters (cnt_boundary, cnt_save_reg, cnt_restore_reg) are
  * incremented inline by the instrumenter via ADD.W instructions.
  *
@@ -17,7 +20,7 @@
 #include <msp430.h>
 #include <stdint.h>
 
-#include "rockclimb_runtime.h"
+#include "debug_counters.h"
 
 /* ============================================================================
  * UART Setup for MSP430FR5994
@@ -80,20 +83,21 @@ static void uart_put_u16(uint16_t val) {
  * instrumented code via ADD.W instructions)
  * ============================================================================ */
 
-__attribute__((section(".nvm"))) uint16_t cnt_boundary;
-__attribute__((section(".nvm"))) uint16_t cnt_save_reg;
-__attribute__((section(".nvm"))) uint16_t cnt_restore_reg;
+__attribute__((section(".nvm"))) uint16_t cnt_boundary = 0;
+__attribute__((section(".nvm"))) uint16_t cnt_save_reg = 0;
+__attribute__((section(".nvm"))) uint16_t cnt_restore_reg = 0;
 
 /* ============================================================================
- * UART init (constructor) + Counter output (destructor)
+ * Debug API (called explicitly from benchmarks)
  * ============================================================================ */
 
-__attribute__((constructor)) void __rockclimb_debug_init(void) {
+void debug_init(void) {
     uart_init();
+    uart_puts("BOOT\r\n");
 }
 
-__attribute__((destructor)) void __rockclimb_print_counts(void) {
-    uart_puts("=== RockClimb Debug Counter Summary ===\r\n");
+void debug_exit(void) {
+    uart_puts("=== Debug Counter Summary ===\r\n");
     uart_puts("  __region_boundary:    ");
     uart_put_u16(cnt_boundary);
     uart_puts("\r\n");

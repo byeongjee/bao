@@ -83,11 +83,16 @@ BASENAME="$(basename "${INPUT%.*}")"
 OUTPUT="${OUTPUT:-build/$BASENAME}"
 mkdir -p "$(dirname "$OUTPUT")"
 
+# Debug counters: pass -DDEBUG_COUNTERS so benchmarks can use debug_init()/debug_exit()
+CLANG_DEBUG_FLAGS=""
+[[ "$DEBUG_COUNTERS" == "true" ]] && CLANG_DEBUG_FLAGS="-DDEBUG_COUNTERS"
+
 # Step 1: C → LLVM IR
 echo "=== Step 1: C → LLVM IR (clang -O${CLANG_OPT_LEVEL}) ==="
 "$CLANG" -S -emit-llvm -O"$CLANG_OPT_LEVEL" --target=msp430 \
     -isystem "$MSP430GCC_SUPPORT_PATH/include" \
     -isystem "$MSP430GCC_SUPPORT_PATH/msp430-elf/include" \
+    $CLANG_DEBUG_FLAGS \
     "$INPUT" -o "${OUTPUT}.ll"
 
 if [[ "$PRECOMPUTED_ENERGY" == "true" ]]; then
@@ -197,7 +202,7 @@ if [[ "$LINK" == "true" ]]; then
         DEBUG_COUNTERS_SRC="$PROJECT_DIR/passes/runtime/rockclimb_debug_counters.c"
         [[ ! -f "$DEBUG_COUNTERS_SRC" ]] && { echo "Error: $DEBUG_COUNTERS_SRC not found" >&2; exit 1; }
 
-        $GCC -mmcu=$DEVICE -msmall -O2 \
+        $GCC -mmcu=$DEVICE -msmall -O2 -DDEBUG_COUNTERS \
             -I"$MSP430GCC_SUPPORT_PATH/include" \
             -I"$PROJECT_DIR/passes/runtime" \
             -c "$DEBUG_COUNTERS_SRC" -o "${OUTPUT}.debug_counters.o"
@@ -208,6 +213,7 @@ if [[ "$LINK" == "true" ]]; then
     $GCC -mmcu=$DEVICE -msmall \
         -L"$MSP430GCC_SUPPORT_PATH/include" \
         -T "$LINKER_SCRIPT" \
+        -Wl,--nmagic \
         "${LINK_OBJS[@]}" -o "${OUTPUT}.elf"
 
     $SIZE "${OUTPUT}.elf"
