@@ -14,6 +14,8 @@
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "common/BlockUtils.h"
+
 #include <chrono>
 #include <fstream>
 #include <set>
@@ -322,11 +324,17 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     const auto totalEnd = std::chrono::steady_clock::now();
     double totalMs = std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
+    // Compute edge count
+    unsigned edgeCount = 0;
+    for (auto &MBB : MF)
+        edgeCount += MBB.succ_size();
+
     // Print statistics
     errs() << "\n=== Checkpoint Insertion Statistics ===\n";
     errs() << "  Pass:                            RockClimb-Machine\n";
     errs() << "  Function:                        " << MF.getName() << "\n";
     errs() << "  Basic blocks:                    " << MF.size() << "\n";
+    errs() << "  Edges:                           " << edgeCount << "\n";
     errs() << "  Regions:                         " << result.regions.size() << "\n";
     errs() << "  Region boundaries:               " << result.regionBoundaries.size() << "\n";
     errs() << "  --- RockClimb-Machine-specific ---\n";
@@ -338,6 +346,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     errs() << "  Register checkpoints:            " << checkpointPoints.size() << "\n";
     errs() << "  Total instrumentation points:    " << insertedCount << "\n";
     errs() << "  Compilation time (ms):           " << totalMs << "\n";
+    errs() << "  Peak RSS (KB):                   " << checkpoint::getPeakRSSKb() << "\n";
 
     return insertedCount > 0; // Return true if we modified the function
 }
