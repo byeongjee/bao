@@ -46,6 +46,9 @@ _rockclimb_boot:
     /* This is a recovery boot - restore all state from NVM */
 
 _do_recovery:
+    /* Disable watchdog — reboot resets WDT to active state */
+    mov.w   #0x5A80, &0x015C
+
     /* R14 holds saved PC. Clear recovery marker first to prevent
        infinite recovery loops on next reboot. */
     mov.w   #0, &__nvm_pc
@@ -120,14 +123,25 @@ __region_boundary:
     mov.w   SP, &__nvm_sp
     add.w   #2, &__nvm_sp
 
-    /* Halt — enter LPM4 (bits 4-7 of SR = CPUOFF+OSCOFF+SCG0+SCG1).
-       System will reboot when energy is available. */
-    /* TODO: re-enable deep sleep after debug testing
+#if defined(ROCKCLIMB_HALT_BOR)
+    /* Software BOR: PMMCTL0 = PMMPW (0xA500) | PMMSWBOR (0x0004).
+       CPU resets immediately, FRAM survives. On reboot, _rockclimb_boot
+       detects __nvm_pc != 0 and restores execution from saved state. */
+    mov.w   #0xA504, &0x0120
+    /* Unreachable — CPU resets before next instruction */
+
+#elif defined(ROCKCLIMB_HALT_LPM4)
+    /* Enter LPM4 deep sleep (CPUOFF+OSCOFF+SCG0+SCG1 = bits 4-7 of SR).
+       System powers off. On energy harvest, reset vector fires and
+       _rockclimb_boot recovers from NVM state. */
     bis.w   #0xF0, SR
     nop
-    */
+    /* If woken by interrupt (not full reboot), fall through to ret */
 
-    /* If we wake from LPM4 (e.g., by an interrupt), just return */
+#else
+    /* Debug mode: no halt, just return. GDB-compatible. */
+#endif
+
     ret
 
     .size   __region_boundary, .-__region_boundary

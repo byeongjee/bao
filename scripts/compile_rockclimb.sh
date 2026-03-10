@@ -15,6 +15,7 @@
 #   --verbose            Show detailed pass output
 #   --link               Assemble + link to produce .elf (real runtime: boot.S + runtime.c)
 #   --debug-counters     Link with debug counter runtime alongside real runtime (implies --link)
+#   --halt-mode <mode>   Halt behavior: debug (default), bor, lpm4. bor/lpm4 imply --link
 #   --linker <script>    Linker script (default: rockclimb_msp430fr5994.ld)
 #   -h, --help           Show this help message
 #
@@ -45,6 +46,7 @@ OUTPUT=""
 CLANG_OPT_LEVEL="2"
 PRECOMPUTED_ENERGY="true"
 VERBOSE="false"
+HALT_MODE="debug"
 LINK="false"
 DEBUG_COUNTERS="false"
 LINKER_SCRIPT=""
@@ -62,12 +64,21 @@ while [[ $# -gt 0 ]]; do
         --verbose) VERBOSE="true"; shift ;;
         --link) LINK="true"; shift ;;
         --debug-counters) DEBUG_COUNTERS="true"; LINK="true"; shift ;;
+        --halt-mode) HALT_MODE="$2"; shift 2 ;;
         --linker) LINKER_SCRIPT="$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) INPUT="$1"; shift ;;
     esac
 done
+
+# Validate halt mode
+case "$HALT_MODE" in
+    debug|bor|lpm4) ;;
+    *) echo "Error: --halt-mode must be debug, bor, or lpm4 (got: $HALT_MODE)" >&2; exit 1 ;;
+esac
+# bor/lpm4 imply --link (only meaningful on-device)
+[[ "$HALT_MODE" != "debug" ]] && LINK="true"
 
 [[ -z "$INPUT" ]] && { echo "Error: No input file" >&2; exit 1; }
 [[ -z "$ESTIMATOR_CONFIG" ]] && { echo "Error: -e <energy_config> required" >&2; exit 1; }
@@ -190,7 +201,13 @@ if [[ "$LINK" == "true" ]]; then
     [[ ! -f "$BOOT_SRC" ]] && { echo "Error: $BOOT_SRC not found" >&2; exit 1; }
     [[ ! -f "$RUNTIME_SRC" ]] && { echo "Error: $RUNTIME_SRC not found" >&2; exit 1; }
 
-    $GCC -mmcu=$DEVICE -msmall -c "$BOOT_SRC" -o "${OUTPUT}.boot.o"
+    BOOT_ASM_FLAGS=""
+    case "$HALT_MODE" in
+        bor)  BOOT_ASM_FLAGS="-DROCKCLIMB_HALT_BOR" ;;
+        lpm4) BOOT_ASM_FLAGS="-DROCKCLIMB_HALT_LPM4" ;;
+    esac
+
+    $GCC -mmcu=$DEVICE -msmall $BOOT_ASM_FLAGS -c "$BOOT_SRC" -o "${OUTPUT}.boot.o"
     $GCC -mmcu=$DEVICE -msmall -O2 \
         -I"$MSP430GCC_SUPPORT_PATH/include" \
         -I"$PROJECT_DIR/passes/runtime" \
