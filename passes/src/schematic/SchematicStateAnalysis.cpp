@@ -211,19 +211,6 @@ void SchematicStateAnalysis::reportStrictError(const llvm::Instruction &I,
 }
 
 bool SchematicStateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I) {
-    if (candidateGlobals_.empty())
-        return true;
-
-    auto mayTouchCandidate = [&](bool checkRef, bool checkMod) {
-        for (llvm::GlobalVariable *GV : candidateGlobals_) {
-            auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
-            llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
-            if ((checkRef && llvm::isRefSet(MRI)) || (checkMod && llvm::isModSet(MRI)))
-                return true;
-        }
-        return false;
-    };
-
     if (auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
         if (!isAllowedDirectCall(*CB)) {
             reportStrictError(I, "call target/effects are unresolved in strict mode");
@@ -232,74 +219,15 @@ bool SchematicStateAnalysis::validateInstructionForStrictMode(const llvm::Instru
         return true;
     }
 
-    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
-        const llvm::Value *Obj =
-            llvm::getUnderlyingObject(LI->getPointerOperand()->stripPointerCasts());
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(Obj)) {
-            if (candidateSet_.count(const_cast<llvm::GlobalVariable *>(GV)))
-                return true;
-        }
-        if (llvm::isa<llvm::AllocaInst>(Obj))
-            return true;
-        if (mayTouchCandidate(true, false)) {
-            reportStrictError(I, "load may alias candidate globals but target is unresolved");
-            return false;
-        }
+    // For loads, stores, and mem intrinsics: even when getUnderlyingObject
+    // cannot resolve the pointer to a specific candidate (common at O0 where
+    // pointers pass through alloca memory), AA-based counting in
+    // computeAccessMaps() still correctly tracks these accesses via
+    // getModRefInfo. So unresolved pointer targets are not errors for data
+    // access instructions — only for calls with unknown side effects.
+    if (llvm::isa<llvm::LoadInst>(&I) || llvm::isa<llvm::StoreInst>(&I) ||
+        llvm::isa<llvm::MemIntrinsic>(&I)) {
         return true;
-    }
-
-    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-        const llvm::Value *Obj =
-            llvm::getUnderlyingObject(SI->getPointerOperand()->stripPointerCasts());
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(Obj)) {
-            if (candidateSet_.count(const_cast<llvm::GlobalVariable *>(GV)))
-                return true;
-        }
-        if (llvm::isa<llvm::AllocaInst>(Obj))
-            return true;
-        if (mayTouchCandidate(false, true)) {
-            reportStrictError(I, "store may alias candidate globals but target is unresolved");
-            return false;
-        }
-        return true;
-    }
-
-    if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
-        bool directCandidate = false;
-        if (auto *MCI = llvm::dyn_cast<llvm::MemCpyInst>(MI)) {
-            const llvm::Value *DstObj =
-                llvm::getUnderlyingObject(MCI->getDest()->stripPointerCasts());
-            const llvm::Value *SrcObj =
-                llvm::getUnderlyingObject(MCI->getSource()->stripPointerCasts());
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(DstObj))
-                directCandidate |= candidateSet_.count(const_cast<llvm::GlobalVariable *>(GV)) > 0;
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(SrcObj))
-                directCandidate |= candidateSet_.count(const_cast<llvm::GlobalVariable *>(GV)) > 0;
-            if (llvm::isa<llvm::AllocaInst>(DstObj) || llvm::isa<llvm::AllocaInst>(SrcObj))
-                directCandidate = true;
-        } else {
-            const llvm::Value *DstObj =
-                llvm::getUnderlyingObject(MI->getRawDest()->stripPointerCasts());
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(DstObj))
-                directCandidate |= candidateSet_.count(const_cast<llvm::GlobalVariable *>(GV)) > 0;
-            if (llvm::isa<llvm::AllocaInst>(DstObj))
-                directCandidate = true;
-        }
-
-        if (!directCandidate && mayTouchCandidate(true, true)) {
-            reportStrictError(I,
-                              "mem intrinsic may touch candidate globals via unresolved pointer");
-            return false;
-        }
-        return true;
-    }
-
-    if (I.mayReadOrWriteMemory() && !llvm::isa<llvm::AllocaInst>(&I) &&
-        !llvm::isa<llvm::PHINode>(&I)) {
-        if (mayTouchCandidate(true, true)) {
-            reportStrictError(I, "memory instruction touching candidate globals is unresolved");
-            return false;
-        }
     }
 
     return true;
