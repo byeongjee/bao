@@ -9,7 +9,7 @@
 #   ./scripts/compile_and_run.sh [options] <input.c>
 #
 # Options:
-#   --mode <mode>    Checkpoint mode: none, rockclimb, rockclimb-machine, milp, schematic (default: none)
+#   --mode <mode>    Checkpoint mode: none, rockclimb, milp, schematic (default: none)
 #   --runtime <type> Runtime variant: real (default), mock-counter, energy-validate
 #   --local          Compile for host machine instead of MSP430 (run locally)
 #   --debug          Enable DEBUG output via UART
@@ -162,8 +162,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             [[ -z "$MILP_CONFIG" ]] && error "MILP config required for milp mode: use -m <config.json>"
             [[ ! -f "$MILP_CONFIG" ]] && error "MILP config not found: $MILP_CONFIG"
             ;;
-        rockclimb|rockclimb-machine)
-            [[ -z "$ESTIMATOR_CONFIG" ]] && error "Energy estimator config required for $MODE mode: use -e <config.json>"
+        rockclimb)
+            [[ -z "$ESTIMATOR_CONFIG" ]] && error "Energy estimator config required for rockclimb mode: use -e <config.json>"
             [[ ! -f "$ESTIMATOR_CONFIG" ]] && error "Estimator config not found: $ESTIMATOR_CONFIG"
             [[ -z "$ROCKCLIMB_CONFIG" ]] && error "RockClimb config required: use -c <config.json>"
             [[ ! -f "$ROCKCLIMB_CONFIG" ]] && error "RockClimb config not found: $ROCKCLIMB_CONFIG"
@@ -264,26 +264,6 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             fi
             ;;
 
-        rockclimb)
-            "$SCRIPT_DIR/compile_rockclimb.sh" \
-                -c "$ROCKCLIMB_CONFIG" \
-                "${COMPILE_ARGS[@]}" \
-                "$INPUT"
-
-            if [[ "$LOCAL_MODE" == "true" ]]; then
-                if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
-                    link_local "$TMP_DIR/ckpt.ll" "$ENERGY_VALIDATE_RUNTIME"
-                else
-                    link_local "$TMP_DIR/ckpt.ll" "$ROCKCLIMB_MOCK_CKPT_COUNTER"
-                fi
-            else
-                cp "$TMP_DIR/ckpt.o" "$TMP_DIR/ckpt.o" 2>/dev/null || true
-                link_runtime "$ROCKCLIMB_MOCK_CKPT_COUNTER" "$ROCKCLIMB_RUNTIME" \
-                    "$ROCKCLIMB_BOOT" "$ROCKCLIMB_LINKER"
-                cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
-            fi
-            ;;
-
         milp)
             "$SCRIPT_DIR/compile_milp.sh" \
                 -m "$MILP_CONFIG" \
@@ -325,14 +305,14 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             fi
             ;;
 
-        rockclimb-machine)
+        rockclimb)
             MACHINE_ARGS=(-e "$ESTIMATOR_CONFIG" -c "$ROCKCLIMB_CONFIG" -o "$TMP_DIR/ckpt")
             [[ "$VERBOSE" == "true" ]] && MACHINE_ARGS+=(--verbose)
             [[ -n "$CLANG_OPT_LEVEL" ]] && MACHINE_ARGS+=(-Oc "$CLANG_OPT_LEVEL")
             MACHINE_ARGS+=(--link)
             [[ "$RUNTIME_TYPE" == "mock-counter" ]] && MACHINE_ARGS+=(--mock-counter)
 
-            "$SCRIPT_DIR/compile_rockclimb_machine.sh" \
+            "$SCRIPT_DIR/compile_rockclimb.sh" \
                 "${MACHINE_ARGS[@]}" \
                 "$INPUT"
 
@@ -341,7 +321,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             ;;
 
         *)
-            error "Unknown mode: $MODE (use: none, rockclimb, rockclimb-machine, milp, schematic)"
+            error "Unknown mode: $MODE (use: none, rockclimb, milp, schematic)"
             ;;
     esac
 

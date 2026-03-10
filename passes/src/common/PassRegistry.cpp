@@ -3,7 +3,6 @@
 #include "common/TripCountAnnotationPass.h"
 #include "milp/LoopStripMiningPass.h"
 #include "milp/MILPCheckpointPass.h"
-#include "rockclimb/RockClimbPass.h"
 #include "schematic/SchematicPass.h"
 #include "schematic/TraceCollectorPass.h"
 
@@ -87,12 +86,6 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
                         FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
-                        return true;
-                    }
-                    if (Name == "rockclimb") {
-                        FPM.addPass(LoopSimplifyPass());
-                        FPM.addPass(LCSSAPass());
-                        FPM.addPass(checkpoint::RockClimbPass());
                         return true;
                     }
                     if (Name == "schematic") {

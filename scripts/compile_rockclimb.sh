@@ -1,135 +1,206 @@
 #!/usr/bin/env bash
 #
-# Compile C source with RockClimb checkpoint insertion.
+# Compile C source with machine-level RockClimb checkpoint insertion.
+# Uses post-regalloc MachineFunctionPass via MIR pipeline.
 #
 # Usage:
 #   compile_rockclimb.sh -e <energy_config> -c <rockclimb_config> [options] <input.c>
 #
 # Options:
-#   -e <config>          Energy estimator config JSON (required)
+#   -e <config>          Assembly energy config/params JSON (required)
 #   -c <config>          RockClimb config JSON (required)
 #   -o <output>          Output base name (default: build/<input>)
-#   -O <level>           LLC optimization level (default: 2)
 #   -Oc <level>          Clang optimization level (default: 2)
-#   -I <dir>             Add include directory (can be repeated)
-#   --local              Compile for host machine instead of MSP430
+#   --no-precomputed-energy  Skip bb-energy-analyzer, use MIR-level estimation
 #   --verbose            Show detailed pass output
-#   --debug              Enable DEBUG output
-#   --add-debug-markers  Insert mock-counter debug markers
-#   --energy-validate    Run energy-validate pass after RockClimb
+#   --link               Assemble + link to produce .elf
+#   --mock-counter       Link with mock counter runtime (implies --link)
+#   --linker <script>    Linker script (default: rockclimb_msp430fr5994.ld)
 #   -h, --help           Show this help message
+#
+# Default pipeline (pre-computed energy):
+#   C → clang → .ll → opt (assign-bb-debuginfo) → .ll
+#   .ll → llc → .o → bb-energy-analyzer → energy.json
+#   .ll → llc -stop-after=virtregrewriter → .mir
+#   → llc -load=RockClimbMachinePass.so -run-pass=rockclimb → .mir
+#   → llc -start-after=virtregrewriter → .s
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
+# Pass plugin
+MACHINE_PASS_LIB="$PROJECT_DIR/passes/build/rockclimb-backend/RockClimbMachinePass.so"
+
+# BB debug info pass plugin (for assign-bb-debuginfo)
+BB_DEBUGINFO_LIB="$PROJECT_DIR/passes/build/bb-debuginfo/BBDebugInfoPass.so"
+
+# bb-energy-analyzer
+BB_ANALYZER="$PROJECT_DIR/passes/build/bb-energy-analyzer/bb-energy-analyzer"
+
 # Defaults
 ESTIMATOR_CONFIG=""
 ROCKCLIMB_CONFIG=""
 OUTPUT=""
-OPT_LEVEL="2"
 CLANG_OPT_LEVEL="2"
-EXTRA_INCLUDES=""
-LOCAL_MODE="false"
+PRECOMPUTED_ENERGY="true"
 VERBOSE="false"
-DEBUG_MODE="false"
-ADD_DEBUG_MARKERS="false"
-ENERGY_VALIDATE="false"
+LINK="false"
+MOCK_COUNTER="false"
+LINKER_SCRIPT=""
 INPUT=""
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,29p' "$0" | sed 's/^# \?//'; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -e|--energy-config) ESTIMATOR_CONFIG="$2"; shift 2 ;;
         -c|--rockclimb-config) ROCKCLIMB_CONFIG="$2"; shift 2 ;;
         -o) OUTPUT="$2"; shift 2 ;;
-        -O) OPT_LEVEL="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
-        -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
-        --local) LOCAL_MODE="true"; shift ;;
+        --no-precomputed-energy) PRECOMPUTED_ENERGY="false"; shift ;;
         --verbose) VERBOSE="true"; shift ;;
-        --debug) DEBUG_MODE="true"; shift ;;
-        --add-debug-markers) ADD_DEBUG_MARKERS="true"; shift ;;
-        --energy-validate) ENERGY_VALIDATE="true"; shift ;;
+        --link) LINK="true"; shift ;;
+        --mock-counter) MOCK_COUNTER="true"; LINK="true"; shift ;;
+        --linker) LINKER_SCRIPT="$2"; shift 2 ;;
         -h|--help) usage ;;
-        -*) error "Unknown option: $1" ;;
+        -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) INPUT="$1"; shift ;;
     esac
 done
 
-# Validate
-[[ -z "$INPUT" ]] && error "No input file specified"
-[[ ! -f "$INPUT" ]] && error "File not found: $INPUT"
-[[ -z "$ESTIMATOR_CONFIG" ]] && error "Energy config required: use -e <config.json>"
-[[ ! -f "$ESTIMATOR_CONFIG" ]] && error "Estimator config not found: $ESTIMATOR_CONFIG"
-[[ -z "$ROCKCLIMB_CONFIG" ]] && error "RockClimb config required: use -c <config.json>"
-[[ ! -f "$ROCKCLIMB_CONFIG" ]] && error "RockClimb config not found: $ROCKCLIMB_CONFIG"
-[[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
+[[ -z "$INPUT" ]] && { echo "Error: No input file" >&2; exit 1; }
+[[ -z "$ESTIMATOR_CONFIG" ]] && { echo "Error: -e <energy_config> required" >&2; exit 1; }
+[[ -z "$ROCKCLIMB_CONFIG" ]] && { echo "Error: -c <rockclimb_config> required" >&2; exit 1; }
+[[ ! -f "$MACHINE_PASS_LIB" ]] && { echo "Error: $MACHINE_PASS_LIB not found. Build with: cd passes/build && make RockClimbMachinePass" >&2; exit 1; }
 
-# Output name
-BUILD_DIR="$PROJECT_DIR/build"
-[[ -z "$OUTPUT" ]] && OUTPUT="$BUILD_DIR/$(basename "$INPUT" .c)"
+if [[ "$PRECOMPUTED_ENERGY" == "true" ]]; then
+    [[ ! -f "$BB_DEBUGINFO_LIB" ]] && { echo "Error: $BB_DEBUGINFO_LIB not found (needed for assign-bb-debuginfo). Build with: cd passes/build && make BBDebugInfoPass" >&2; exit 1; }
+    [[ ! -f "$BB_ANALYZER" ]] && { echo "Error: $BB_ANALYZER not found. Build with: cd passes/build && make bb-energy-analyzer" >&2; exit 1; }
+fi
+
+BASENAME="$(basename "${INPUT%.*}")"
+OUTPUT="${OUTPUT:-build/$BASENAME}"
 mkdir -p "$(dirname "$OUTPUT")"
 
-TMP_DIR=$(mktemp -d)
-trap "rm -rf $TMP_DIR" EXIT
+# Step 1: C → LLVM IR
+echo "=== Step 1: C → LLVM IR (clang -O${CLANG_OPT_LEVEL}) ==="
+"$CLANG" -S -emit-llvm -O"$CLANG_OPT_LEVEL" --target=msp430 \
+    -isystem "$MSP430GCC_SUPPORT_PATH/include" \
+    -isystem "$MSP430GCC_SUPPORT_PATH/msp430-elf/include" \
+    "$INPUT" -o "${OUTPUT}.ll"
 
-# Build compile_to_ir args
-IR_ARGS=("$INPUT" "$TMP_DIR/input.ll" --clang-opt-level "$CLANG_OPT_LEVEL")
-[[ "$LOCAL_MODE" == "true" ]] && IR_ARGS+=(--local)
-[[ "$DEBUG_MODE" == "true" ]] && IR_ARGS+=(--debug)
-# Forward -I flags
-for word in $EXTRA_INCLUDES; do
-    if [[ "$word" == -I* ]]; then
-        IR_ARGS+=(-I "${word#-I}")
-    fi
-done
+if [[ "$PRECOMPUTED_ENERGY" == "true" ]]; then
+    # Step 2: Assign BB debug info for DWARF-based energy analysis
+    echo "=== Step 2: Assign BB debug info ==="
+    "$OPT" -load-pass-plugin="$BB_DEBUGINFO_LIB" \
+        -passes=assign-bb-debuginfo \
+        -bb-mapping="${OUTPUT}.bb_mapping.json" \
+        -S "${OUTPUT}.ll" -o "${OUTPUT}.bbinfo.ll"
 
-info "Compiling with RockClimb..."
-compile_to_ir "${IR_ARGS[@]}"
+    # Step 3a: IR → MIR (stop after register allocation) — uses bbinfo IR
+    echo "=== Step 3a: IR → MIR (stop-after=virtregrewriter) ==="
+    "$LLC" -march=msp430 -stop-after=virtregrewriter \
+        "${OUTPUT}.bbinfo.ll" -o "${OUTPUT}.mir"
 
-# RockClimb pass
-ROCKCLIMB_EXTRA_FLAGS=""
-[[ "$ADD_DEBUG_MARKERS" == "true" ]] && ROCKCLIMB_EXTRA_FLAGS="-add-debug-markers"
+    # Step 3b: IR → object file (full pipeline) — for bb-energy-analyzer
+    echo "=== Step 3b: IR → object file (for energy analysis) ==="
+    "$LLC" -march=msp430 -filetype=obj \
+        "${OUTPUT}.bbinfo.ll" -o "${OUTPUT}.energy.o"
 
-PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
-if $OPT -load-pass-plugin="$PASS_LIB" \
-    -passes=rockclimb \
-    -energy-config="$ESTIMATOR_CONFIG" \
-    -rockclimb-config="$ROCKCLIMB_CONFIG" \
-    $ROCKCLIMB_EXTRA_FLAGS \
-    -S "$TMP_DIR/input.ll" -o "$TMP_DIR/ckpt.ll" \
-    >"$PASS_LOG" 2>&1; then
+    # Step 3c: bb-energy-analyzer: compute per-BB energy from real assembly
+    echo "=== Step 3c: bb-energy-analyzer → per-BB energy JSON ==="
+    "$BB_ANALYZER" \
+        --energy-params "$ESTIMATOR_CONFIG" \
+        --bb-mapping "${OUTPUT}.bb_mapping.json" \
+        "${OUTPUT}.energy.o" > "${OUTPUT}.bb_energy.json"
+
+    # Step 4: Run RockClimb machine pass on MIR with pre-computed energy
+    echo "=== Step 4: RockClimb Machine Pass (pre-computed energy) ==="
     if [[ "$VERBOSE" == "true" ]]; then
-        cat "$PASS_LOG"
+        "$LLC" -march=msp430 \
+            -load="$MACHINE_PASS_LIB" \
+            -run-pass=rockclimb \
+            -rockclimb-config="$ROCKCLIMB_CONFIG" \
+            -rockclimb-energy-data="${OUTPUT}.bb_energy.json" \
+            "${OUTPUT}.mir" -o "${OUTPUT}.instrumented.mir"
     else
-        grep -E "^(Region|Memory|Inserted|===)" "$PASS_LOG" | head -10
+        "$LLC" -march=msp430 \
+            -load="$MACHINE_PASS_LIB" \
+            -run-pass=rockclimb \
+            -rockclimb-config="$ROCKCLIMB_CONFIG" \
+            -rockclimb-energy-data="${OUTPUT}.bb_energy.json" \
+            "${OUTPUT}.mir" -o "${OUTPUT}.instrumented.mir" 2>/dev/null
     fi
 else
-    cat "$PASS_LOG" >&2
-    error "RockClimb pass failed (see output above)"
+    # Fallback: MIR-level energy estimation (no bb-energy-analyzer)
+
+    # Step 2: LLVM IR → MIR (stop after register allocation)
+    echo "=== Step 2: IR → MIR (stop-after=virtregrewriter) ==="
+    "$LLC" -march=msp430 -stop-after=virtregrewriter \
+        "${OUTPUT}.ll" -o "${OUTPUT}.mir"
+
+    # Step 3: Run RockClimb machine pass on MIR
+    echo "=== Step 3: RockClimb Machine Pass (MIR-level estimation) ==="
+    if [[ "$VERBOSE" == "true" ]]; then
+        "$LLC" -march=msp430 \
+            -load="$MACHINE_PASS_LIB" \
+            -run-pass=rockclimb \
+            -rockclimb-config="$ROCKCLIMB_CONFIG" \
+            -rockclimb-energy-config="$ESTIMATOR_CONFIG" \
+            "${OUTPUT}.mir" -o "${OUTPUT}.instrumented.mir"
+    else
+        "$LLC" -march=msp430 \
+            -load="$MACHINE_PASS_LIB" \
+            -run-pass=rockclimb \
+            -rockclimb-config="$ROCKCLIMB_CONFIG" \
+            -rockclimb-energy-config="$ESTIMATOR_CONFIG" \
+            "${OUTPUT}.mir" -o "${OUTPUT}.instrumented.mir" 2>/dev/null
+    fi
 fi
 
-# Energy-validate pass
-if [[ "$ENERGY_VALIDATE" == "true" ]]; then
-    info "Running energy-validate pass..."
-    VALIDATE_FLAGS="-energy-config=$ESTIMATOR_CONFIG -rockclimb-config=$ROCKCLIMB_CONFIG -validate-mode=rockclimb"
-    [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
-    $OPT -load-pass-plugin="$PASS_LIB" \
-        -passes=energy-validate \
-        $VALIDATE_FLAGS \
-        -S "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.ll"
+# Step 5: Resume compilation: instrumented MIR → assembly
+echo "=== Step 5: MIR → Assembly (start-after=virtregrewriter) ==="
+"$LLC" -march=msp430 -start-after=virtregrewriter \
+    "${OUTPUT}.instrumented.mir" -o "${OUTPUT}.s"
+
+# Step 6 (optional): Assemble + link
+if [[ "$LINK" == "true" ]]; then
+    echo "=== Step 6: Assemble + Link ==="
+
+    # Assemble to object
+    $GCC -mmcu=$DEVICE -msmall -c "${OUTPUT}.s" -o "${OUTPUT}.o"
+
+    # Determine linker script
+    [[ -z "$LINKER_SCRIPT" ]] && LINKER_SCRIPT="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
+
+    if [[ "$MOCK_COUNTER" == "true" ]]; then
+        MOCK_COUNTER_SRC="$PROJECT_DIR/passes/runtime/rockclimb_mock_ckpt_counter.c"
+        [[ ! -f "$MOCK_COUNTER_SRC" ]] && { echo "Error: $MOCK_COUNTER_SRC not found" >&2; exit 1; }
+
+        $GCC -mmcu=$DEVICE -msmall -O2 \
+            -I"$MSP430GCC_SUPPORT_PATH/include" \
+            -I"$PROJECT_DIR/passes/runtime" \
+            -c "$MOCK_COUNTER_SRC" -o "${OUTPUT}.mock.o"
+
+        $GCC -mmcu=$DEVICE -msmall \
+            -L"$MSP430GCC_SUPPORT_PATH/include" \
+            -T "$LINKER_SCRIPT" \
+            "${OUTPUT}.o" "${OUTPUT}.mock.o" -o "${OUTPUT}.elf"
+    else
+        $GCC -mmcu=$DEVICE -msmall \
+            -L"$MSP430GCC_SUPPORT_PATH/include" \
+            -T "$LINKER_SCRIPT" \
+            "${OUTPUT}.o" -o "${OUTPUT}.elf"
+    fi
+
+    $SIZE "${OUTPUT}.elf"
 fi
 
-# Output
-if [[ "$LOCAL_MODE" == "true" ]]; then
-    sed -i '' 's/, section ".nvm"//g' "$TMP_DIR/ckpt.ll"
-    cp "$TMP_DIR/ckpt.ll" "${OUTPUT}.ll"
-else
-    $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
-    $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
-        -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
-    cp "$TMP_DIR/ckpt.o" "${OUTPUT}.o"
-    cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
-fi
+echo "=== Done ==="
+echo "  LLVM IR:           ${OUTPUT}.ll"
+echo "  MIR (pre-pass):    ${OUTPUT}.mir"
+echo "  MIR (post-pass):   ${OUTPUT}.instrumented.mir"
+echo "  Assembly:          ${OUTPUT}.s"
+[[ "$LINK" == "true" ]] && echo "  ELF:               ${OUTPUT}.elf"
+exit 0

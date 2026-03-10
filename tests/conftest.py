@@ -211,45 +211,6 @@ def run_milp(tools, compile_to_ir):
 
 
 @pytest.fixture(scope="session")
-def run_rockclimb(tools, compile_to_ir):
-    """Return a callable that runs the RockClimb pass."""
-
-    def _run_rockclimb(
-        src: str | Path,
-        energy_config: str | Path,
-        rockclimb_config: str | Path,
-        tmp_path: Path,
-        *,
-        mem2reg: bool = False,
-    ) -> PassResult:
-        src = str(src)
-        input_ll = str(tmp_path / "input.ll")
-        compile_to_ir(src, input_ll, mem2reg=mem2reg)
-
-        output_ll = str(tmp_path / "output.ll")
-        r = _run([
-            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-            "-passes=rockclimb",
-            f"-energy-config={str(energy_config)}",
-            f"-rockclimb-config={str(rockclimb_config)}",
-            "-S", input_ll, "-o", output_ll,
-        ])
-
-        output_ir = ""
-        if os.path.exists(output_ll):
-            output_ir = Path(output_ll).read_text()
-
-        return PassResult(
-            exit_code=r.returncode,
-            stdout=r.stdout,
-            stderr=r.stderr,
-            output_ir=output_ir,
-        )
-
-    return _run_rockclimb
-
-
-@pytest.fixture(scope="session")
 def run_schematic(tools, compile_to_ir):
     """Return a callable that runs the full SCHEMATIC pipeline."""
 

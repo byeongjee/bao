@@ -142,14 +142,7 @@ MILP_TESTS=(
     "test_vm_nvm_placement:VM/NVM placement - global memory assignment:checkpoint:estimator_ir_uniform.json:milp_params_small.json:O3:pass"
 )
 
-ROCKCLIMB_TESTS=(
-    "test_rockclimb_linear:Linear sequence - basic region partitioning:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
-    "test_rockclimb_loop:Simple loop - mandatory loop header boundary:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
-    "test_rockclimb_nested:Nested loops - multiple loop boundaries:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
-    "test_rockclimb_diamond:Diamond CFG - branching within regions:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
-    "test_rockclimb_liveout:Live-out registers - distributed checkpointing:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:regions"
-    "test_rockclimb_phi_liveout:PHI-defined live-out - runtime checkpoint check:rockclimb:estimator_ir_weighted.json:rockclimb_params.json:O0:phi_runtime"
-)
+ROCKCLIMB_TESTS=()
 
 # Collect tests to run
 TESTS=()
@@ -437,60 +430,6 @@ for test_entry in "${TESTS[@]}"; do
     run_test "$name" "$desc" "$pass" "$est_config" "$mode_config" "$clang_opt" "$check_type"
 done
 
-# Run comparison if RockClimb tests are included
-if $RUN_ROCKCLIMB; then
-    echo ""
-    echo "=========================================="
-    echo "Comparison: RockClimb vs MILP"
-    echo "=========================================="
-    echo ""
-
-    COMPARISON_TEST="test_linear"
-    test_file="$SCRIPT_DIR/${COMPARISON_TEST}.c"
-    ll_file="$TMP_DIR/${COMPARISON_TEST}.ll"
-
-    if [ -f "$test_file" ]; then
-        echo "Comparing passes on: $COMPARISON_TEST"
-        echo ""
-
-        # Compile and collect BB frequencies for MILP comparison.
-        "$CLANG" -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
-            "$test_file" -o "$ll_file" 2>/dev/null
-        "$OPT" -load-pass-plugin="$PASS_LIB" \
-            -passes=tripcount-annotation \
-            -S "$ll_file" -o "$TMP_DIR/${COMPARISON_TEST}_ann.ll" 2>/dev/null
-
-        cmp_freq_dir="$TMP_DIR/freq_${COMPARISON_TEST}_cmp"
-        mkdir -p "$cmp_freq_dir"
-        "$OPT" -load-pass-plugin="$PASS_LIB" \
-            -passes=bb-freq-collect \
-            -energy-config="$ESTIMATOR_UNIFORM" \
-            -milp-config="$MILP_PARAMS" \
-            -S "$TMP_DIR/${COMPARISON_TEST}_ann.ll" -o "$cmp_freq_dir/freq_inst.ll" 2>/dev/null
-        "$CLANG" $SYSROOT_FLAGS -O0 \
-            "$cmp_freq_dir/freq_inst.ll" "$BB_FREQ_RUNTIME" \
-            -o "$cmp_freq_dir/freq_run" 2>/dev/null
-        (cd "$cmp_freq_dir" && ./freq_run) >/dev/null 2>&1 || true
-
-        ll_file="$TMP_DIR/${COMPARISON_TEST}_ann.ll"
-
-        echo -e "${CYAN}--- MILP Pass ---${NC}"
-        "$OPT" -load-pass-plugin="$PASS_LIB" \
-              -passes=checkpoint \
-              -energy-config="$ESTIMATOR_UNIFORM" \
-              -milp-config="$MILP_PARAMS" \
-              -bb-freq-file="$cmp_freq_dir/bb_freq.json" \
-              "$ll_file" -S -o /dev/null 2>&1 || true
-
-        echo ""
-        echo -e "${CYAN}--- RockClimb Pass ---${NC}"
-        "$OPT" -load-pass-plugin="$PASS_LIB" \
-              -passes=rockclimb \
-              -energy-config="$ESTIMATOR_WEIGHTED" \
-              -rockclimb-config="$ROCKCLIMB_PARAMS" \
-              "$ll_file" -S -o /dev/null 2>&1 || true
-    fi
-fi
 
 # Run validation tests if requested
 if $RUN_VALIDATE; then

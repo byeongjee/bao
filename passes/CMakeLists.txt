@@ -70,11 +70,6 @@ add_library(CheckpointPass MODULE
     src/milp/MILPCheckpointPass.cpp
     src/milp/CheckpointOptimizer.cpp
     src/milp/CheckpointInstrumenter.cpp
-    # RockClimb (PFI baseline)
-    src/rockclimb/RockClimbPass.cpp
-    src/rockclimb/RockClimbOptimizer.cpp
-    src/rockclimb/RockClimbInstrumenter.cpp
-    src/rockclimb/DistributedCheckpointing.cpp
     # SCHEMATIC (greedy heuristic baseline)
     src/schematic/SchematicParams.cpp
     src/schematic/SchematicPass.cpp

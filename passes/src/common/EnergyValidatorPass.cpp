@@ -2,7 +2,6 @@
 #include "common/BaseContext.h"
 #include "common/BlockUtils.h"
 #include "milp/EnergyModel.h"
-#include "rockclimb/RockClimbContext.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/IRBuilder.h"
@@ -19,8 +18,6 @@ using namespace llvm;
 // Defined in PassRegistry.cpp
 extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<std::string> MILPConfigOpt;
-// Defined in RockClimbPass.cpp
-extern cl::opt<std::string> RockClimbConfigOpt;
 
 // Local CLI options
 namespace {
@@ -38,13 +35,11 @@ static cl::opt<bool> ValidateVerboseOpt("validate-verbose",
                                         cl::desc("Print per-block remaining energy to stderr"),
                                         cl::init(false));
 
-enum class ValidateMode { MILP, RockClimb };
+enum class ValidateMode { MILP };
 
 static cl::opt<ValidateMode>
     ValidateModeOpt("validate-mode", cl::desc("Checkpoint algorithm mode for energy validation"),
-                    cl::values(clEnumValN(ValidateMode::MILP, "milp", "MILP checkpoint insertion"),
-                               clEnumValN(ValidateMode::RockClimb, "rockclimb",
-                                          "RockClimb (PFI) checkpoint insertion")),
+                    cl::values(clEnumValN(ValidateMode::MILP, "milp", "MILP checkpoint insertion")),
                     cl::init(ValidateMode::MILP));
 
 } // anonymous namespace
@@ -53,17 +48,8 @@ namespace checkpoint {
 
 /// Compute the effective capacity for the given mode.
 /// MILP: MILPEnergyParams::capacity (= E_buf) from milp-config
-/// RockClimb: RockClimbParams::calculateESafe() (= E_input - E_restore) from rockclimb-config
 static double computeEffectiveCapacity(ValidateMode mode) {
     switch (mode) {
-    case ValidateMode::RockClimb: {
-        RockClimbParams rcParams;
-        if (!parseRockClimbParams(RockClimbConfigOpt.getValue(), rcParams)) {
-            llvm::errs() << "Error: Failed to parse RockClimb config for validation\n";
-            return 0.0;
-        }
-        return rcParams.calculateESafe();
-    }
     case ValidateMode::MILP: {
         auto milpParams = parseMILPEnergyParams(MILPConfigOpt.getValue());
         if (!milpParams) {

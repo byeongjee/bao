@@ -18,7 +18,7 @@ ALGORITHMS = {
     },
     "rockclimb": {
         "file": "../benchmarks/rockclimb_benchmark_summary.csv",
-        "label": "RockClimb",
+        "label": "RockClimb (Machine)",
         "color": "#FF9800",
     },
     "schematic": {

@@ -22,22 +22,21 @@
 using namespace llvm;
 
 // CLI options for the machine-level RockClimb pass
-static cl::opt<std::string> RockClimbMachineConfigOpt("rockclimb-machine-config",
+static cl::opt<std::string> RockClimbMachineConfigOpt("rockclimb-config",
                                                       cl::desc("Path to RockClimb config JSON"),
                                                       cl::value_desc("filename"), cl::init(""));
 
 static cl::opt<std::string>
-    RockClimbMachineEnergyConfigOpt("rockclimb-machine-energy-config",
+    RockClimbMachineEnergyConfigOpt("rockclimb-energy-config",
                                     cl::desc("Path to assembly energy config JSON"),
                                     cl::value_desc("filename"), cl::init(""));
 
 static cl::opt<std::string> RockClimbMachineEnergyDataOpt(
-    "rockclimb-machine-energy-data",
-    cl::desc("Pre-computed per-BB energy JSON (from bb-energy-analyzer)"),
+    "rockclimb-energy-data", cl::desc("Pre-computed per-BB energy JSON (from bb-energy-analyzer)"),
     cl::value_desc("filename"), cl::init(""));
 
 static cl::opt<bool>
-    RockClimbMachineDumpEnergyKeysOpt("rockclimb-machine-dump-energy-keys",
+    RockClimbMachineDumpEnergyKeysOpt("rockclimb-dump-energy-keys",
                                       cl::desc("Print all required energy parameter keys and exit"),
                                       cl::init(false));
 
@@ -155,13 +154,13 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
 
     // Validate config paths
     if (RockClimbMachineConfigOpt.empty()) {
-        errs() << "Error: -rockclimb-machine-config not specified\n";
+        errs() << "Error: -rockclimb-config not specified\n";
         return false;
     }
     bool hasPrecomputed = !RockClimbMachineEnergyDataOpt.empty();
     if (!hasPrecomputed && RockClimbMachineEnergyConfigOpt.empty()) {
-        errs() << "Error: Either -rockclimb-machine-energy-data or "
-                  "-rockclimb-machine-energy-config must be specified\n";
+        errs() << "Error: Either -rockclimb-energy-data or "
+                  "-rockclimb-energy-config must be specified\n";
         return false;
     }
 
@@ -337,10 +336,10 @@ void initializeRockClimbMachinePassPass(PassRegistry &);
 // INITIALIZE_PASS macros require unqualified class name — use a type alias
 using RockClimbMachinePass = checkpoint::RockClimbMachinePass;
 
-INITIALIZE_PASS_BEGIN(RockClimbMachinePass, "rockclimb-machine",
+INITIALIZE_PASS_BEGIN(RockClimbMachinePass, "rockclimb",
                       "RockClimb Machine-Level Checkpoint Insertion", false, false)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfoWrapperPass)
-INITIALIZE_PASS_END(RockClimbMachinePass, "rockclimb-machine",
+INITIALIZE_PASS_END(RockClimbMachinePass, "rockclimb",
                     "RockClimb Machine-Level Checkpoint Insertion", false, false)
 
 // Auto-registration via static constructor when .so is loaded by llc -load
