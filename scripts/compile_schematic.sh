@@ -16,7 +16,6 @@
 #   --verbose            Show detailed pass output
 #   --debug              Enable DEBUG output
 #   --add-debug-markers  Insert mock-counter debug markers
-#   --energy-validate    Run energy-validate pass after SCHEMATIC
 #   --trace <file>       Use pre-collected trace (skip collection)
 #   --trace-only         Collect trace and stop; output <output>_trace.json
 #   -h, --help           Show this help message
@@ -36,7 +35,6 @@ LOCAL_MODE="false"
 VERBOSE="false"
 DEBUG_MODE="false"
 ADD_DEBUG_MARKERS="false"
-ENERGY_VALIDATE="false"
 TRACE_FILE=""
 TRACE_ONLY="false"
 INPUT=""
@@ -55,7 +53,6 @@ while [[ $# -gt 0 ]]; do
         --verbose) VERBOSE="true"; shift ;;
         --debug) DEBUG_MODE="true"; shift ;;
         --add-debug-markers) ADD_DEBUG_MARKERS="true"; shift ;;
-        --energy-validate) ENERGY_VALIDATE="true"; shift ;;
         --trace) TRACE_FILE="$2"; shift 2 ;;
         --trace-only) TRACE_ONLY="true"; shift ;;
         -h|--help) usage ;;
@@ -175,17 +172,6 @@ if $OPT -load-pass-plugin="$PASS_LIB" \
 else
     cat "$PASS_LOG" >&2
     error "SCHEMATIC pass failed (see output above)"
-fi
-
-# Energy-validate pass
-if [[ "$ENERGY_VALIDATE" == "true" ]]; then
-    info "Running energy-validate pass..."
-    VALIDATE_FLAGS="-energy-config=$ESTIMATOR_CONFIG -schematic-config=$SCHEMATIC_CONFIG -validate-mode=schematic"
-    [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
-    $OPT -load-pass-plugin="$PASS_LIB" \
-        -passes=energy-validate \
-        $VALIDATE_FLAGS \
-        -S "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.ll"
 fi
 
 # Output

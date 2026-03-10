@@ -1,5 +1,4 @@
 #include "common/BBFreqCollectorPass.h"
-#include "common/EnergyValidatorPass.h"
 #include "common/TripCountAnnotationPass.h"
 #include "milp/LoopStripMiningPass.h"
 #include "milp/MILPCheckpointPass.h"
@@ -108,10 +107,6 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
                         FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::BBFreqCollectorPass());
-                        return true;
-                    }
-                    if (Name == "energy-validate") {
-                        FPM.addPass(checkpoint::EnergyValidatorPass());
                         return true;
                     }
                     return false;

@@ -57,42 +57,7 @@ extern uint16_t __nvm_sp NVM_SECTION;
  *
  * Provided by rockclimb_boot.S (assembly).
  */
-void __rockclimb_check(void);
-
-/**
- * Save a single register to NVM (distributed checkpointing).
- */
-void __rockclimb_save_reg(void);
-
-/*
- * Optional debug marker API (MILP-style counters).
- * Emitted when add_debug_markers / -add-debug-markers is enabled.
- */
-void __region_prologue(void);
-void __region_epilogue(void);
-void __checkpoint_store_reg(int32_t slot_id, int64_t value);
-
-/**
- * Initialize the RockClimb runtime.
- * Disables watchdog and clears NVM on fresh boot.
- */
-void __rockclimb_init(void);
-
-/**
- * Check if this is a recovery boot.
- * @return Non-zero if recovering from power failure, 0 otherwise.
- */
-uint16_t __rockclimb_is_recovery(void);
-
-/**
- * Perform recovery after power failure.
- * Note: Recovery is handled by boot.S; this is a stub.
- */
-void __rockclimb_recover(void)
-#if defined(__ELF__)
-    __attribute__((noreturn))
-#endif
-    ;
+void __region_boundary(void);
 
 #ifdef __cplusplus
 }

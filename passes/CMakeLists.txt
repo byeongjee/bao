@@ -50,8 +50,7 @@ add_library(CheckpointPass MODULE
     src/common/BBNaming.cpp
     src/common/BlockSplitter.cpp
     src/common/CFGAnalysis.cpp
-    src/common/EnergyValidatorPass.cpp
-    src/common/LoopTripCount.cpp
+src/common/LoopTripCount.cpp
     src/common/BBFreqCollectorPass.cpp
     src/common/PassRegistry.cpp
     src/common/PassStatistics.cpp

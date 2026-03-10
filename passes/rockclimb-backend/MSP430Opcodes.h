@@ -31,9 +31,11 @@ enum Register : unsigned {
 
 // Instruction opcode enum values (from MSP430GenInstrInfo.inc)
 enum Opcode : unsigned {
+    ADD16mi = 324, // Add immediate to memory: add.w #imm, $dst
     CALLi = 473,   // Call with immediate/symbol operand
     MOV16mr = 532, // Move 16-bit register to memory: mov.w $rs, $dst
     MOV16ri = 534, // Move immediate to 16-bit register
+    MOV16rm = 535, // Move 16-bit memory to register: mov.w $src, $rd
     MOV16rr = 538, // Move 16-bit register to register
     MOV8rr = 549,  // Move 8-bit register to register
 };

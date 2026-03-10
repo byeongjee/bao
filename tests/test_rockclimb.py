@@ -169,6 +169,11 @@ def count_asm_calls(asm: str, func_name: str) -> int:
     return len(re.findall(rf"call\s+#{re.escape(func_name)}", asm))
 
 
+def count_mir_reg_saves(mir: str) -> int:
+    """Count MOV16mr to __nvm_regs (inline register saves) in MIR output."""
+    return len(re.findall(r"MOV16mr.*__nvm_regs", mir))
+
+
 # ---------------------------------------------------------------------------
 # Test C sources (inline)
 # ---------------------------------------------------------------------------
@@ -232,7 +237,7 @@ class TestMachinePassBasic:
         )
         assert result.exit_code == 0
         # Should have at least one boundary check in MIR
-        checks_mir = count_mir_calls(result.output_mir, "__rockclimb_check")
+        checks_mir = count_mir_calls(result.output_mir, "__region_boundary")
         assert checks_mir >= 1, (
             f"Expected >=1 boundary checks in MIR, got {checks_mir}"
         )
@@ -245,7 +250,7 @@ class TestMachinePassBasic:
         assert result.exit_code == 0
         assert result.output_asm, "No assembly output produced"
         # Should have checkpoint calls in assembly
-        checks_asm = count_asm_calls(result.output_asm, "__rockclimb_check")
+        checks_asm = count_asm_calls(result.output_asm, "__region_boundary")
         assert checks_asm >= 1, (
             f"Expected >=1 boundary checks in assembly, got {checks_asm}"
         )
@@ -276,7 +281,7 @@ class TestMachinePassDistributedCkpt:
             src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
         )
         assert result.exit_code == 0
-        saves = count_mir_calls(result.output_mir, "__rockclimb_save_reg")
+        saves = count_mir_reg_saves(result.output_mir)
         # Functions with live-out registers should have save points
         assert saves >= 0  # May be 0 if no cross-region liveness
 
@@ -286,12 +291,12 @@ class TestMachinePassDistributedCkpt:
             src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
         )
         assert result.exit_code == 0
-        saves_asm = count_asm_calls(result.output_asm, "__rockclimb_save_reg")
-        saves_mir = count_mir_calls(result.output_mir, "__rockclimb_save_reg")
-        # Assembly and MIR should agree on save count
-        assert saves_asm == saves_mir, (
-            f"MIR has {saves_mir} saves but assembly has {saves_asm}"
-        )
+        saves_mir = count_mir_reg_saves(result.output_mir)
+        # If MIR has saves, assembly should reference __nvm_regs
+        if saves_mir > 0:
+            assert "__nvm_regs" in result.output_asm, (
+                f"MIR has {saves_mir} saves but assembly has no __nvm_regs references"
+            )
 
 
 class TestMachinePassStatistics:

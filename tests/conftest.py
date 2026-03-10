@@ -18,7 +18,6 @@ TESTS_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = TESTS_DIR.parent
 PASS_LIB = PROJECT_DIR / "passes" / "build" / "CheckpointPass.so"
 BB_FREQ_RUNTIME = PROJECT_DIR / "passes" / "runtime" / "bb_freq_runtime.c"
-ENERGY_VALIDATE_RUNTIME = PROJECT_DIR / "passes" / "runtime" / "energy_validate_runtime.c"
 SCHEMATIC_TRACE_RUNTIME = PROJECT_DIR / "passes" / "runtime" / "schematic_trace_runtime.c"
 SCENARIOS_DIR = TESTS_DIR / "scenarios"
 CONFIGS_DIR = SCENARIOS_DIR / "configs"

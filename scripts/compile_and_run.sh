@@ -10,7 +10,7 @@
 #
 # Options:
 #   --mode <mode>    Checkpoint mode: none, rockclimb, milp, schematic (default: none)
-#   --runtime <type> Runtime variant: real (default), mock-counter, energy-validate
+#   --runtime <type> Runtime variant: real (default), mock-counter
 #   --local          Compile for host machine instead of MSP430 (run locally)
 #   --debug          Enable DEBUG output via UART
 #   --compile-only   Compile but don't flash
@@ -25,7 +25,6 @@
 #   -Oc <level>      Clang optimization level (default: 2)
 #   -I <dir>         Add include directory (can be repeated)
 #   --verbose        Show detailed pass output
-#   --validate-checkpoint-function <name>  Checkpoint function for energy-validate in none mode
 #   -h, --help       Show this help message
 #
 
@@ -52,9 +51,7 @@ MILP_CONFIG=""
 ROCKCLIMB_CONFIG=""
 SCHEMATIC_CONFIG=""
 SCHEMATIC_TRACE=""
-VALIDATE_CKPT_FUNCTION=""
-
-usage() { sed -n '2,32p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,31p' "$0" | sed 's/^# \?//'; exit 0; }
 
 # Link checkpoint object with mock counter or real runtime.
 # Usage: link_runtime <mock_counter> <runtime> <boot> <linker>
@@ -130,7 +127,6 @@ while [[ $# -gt 0 ]]; do
         -O) OPT_LEVEL="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
-        --validate-checkpoint-function) VALIDATE_CKPT_FUNCTION="$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) error "Unknown option: $1" ;;
         *) INPUT="$1"; shift ;;
@@ -146,11 +142,6 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
     fi
     [[ "$RUNTIME_SET" == "true" && "$RUNTIME_TYPE" == "real" ]] && \
         error "--local is incompatible with --runtime real (real runtime needs MSP430 hardware)"
-fi
-
-# energy-validate requires --local
-if [[ "$RUNTIME_TYPE" == "energy-validate" && "$LOCAL_MODE" != "true" ]]; then
-    error "--runtime energy-validate requires --local (energy validation runs on host)"
 fi
 
 # Validate required configs per mode
@@ -175,10 +166,6 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             [[ ! -f "$SCHEMATIC_CONFIG" ]] && error "SCHEMATIC config not found: $SCHEMATIC_CONFIG"
             ;;
         none)
-            if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
-                [[ -z "$ESTIMATOR_CONFIG" ]] && error "Energy estimator config required for energy-validate: use -e <config.json>"
-                [[ ! -f "$ESTIMATOR_CONFIG" ]] && error "Estimator config not found: $ESTIMATOR_CONFIG"
-            fi
             ;;
     esac
 fi
@@ -210,7 +197,6 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
     [[ "$VERBOSE" == "true" ]] && COMPILE_ARGS+=(--verbose)
     [[ "$DEBUG_MODE" == "true" ]] && COMPILE_ARGS+=(--debug)
     [[ "$RUNTIME_TYPE" == "mock-counter" ]] && COMPILE_ARGS+=(--add-debug-markers)
-    [[ "$RUNTIME_TYPE" == "energy-validate" ]] && COMPILE_ARGS+=(--energy-validate)
     [[ -n "$OPT_LEVEL" ]] && COMPILE_ARGS+=(-O "$OPT_LEVEL")
     [[ -n "$CLANG_OPT_LEVEL" ]] && COMPILE_ARGS+=(-Oc "$CLANG_OPT_LEVEL")
     # Forward -I flags
@@ -235,26 +221,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             done
             compile_to_ir "${IR_ARGS[@]}"
 
-            # Run energy-validate pass if requested
-            if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
-                info "Running energy-validate pass..."
-                VALIDATE_FLAGS="-energy-config=$ESTIMATOR_CONFIG"
-                [[ -n "$MILP_CONFIG" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -milp-config=$MILP_CONFIG"
-                [[ -n "$VALIDATE_CKPT_FUNCTION" ]] && \
-                    VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-checkpoint-function=$VALIDATE_CKPT_FUNCTION"
-                [[ "$VERBOSE" == "true" ]] && VALIDATE_FLAGS="$VALIDATE_FLAGS -validate-verbose"
-                $OPT -load-pass-plugin="$PASS_LIB" \
-                    -passes=energy-validate \
-                    $VALIDATE_FLAGS \
-                    -S "$TMP_DIR/input.ll" -o "$TMP_DIR/input.ll"
-            fi
-
             if [[ "$LOCAL_MODE" == "true" ]]; then
-                if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
-                    link_local "$TMP_DIR/input.ll" "$ENERGY_VALIDATE_RUNTIME"
-                else
-                    link_local "$TMP_DIR/input.ll"
-                fi
+                link_local "$TMP_DIR/input.ll"
             else
                 $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/input.ll" -o "$TMP_DIR/output.s"
                 $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
@@ -271,11 +239,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 "$INPUT"
 
             if [[ "$LOCAL_MODE" == "true" ]]; then
-                if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
-                    link_local "$TMP_DIR/ckpt.ll" "$ENERGY_VALIDATE_RUNTIME"
-                else
-                    link_local "$TMP_DIR/ckpt.ll" "$MILP_MOCK_CKPT_COUNTER"
-                fi
+                link_local "$TMP_DIR/ckpt.ll" "$MILP_MOCK_CKPT_COUNTER"
             else
                 link_runtime "$MILP_MOCK_CKPT_COUNTER" "$MILP_RUNTIME" \
                     "$MILP_BOOT" "$MILP_LINKER"
@@ -293,11 +257,7 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 "$INPUT"
 
             if [[ "$LOCAL_MODE" == "true" ]]; then
-                if [[ "$RUNTIME_TYPE" == "energy-validate" ]]; then
-                    link_local "$TMP_DIR/ckpt.ll" "$ENERGY_VALIDATE_RUNTIME"
-                else
-                    link_local "$TMP_DIR/ckpt.ll" "$SCHEMATIC_MOCK_CKPT_COUNTER"
-                fi
+                link_local "$TMP_DIR/ckpt.ll" "$SCHEMATIC_MOCK_CKPT_COUNTER"
             else
                 link_runtime "$SCHEMATIC_MOCK_CKPT_COUNTER" "$MILP_RUNTIME" \
                     "$MILP_BOOT" "$MILP_LINKER"

@@ -14,6 +14,5 @@ markers = [
     "milp: MILP checkpoint pass tests",
     "rockclimb: RockClimb machine-level (post-regalloc) pass tests",
     "schematic: SCHEMATIC pass tests",
-    "energy_validation: Energy validation runtime tests",
     "vm_nvm: VM/NVM placement tests",
 ]

@@ -2,9 +2,9 @@
 
 # Unified test runner for checkpoint optimization passes
 # Usage: ./run_tests.sh [--milp] [--rockclimb]
-#   No flags  = run all tests (MILP + RockClimb + comparison)
+#   No flags  = run all tests (MILP + RockClimb)
 #   --milp    = run only MILP tests
-#   --rockclimb = run only RockClimb tests + comparison
+#   --rockclimb = run only RockClimb tests
 
 set -e
 
@@ -57,22 +57,18 @@ NC='\033[0m' # No Color
 # Parse flags
 RUN_MILP=false
 RUN_ROCKCLIMB=false
-RUN_VALIDATE=false
-
 for arg in "$@"; do
     case "$arg" in
         --milp) RUN_MILP=true ;;
         --rockclimb) RUN_ROCKCLIMB=true ;;
-        --validate) RUN_VALIDATE=true ;;
-        *) echo "Unknown option: $arg"; echo "Usage: $0 [--milp] [--rockclimb] [--validate]"; exit 1 ;;
+        *) echo "Unknown option: $arg"; echo "Usage: $0 [--milp] [--rockclimb]"; exit 1 ;;
     esac
 done
 
 # Default: run everything
-if ! $RUN_MILP && ! $RUN_ROCKCLIMB && ! $RUN_VALIDATE; then
+if ! $RUN_MILP && ! $RUN_ROCKCLIMB; then
     RUN_MILP=true
     RUN_ROCKCLIMB=true
-    RUN_VALIDATE=true
 fi
 
 # Check prerequisites
@@ -157,16 +153,12 @@ fi
 echo "=========================================="
 echo "Checkpoint Optimization Test Suite"
 echo "=========================================="
-if $RUN_MILP && $RUN_ROCKCLIMB && $RUN_VALIDATE; then
-    echo "Mode: All tests (MILP + RockClimb + Validate)"
-elif $RUN_MILP && $RUN_ROCKCLIMB; then
-    echo "Mode: MILP + RockClimb tests"
+if $RUN_MILP && $RUN_ROCKCLIMB; then
+    echo "Mode: All tests (MILP + RockClimb)"
 elif $RUN_MILP; then
     echo "Mode: MILP tests only"
 elif $RUN_ROCKCLIMB; then
     echo "Mode: RockClimb tests only"
-elif $RUN_VALIDATE; then
-    echo "Mode: Validation tests only"
 fi
 echo ""
 
@@ -430,21 +422,6 @@ for test_entry in "${TESTS[@]}"; do
     run_test "$name" "$desc" "$pass" "$est_config" "$mode_config" "$clang_opt" "$check_type"
 done
 
-
-# Run validation tests if requested
-if $RUN_VALIDATE; then
-    echo ""
-    echo "=========================================="
-    echo "Energy Validation Tests"
-    echo "=========================================="
-    echo ""
-
-    if [[ -x "$SCRIPT_DIR/test_validate.sh" ]]; then
-        "$SCRIPT_DIR/test_validate.sh" || true
-    else
-        echo -e "${YELLOW}Skipping: test_validate.sh not found or not executable${NC}"
-    fi
-fi
 
 echo ""
 echo "=========================================="

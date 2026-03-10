@@ -293,8 +293,27 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
                                /*Initializer=*/nullptr, "__nvm_regs");
     }
 
+    // Get or create debug counter globals (uint16_t in .nvm section)
+    GlobalVariable *cntSaveGV = nullptr;
+    GlobalVariable *cntRestoreGV = nullptr;
+    if (addDebugMarkers) {
+        auto *i16Ty = Type::getInt16Ty(M->getContext());
+        auto getOrCreateCounter = [&](const char *name) -> GlobalVariable * {
+            GlobalVariable *gv = M->getGlobalVariable(name);
+            if (!gv) {
+                gv = new GlobalVariable(*M, i16Ty, /*isConstant=*/false,
+                                        GlobalValue::ExternalLinkage,
+                                        /*Initializer=*/nullptr, name);
+            }
+            return gv;
+        };
+        cntSaveGV = getOrCreateCounter("cnt_save_reg");
+        cntRestoreGV = getOrCreateCounter("cnt_restore_reg");
+    }
+
     // Instrumentation
-    RockClimbMachineInstrumenter instrumenter(MF, addDebugMarkers, nvmRegsGV);
+    RockClimbMachineInstrumenter instrumenter(MF, addDebugMarkers, nvmRegsGV, cntSaveGV,
+                                              cntRestoreGV);
     unsigned insertedCount = instrumenter.instrument(result.regionBoundaries, checkpointPoints,
                                                      params.distributedCheckpointing);
 

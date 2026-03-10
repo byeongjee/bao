@@ -3,7 +3,7 @@
  *
  * This file implements:
  * 1. Early boot recovery: checks NVM state and restores registers + PC
- * 2. __rockclimb_check: saves state and halts (deep sleep) at region boundaries
+ * 2. __region_boundary: saves state and halts (deep sleep) at region boundaries
  *
  * Recovery is placed in .crt_0010 (before data/BSS init) so that on recovery
  * we jump to saved PC before CRT reinitializes .data/.bss, preserving FRAM
@@ -85,6 +85,10 @@ _normal_boot:
      * Normal (fresh) boot - initialize NVM state and continue to CRT.
      * Handles the case where FRAM contains garbage on first power-up.
      */
+
+    /* Disable watchdog timer (WDTCTL = WDTPW | WDTHOLD) */
+    mov.w   #0x5A80, &0x015C
+
     mov.w   #0, &__nvm_region_id
     mov.w   #0, &__nvm_pc
     mov.w   #0, &__nvm_sp
@@ -95,7 +99,7 @@ _normal_boot:
 
 
 /*
- * __rockclimb_check — Save state and halt at region boundaries
+ * __region_boundary — Save state and halt at region boundaries
  *
  * Called at the start of each energy region (except the entry block).
  * Saves the return address (= region body start) and SP to NVM,
@@ -106,10 +110,10 @@ _normal_boot:
  * If woken from LPM4 by an interrupt (not a full reboot), just returns.
  */
     .section .text
-    .global __rockclimb_check
-    .type   __rockclimb_check, @function
+    .global __region_boundary
+    .type   __region_boundary, @function
 
-__rockclimb_check:
+__region_boundary:
     /* Save return address as recovery PC.
        0(SP) holds the return address pushed by CALL. */
     mov.w   0(SP), &__nvm_pc
@@ -123,13 +127,15 @@ __rockclimb_check:
 
     /* Halt — enter LPM4 (bits 4-7 of SR = CPUOFF+OSCOFF+SCG0+SCG1).
        System will reboot when energy is available. */
+    /* TODO: re-enable deep sleep after debug testing
     bis.w   #0xF0, SR
-    nop                             /* Required after SR modification */
+    nop
+    */
 
     /* If we wake from LPM4 (e.g., by an interrupt), just return */
     ret
 
-    .size   __rockclimb_check, .-__rockclimb_check
+    .size   __region_boundary, .-__region_boundary
 
 
 /*

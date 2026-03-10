@@ -13,9 +13,11 @@ namespace checkpoint {
 
 RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(MachineFunction &MF,
                                                            bool addDebugMarkers,
-                                                           GlobalVariable *nvmRegsGV)
+                                                           GlobalVariable *nvmRegsGV,
+                                                           GlobalVariable *cntSaveGV,
+                                                           GlobalVariable *cntRestoreGV)
     : MF_(MF), TII_(MF.getSubtarget().getInstrInfo()), addDebugMarkers_(addDebugMarkers),
-      nvmRegsGV_(nvmRegsGV) {}
+      nvmRegsGV_(nvmRegsGV), cntSaveGV_(cntSaveGV), cntRestoreGV_(cntRestoreGV) {}
 
 bool RockClimbMachineInstrumenter::verifyConstants() const {
     bool ok = true;
@@ -32,12 +34,13 @@ bool RockClimbMachineInstrumenter::verifyConstants() const {
 
     checkOpcode(msp430::CALLi, "CALLi");
     checkOpcode(msp430::MOV16mr, "MOV16mr");
+    checkOpcode(msp430::ADD16mi, "ADD16mi");
 
     return ok;
 }
 
 void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
-    // Insert CALL __rockclimb_check at the beginning of the block,
+    // Insert CALL __region_boundary at the beginning of the block,
     // after any PHI-like copies at the start.
     MachineBasicBlock::iterator InsertPt = MBB.begin();
 
@@ -49,16 +52,26 @@ void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
     if (InsertPt != MBB.end())
         DL = InsertPt->getDebugLoc();
 
-    // CALL __rockclimb_check
+    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
+
+    // CALL __region_boundary
     MachineInstr *CallMI =
-        BuildMI(MBB, InsertPt, DL, TII_->get(msp430::CALLi)).addExternalSymbol("__rockclimb_check");
+        BuildMI(MBB, InsertPt, DL, TII_->get(msp430::CALLi)).addExternalSymbol("__region_boundary");
 
     // Mark caller-saved registers as implicitly defined/clobbered by the call.
     // Post-regalloc, we must declare which registers the call may overwrite.
-    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
     // MSP430 caller-saved: R11-R15
     for (unsigned reg : {msp430::R11, msp430::R12, msp430::R13, msp430::R14, msp430::R15}) {
         CallMI->addRegisterDefined(reg, TRI);
+    }
+
+    // Debug counter: increment cnt_restore_reg by 14 (R4-R15 + PC + SP).
+    // SR and CG (R2, R3) are not restored.
+    if (addDebugMarkers_ && cntRestoreGV_) {
+        BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
+            .addReg(msp430::SR)              // base = SR (absolute addressing)
+            .addGlobalAddress(cntRestoreGV_) // address of cnt_restore_reg
+            .addImm(14);                     // 14 registers restored per recovery
     }
 }
 
@@ -96,15 +109,12 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
                           static_cast<int64_t>(ckpt.regId) * 2) // disp = &__nvm_regs + regId*2
         .addReg(srcReg);                                        // source register
 
-    // Optionally emit debug marker call for counting
-    if (addDebugMarkers_) {
-        MachineInstr *CallMI = BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::CALLi))
-                                   .addExternalSymbol("__rockclimb_save_reg");
-
-        // Mark caller-saved registers as clobbered
-        for (unsigned reg : {msp430::R11, msp430::R12, msp430::R13, msp430::R14, msp430::R15}) {
-            CallMI->addRegisterDefined(reg, TRI);
-        }
+    // Debug counter: increment cnt_save_reg by 1.
+    if (addDebugMarkers_ && cntSaveGV_) {
+        BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
+            .addReg(msp430::SR)           // base = SR (absolute addressing)
+            .addGlobalAddress(cntSaveGV_) // address of cnt_save_reg
+            .addImm(1);                   // one register saved
     }
 }
 

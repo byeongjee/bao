@@ -11,13 +11,18 @@ namespace checkpoint {
 
 /// Inserts machine-level checkpoint instructions for MSP430.
 ///
-/// At region boundaries: CALL __rockclimb_check
+/// At region boundaries: CALL __region_boundary
 /// At register saves:    MOV16mr physReg, &__nvm_regs[regId]
-///                       (+ CALL __rockclimb_save_reg if addDebugMarkers)
+///
+/// When addDebugMarkers is enabled, also inserts inline NVM counter
+/// increments (ADD16mi) for profiling — no function calls, so no
+/// post-regalloc register clobber issues.
 class RockClimbMachineInstrumenter {
   public:
     explicit RockClimbMachineInstrumenter(llvm::MachineFunction &MF, bool addDebugMarkers,
-                                          llvm::GlobalVariable *nvmRegsGV);
+                                          llvm::GlobalVariable *nvmRegsGV,
+                                          llvm::GlobalVariable *cntSaveGV,
+                                          llvm::GlobalVariable *cntRestoreGV);
 
     /// Verify that hardcoded MSP430 opcode/register constants match runtime values.
     /// Call once at initialization. Returns false and prints errors if mismatched.
@@ -26,7 +31,7 @@ class RockClimbMachineInstrumenter {
     /// Insert boundary check call at the start of MBB
     void insertBoundaryCheck(llvm::MachineBasicBlock &MBB);
 
-    /// Insert inline register save (and optional debug call) after the given instruction
+    /// Insert inline register save (and optional debug counter) after the given instruction
     void insertRegisterCheckpoint(const MachineCheckpointPoint &ckpt);
 
     /// Instrument the function with all boundaries and checkpoints.
@@ -40,6 +45,8 @@ class RockClimbMachineInstrumenter {
     const llvm::TargetInstrInfo *TII_;
     bool addDebugMarkers_;
     llvm::GlobalVariable *nvmRegsGV_;
+    llvm::GlobalVariable *cntSaveGV_;
+    llvm::GlobalVariable *cntRestoreGV_;
 };
 
 } // namespace checkpoint

@@ -51,7 +51,6 @@ MILP_LINKER="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
 SCHEMATIC_TRACE_RUNTIME="$PROJECT_DIR/passes/runtime/schematic_trace_runtime.c"
 SCHEMATIC_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/schematic_mock_ckpt_counter.c"
 
-ENERGY_VALIDATE_RUNTIME="$PROJECT_DIR/passes/runtime/energy_validate_runtime.c"
 BB_FREQ_RUNTIME="$PROJECT_DIR/passes/runtime/bb_freq_runtime.c"
 
 # ── macOS SDK detection (cached) ─────────────────────────────────────────────

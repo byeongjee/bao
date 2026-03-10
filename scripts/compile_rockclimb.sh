@@ -14,7 +14,7 @@
 #   --no-precomputed-energy  Skip bb-energy-analyzer, use MIR-level estimation
 #   --verbose            Show detailed pass output
 #   --link               Assemble + link to produce .elf (real runtime: boot.S + runtime.c)
-#   --mock-counter       Link with mock counter runtime instead of real runtime (implies --link)
+#   --debug-counters     Link with debug counter runtime alongside real runtime (implies --link)
 #   --linker <script>    Linker script (default: rockclimb_msp430fr5994.ld)
 #   -h, --help           Show this help message
 #
@@ -46,7 +46,7 @@ CLANG_OPT_LEVEL="2"
 PRECOMPUTED_ENERGY="true"
 VERBOSE="false"
 LINK="false"
-MOCK_COUNTER="false"
+DEBUG_COUNTERS="false"
 LINKER_SCRIPT=""
 INPUT=""
 
@@ -61,7 +61,7 @@ while [[ $# -gt 0 ]]; do
         --no-precomputed-energy) PRECOMPUTED_ENERGY="false"; shift ;;
         --verbose) VERBOSE="true"; shift ;;
         --link) LINK="true"; shift ;;
-        --mock-counter) MOCK_COUNTER="true"; LINK="true"; shift ;;
+        --debug-counters) DEBUG_COUNTERS="true"; LINK="true"; shift ;;
         --linker) LINKER_SCRIPT="$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -178,38 +178,37 @@ if [[ "$LINK" == "true" ]]; then
     # Determine linker script
     [[ -z "$LINKER_SCRIPT" ]] && LINKER_SCRIPT="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
 
-    if [[ "$MOCK_COUNTER" == "true" ]]; then
-        # Mock runtime: counter stubs, no boot.S, no real NVM ops
-        MOCK_COUNTER_SRC="$PROJECT_DIR/passes/runtime/rockclimb_mock_ckpt_counter.c"
-        [[ ! -f "$MOCK_COUNTER_SRC" ]] && { echo "Error: $MOCK_COUNTER_SRC not found" >&2; exit 1; }
+    # Real runtime: boot.S (recovery + __region_boundary) + rockclimb_runtime.c
+    BOOT_SRC="$PROJECT_DIR/passes/runtime/rockclimb_boot.S"
+    RUNTIME_SRC="$PROJECT_DIR/passes/runtime/rockclimb_runtime.c"
+    [[ ! -f "$BOOT_SRC" ]] && { echo "Error: $BOOT_SRC not found" >&2; exit 1; }
+    [[ ! -f "$RUNTIME_SRC" ]] && { echo "Error: $RUNTIME_SRC not found" >&2; exit 1; }
+
+    $GCC -mmcu=$DEVICE -msmall -c "$BOOT_SRC" -o "${OUTPUT}.boot.o"
+    $GCC -mmcu=$DEVICE -msmall -O2 \
+        -I"$MSP430GCC_SUPPORT_PATH/include" \
+        -I"$PROJECT_DIR/passes/runtime" \
+        -c "$RUNTIME_SRC" -o "${OUTPUT}.runtime.o"
+
+    LINK_OBJS=("${OUTPUT}.o" "${OUTPUT}.boot.o" "${OUTPUT}.runtime.o")
+
+    if [[ "$DEBUG_COUNTERS" == "true" ]]; then
+        # Debug counters: links alongside real runtime (UART + NVM counters)
+        DEBUG_COUNTERS_SRC="$PROJECT_DIR/passes/runtime/rockclimb_debug_counters.c"
+        [[ ! -f "$DEBUG_COUNTERS_SRC" ]] && { echo "Error: $DEBUG_COUNTERS_SRC not found" >&2; exit 1; }
 
         $GCC -mmcu=$DEVICE -msmall -O2 \
             -I"$MSP430GCC_SUPPORT_PATH/include" \
             -I"$PROJECT_DIR/passes/runtime" \
-            -c "$MOCK_COUNTER_SRC" -o "${OUTPUT}.mock.o"
+            -c "$DEBUG_COUNTERS_SRC" -o "${OUTPUT}.debug_counters.o"
 
-        $GCC -mmcu=$DEVICE -msmall \
-            -L"$MSP430GCC_SUPPORT_PATH/include" \
-            -T "$LINKER_SCRIPT" \
-            "${OUTPUT}.o" "${OUTPUT}.mock.o" -o "${OUTPUT}.elf"
-    else
-        # Real runtime: boot.S (recovery + __rockclimb_check) + rockclimb_runtime.c
-        BOOT_SRC="$PROJECT_DIR/passes/runtime/rockclimb_boot.S"
-        RUNTIME_SRC="$PROJECT_DIR/passes/runtime/rockclimb_runtime.c"
-        [[ ! -f "$BOOT_SRC" ]] && { echo "Error: $BOOT_SRC not found" >&2; exit 1; }
-        [[ ! -f "$RUNTIME_SRC" ]] && { echo "Error: $RUNTIME_SRC not found" >&2; exit 1; }
-
-        $GCC -mmcu=$DEVICE -msmall -c "$BOOT_SRC" -o "${OUTPUT}.boot.o"
-        $GCC -mmcu=$DEVICE -msmall -O2 \
-            -I"$MSP430GCC_SUPPORT_PATH/include" \
-            -I"$PROJECT_DIR/passes/runtime" \
-            -c "$RUNTIME_SRC" -o "${OUTPUT}.runtime.o"
-
-        $GCC -mmcu=$DEVICE -msmall \
-            -L"$MSP430GCC_SUPPORT_PATH/include" \
-            -T "$LINKER_SCRIPT" \
-            "${OUTPUT}.o" "${OUTPUT}.boot.o" "${OUTPUT}.runtime.o" -o "${OUTPUT}.elf"
+        LINK_OBJS+=("${OUTPUT}.debug_counters.o")
     fi
+
+    $GCC -mmcu=$DEVICE -msmall \
+        -L"$MSP430GCC_SUPPORT_PATH/include" \
+        -T "$LINKER_SCRIPT" \
+        "${LINK_OBJS[@]}" -o "${OUTPUT}.elf"
 
     $SIZE "${OUTPUT}.elf"
 fi
