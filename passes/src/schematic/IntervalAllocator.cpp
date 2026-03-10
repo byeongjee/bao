@@ -63,9 +63,14 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
     RegionAllocation result;
 
     // Copy fixed placements and compute initial VM usage.
+    // Also compute livenessFlags for fixed placements — without these, the
+    // instrumenter skips save/restore memcpy, which can cause infinite loops
+    // when shadow variables go out of sync with their backing allocas.
     result.placement = fixedPlacements;
     result.vmBytesUsed = 0;
     for (const auto &[v, place] : fixedPlacements) {
+        auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
+        result.livenessFlags[v] = {needRestore, needSave};
         if (place == Placement::VM) {
             unsigned size = state.getVarSizeBytes(v);
             if (tracker) {
