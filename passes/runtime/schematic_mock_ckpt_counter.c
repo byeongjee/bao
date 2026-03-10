@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "debug_counters.h"
+
 static uint32_t cnt_region_prologue;
 static uint32_t cnt_region_epilogue;
 static uint32_t cnt_checkpoint_store_reg;
@@ -58,8 +60,7 @@ void __loop_tripcount(int max_iterations) {
     (void)max_iterations;
 }
 
-__attribute__((destructor))
-void __schematic_print_counts(void) {
+__attribute__((destructor)) void __schematic_print_counts(void) {
     printf("=== SCHEMATIC Checkpoint Counter Summary ===\n");
     printf("  __region_prologue:       %u\n", cnt_region_prologue);
     printf("  __region_epilogue:       %u\n", cnt_region_epilogue);
@@ -67,5 +68,5 @@ void __schematic_print_counts(void) {
     printf("  __checkpoint_store_mem:  %u\n", cnt_checkpoint_store_mem);
     printf("  __restore_reg:           %u\n", cnt_restore_reg);
     printf("  __restore_mem:           %u\n", cnt_restore_mem);
-    printf("=============================================\n");
+    printf(DEBUG_END_MARKER "\n");
 }

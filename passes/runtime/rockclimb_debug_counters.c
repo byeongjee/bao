@@ -107,5 +107,5 @@ void debug_exit(void) {
     uart_puts("  reg_restores:         ");
     uart_put_u16(cnt_restore_reg);
     uart_puts("\r\n");
-    uart_puts("========================================\r\n");
+    uart_puts(DEBUG_END_MARKER "\r\n");
 }

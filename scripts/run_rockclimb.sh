@@ -159,25 +159,11 @@ for bench_path in "${BENCHMARKS[@]}"; do
 
         # Read serial output (debug-counters mode only — real runtime halts in LPM4, no UART)
         serial_output=""
-        if [[ "$DEBUG_COUNTERS" -eq 1 ]]; then
-            SERIAL_DEV=$(ls /dev/tty.usbmodem* 2>/dev/null | head -1)
-            if [[ -z "$SERIAL_DEV" ]]; then
-                SERIAL_DEV=$(ls /dev/ttyACM* 2>/dev/null | head -1)
-            fi
-            if [[ -n "$SERIAL_DEV" && -f "$TMP_DIR/${bench_name}.elf" ]]; then
-                # Configure serial port
-                stty -f "$SERIAL_DEV" 9600 cs8 -cstopb -parenb raw 2>/dev/null || \
-                    stty -F "$SERIAL_DEV" 9600 cs8 -cstopb -parenb raw 2>/dev/null || true
-                # Read with timeout
-                timeout 30 cat "$SERIAL_DEV" > "$TMP_DIR/serial.out" 2>/dev/null &
-                SERIAL_PID=$!
-                sleep 1
-                # Reset device to start execution
-                mspdebug tilib "reset" "run" 2>/dev/null &
-                # Wait for output or timeout
-                wait $SERIAL_PID 2>/dev/null || true
-                serial_output=$(cat "$TMP_DIR/serial.out" 2>/dev/null) || true
-            fi
+        if [[ "$DEBUG_COUNTERS" -eq 1 && -f "$TMP_DIR/${bench_name}.elf" ]]; then
+            serial_output=$(uv run python3 "$SCRIPT_DIR/lib/read_serial.py" \
+                --timeout 30 \
+                --reset-cmd "mspdebug tilib \"reset\" \"run\"" \
+                2>"$TMP_DIR/serial.err") || true
         fi
 
         # Merge compile stderr + serial output for stat extraction

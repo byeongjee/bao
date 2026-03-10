@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "debug_counters.h"
 #include "milp_runtime.h"
 
 static uint32_t cnt_region_prologue;
@@ -60,8 +61,7 @@ void __loop_tripcount(int max_iterations) {
     (void)max_iterations;
 }
 
-__attribute__((destructor))
-void __milp_print_counts(void) {
+__attribute__((destructor)) void __milp_print_counts(void) {
     printf("=== MILP Checkpoint Counter Summary ===\n");
     printf("  __region_prologue:       %u\n", cnt_region_prologue);
     printf("  __region_epilogue:       %u\n", cnt_region_epilogue);
@@ -69,5 +69,5 @@ void __milp_print_counts(void) {
     printf("  __checkpoint_store_mem:  %u\n", cnt_checkpoint_store_mem);
     printf("  __restore_reg:           %u\n", cnt_restore_reg);
     printf("  __restore_mem:           %u\n", cnt_restore_mem);
-    printf("=======================================\n");
+    printf(DEBUG_END_MARKER "\n");
 }

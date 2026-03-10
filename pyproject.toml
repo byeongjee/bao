@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = ["pyserial>=3.5"]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-xdist>=3.0"]

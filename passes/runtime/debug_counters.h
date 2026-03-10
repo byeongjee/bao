@@ -20,6 +20,9 @@
 #ifndef DEBUG_COUNTERS_H
 #define DEBUG_COUNTERS_H
 
+/* End-of-output marker — used by all runtimes, detected by read_serial.py */
+#define DEBUG_END_MARKER "[END_OUTPUT]"
+
 #ifdef DEBUG_COUNTERS
 
 void debug_init(void);
