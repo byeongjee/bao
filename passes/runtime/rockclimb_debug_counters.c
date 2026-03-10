@@ -8,7 +8,8 @@
  * ADD.W instructions (no function calls) when add_debug_markers=true.
  *
  * Counter summary is printed over UART at program exit via destructor.
- * Uses __nvm_region_id (from runtime.c) for boundary count.
+ * All counters (cnt_boundary, cnt_save_reg, cnt_restore_reg) are
+ * incremented inline by the instrumenter via ADD.W instructions.
  *
  * Compile with: msp430-elf-gcc -mmcu=MSP430FR5994 -msmall -O2
  */
@@ -79,6 +80,7 @@ static void uart_put_u16(uint16_t val) {
  * instrumented code via ADD.W instructions)
  * ============================================================================ */
 
+__attribute__((section(".nvm"))) uint16_t cnt_boundary;
 __attribute__((section(".nvm"))) uint16_t cnt_save_reg;
 __attribute__((section(".nvm"))) uint16_t cnt_restore_reg;
 
@@ -93,7 +95,7 @@ __attribute__((constructor)) void __rockclimb_debug_init(void) {
 __attribute__((destructor)) void __rockclimb_print_counts(void) {
     uart_puts("=== RockClimb Debug Counter Summary ===\r\n");
     uart_puts("  __region_boundary:    ");
-    uart_put_u16(__nvm_region_id);
+    uart_put_u16(cnt_boundary);
     uart_puts("\r\n");
     uart_puts("  reg_saves:            ");
     uart_put_u16(cnt_save_reg);

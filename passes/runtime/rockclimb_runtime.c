@@ -17,9 +17,6 @@
 /* Checkpointed register values */
 __attribute__((section(".nvm"))) uint16_t __nvm_regs[ROCKCLIMB_MAX_REGS];
 
-/* Current region ID */
-__attribute__((section(".nvm"))) uint16_t __nvm_region_id;
-
 /* Saved program counter */
 __attribute__((section(".nvm"))) uint16_t __nvm_pc;
 

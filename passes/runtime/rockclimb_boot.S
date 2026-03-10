@@ -23,7 +23,6 @@
  * External symbols from rockclimb_runtime.c
  */
     .extern __nvm_regs
-    .extern __nvm_region_id
     .extern __nvm_pc
     .extern __nvm_sp
 
@@ -89,7 +88,6 @@ _normal_boot:
     /* Disable watchdog timer (WDTCTL = WDTPW | WDTHOLD) */
     mov.w   #0x5A80, &0x015C
 
-    mov.w   #0, &__nvm_region_id
     mov.w   #0, &__nvm_pc
     mov.w   #0, &__nvm_sp
 
@@ -121,9 +119,6 @@ __region_boundary:
     /* Save caller's SP (before CALL pushed return address) */
     mov.w   SP, &__nvm_sp
     add.w   #2, &__nvm_sp
-
-    /* Increment region ID */
-    add.w   #1, &__nvm_region_id
 
     /* Halt — enter LPM4 (bits 4-7 of SR = CPUOFF+OSCOFF+SCG0+SCG1).
        System will reboot when energy is available. */

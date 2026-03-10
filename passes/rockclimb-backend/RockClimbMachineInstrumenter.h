@@ -21,6 +21,7 @@ class RockClimbMachineInstrumenter {
   public:
     explicit RockClimbMachineInstrumenter(llvm::MachineFunction &MF, bool addDebugMarkers,
                                           llvm::GlobalVariable *nvmRegsGV,
+                                          llvm::GlobalVariable *cntBoundaryGV,
                                           llvm::GlobalVariable *cntSaveGV,
                                           llvm::GlobalVariable *cntRestoreGV);
 
@@ -45,6 +46,7 @@ class RockClimbMachineInstrumenter {
     const llvm::TargetInstrInfo *TII_;
     bool addDebugMarkers_;
     llvm::GlobalVariable *nvmRegsGV_;
+    llvm::GlobalVariable *cntBoundaryGV_;
     llvm::GlobalVariable *cntSaveGV_;
     llvm::GlobalVariable *cntRestoreGV_;
 };

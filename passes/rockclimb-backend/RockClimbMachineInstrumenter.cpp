@@ -11,13 +11,12 @@ using namespace llvm;
 
 namespace checkpoint {
 
-RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(MachineFunction &MF,
-                                                           bool addDebugMarkers,
-                                                           GlobalVariable *nvmRegsGV,
-                                                           GlobalVariable *cntSaveGV,
-                                                           GlobalVariable *cntRestoreGV)
+RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(
+    MachineFunction &MF, bool addDebugMarkers, GlobalVariable *nvmRegsGV,
+    GlobalVariable *cntBoundaryGV, GlobalVariable *cntSaveGV, GlobalVariable *cntRestoreGV)
     : MF_(MF), TII_(MF.getSubtarget().getInstrInfo()), addDebugMarkers_(addDebugMarkers),
-      nvmRegsGV_(nvmRegsGV), cntSaveGV_(cntSaveGV), cntRestoreGV_(cntRestoreGV) {}
+      nvmRegsGV_(nvmRegsGV), cntBoundaryGV_(cntBoundaryGV), cntSaveGV_(cntSaveGV),
+      cntRestoreGV_(cntRestoreGV) {}
 
 bool RockClimbMachineInstrumenter::verifyConstants() const {
     bool ok = true;
@@ -63,6 +62,14 @@ void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
     // MSP430 caller-saved: R11-R15
     for (unsigned reg : {msp430::R11, msp430::R12, msp430::R13, msp430::R14, msp430::R15}) {
         CallMI->addRegisterDefined(reg, TRI);
+    }
+
+    // Debug counter: increment cnt_boundary by 1.
+    if (addDebugMarkers_ && cntBoundaryGV_) {
+        BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
+            .addReg(msp430::SR)               // base = SR (absolute addressing)
+            .addGlobalAddress(cntBoundaryGV_) // address of cnt_boundary
+            .addImm(1);
     }
 
     // Debug counter: increment cnt_restore_reg by 14 (R4-R15 + PC + SP).

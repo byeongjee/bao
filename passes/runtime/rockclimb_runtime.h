@@ -36,9 +36,6 @@ extern "C" {
 /* Checkpointed register values */
 extern uint16_t __nvm_regs[ROCKCLIMB_MAX_REGS] NVM_SECTION;
 
-/* Current region ID (incremented at each boundary) */
-extern uint16_t __nvm_region_id NVM_SECTION;
-
 /* Saved program counter for recovery */
 extern uint16_t __nvm_pc NVM_SECTION;
 
