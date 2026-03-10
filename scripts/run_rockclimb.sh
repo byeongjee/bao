@@ -91,7 +91,7 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,,,,,,,,boundary_checks,register_checkpoints,avg_region_energy,max_region_energy,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls"
+HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,boundary_checks,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 # Extract first numeric/token value after "label:" from output.
@@ -177,19 +177,19 @@ ${serial_output}"
         # Check for infeasibility
         if echo "$full_output" | grep -q "Region partitioning failed"; then
             echo "  INFEASIBLE (region partitioning failed)"
-            echo "$row_name,$cap_label,infeasible,,,,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,infeasible,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
         if echo "$full_output" | grep -q "blocks exceed E_safe"; then
             echo "  INFEASIBLE (blocks exceed E_safe)"
-            echo "$row_name,$cap_label,infeasible,,,,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,infeasible,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
 
         # Check for compilation failure (no RockClimb metrics at all)
         if ! echo "$full_output" | grep -q "Checkpoint Insertion Statistics"; then
             echo "  FAILED (compilation error)"
-            echo "$row_name,$cap_label,failed,,,,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,failed,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
 
@@ -198,9 +198,6 @@ ${serial_output}"
         edges=$(extract_stat "$full_output" "Edges")
         regions=$(extract_stat "$full_output" "Regions")
         boundary_checks=$(extract_stat "$full_output" "Boundary checks")
-        register_ckpts=$(extract_stat "$full_output" "Register checkpoints")
-        avg_region_energy=$(extract_stat "$full_output" "Avg region energy")
-        max_region_energy=$(extract_stat "$full_output" "Max region energy")
         compilation_time=$(extract_stat "$full_output" "Compilation time (ms)")
         peak_rss=$(extract_stat "$full_output" "Peak RSS (KB)")
         execution_time=$(extract_stat "$full_output" "Execution time (ms)")
@@ -216,9 +213,6 @@ ${serial_output}"
         edges=${edges:-0}
         regions=${regions:-0}
         boundary_checks=${boundary_checks:-0}
-        register_ckpts=${register_ckpts:-0}
-        avg_region_energy=${avg_region_energy:-0}
-        max_region_energy=${max_region_energy:-0}
         compilation_time=${compilation_time:-0}
         peak_rss=${peak_rss:-0}
         execution_time=${execution_time:-0}
@@ -226,7 +220,7 @@ ${serial_output}"
         runtime_save_reg=${runtime_save_reg:-0}
         runtime_restore_reg=${runtime_restore_reg:-0}
 
-        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,,$execution_time,,,,,,,$boundary_checks,$register_ckpts,$avg_region_energy,$max_region_energy,$runtime_check,$runtime_save_reg,$runtime_restore_reg" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,,$execution_time,$boundary_checks,$runtime_check,$runtime_save_reg,$runtime_restore_reg" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $boundary_checks boundaries)"
     done
 done
