@@ -162,7 +162,11 @@ fi
 # Step 5: Resume compilation: instrumented MIR → assembly
 echo "=== Step 5: MIR → Assembly (start-after=virtregrewriter) ==="
 "$LLC" -march=msp430 -start-after=virtregrewriter \
-    "${OUTPUT}.instrumented.mir" -o "${OUTPUT}.s"
+    "${OUTPUT}.instrumented.mir" -o "${OUTPUT}.raw.s"
+
+# WORKAROUND: LLVM emits .cfi_* directives that msp430-elf-as does not support.
+# Strip them until LLVM's MSP430 backend gains a flag to suppress CFI emission.
+sed '/\.cfi_/d' "${OUTPUT}.raw.s" > "${OUTPUT}.s"
 
 # Step 6 (optional): Assemble + link
 if [[ "$LINK" == "true" ]]; then
