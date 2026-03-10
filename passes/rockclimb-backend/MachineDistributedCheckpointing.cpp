@@ -1,9 +1,12 @@
 #include "MachineDistributedCheckpointing.h"
+#include "MSP430Opcodes.h"
 
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+
+#include <cassert>
 
 using namespace llvm;
 
@@ -22,7 +25,10 @@ unsigned MachineDistributedCheckpointing::assignRegId(MCPhysReg reg) {
     auto it = regIdMap_.find(reg);
     if (it != regIdMap_.end())
         return it->second;
-    unsigned id = nextRegId_++;
+    // Deterministic mapping: R4=0, R5=1, ..., R15=11
+    // This matches boot.S's fixed restore order (__nvm_regs[0] → R4, etc.)
+    unsigned id = static_cast<unsigned>(reg) - msp430::R4;
+    assert(id < 12 && "Register ID out of range for __nvm_regs");
     regIdMap_[reg] = id;
     return id;
 }

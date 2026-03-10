@@ -34,12 +34,13 @@ class MachineDistributedCheckpointing {
 
     std::vector<MachineCheckpointPoint> analyze();
 
-    unsigned getCheckpointedRegisterCount() const { return nextRegId_; }
+    unsigned getCheckpointedRegisterCount() const {
+        return static_cast<unsigned>(regIdMap_.size());
+    }
 
   private:
     const std::vector<MachineRegionInfo> &regions_;
     const llvm::MachineFunction &MF_;
-    unsigned nextRegId_ = 0;
 
     /// Map physical register to unique NVM slot ID
     llvm::DenseMap<llvm::MCPhysReg, unsigned> regIdMap_;

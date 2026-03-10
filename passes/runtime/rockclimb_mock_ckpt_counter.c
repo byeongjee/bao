@@ -69,7 +69,6 @@ uint16_t __nvm_regs[ROCKCLIMB_MAX_REGS];
 uint16_t __nvm_region_id;
 uint16_t __nvm_pc;
 uint16_t __nvm_sp;
-volatile uint16_t __rockclimb_vmax_threshold;
 
 /* ============================================================================
  * Counters

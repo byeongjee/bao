@@ -50,7 +50,7 @@ MEMORY {
   INFOD            : ORIGIN = 0x1800, LENGTH = 0x0080 /* END=0x187F, size 128 */
   /* MODIFIED: Split FRAM to reserve 1KB for RockClimb NVM checkpoint storage */
   NVM (rxw)        : ORIGIN = 0x4000, LENGTH = 0x0400 /* END=0x43FF, size 1024 - RockClimb NVM */
-  FRAM (rx)        : ORIGIN = 0x4400, LENGTH = 0xBB80 /* END=0xFF7F, size 48000 (was 49024) */
+  FRAM (rwx)       : ORIGIN = 0x4400, LENGTH = 0xBB80 /* END=0xFF7F, size 48000 (was 49024) */
   HIFRAM (rxw)     : ORIGIN = 0x00010000, LENGTH = 0x00033FF7 /* Boundaries changed to fix CPU47 */
   JTAGSIGNATURE    : ORIGIN = 0xFF80, LENGTH = 0x0004
   BSLSIGNATURE     : ORIGIN = 0xFF84, LENGTH = 0x0004
@@ -283,7 +283,7 @@ SECTIONS
     . = ALIGN(2);
     PROVIDE (__datastart = .);
     *(.lower.data.* .lower.data)
-  } > RAM AT> FRAM
+  } > FRAM
 
   .data :
   {
@@ -310,12 +310,12 @@ SECTIONS
     _edata = .;
     PROVIDE (edata = .);
     PROVIDE (__dataend = .);
-  } > RAM AT> FRAM
+  } > FRAM
 
-  /* Note that crt0 assumes this is a multiple of two; all the
-     start/stop symbols are also assumed word-aligned.  */
+  /* Data lives in FRAM directly — no ROM-to-RAM copy needed.
+     Set romdatacopysize to 0 so CRT data-copy is a no-op. */
   PROVIDE(__romdatastart = LOADADDR(.lower.data));
-  PROVIDE (__romdatacopysize = SIZEOF(.lower.data) + SIZEOF(.data));
+  PROVIDE (__romdatacopysize = 0);
 
   .upper.data :
   {
@@ -335,7 +335,7 @@ SECTIONS
     . = ALIGN(2);
     PROVIDE (__bssstart = .);
     *(.lower.bss.* .lower.bss)
-  } > RAM
+  } > FRAM
 
   .bss :
   {
@@ -346,7 +346,7 @@ SECTIONS
     . = ALIGN(2);
     *(COMMON)
     PROVIDE (__bssend = .);
-  } > RAM
+  } > FRAM
   PROVIDE (__bsssize = SIZEOF(.lower.bss) + SIZEOF(.bss));
 
   .upper.bss :
@@ -368,11 +368,9 @@ SECTIONS
     *(.noinit)
     . = ALIGN(2);
     PROVIDE (__noinit_end = .);
-  } > RAM
+  } > FRAM
 
-  /* We create this section so that "end" will always be in the
-     RAM region (matching .stack below), even if the .bss
-     section is empty.  */
+  /* Heap in FRAM (all mutable data lives in FRAM). */
   .heap (NOLOAD) :
   {
     . = ALIGN(2);
@@ -388,12 +386,10 @@ SECTIONS
     LONG(0);
     __heap_end__ = .;
     __HeapLimit = __heap_end__;
-  } > RAM
-  /* WARNING: Do not place anything in RAM here.
-     The heap section must be the last section in RAM and the stack
-     section must be placed at the very end of the RAM region.  */
+  } > FRAM
 
-  .stack (ORIGIN (RAM) + LENGTH(RAM)) :
+  /* Stack at end of FRAM (all-FRAM operation, no SRAM used). */
+  .stack (ORIGIN (FRAM) + LENGTH(FRAM)) :
   {
     PROVIDE (__stack = .);
     *(.stack)

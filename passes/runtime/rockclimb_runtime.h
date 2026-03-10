@@ -1,12 +1,9 @@
 /*
  * RockClimb Runtime Library for MSP430
  *
- * This runtime implements the PFI (Proactive Failure Immunity) approach
- * from the RockClimb paper. Key features:
- * - Voltage monitoring at region boundaries
- * - Low-power mode entry when voltage is too low
- * - Register checkpointing to NVM
- * - Recovery from power failures
+ * All-FRAM operation with save-and-halt at region boundaries.
+ * Register checkpointing to NVM, recovery from power failures
+ * handled by boot.S.
  */
 
 #ifndef ROCKCLIMB_RUNTIME_H
@@ -24,9 +21,6 @@ extern "C" {
 
 /* Maximum number of registers to checkpoint (MSP430 has R4-R15 = 12 GPRs) */
 #define ROCKCLIMB_MAX_REGS 16
-
-/* Default voltage threshold (ADC value, platform-specific) */
-#define ROCKCLIMB_DEFAULT_VMAX_THRESHOLD 0x1FF
 
 /* ============================================================================
  * NVM Storage (placed in non-volatile memory section)
@@ -51,33 +45,22 @@ extern uint16_t __nvm_pc NVM_SECTION;
 /* Saved stack pointer for recovery */
 extern uint16_t __nvm_sp NVM_SECTION;
 
-/* Voltage threshold for V_max comparison */
-extern volatile uint16_t __rockclimb_vmax_threshold;
-
 /* ============================================================================
  * Runtime API
  * ============================================================================ */
 
 /**
- * Voltage check function - called at region boundaries.
+ * Region boundary: save state and halt (deep sleep).
  *
- * Algorithm (PFI approach):
- * 1. Check if current voltage is above V_max threshold
- * 2. If below threshold, enter low-power mode (LPM4)
- * 3. Wait for voltage comparator interrupt when voltage rises
- * 4. Increment region ID and continue execution
+ * Saves return address (region body start) and SP to NVM, then enters
+ * LPM4. System powers off. On reboot, boot.S recovers from saved state.
  *
- * This is a rollback-free approach: we wait for sufficient energy
- * rather than re-executing after power failure.
+ * Provided by rockclimb_boot.S (assembly).
  */
 void __rockclimb_check(void);
 
 /**
- * Save a single register to NVM.
- *
- * Called at the last definition point of each live-out register
- * within a region (distributed checkpointing strategy).
- *
+ * Save a single register to NVM (distributed checkpointing).
  */
 void __rockclimb_save_reg(void);
 
@@ -91,24 +74,19 @@ void __checkpoint_store_reg(int32_t slot_id, int64_t value);
 
 /**
  * Initialize the RockClimb runtime.
- *
- * Should be called early in main() or from crt0.
- * Sets up voltage comparator and clears NVM if this is a fresh boot.
+ * Disables watchdog and clears NVM on fresh boot.
  */
 void __rockclimb_init(void);
 
 /**
  * Check if this is a recovery boot.
- *
  * @return Non-zero if recovering from power failure, 0 otherwise.
  */
 uint16_t __rockclimb_is_recovery(void);
 
 /**
  * Perform recovery after power failure.
- *
- * Restores registers from NVM and returns to saved PC.
- * This function does not return normally.
+ * Note: Recovery is handled by boot.S; this is a stub.
  */
 void __rockclimb_recover(void)
 #if defined(__ELF__)

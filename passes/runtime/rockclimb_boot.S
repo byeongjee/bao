@@ -1,13 +1,13 @@
 /*
  * RockClimb Boot/Recovery Assembly Routine for MSP430
  *
- * This file implements the early boot sequence that handles:
- * 1. Checking if this is a recovery boot
- * 2. Restoring registers from NVM on recovery
- * 3. Jumping to the saved program counter
+ * This file implements:
+ * 1. Early boot recovery: checks NVM state and restores registers + PC
+ * 2. __rockclimb_check: saves state and halts (deep sleep) at region boundaries
  *
- * This code is placed in .crt_0250 section to execute after data
- * initialization but before main() during MSP430 GCC startup.
+ * Recovery is placed in .crt_0010 (before data/BSS init) so that on recovery
+ * we jump to saved PC before CRT reinitializes .data/.bss, preserving FRAM
+ * contents.
  *
  * MSP430 GCC CRT sections:
  *   .crt_0000-.crt_0099: Before BSS clear
@@ -30,41 +30,39 @@
 /*
  * Boot/Recovery entry point
  *
- * This is called early in the startup sequence.
- * It checks if we're recovering from a power failure and
- * restores state if necessary.
+ * Placed in .crt_0010 — runs BEFORE data/BSS initialization.
+ * On recovery, jumps to saved PC immediately, preserving FRAM state.
+ * On fresh boot, falls through to CRT data init.
  */
-    .section .crt_0250, "ax", @progbits
+    .section .crt_0010, "ax", @progbits
     .global _rockclimb_boot
     .type   _rockclimb_boot, @function
 
 _rockclimb_boot:
-    /* Check if this is a recovery boot by examining region_id and PC */
-    /* Recovery condition: region_id > 0 AND nvm_pc != 0 */
-
-    mov.w   &__nvm_region_id, R15
-    tst.w   R15
-    jz      _normal_boot          /* region_id == 0: fresh boot */
-
+    /* Check if this is a recovery boot: nvm_pc != 0 */
     mov.w   &__nvm_pc, R14
     tst.w   R14
-    jz      _normal_boot          /* PC == 0: no recovery point saved */
+    jz      _normal_boot
 
     /* This is a recovery boot - restore all state from NVM */
 
 _do_recovery:
-    /*
-     * Restore general-purpose registers R4-R15 from NVM.
-     * MSP430 register usage convention:
-     *   R0 (PC) - Program Counter
-     *   R1 (SP) - Stack Pointer
-     *   R2 (SR) - Status Register
-     *   R3 (CG) - Constant Generator
-     *   R4-R11  - Callee-saved registers
-     *   R12-R15 - Caller-saved / argument registers
-     */
+    /* R14 holds saved PC. Clear recovery marker first to prevent
+       infinite recovery loops on next reboot. */
+    mov.w   #0, &__nvm_pc
 
-    /* Restore R4-R11 (callee-saved) */
+    /* Restore SP */
+    mov.w   &__nvm_sp, SP
+
+    /* Push saved PC onto restored stack (for ret-based jump) */
+    push    R14
+
+    /*
+     * Restore all general-purpose registers R4-R15 from NVM.
+     * Slot layout matches deterministic regId mapping:
+     *   __nvm_regs[0]=R4, [1]=R5, ..., [11]=R15
+     * Each slot is 2 bytes (uint16_t).
+     */
     mov.w   &__nvm_regs+0,  R4
     mov.w   &__nvm_regs+2,  R5
     mov.w   &__nvm_regs+4,  R6
@@ -73,40 +71,19 @@ _do_recovery:
     mov.w   &__nvm_regs+10, R9
     mov.w   &__nvm_regs+12, R10
     mov.w   &__nvm_regs+14, R11
-
-    /* Restore R12-R14 (caller-saved / arguments) */
     mov.w   &__nvm_regs+16, R12
     mov.w   &__nvm_regs+18, R13
     mov.w   &__nvm_regs+20, R14
-    /* R15 will be loaded last with region_id or preserved */
+    mov.w   &__nvm_regs+22, R15
 
-    /* Restore stack pointer */
-    mov.w   &__nvm_sp, SP
-
-    /*
-     * Clear the recovery state to prevent infinite recovery loops.
-     * Set PC to 0 so next boot is treated as fresh.
-     */
-    mov.w   #0, &__nvm_pc
-
-    /*
-     * Jump to the saved program counter.
-     * The PC was saved at the start of a region, so execution
-     * will resume from the beginning of that region.
-     */
-    mov.w   R14, PC           /* R14 still holds __nvm_pc value */
-
-    /* Should never reach here */
+    /* Jump to saved PC (pops from stack).
+       After ret: PC = saved PC, SP = __nvm_sp (push -2, ret +2 cancel). */
+    ret
 
 _normal_boot:
     /*
-     * Normal (fresh) boot - continue to standard C startup.
-     * The startup code will eventually call main().
-     */
-
-    /*
-     * Initialize NVM region_id to 0 for fresh boot.
-     * This handles the case where FRAM contains garbage on first power-up.
+     * Normal (fresh) boot - initialize NVM state and continue to CRT.
+     * Handles the case where FRAM contains garbage on first power-up.
      */
     mov.w   #0, &__nvm_region_id
     mov.w   #0, &__nvm_pc
@@ -118,21 +95,51 @@ _normal_boot:
 
 
 /*
- * Save current context to NVM
+ * __rockclimb_check — Save state and halt at region boundaries
  *
- * This function saves all registers and the return address to NVM.
- * It should be called when the application wants to create a checkpoint
- * that can be resumed after power failure.
+ * Called at the start of each energy region (except the entry block).
+ * Saves the return address (= region body start) and SP to NVM,
+ * then enters deep sleep (LPM4). The system powers off.
+ * On next power-on, the reset vector fires, CRT runs, and boot
+ * recovery (above) resumes from saved state.
  *
- * Note: This is an alternative to distributed checkpointing where
- * all registers are saved at once at a specific point.
+ * If woken from LPM4 by an interrupt (not a full reboot), just returns.
+ */
+    .section .text
+    .global __rockclimb_check
+    .type   __rockclimb_check, @function
+
+__rockclimb_check:
+    /* Save return address as recovery PC.
+       0(SP) holds the return address pushed by CALL. */
+    mov.w   0(SP), &__nvm_pc
+
+    /* Save caller's SP (before CALL pushed return address) */
+    mov.w   SP, &__nvm_sp
+    add.w   #2, &__nvm_sp
+
+    /* Increment region ID */
+    add.w   #1, &__nvm_region_id
+
+    /* Halt — enter LPM4 (bits 4-7 of SR = CPUOFF+OSCOFF+SCG0+SCG1).
+       System will reboot when energy is available. */
+    bis.w   #0xF0, SR
+    nop                             /* Required after SR modification */
+
+    /* If we wake from LPM4 (e.g., by an interrupt), just return */
+    ret
+
+    .size   __rockclimb_check, .-__rockclimb_check
+
+
+/*
+ * Save current context to NVM (bulk save alternative)
  */
     .section .text
     .global _rockclimb_save_context
     .type   _rockclimb_save_context, @function
 
 _rockclimb_save_context:
-    /* Save all general-purpose registers to NVM */
     mov.w   R4,  &__nvm_regs+0
     mov.w   R5,  &__nvm_regs+2
     mov.w   R6,  &__nvm_regs+4
@@ -146,32 +153,11 @@ _rockclimb_save_context:
     mov.w   R14, &__nvm_regs+20
     mov.w   R15, &__nvm_regs+22
 
-    /* Save stack pointer */
     mov.w   SP, &__nvm_sp
-
-    /* Save return address (on stack) as PC */
-    /* Return address is at 0(SP) */
     mov.w   0(SP), &__nvm_pc
 
     ret
 
     .size   _rockclimb_save_context, .-_rockclimb_save_context
-
-
-/*
- * Comparator_A interrupt vector
- *
- * This ISR is triggered when the voltage comparator detects that
- * the supply voltage has risen above the V_max threshold.
- * It wakes the CPU from LPM4.
- */
-    .section .vectors, "ax", @progbits
-    .global __comparator_vector
-
-__comparator_vector:
-    /* Clear interrupt flag - handled in C ISR */
-    /* Exit LPM4 */
-    bic.w   #0xF0, 0(SP)      /* Clear LPM bits in saved SR */
-    reti
 
     .end
