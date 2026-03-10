@@ -84,8 +84,8 @@ def main():
         help="Wall-clock timeout in seconds (default: 30)"
     )
     parser.add_argument(
-        "--end-marker", default="[END_OUTPUT]",
-        help="End-of-output marker string (default: [END_OUTPUT])"
+        "--end-marker", default="END_OUTPUT",
+        help="End-of-output marker string (default: END_OUTPUT)"
     )
     parser.add_argument(
         "--reset-cmd", default=None,
@@ -116,6 +116,7 @@ def main():
     ser.close()
 
     if reset_proc is not None:
+        reset_proc.terminate()
         reset_proc.wait()
 
     for line in lines:
