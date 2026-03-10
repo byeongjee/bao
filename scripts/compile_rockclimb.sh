@@ -92,6 +92,7 @@ echo "=== Step 1: C → LLVM IR (clang -O${CLANG_OPT_LEVEL}) ==="
 "$CLANG" -S -emit-llvm -O"$CLANG_OPT_LEVEL" --target=msp430 \
     -isystem "$MSP430GCC_SUPPORT_PATH/include" \
     -isystem "$MSP430GCC_SUPPORT_PATH/msp430-elf/include" \
+    -I"$PROJECT_DIR/passes/runtime" \
     $CLANG_DEBUG_FLAGS \
     "$INPUT" -o "${OUTPUT}.ll"
 
