@@ -34,7 +34,6 @@ done
 ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_energy_config_ir.json"
 
 CAPACITOR_CONFIGS=(
-    "100nF:$PROJECT_DIR/benchmarks/sample_schematic_config_100nF.json"
     "1uF:$PROJECT_DIR/benchmarks/sample_schematic_config_1uF.json"
     "10uF:$PROJECT_DIR/benchmarks/sample_schematic_config_10uF.json"
     "100uF:$PROJECT_DIR/benchmarks/sample_schematic_config_100uF.json"

@@ -3,7 +3,6 @@
 
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <queue>
@@ -162,19 +161,13 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
             accum_cycle = Cycle_bbi;
         }
 
-        // Split oversized blocks
-        while (accum_cycle >= E_safe_) {
-            MachineBasicBlock *newMBB = splitBlock(MBB, E_safe_, i);
-            if (!newMBB) {
-                result.feasible = false;
-                result.errorMessage = "Block '" + std::string(MBB->getName()) + "' (BB#" +
-                                      std::to_string(MBB->getNumber()) +
-                                      ") exceeds E_safe and cannot be split further";
-                return result;
-            }
-
-            Cycle_bbi = getBlockCost(MBB);
-            accum_cycle = Cycle_bbi;
+        // Fail if a single block exceeds E_safe (block splitting not implemented)
+        if (accum_cycle >= E_safe_) {
+            result.feasible = false;
+            result.errorMessage = "Block '" + std::string(MBB->getName()) + "' (BB#" +
+                                  std::to_string(MBB->getNumber()) + ") exceeds E_safe (" +
+                                  std::to_string(E_safe_) + "); block splitting is not implemented";
+            return result;
         }
 
         // Propagate to successors
@@ -225,84 +218,6 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
     }
 
     return result;
-}
-
-MachineBasicBlock *RockClimbMachineOptimizer::splitBlock(MachineBasicBlock *MBB, double threshold,
-                                                         size_t insertIdx) {
-    // When using pre-computed energy (bb-energy-analyzer), the block-level cost
-    // in energyCosts_ is accurate but we only have instruction-level estimates
-    // (estimateInstruction) for splitting granularity. These two can diverge
-    // significantly: many MIR opcodes lack cost entries and fall back to a 1.0
-    // default, so the instruction-level sum can be much smaller than the true
-    // block cost.
-    //
-    // To bridge this gap we compute a scale factor = blockCost / instLevelSum.
-    // Each instruction's cost is multiplied by this factor during the split-point
-    // search, so the cumulative sum operates in the same energy domain as
-    // getBlockCost() and the E_safe threshold. The relative cost distribution
-    // across instructions is preserved — we just don't know absolute per-
-    // instruction costs, only their proportions.
-    double blockCost = getBlockCost(MBB);
-    double instTotal = 0.0;
-    for (const MachineInstr &MI : *MBB)
-        instTotal += estimator_.estimateInstruction(MI);
-    double scale = (instTotal > 0.0) ? (blockCost / instTotal) : 1.0;
-
-    // Find the split point: split *before* the instruction that would exceed
-    // threshold. This matches the IR-level BlockSplitter pattern — the first
-    // half always has cost < threshold.
-    double cumulative = 0.0;
-    MachineBasicBlock::iterator splitPt = MBB->end();
-    MachineBasicBlock::iterator lastCandidate = MBB->end();
-
-    for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end(); I != E; ++I) {
-        double instCost = estimator_.estimateInstruction(*I) * scale;
-        if (cumulative + instCost >= threshold && lastCandidate != MBB->end()) {
-            splitPt = I; // split before this instruction
-            break;
-        }
-        cumulative += instCost;
-        lastCandidate = I;
-    }
-
-    // Can't split if we couldn't find a valid split point
-    if (splitPt == MBB->end() || splitPt == MBB->begin())
-        return nullptr;
-
-    // Use MachineBasicBlock::splitAt to create the new block
-    MachineBasicBlock *newMBB = MF_.CreateMachineBasicBlock();
-    MF_.insert(std::next(MachineFunction::iterator(MBB)), newMBB);
-
-    // Move instructions from splitPt to end into newMBB
-    newMBB->splice(newMBB->end(), MBB, splitPt, MBB->end());
-
-    // Transfer successors from MBB to newMBB
-    while (!MBB->succ_empty()) {
-        MachineBasicBlock *succ = *MBB->succ_begin();
-        MBB->removeSuccessor(succ);
-        newMBB->addSuccessor(succ);
-    }
-    // MBB now falls through to newMBB
-    MBB->addSuccessor(newMBB);
-
-    // Update energy costs proportionally. We cannot call estimateBlock() here
-    // because it would look up the pre-computed value by block name — the
-    // original MBB keeps its name after the split, so the lookup returns the
-    // stale (unsplit) cost. Instead, distribute the known block cost based on
-    // the scaled cumulative computed above.
-    energyCosts_[MBB] = cumulative;
-    energyCosts_[newMBB] = blockCost - cumulative;
-
-    // Insert new block into topological order right after current
-    topoOrder_.insert(topoOrder_.begin() + static_cast<long>(insertIdx) + 1, newMBB);
-
-    // Re-check for call sites in both halves
-    if (!blockHasMachineCallSite(*MBB))
-        callSiteBlocks_.erase(MBB);
-    if (blockHasMachineCallSite(*newMBB))
-        callSiteBlocks_.insert(newMBB);
-
-    return newMBB;
 }
 
 } // namespace checkpoint

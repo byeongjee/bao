@@ -65,10 +65,6 @@ class RockClimbMachineOptimizer {
     double getBlockCost(llvm::MachineBasicBlock *MBB) const;
 
     MachineRockClimbResult partitionRegions();
-
-    /// Split an oversized block at the instruction where energy reaches threshold
-    llvm::MachineBasicBlock *splitBlock(llvm::MachineBasicBlock *MBB, double threshold,
-                                        size_t insertIdx);
 };
 
 } // namespace checkpoint

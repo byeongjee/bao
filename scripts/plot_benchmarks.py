@@ -80,7 +80,7 @@ def read_csv(filepath):
 def parse_benchmark_name(benchmark):
     """Split 'program-capacitor' into (program, capacitor).
 
-    Handles multi-part program names like 'activity_recognition-100nF'.
+    Handles multi-part program names like 'activity_recognition-1uF'.
     """
     parts = benchmark.rsplit("-", 1)
     if len(parts) == 2:
@@ -143,7 +143,7 @@ def load_data(base_dir, algorithms, benchmarks, capacitors, metric_key):
         data[alg_key] = alg_data
 
     # Sort labels: group by program name, then by capacitor size
-    cap_order = {"100nF": 0, "1uF": 1, "10uF": 2, "100uF": 3}
+    cap_order = {"1uF": 0, "10uF": 1, "100uF": 2}
 
     def sort_key(label):
         parts = label.split("\n")
@@ -274,8 +274,8 @@ examples:
   # Plot execution time for specific programs
   %(prog)s --metric execution_time --benchmarks crc rsa
 
-  # Plot only MILP and SCHEMATIC for 100nF capacitor
-  %(prog)s --metric prologue --algorithms milp schematic --capacitors 100nF
+  # Plot only MILP and SCHEMATIC for 1uF capacitor
+  %(prog)s --metric prologue --algorithms milp schematic --capacitors 1uF
 
   # Normalize to MILP baseline (all values shown as ratio to MILP)
   %(prog)s --metric prologue --normalize milp
@@ -305,7 +305,7 @@ examples:
     parser.add_argument(
         "--capacitors",
         nargs="+",
-        help="Capacitor sizes to include (e.g., 100nF 1uF). Default: all",
+        help="Capacitor sizes to include (e.g., 1uF 10uF). Default: all",
     )
     parser.add_argument(
         "--csv-dir",

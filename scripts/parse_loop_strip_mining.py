@@ -7,7 +7,6 @@ import csv
 import sys
 
 CAPACITY_MAP = {
-    "100nF": 486.0,
     "1uF": 4860.0,
     "10uF": 48600.0,
     "100uF": 486000.0,
