@@ -11,8 +11,11 @@ using namespace llvm;
 
 namespace checkpoint {
 
-RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(MachineFunction &MF)
-    : MF_(MF), TII_(MF.getSubtarget().getInstrInfo()) {}
+RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(MachineFunction &MF,
+                                                           bool addDebugMarkers,
+                                                           GlobalVariable *nvmRegsGV)
+    : MF_(MF), TII_(MF.getSubtarget().getInstrInfo()), addDebugMarkers_(addDebugMarkers),
+      nvmRegsGV_(nvmRegsGV) {}
 
 bool RockClimbMachineInstrumenter::verifyConstants() const {
     bool ok = true;
@@ -28,6 +31,7 @@ bool RockClimbMachineInstrumenter::verifyConstants() const {
     };
 
     checkOpcode(msp430::CALLi, "CALLi");
+    checkOpcode(msp430::MOV16mr, "MOV16mr");
 
     return ok;
 }
@@ -73,13 +77,34 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
     DebugLoc DL = ckpt.afterInst->getDebugLoc();
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
 
-    // Insert: CALL __rockclimb_save_reg (no arguments — real runtime inlines saves)
-    MachineInstr *CallMI = BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::CALLi))
-                               .addExternalSymbol("__rockclimb_save_reg");
+    // Determine the source register for the MOV.
+    // If the physical register is GR8, promote to its GR16 super-register.
+    unsigned srcReg = ckpt.reg;
+    const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(srcReg);
+    if (RC && RC->getID() == msp430::GR8RegClassID) {
+        MCPhysReg superReg = TRI->getMatchingSuperReg(srcReg, msp430::subreg_8bit,
+                                                      TRI->getMinimalPhysRegClass(msp430::R4));
+        if (superReg)
+            srcReg = superReg;
+    }
 
-    // Mark caller-saved registers as clobbered
-    for (unsigned reg : {msp430::R11, msp430::R12, msp430::R13, msp430::R14, msp430::R15}) {
-        CallMI->addRegisterDefined(reg, TRI);
+    // Inline save: MOV16mr physReg, &__nvm_regs[regId]
+    // memdst operands: (base=SR for absolute addressing, disp=GlobalAddress+offset)
+    BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::MOV16mr))
+        .addReg(msp430::SR) // base = SR (absolute addressing)
+        .addGlobalAddress(nvmRegsGV_,
+                          static_cast<int64_t>(ckpt.regId) * 2) // disp = &__nvm_regs + regId*2
+        .addReg(srcReg);                                        // source register
+
+    // Optionally emit debug marker call for counting
+    if (addDebugMarkers_) {
+        MachineInstr *CallMI = BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::CALLi))
+                                   .addExternalSymbol("__rockclimb_save_reg");
+
+        // Mark caller-saved registers as clobbered
+        for (unsigned reg : {msp430::R11, msp430::R12, msp430::R13, msp430::R14, msp430::R15}) {
+            CallMI->addRegisterDefined(reg, TRI);
+        }
     }
 }
 

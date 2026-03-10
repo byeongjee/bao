@@ -5,6 +5,9 @@
 #include "RockClimbMachineOptimizer.h"
 
 #include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
@@ -38,6 +41,11 @@ static cl::opt<bool>
                                       cl::desc("Print all required energy parameter keys and exit"),
                                       cl::init(false));
 
+static cl::opt<bool> AddDebugMarkersOpt("add-debug-markers",
+                                        cl::desc("Emit runtime function calls for register "
+                                                 "save/restore (for mock counter debugging)"),
+                                        cl::init(false));
+
 namespace checkpoint {
 
 /// Parameters parsed from the rockclimb machine config JSON.
@@ -48,6 +56,7 @@ struct MachineRockClimbParams {
     double reg_restore_energy = 0.0;
     bool distributedCheckpointing = true;
     double checkpoint_store_energy = 0.0;
+    bool addDebugMarkers = false;
 
     double calculateESafe() const { return capacity - N_reg * reg_restore_energy; }
 };
@@ -129,6 +138,10 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
         if (auto v = root->getNumber("checkpoint_store_energy"))
             params.checkpoint_store_energy = *v;
     }
+
+    // add_debug_markers (optional, default false)
+    if (auto val = root->getBoolean("add_debug_markers"))
+        params.addDebugMarkers = *val;
 
     return true;
 }
@@ -267,8 +280,22 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
         checkpointPoints = distCkpt.analyze();
     }
 
+    // Resolve addDebugMarkers from CLI option or config
+    bool addDebugMarkers = AddDebugMarkersOpt.getValue() || params.addDebugMarkers;
+
+    // Get or create __nvm_regs as an external global: [16 x i16]
+    Module *M = const_cast<Module *>(MF.getFunction().getParent());
+    GlobalVariable *nvmRegsGV = M->getGlobalVariable("__nvm_regs");
+    if (!nvmRegsGV) {
+        auto *i16Ty = Type::getInt16Ty(M->getContext());
+        auto *arrayTy = ArrayType::get(i16Ty, 16);
+        nvmRegsGV =
+            new GlobalVariable(*M, arrayTy, /*isConstant=*/false, GlobalValue::ExternalLinkage,
+                               /*Initializer=*/nullptr, "__nvm_regs");
+    }
+
     // Instrumentation
-    RockClimbMachineInstrumenter instrumenter(MF);
+    RockClimbMachineInstrumenter instrumenter(MF, addDebugMarkers, nvmRegsGV);
     unsigned insertedCount = instrumenter.instrument(result.regionBoundaries, checkpointPoints,
                                                      params.distributedCheckpointing);
 
