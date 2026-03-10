@@ -4,8 +4,9 @@
 ** Original by Jerry Coffin (1991), Public Domain.
 */
 
-#include <stdint.h>
+#include "debug_counters.h"
 #include "loop_tripcount.h"
+#include <stdint.h>
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
@@ -22,45 +23,20 @@ static char *findme __attribute__((used));
 // --- Const data ---
 
 static const char *find_strings[NUM_PATTERNS] = {
-    "Kur",
-    "gent",
-    "lass",
-    "suns",
-    "for",
-    "xxx",
-    "long",
-    "have",
-    "where",
-    "xxxxxx",
-    "xxxxxx",
-    "pense",
-    "pow",
-    "xxxxx",
-    "Yo",
-    "and",
-    "faded",
-    "20",
-    "you",
-    "bac",
-    "an",
-    "way",
-    "possibili",
-    "fat",
-    "imag",
-    "th"
-};
+    "Kur",    "gent",   "lass",  "suns", "for",       "xxx", "long", "have",  "where",
+    "xxxxxx", "xxxxxx", "pense", "pow",  "xxxxx",     "Yo",  "and",  "faded", "20",
+    "you",    "bac",    "an",    "way",  "possibili", "fat", "imag", "th"};
 
-static const char search_text[] =
-    "KurtVonnegutsCommencementAddressatMITLadiesandgentlemen"
-    "oftheclassof97WearsunscreenIfIcouldofferyouonlyonetip"
-    "forthefuturesunscreenwouldbeitThelongtermbenefitsof"
-    "sunscreenhavebeenprovedbyscientistswhereastherestof"
-    "myadvicehasnobasismorereliablethanmyownmeandering"
-    "experienceIwilldispensethisadvicenowEnjoythepowerand"
-    "beautyofyouryouthOhnevermindYouwillnotunderstandthe"
-    "powerandbeautyofyouryouthuntiltheyvefadedButtrustme"
-    "in20yearsyoulllookbackatphotosofyourselfandrecallin"
-    "awayyoucantgraspnowhowmuchpossibilitylaybefore";
+static const char search_text[] = "KurtVonnegutsCommencementAddressatMITLadiesandgentlemen"
+                                  "oftheclassof97WearsunscreenIfIcouldofferyouonlyonetip"
+                                  "forthefuturesunscreenwouldbeitThelongtermbenefitsof"
+                                  "sunscreenhavebeenprovedbyscientistswhereastherestof"
+                                  "myadvicehasnobasismorereliablethanmyownmeandering"
+                                  "experienceIwilldispensethisadvicenowEnjoythepowerand"
+                                  "beautyofyouryouthOhnevermindYouwillnotunderstandthe"
+                                  "powerandbeautyofyouryouthuntiltheyvefadedButtrustme"
+                                  "in20yearsyoulllookbackatphotosofyourselfandrecallin"
+                                  "awayyoucantgraspnowhowmuchpossibilitylaybefore";
 
 // --- Helper functions ---
 
@@ -108,8 +84,7 @@ FORCE_INLINE const char *strsearch(const char *pattern, const char *text) {
         __loop_tripcount(TEXT_LEN);
 
         // Skip loop: advance by table lookup
-        while (pos < limit &&
-               (shift = table[(unsigned char)text[pos]]) > 0) {
+        while (pos < limit && (shift = table[(unsigned char)text[pos]]) > 0) {
             __loop_tripcount(TEXT_LEN);
             pos += shift;
         }
@@ -141,6 +116,7 @@ FORCE_INLINE const char *strsearch(const char *pattern, const char *text) {
 // --- Main ---
 
 __attribute__((noinline)) int main(void) {
+    DEBUG_INIT();
     volatile int total_found = 0;
     int i;
 
@@ -164,5 +140,6 @@ __attribute__((noinline)) int main(void) {
         }
     }
 
+    DEBUG_EXIT();
     return total_found;
 }

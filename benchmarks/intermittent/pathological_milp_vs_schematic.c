@@ -9,22 +9,22 @@
 
 #include <stdint.h>
 
+#include "debug_counters.h"
 #include "loop_tripcount.h"
 
 #define OUTER_ITERS 4096U
 
-#define MIX_STEP(x, mul, add, sh) \
-    do {                          \
-        (x) = (x) * (mul) + (add); \
-        (x) ^= ((x) >> (sh));       \
+#define MIX_STEP(x, mul, add, sh)                                                                  \
+    do {                                                                                           \
+        (x) = (x) * (mul) + (add);                                                                 \
+        (x) ^= ((x) >> (sh));                                                                      \
     } while (0)
 
-static uint32_t g_state
-    __attribute__((used)) = 0x12345678u;
-static uint32_t g_ring[8]
-    __attribute__((used));
+static uint32_t g_state __attribute__((used)) = 0x12345678u;
+static uint32_t g_ring[8] __attribute__((used));
 
 int main(void) {
+    DEBUG_INIT();
     uint32_t x = g_state ^ 0x9e3779b9u;
 
     for (uint32_t i = 0; i < OUTER_ITERS; ++i) {
@@ -47,7 +47,8 @@ int main(void) {
         g_ring[i & 7u] = x;
     }
 
-    g_state = x ^ g_ring[0] ^ g_ring[1] ^ g_ring[2] ^
-              g_ring[3] ^ g_ring[4] ^ g_ring[5] ^ g_ring[6] ^ g_ring[7];
+    g_state = x ^ g_ring[0] ^ g_ring[1] ^ g_ring[2] ^ g_ring[3] ^ g_ring[4] ^ g_ring[5] ^
+              g_ring[6] ^ g_ring[7];
+    DEBUG_EXIT();
     return (int)(g_state & 0x7fffffffU);
 }

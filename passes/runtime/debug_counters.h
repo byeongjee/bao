@@ -8,12 +8,13 @@
  *   #include "debug_counters.h"
  *   int main(void) {
  *       WDTCTL = WDTPW | WDTHOLD;
- *       debug_init();
+ *       DEBUG_INIT();
  *       // ... benchmark code ...
- *       debug_exit();
+ *       DEBUG_EXIT();
+ *       return 0;
  *   }
  *
- * Compile with -DDEBUG_COUNTERS to enable. Without it, calls are no-ops.
+ * Compile with -DDEBUG_COUNTERS to enable. Without it, macros expand to nothing.
  */
 
 #ifndef DEBUG_COUNTERS_H
@@ -24,10 +25,13 @@
 void debug_init(void);
 void debug_exit(void);
 
+#define DEBUG_INIT() debug_init()
+#define DEBUG_EXIT() debug_exit()
+
 #else
 
-#define debug_init() ((void)0)
-#define debug_exit() ((void)0)
+#define DEBUG_INIT()
+#define DEBUG_EXIT()
 
 #endif /* DEBUG_COUNTERS */
 

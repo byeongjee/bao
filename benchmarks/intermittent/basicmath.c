@@ -6,6 +6,7 @@
 #include <math.h>
 #include <stdint.h>
 
+#include "debug_counters.h"
 #include "loop_tripcount.h"
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
@@ -20,16 +21,10 @@ typedef struct {
 } int_sqrt_t;
 
 static double g_accum = 0.0;
-static int_sqrt_t g_last_sqrt
-    __attribute__((used));
+static int_sqrt_t g_last_sqrt __attribute__((used));
 
-FORCE_INLINE void solve_cubic(double a,
-                              double b,
-                              double c,
-                              double d,
-                              uint32_t *solutions,
-                              double *x)
-{
+FORCE_INLINE void solve_cubic(double a, double b, double c, double d, uint32_t *solutions,
+                              double *x) {
     double a1 = b / a;
     double a2 = c / a;
     double a3 = d / a;
@@ -52,8 +47,7 @@ FORCE_INLINE void solve_cubic(double a,
     }
 }
 
-FORCE_INLINE void usqrt(uint32_t x, int_sqrt_t *q)
-{
+FORCE_INLINE void usqrt(uint32_t x, int_sqrt_t *q) {
     uint32_t a = 0;
     uint32_t r = 0;
     uint32_t e = 0;
@@ -75,18 +69,16 @@ FORCE_INLINE void usqrt(uint32_t x, int_sqrt_t *q)
     q->frac = r;
 }
 
-FORCE_INLINE double rad2deg(double rad)
-{
+FORCE_INLINE double rad2deg(double rad) {
     return (180.0 * rad / PI_CONST);
 }
 
-FORCE_INLINE double deg2rad(double deg)
-{
+FORCE_INLINE double deg2rad(double deg) {
     return (PI_CONST * deg / 180.0);
 }
 
-int main(void)
-{
+int main(void) {
+    DEBUG_INIT();
     double a1 = 1.0;
     double b1 = -10.5;
     double c1 = 32.0;
@@ -163,5 +155,6 @@ int main(void)
     g_accum = accum;
     g_last_sqrt = q;
 
+    DEBUG_EXIT();
     return (int)(((uint64_t)(accum * 1000.0)) & 0x7FFFFFFF);
 }

@@ -7,12 +7,13 @@
  * Hashes a 128-byte input message for intermittent computing benchmark.
  */
 
-#include <stdint.h>
+#include "debug_counters.h"
 #include "loop_tripcount.h"
+#include <stdint.h>
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
-#define SHA256_HASH_SIZE  32
+#define SHA256_HASH_SIZE 32
 #define SHA256_HASH_WORDS 8
 #define DATA_LEN 128
 
@@ -24,7 +25,7 @@ typedef struct {
     uint32_t bufferLength;
     union {
         uint32_t words[16];
-        uint8_t  bytes[64];
+        uint8_t bytes[64];
     } buffer;
 } SHA256_CTX;
 
@@ -36,62 +37,47 @@ uint8_t g_hash[SHA256_HASH_SIZE];
 /* --- Const data (no annotation) --- */
 
 static const uint32_t K[64] = {
-    0x428a2f98L, 0x71374491L, 0xb5c0fbcfL, 0xe9b5dba5L,
-    0x3956c25bL, 0x59f111f1L, 0x923f82a4L, 0xab1c5ed5L,
-    0xd807aa98L, 0x12835b01L, 0x243185beL, 0x550c7dc3L,
-    0x72be5d74L, 0x80deb1feL, 0x9bdc06a7L, 0xc19bf174L,
-    0xe49b69c1L, 0xefbe4786L, 0x0fc19dc6L, 0x240ca1ccL,
-    0x2de92c6fL, 0x4a7484aaL, 0x5cb0a9dcL, 0x76f988daL,
-    0x983e5152L, 0xa831c66dL, 0xb00327c8L, 0xbf597fc7L,
-    0xc6e00bf3L, 0xd5a79147L, 0x06ca6351L, 0x14292967L,
-    0x27b70a85L, 0x2e1b2138L, 0x4d2c6dfcL, 0x53380d13L,
-    0x650a7354L, 0x766a0abbL, 0x81c2c92eL, 0x92722c85L,
-    0xa2bfe8a1L, 0xa81a664bL, 0xc24b8b70L, 0xc76c51a3L,
-    0xd192e819L, 0xd6990624L, 0xf40e3585L, 0x106aa070L,
-    0x19a4c116L, 0x1e376c08L, 0x2748774cL, 0x34b0bcb5L,
-    0x391c0cb3L, 0x4ed8aa4aL, 0x5b9cca4fL, 0x682e6ff3L,
-    0x748f82eeL, 0x78a5636fL, 0x84c87814L, 0x8cc70208L,
-    0x90befffaL, 0xa4506cebL, 0xbef9a3f7L, 0xc67178f2L
-};
+    0x428a2f98L, 0x71374491L, 0xb5c0fbcfL, 0xe9b5dba5L, 0x3956c25bL, 0x59f111f1L, 0x923f82a4L,
+    0xab1c5ed5L, 0xd807aa98L, 0x12835b01L, 0x243185beL, 0x550c7dc3L, 0x72be5d74L, 0x80deb1feL,
+    0x9bdc06a7L, 0xc19bf174L, 0xe49b69c1L, 0xefbe4786L, 0x0fc19dc6L, 0x240ca1ccL, 0x2de92c6fL,
+    0x4a7484aaL, 0x5cb0a9dcL, 0x76f988daL, 0x983e5152L, 0xa831c66dL, 0xb00327c8L, 0xbf597fc7L,
+    0xc6e00bf3L, 0xd5a79147L, 0x06ca6351L, 0x14292967L, 0x27b70a85L, 0x2e1b2138L, 0x4d2c6dfcL,
+    0x53380d13L, 0x650a7354L, 0x766a0abbL, 0x81c2c92eL, 0x92722c85L, 0xa2bfe8a1L, 0xa81a664bL,
+    0xc24b8b70L, 0xc76c51a3L, 0xd192e819L, 0xd6990624L, 0xf40e3585L, 0x106aa070L, 0x19a4c116L,
+    0x1e376c08L, 0x2748774cL, 0x34b0bcb5L, 0x391c0cb3L, 0x4ed8aa4aL, 0x5b9cca4fL, 0x682e6ff3L,
+    0x748f82eeL, 0x78a5636fL, 0x84c87814L, 0x8cc70208L, 0x90befffaL, 0xa4506cebL, 0xbef9a3f7L,
+    0xc67178f2L};
 
 static const uint8_t padding[64] = {
-    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-};
+    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 /* 128 bytes of input data */
 static const uint8_t data[DATA_LEN] = {
-    'S','H','A','-','2','5','6',' ','t','e','s','t',' ','d','a','t',
-    'a',' ','f','o','r',' ','i','n','t','e','r','m','i','t','t','e',
-    'n','t',' ','c','o','m','p','u','t','i','n','g',' ','b','e','n',
-    'c','h','m','a','r','k','.',' ','T','h','i','s',' ','i','s',' ',
-    'a',' ','1','2','8','-','b','y','t','e',' ','m','e','s','s','a',
-    'g','e',' ','u','s','e','d',' ','t','o',' ','e','x','e','r','c',
-    'i','s','e',' ','t','h','e',' ','S','H','A','2','5','6',' ','h',
-    'a','s','h',' ','a','l','g','o','r','i','t','h','m','.','.','.'
-};
+    'S', 'H', 'A', '-', '2', '5', '6', ' ', 't', 'e', 's', 't', ' ', 'd', 'a', 't', 'a', ' ', 'f',
+    'o', 'r', ' ', 'i', 'n', 't', 'e', 'r', 'm', 'i', 't', 't', 'e', 'n', 't', ' ', 'c', 'o', 'm',
+    'p', 'u', 't', 'i', 'n', 'g', ' ', 'b', 'e', 'n', 'c', 'h', 'm', 'a', 'r', 'k', '.', ' ', 'T',
+    'h', 'i', 's', ' ', 'i', 's', ' ', 'a', ' ', '1', '2', '8', '-', 'b', 'y', 't', 'e', ' ', 'm',
+    'e', 's', 's', 'a', 'g', 'e', ' ', 'u', 's', 'e', 'd', ' ', 't', 'o', ' ', 'e', 'x', 'e', 'r',
+    'c', 'i', 's', 'e', ' ', 't', 'h', 'e', ' ', 'S', 'H', 'A', '2', '5', '6', ' ', 'h', 'a', 's',
+    'h', ' ', 'a', 'l', 'g', 'o', 'r', 'i', 't', 'h', 'm', '.', '.', '.'};
 
 /* --- SHA-256 helper macros --- */
 
 #define ROTL(x, n) (((x) << (n)) | ((x) >> (32 - (n))))
 #define ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
 
-#define Ch(x, y, z)    ((z) ^ ((x) & ((y) ^ (z))))
-#define Maj(x, y, z)   (((x) & ((y) | (z))) | ((y) & (z)))
-#define SIGMA0(x)       (ROTR((x), 2) ^ ROTR((x), 13) ^ ROTR((x), 22))
-#define SIGMA1(x)       (ROTR((x), 6) ^ ROTR((x), 11) ^ ROTR((x), 25))
-#define sigma0(x)       (ROTR((x), 7) ^ ROTR((x), 18) ^ ((x) >> 3))
-#define sigma1(x)       (ROTR((x), 17) ^ ROTR((x), 19) ^ ((x) >> 10))
+#define Ch(x, y, z) ((z) ^ ((x) & ((y) ^ (z))))
+#define Maj(x, y, z) (((x) & ((y) | (z))) | ((y) & (z)))
+#define SIGMA0(x) (ROTR((x), 2) ^ ROTR((x), 13) ^ ROTR((x), 22))
+#define SIGMA1(x) (ROTR((x), 6) ^ ROTR((x), 11) ^ ROTR((x), 25))
+#define sigma0(x) (ROTR((x), 7) ^ ROTR((x), 18) ^ ((x) >> 3))
+#define sigma1(x) (ROTR((x), 17) ^ ROTR((x), 19) ^ ((x) >> 10))
 
 /* Little-endian byteswap */
-#define BYTESWAP(x) ((ROTR((x), 8) & 0xff00ff00L) | \
-                     (ROTL((x), 8) & 0x00ff00ffL))
+#define BYTESWAP(x) ((ROTR((x), 8) & 0xff00ff00L) | (ROTL((x), 8) & 0x00ff00ffL))
 
 FORCE_INLINE uint64_t byteswap64(uint64_t x) {
     uint32_t a = x >> 32;
@@ -101,18 +87,18 @@ FORCE_INLINE uint64_t byteswap64(uint64_t x) {
 
 #define BYTESWAP64(x) byteswap64(x)
 
-#define DO_ROUND()                                             \
-    {                                                          \
-        t1 = h + SIGMA1(e) + Ch(e, f, g) + *(Kp++) + *(W++);  \
-        t2 = SIGMA0(a) + Maj(a, b, c);                         \
-        h = g;                                                 \
-        g = f;                                                 \
-        f = e;                                                 \
-        e = d + t1;                                            \
-        d = c;                                                 \
-        c = b;                                                 \
-        b = a;                                                 \
-        a = t1 + t2;                                           \
+#define DO_ROUND()                                                                                 \
+    {                                                                                              \
+        t1 = h + SIGMA1(e) + Ch(e, f, g) + *(Kp++) + *(W++);                                       \
+        t2 = SIGMA0(a) + Maj(a, b, c);                                                             \
+        h = g;                                                                                     \
+        g = f;                                                                                     \
+        f = e;                                                                                     \
+        e = d + t1;                                                                                \
+        d = c;                                                                                     \
+        c = b;                                                                                     \
+        b = a;                                                                                     \
+        a = t1 + t2;                                                                               \
     }
 
 /* --- Forward declarations for mutual recursion --- */
@@ -140,8 +126,8 @@ FORCE_INLINE void SHA256Guts(SHA256_CTX *sc, const uint32_t *cbuf) {
     /* Message schedule expansion: 48 more words */
     W16 = &buf[0];
     W15 = &buf[1];
-    W7  = &buf[9];
-    W2  = &buf[14];
+    W7 = &buf[9];
+    W2 = &buf[14];
 
     for (i = 47; i >= 0; i--) {
         __loop_tripcount(48);
@@ -179,7 +165,7 @@ FORCE_INLINE void SHA256Guts(SHA256_CTX *sc, const uint32_t *cbuf) {
 }
 
 FORCE_INLINE void sha256_init(SHA256_CTX *sc) {
-    sc->totalLength  = 0ULL;
+    sc->totalLength = 0ULL;
     sc->hash[0] = 0x6a09e667L;
     sc->hash[1] = 0xbb67ae85L;
     sc->hash[2] = 0x3c6ef372L;
@@ -221,7 +207,7 @@ FORCE_INLINE void sha256_update(SHA256_CTX *sc, const void *vdata, uint32_t len)
         sc->totalLength += bytesToCopy * 8L;
 
         sc->bufferLength += bytesToCopy;
-        d8  += bytesToCopy;
+        d8 += bytesToCopy;
         len -= bytesToCopy;
 
         if (sc->bufferLength == 64L) {
@@ -261,8 +247,10 @@ FORCE_INLINE void sha256_final(SHA256_CTX *sc, uint8_t hash[SHA256_HASH_SIZE]) {
 /* --- Main --- */
 
 __attribute__((noinline)) int main(void) {
+    DEBUG_INIT();
     sha256_init(&g_ctx);
     sha256_update(&g_ctx, data, DATA_LEN);
     sha256_final(&g_ctx, g_hash);
+    DEBUG_EXIT();
     return (int)g_hash[0];
 }

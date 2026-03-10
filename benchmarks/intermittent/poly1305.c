@@ -4,8 +4,9 @@
  * Simplified: concrete struct instead of opaque double[], no function pointers,
  * uint32_t instead of size_t for MSP430.
  */
-#include <stdint.h>
+#include "debug_counters.h"
 #include "loop_tripcount.h"
+#include <stdint.h>
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
@@ -33,61 +34,43 @@ uint8_t g_hash[16];
 /* --- Const data (no annotation) --- */
 
 /* Key from RFC 7539 */
-static const uint8_t key[32] = {
-    0x85, 0xd6, 0xbe, 0x78, 0x57, 0x55, 0x6d, 0x33,
-    0x7f, 0x44, 0x52, 0xfe, 0x42, 0xd5, 0x06, 0xa8,
-    0x01, 0x03, 0x80, 0x8a, 0xfb, 0x0d, 0xb2, 0xfd,
-    0x4a, 0xbf, 0xf6, 0xaf, 0x41, 0x49, 0xf5, 0x1b
-};
+static const uint8_t key[32] = {0x85, 0xd6, 0xbe, 0x78, 0x57, 0x55, 0x6d, 0x33, 0x7f, 0x44, 0x52,
+                                0xfe, 0x42, 0xd5, 0x06, 0xa8, 0x01, 0x03, 0x80, 0x8a, 0xfb, 0x0d,
+                                0xb2, 0xfd, 0x4a, 0xbf, 0xf6, 0xaf, 0x41, 0x49, 0xf5, 0x1b};
 
 /* 128-byte test input */
 #define TEST_DATA_LEN 128
 static const uint8_t test_data[TEST_DATA_LEN] = {
-    0x43, 0x72, 0x79, 0x70, 0x74, 0x6f, 0x67, 0x72,
-    0x61, 0x70, 0x68, 0x69, 0x63, 0x20, 0x46, 0x6f,
-    0x72, 0x75, 0x6d, 0x20, 0x52, 0x65, 0x73, 0x65,
-    0x61, 0x72, 0x63, 0x68, 0x20, 0x47, 0x72, 0x6f,
-    0x75, 0x70, 0x20, 0x2d, 0x20, 0x50, 0x6f, 0x6c,
-    0x79, 0x31, 0x33, 0x30, 0x35, 0x20, 0x4d, 0x41,
-    0x43, 0x20, 0x62, 0x65, 0x6e, 0x63, 0x68, 0x6d,
-    0x61, 0x72, 0x6b, 0x20, 0x74, 0x65, 0x73, 0x74,
-    0x20, 0x64, 0x61, 0x74, 0x61, 0x20, 0x66, 0x6f,
-    0x72, 0x20, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6d,
-    0x69, 0x74, 0x74, 0x65, 0x6e, 0x74, 0x20, 0x63,
-    0x6f, 0x6d, 0x70, 0x75, 0x74, 0x69, 0x6e, 0x67,
-    0x20, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x73,
-    0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x65, 0x6e,
-    0x65, 0x72, 0x67, 0x79, 0x20, 0x68, 0x61, 0x72,
-    0x76, 0x65, 0x73, 0x74, 0x69, 0x6e, 0x67, 0x2e
-};
+    0x43, 0x72, 0x79, 0x70, 0x74, 0x6f, 0x67, 0x72, 0x61, 0x70, 0x68, 0x69, 0x63, 0x20, 0x46, 0x6f,
+    0x72, 0x75, 0x6d, 0x20, 0x52, 0x65, 0x73, 0x65, 0x61, 0x72, 0x63, 0x68, 0x20, 0x47, 0x72, 0x6f,
+    0x75, 0x70, 0x20, 0x2d, 0x20, 0x50, 0x6f, 0x6c, 0x79, 0x31, 0x33, 0x30, 0x35, 0x20, 0x4d, 0x41,
+    0x43, 0x20, 0x62, 0x65, 0x6e, 0x63, 0x68, 0x6d, 0x61, 0x72, 0x6b, 0x20, 0x74, 0x65, 0x73, 0x74,
+    0x20, 0x64, 0x61, 0x74, 0x61, 0x20, 0x66, 0x6f, 0x72, 0x20, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6d,
+    0x69, 0x74, 0x74, 0x65, 0x6e, 0x74, 0x20, 0x63, 0x6f, 0x6d, 0x70, 0x75, 0x74, 0x69, 0x6e, 0x67,
+    0x20, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x73, 0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x65, 0x6e,
+    0x65, 0x72, 0x67, 0x79, 0x20, 0x68, 0x61, 0x72, 0x76, 0x65, 0x73, 0x74, 0x69, 0x6e, 0x67, 0x2e};
 
 /* --- Macros --- */
 
-#define CONSTANT_TIME_CARRY(a, b) ( \
-    (a ^ ((a ^ b) | ((a - b) ^ b))) >> (sizeof(a) * 8 - 1))
+#define CONSTANT_TIME_CARRY(a, b) ((a ^ ((a ^ b) | ((a - b) ^ b))) >> (sizeof(a) * 8 - 1))
 
 /* --- Helper Functions --- */
 
 /* Pick 32-bit integer in little endian order */
-FORCE_INLINE uint32_t U8TOU32(const uint8_t *p)
-{
-    return (((uint32_t)(p[0] & 0xff)) |
-            ((uint32_t)(p[1] & 0xff) << 8) |
-            ((uint32_t)(p[2] & 0xff) << 16) |
-            ((uint32_t)(p[3] & 0xff) << 24));
+FORCE_INLINE uint32_t U8TOU32(const uint8_t *p) {
+    return (((uint32_t)(p[0] & 0xff)) | ((uint32_t)(p[1] & 0xff) << 8) |
+            ((uint32_t)(p[2] & 0xff) << 16) | ((uint32_t)(p[3] & 0xff) << 24));
 }
 
 /* Store a 32-bit integer in little endian */
-FORCE_INLINE void U32TO8(uint8_t *p, uint32_t v)
-{
+FORCE_INLINE void U32TO8(uint8_t *p, uint32_t v) {
     p[0] = (uint8_t)((v) & 0xff);
     p[1] = (uint8_t)((v >> 8) & 0xff);
     p[2] = (uint8_t)((v >> 16) & 0xff);
     p[3] = (uint8_t)((v >> 24) & 0xff);
 }
 
-FORCE_INLINE void poly1305_init(poly1305_ctx_t *ctx, const uint8_t k[32])
-{
+FORCE_INLINE void poly1305_init(poly1305_ctx_t *ctx, const uint8_t k[32]) {
     poly1305_internal *st = &ctx->st;
 
     /* h = 0 */
@@ -112,9 +95,8 @@ FORCE_INLINE void poly1305_init(poly1305_ctx_t *ctx, const uint8_t k[32])
     ctx->num = 0;
 }
 
-FORCE_INLINE void poly1305_blocks(poly1305_internal *st, const uint8_t *inp,
-                                   uint32_t len, uint32_t padbit)
-{
+FORCE_INLINE void poly1305_blocks(poly1305_internal *st, const uint8_t *inp, uint32_t len,
+                                  uint32_t padbit) {
     uint32_t r0, r1, r2, r3;
     uint32_t s1, s2, s3;
     uint32_t h0, h1, h2, h3, h4, c;
@@ -136,7 +118,7 @@ FORCE_INLINE void poly1305_blocks(poly1305_internal *st, const uint8_t *inp,
     h4 = st->h[4];
 
     while (len >= POLY1305_BLOCK_SIZE) {
-        __loop_tripcount(8);  /* 128 / 16 = 8 blocks max */
+        __loop_tripcount(8); /* 128 / 16 = 8 blocks max */
 
         /* h += m[i] */
         h0 = (uint32_t)(d0 = (uint64_t)h0 + U8TOU32(inp + 0));
@@ -146,24 +128,12 @@ FORCE_INLINE void poly1305_blocks(poly1305_internal *st, const uint8_t *inp,
         h4 += (uint32_t)(d3 >> 32) + padbit;
 
         /* h *= r "%" p */
-        d0 = ((uint64_t)h0 * r0) +
-             ((uint64_t)h1 * s3) +
-             ((uint64_t)h2 * s2) +
-             ((uint64_t)h3 * s1);
-        d1 = ((uint64_t)h0 * r1) +
-             ((uint64_t)h1 * r0) +
-             ((uint64_t)h2 * s3) +
-             ((uint64_t)h3 * s2) +
+        d0 = ((uint64_t)h0 * r0) + ((uint64_t)h1 * s3) + ((uint64_t)h2 * s2) + ((uint64_t)h3 * s1);
+        d1 = ((uint64_t)h0 * r1) + ((uint64_t)h1 * r0) + ((uint64_t)h2 * s3) + ((uint64_t)h3 * s2) +
              (h4 * s1);
-        d2 = ((uint64_t)h0 * r2) +
-             ((uint64_t)h1 * r1) +
-             ((uint64_t)h2 * r0) +
-             ((uint64_t)h3 * s3) +
+        d2 = ((uint64_t)h0 * r2) + ((uint64_t)h1 * r1) + ((uint64_t)h2 * r0) + ((uint64_t)h3 * s3) +
              (h4 * s2);
-        d3 = ((uint64_t)h0 * r3) +
-             ((uint64_t)h1 * r2) +
-             ((uint64_t)h2 * r1) +
-             ((uint64_t)h3 * r0) +
+        d3 = ((uint64_t)h0 * r3) + ((uint64_t)h1 * r2) + ((uint64_t)h2 * r1) + ((uint64_t)h3 * r0) +
              (h4 * s3);
         h4 = (h4 * r0);
 
@@ -193,9 +163,7 @@ FORCE_INLINE void poly1305_blocks(poly1305_internal *st, const uint8_t *inp,
     st->h[4] = h4;
 }
 
-FORCE_INLINE void poly1305_emit(poly1305_internal *st, uint8_t mac[16],
-                                 const uint32_t nonce[4])
-{
+FORCE_INLINE void poly1305_emit(poly1305_internal *st, uint8_t mac[16], const uint32_t nonce[4]) {
     uint32_t h0, h1, h2, h3, h4;
     uint32_t g0, g1, g2, g3, g4;
     uint64_t t;
@@ -238,9 +206,7 @@ FORCE_INLINE void poly1305_emit(poly1305_internal *st, uint8_t mac[16],
     U32TO8(mac + 12, h3);
 }
 
-FORCE_INLINE void poly1305_update(poly1305_ctx_t *ctx, const uint8_t *inp,
-                                   uint32_t len)
-{
+FORCE_INLINE void poly1305_update(poly1305_ctx_t *ctx, const uint8_t *inp, uint32_t len) {
     uint32_t rem, num;
 
     if ((num = ctx->num)) {
@@ -271,14 +237,13 @@ FORCE_INLINE void poly1305_update(poly1305_ctx_t *ctx, const uint8_t *inp,
     ctx->num = rem;
 }
 
-FORCE_INLINE void poly1305_final(poly1305_ctx_t *ctx, uint8_t mac[16])
-{
+FORCE_INLINE void poly1305_final(poly1305_ctx_t *ctx, uint8_t mac[16]) {
     uint32_t num;
 
     if ((num = ctx->num)) {
-        ctx->data[num++] = 1;  /* pad bit */
+        ctx->data[num++] = 1; /* pad bit */
         while (num < POLY1305_BLOCK_SIZE) {
-            __loop_tripcount(16);  /* at most 15 iterations */
+            __loop_tripcount(16); /* at most 15 iterations */
             ctx->data[num++] = 0;
         }
         poly1305_blocks(&ctx->st, ctx->data, POLY1305_BLOCK_SIZE, 0);
@@ -289,10 +254,11 @@ FORCE_INLINE void poly1305_final(poly1305_ctx_t *ctx, uint8_t mac[16])
 
 /* --- Main --- */
 
-__attribute__((noinline)) int main(void)
-{
+__attribute__((noinline)) int main(void) {
+    DEBUG_INIT();
     poly1305_init(&g_ctx, key);
     poly1305_update(&g_ctx, test_data, TEST_DATA_LEN);
     poly1305_final(&g_ctx, g_hash);
+    DEBUG_EXIT();
     return (int)g_hash[0];
 }

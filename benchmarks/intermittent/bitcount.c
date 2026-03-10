@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <stdint.h>
 
+#include "debug_counters.h"
 #include "loop_tripcount.h"
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
@@ -15,41 +16,29 @@
 #define ITERATIONS 100000U
 
 static uint32_t g_seed = RNG_SEED;
-static uint32_t g_totals[NUM_FUNCS]
-    __attribute__((used));
+static uint32_t g_totals[NUM_FUNCS] __attribute__((used));
 
 static const uint8_t g_bits[256] = {
-    0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-    4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8,
+    0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8,
 };
 
-FORCE_INLINE void my_srand(uint32_t new_seed)
-{
+FORCE_INLINE void my_srand(uint32_t new_seed) {
     g_seed = new_seed;
 }
 
-FORCE_INLINE uint32_t my_rand(void)
-{
+FORCE_INLINE uint32_t my_rand(void) {
     g_seed = (uint32_t)(1103515245u * g_seed + 12345u);
     return g_seed;
 }
 
-FORCE_INLINE uint32_t bit_count(uint32_t x)
-{
+FORCE_INLINE uint32_t bit_count(uint32_t x) {
     uint32_t n = 0;
 
     if (x != 0U) {
@@ -63,8 +52,7 @@ FORCE_INLINE uint32_t bit_count(uint32_t x)
     return n;
 }
 
-FORCE_INLINE uint32_t bitcount(uint32_t i)
-{
+FORCE_INLINE uint32_t bitcount(uint32_t i) {
     i = ((i & 0xAAAAAAAAL) >> 1) + (i & 0x55555555L);
     i = ((i & 0xCCCCCCCCL) >> 2) + (i & 0x33333333L);
     i = ((i & 0xF0F0F0F0L) >> 4) + (i & 0x0F0F0F0FL);
@@ -74,10 +62,8 @@ FORCE_INLINE uint32_t bitcount(uint32_t i)
     return i;
 }
 
-FORCE_INLINE uint32_t ntbl_bitcount(uint32_t x)
-{
-    return g_bits[(uint8_t)(x & 0x0000000FUL)] +
-           g_bits[(uint8_t)((x & 0x000000F0UL) >> 4)] +
+FORCE_INLINE uint32_t ntbl_bitcount(uint32_t x) {
+    return g_bits[(uint8_t)(x & 0x0000000FUL)] + g_bits[(uint8_t)((x & 0x000000F0UL) >> 4)] +
            g_bits[(uint8_t)((x & 0x00000F00UL) >> 8)] +
            g_bits[(uint8_t)((x & 0x0000F000UL) >> 12)] +
            g_bits[(uint8_t)((x & 0x000F0000UL) >> 16)] +
@@ -86,8 +72,7 @@ FORCE_INLINE uint32_t ntbl_bitcount(uint32_t x)
            g_bits[(uint8_t)((x & 0xF0000000UL) >> 28)];
 }
 
-FORCE_INLINE uint32_t ntbl_bitcnt(uint32_t x)
-{
+FORCE_INLINE uint32_t ntbl_bitcnt(uint32_t x) {
     uint32_t cnt = 0;
     while (x != 0U) {
         __loop_tripcount(8);
@@ -97,8 +82,7 @@ FORCE_INLINE uint32_t ntbl_bitcnt(uint32_t x)
     return cnt;
 }
 
-FORCE_INLINE uint32_t btbl_bitcnt(uint32_t x)
-{
+FORCE_INLINE uint32_t btbl_bitcnt(uint32_t x) {
     uint32_t cnt = 0;
     while (x != 0U) {
         __loop_tripcount(4);
@@ -108,8 +92,7 @@ FORCE_INLINE uint32_t btbl_bitcnt(uint32_t x)
     return cnt;
 }
 
-FORCE_INLINE uint32_t BW_btbl_bitcount(uint32_t x)
-{
+FORCE_INLINE uint32_t BW_btbl_bitcount(uint32_t x) {
     union {
         uint8_t ch[4];
         uint32_t y;
@@ -117,12 +100,10 @@ FORCE_INLINE uint32_t BW_btbl_bitcount(uint32_t x)
 
     u.y = x;
 
-    return g_bits[u.ch[0]] + g_bits[u.ch[1]] +
-           g_bits[u.ch[3]] + g_bits[u.ch[2]];
+    return g_bits[u.ch[0]] + g_bits[u.ch[1]] + g_bits[u.ch[3]] + g_bits[u.ch[2]];
 }
 
-FORCE_INLINE uint32_t AR_btbl_bitcount(uint32_t x)
-{
+FORCE_INLINE uint32_t AR_btbl_bitcount(uint32_t x) {
     uint8_t *ptr = (uint8_t *)&x;
     uint32_t accu = g_bits[*ptr++];
 
@@ -133,8 +114,7 @@ FORCE_INLINE uint32_t AR_btbl_bitcount(uint32_t x)
     return accu;
 }
 
-FORCE_INLINE uint32_t bit_shifter(uint32_t x)
-{
+FORCE_INLINE uint32_t bit_shifter(uint32_t x) {
     uint32_t i;
     uint32_t n;
 
@@ -146,8 +126,8 @@ FORCE_INLINE uint32_t bit_shifter(uint32_t x)
     return n;
 }
 
-int main(void)
-{
+int main(void) {
+    DEBUG_INIT();
     uint32_t i;
     uint32_t j;
     uint32_t num;
@@ -197,5 +177,6 @@ int main(void)
         checksum ^= (set_bits + (i * 0x9E3779B9u));
     }
 
+    DEBUG_EXIT();
     return (int)checksum;
 }
