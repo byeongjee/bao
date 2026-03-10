@@ -21,15 +21,32 @@ bool MachineDistributedCheckpointing::isCheckpointableReg(MCPhysReg /*reg*/) {
     return true;
 }
 
+/// Normalize a register (possibly an 8-bit sub-register) to its 16-bit GPR.
+/// E.g., R4B → R4.  Returns 0 if the register doesn't overlap any GPR.
+static MCPhysReg normalizeToGPR16(MCPhysReg reg, const MachineFunction &MF) {
+    if (reg >= msp430::R4 && reg <= msp430::R15)
+        return reg; // Already a 16-bit GPR
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    for (unsigned gpr = msp430::R4; gpr <= msp430::R15; ++gpr) {
+        if (TRI->regsOverlap(reg, gpr))
+            return static_cast<MCPhysReg>(gpr);
+    }
+    return 0;
+}
+
 unsigned MachineDistributedCheckpointing::assignRegId(MCPhysReg reg) {
-    auto it = regIdMap_.find(reg);
+    // Normalize sub-registers (e.g., 8-bit R4B) to their 16-bit GPR
+    MCPhysReg gpr = normalizeToGPR16(reg, MF_);
+    assert(gpr && "Register does not map to any GPR R4-R15");
+
+    auto it = regIdMap_.find(gpr);
     if (it != regIdMap_.end())
         return it->second;
     // Deterministic mapping: R4=0, R5=1, ..., R15=11
     // This matches boot.S's fixed restore order (__nvm_regs[0] → R4, etc.)
-    unsigned id = static_cast<unsigned>(reg) - msp430::R4;
+    unsigned id = static_cast<unsigned>(gpr) - msp430::R4;
     assert(id < 12 && "Register ID out of range for __nvm_regs");
-    regIdMap_[reg] = id;
+    regIdMap_[gpr] = id;
     return id;
 }
 

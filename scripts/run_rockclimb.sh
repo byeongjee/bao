@@ -7,7 +7,11 @@
 # Outputs a CSV summary.
 #
 # Usage:
-#   ./scripts/run_rockclimb.sh [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#   ./scripts/run_rockclimb.sh [--mock] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#
+# Options:
+#   --mock      Use mock counter runtime (counter stubs, UART output).
+#               Default: real runtime (boot.S save+halt, FRAM recovery).
 #
 # If benchmark names are given, only those are run (matched by filename without .c).
 # Example: ./scripts/run_rockclimb.sh crc chacha20 rsa
@@ -18,13 +22,15 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 OUTPUT_CSV="$PROJECT_DIR/benchmarks/rockclimb_benchmark_summary.csv"
 VERBOSE=0
+MOCK=0
 FILTER_BENCHMARKS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) OUTPUT_CSV="$2"; shift 2 ;;
         -v|--verbose) VERBOSE=1; shift ;;
-        -h|--help) echo "Usage: $0 [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
+        --mock) MOCK=1; shift ;;
+        -h|--help) echo "Usage: $0 [--mock] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) FILTER_BENCHMARKS+=("$1"); shift ;;
     esac
@@ -108,9 +114,12 @@ for bench_path in "${BENCHMARKS[@]}"; do
             -c "$cap_config"
             -o "$TMP_DIR/$bench_name"
             --verbose
-            --link --mock-counter
-            "$bench_path"
+            --link
         )
+        if [[ "$MOCK" -eq 1 ]]; then
+            run_cmd+=(--mock-counter)
+        fi
+        run_cmd+=("$bench_path")
         printf -v run_cmd_display '%q ' "${run_cmd[@]}"
         run_cmd_display="${run_cmd_display% }"
         echo "  Command: $run_cmd_display"
@@ -124,25 +133,27 @@ for bench_path in "${BENCHMARKS[@]}"; do
             flash_output=$(mspdebug tilib "prog $TMP_DIR/${bench_name}.elf" 2>&1) || true
         fi
 
-        # Read serial output with timeout (program runs and prints counter summary)
+        # Read serial output (mock mode only — real runtime halts in LPM4, no UART)
         serial_output=""
-        SERIAL_DEV=$(ls /dev/tty.usbmodem* 2>/dev/null | head -1)
-        if [[ -z "$SERIAL_DEV" ]]; then
-            SERIAL_DEV=$(ls /dev/ttyACM* 2>/dev/null | head -1)
-        fi
-        if [[ -n "$SERIAL_DEV" && -f "$TMP_DIR/${bench_name}.elf" ]]; then
-            # Configure serial port
-            stty -f "$SERIAL_DEV" 9600 cs8 -cstopb -parenb raw 2>/dev/null || \
-                stty -F "$SERIAL_DEV" 9600 cs8 -cstopb -parenb raw 2>/dev/null || true
-            # Read with timeout
-            timeout 30 cat "$SERIAL_DEV" > "$TMP_DIR/serial.out" 2>/dev/null &
-            SERIAL_PID=$!
-            sleep 1
-            # Reset device to start execution
-            mspdebug tilib "reset" "run" 2>/dev/null &
-            # Wait for output or timeout
-            wait $SERIAL_PID 2>/dev/null || true
-            serial_output=$(cat "$TMP_DIR/serial.out" 2>/dev/null) || true
+        if [[ "$MOCK" -eq 1 ]]; then
+            SERIAL_DEV=$(ls /dev/tty.usbmodem* 2>/dev/null | head -1)
+            if [[ -z "$SERIAL_DEV" ]]; then
+                SERIAL_DEV=$(ls /dev/ttyACM* 2>/dev/null | head -1)
+            fi
+            if [[ -n "$SERIAL_DEV" && -f "$TMP_DIR/${bench_name}.elf" ]]; then
+                # Configure serial port
+                stty -f "$SERIAL_DEV" 9600 cs8 -cstopb -parenb raw 2>/dev/null || \
+                    stty -F "$SERIAL_DEV" 9600 cs8 -cstopb -parenb raw 2>/dev/null || true
+                # Read with timeout
+                timeout 30 cat "$SERIAL_DEV" > "$TMP_DIR/serial.out" 2>/dev/null &
+                SERIAL_PID=$!
+                sleep 1
+                # Reset device to start execution
+                mspdebug tilib "reset" "run" 2>/dev/null &
+                # Wait for output or timeout
+                wait $SERIAL_PID 2>/dev/null || true
+                serial_output=$(cat "$TMP_DIR/serial.out" 2>/dev/null) || true
+            fi
         fi
 
         # Merge compile stderr + serial output for stat extraction
