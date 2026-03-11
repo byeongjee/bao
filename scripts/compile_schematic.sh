@@ -177,11 +177,7 @@ if $OPT -load-pass-plugin="$PASS_LIB" \
     $SCHEMATIC_EXTRA_FLAGS \
     -S "$SCHEMATIC_INPUT_LL" -o "$TMP_DIR/ckpt.ll" \
     >"$PASS_LOG" 2>&1; then
-    if [[ "$VERBOSE" == "true" ]]; then
-        cat "$PASS_LOG"
-    else
-        head -10 "$PASS_LOG"
-    fi
+    cat "$PASS_LOG"
 else
     cat "$PASS_LOG" >&2
     error "SCHEMATIC pass failed (see output above)"

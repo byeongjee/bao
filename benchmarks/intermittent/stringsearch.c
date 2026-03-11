@@ -16,9 +16,9 @@
 
 // --- Mutable globals (MILP candidates) ---
 
-static uint32_t table[256] __attribute__((used, section(".nvm")));
-static uint32_t len __attribute__((used, section(".nvm")));
-static char *findme __attribute__((used, section(".nvm")));
+static uint32_t table[256] __attribute__((used, section(".fram")));
+static uint32_t len __attribute__((used, section(".fram")));
+static char *findme __attribute__((used, section(".fram")));
 
 // --- Const data ---
 

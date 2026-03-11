@@ -21,7 +21,7 @@ typedef uint16_t index_t; // bucket index
 static fingerprint_t filter[NUM_BUCKETS] __attribute__((used));
 
 // LFSR state for random number generation
-static uint16_t lfsr_state __attribute__((section(".nvm")));
+static uint16_t lfsr_state __attribute__((section(".fram")));
 
 FORCE_INLINE uint16_t simple_rand(void) {
     // If the last bit is 1, shift and XOR. If 0, just shift.

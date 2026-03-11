@@ -21,16 +21,16 @@
 
 /* --- Mutable globals --- */
 
-static float realin[MAXSIZE] __attribute__((section(".nvm")));
-static float imagin[MAXSIZE] __attribute__((section(".nvm")));
-static float realout[MAXSIZE] __attribute__((section(".nvm")));
-static float imagout[MAXSIZE] __attribute__((section(".nvm")));
-static float Coeff[MAXWAVES] __attribute__((section(".nvm")));
-static float Amp[MAXWAVES] __attribute__((section(".nvm")));
+static float realin[MAXSIZE] __attribute__((section(".fram")));
+static float imagin[MAXSIZE] __attribute__((section(".fram")));
+static float realout[MAXSIZE] __attribute__((section(".fram")));
+static float imagout[MAXSIZE] __attribute__((section(".fram")));
+static float Coeff[MAXWAVES] __attribute__((section(".fram")));
+static float Amp[MAXWAVES] __attribute__((section(".fram")));
 
 /* --- Simple LCG RNG (from ulswap-bench common.c) --- */
 
-static uint32_t _myrand_seed __attribute__((section(".nvm"))) = 1234;
+static uint32_t _myrand_seed __attribute__((section(".fram"))) = 1234;
 
 FORCE_INLINE void my_srand(uint32_t new_seed) {
     _myrand_seed = new_seed;

@@ -2,19 +2,19 @@
 #
 # Benchmark SCHEMATIC checkpoint insertion across all intermittent benchmarks
 # and capacitor sizes. Compiles via compile_schematic.sh, flashes to MSP430
-# via mspdebug, and reads runtime counters over UART.
+# via mspdebug, and reads runtime counters from NVM.
 #
 # Outputs a CSV summary.
 #
 # Pipeline per benchmark:
 #   1. Collect trace once via compile_schematic.sh --trace-only
-#   2. Per capacitor: compile with --link --debug-counters, flash, read serial
+#   2. Per capacitor: compile with --link --debug-counters, flash, read NVM
 #
 # Usage:
 #   ./scripts/run_schematic.sh [--debug-counters] [--halt-mode] [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
 #
 # Options:
-#   --debug-counters  Link debug counter runtime (UART output + NVM counters).
+#   --debug-counters  Link debug counter runtime (NVM counters + UART output).
 #   --halt-mode       Enable LPM4 halt at region boundaries.
 #   --cap <size>      Run only the given capacitor size (1uF, 10uF, 100uF).
 #                     Can be repeated: --cap 1uF --cap 10uF
@@ -25,6 +25,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/lib/common.sh"
 
 OUTPUT_CSV="$PROJECT_DIR/benchmarks/schematic_benchmark_summary.csv"
 VERBOSE=0
@@ -96,11 +97,11 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
     exit 1
 fi
 
-# CSV header
-HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,boundary_checks,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,candidate_globals,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted"
+# CSV header — shared columns match RockClimb, then SCHEMATIC-specific columns
+HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,runtime_region_boundary_calls,runtime_save_reg_calls,runtime_restore_reg_calls,runtime_store_mem_calls,runtime_restore_mem_calls,result,candidate_globals,region_boundaries,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted"
 echo "$HEADER" > "$OUTPUT_CSV"
 
-FAIL_COLS=",,,,,,,,,,,,,,,,,,"  # 18 empty fields for error rows
+FAIL_COLS=",,,,,,,,,,,,,,,,,,,"  # 19 empty fields for error rows
 
 # Extract first numeric/token value after "label:" from output.
 extract_stat() {
@@ -122,22 +123,9 @@ extract_stat() {
     return 1
 }
 
-# Extract runtime counter value from debug counter output.
-extract_counter() {
-    local output="$1"
-    local label="$2"
-    local line value
-    line=$(echo "$output" | grep -F "$label:" | head -1 || true)
-    if [[ -n "$line" ]]; then
-        value=$(echo "$line" | awk '{print $NF}')
-        echo "$value"
-    else
-        echo "0"
-    fi
-}
-
 TMPDIR="${TMPDIR:-/tmp}/schematic_bench_$$"
 mkdir -p "$TMPDIR"
+trap "rm -rf $TMPDIR" EXIT
 
 total=$((${#BENCHMARKS[@]} * ${#CAPACITOR_CONFIGS[@]}))
 count=0
@@ -184,7 +172,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
     mv "$TMPDIR/${bench_name}_trace.json" "$trace_json"
     echo "  Trace collected for $bench_name (profiling: ${PROFILING_TIME_MS}ms)"
 
-    # === Per-capacitor: compile, flash, read serial ===
+    # === Per-capacitor: compile, flash, read NVM ===
     for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
         cap_label="${cap_entry%%:*}"
         cap_config="${cap_entry#*:}"
@@ -226,24 +214,30 @@ for bench_path in "${BENCHMARKS[@]}"; do
             echo "$compile_output"
         fi
 
-        # Flash via mspdebug
-        flash_output=""
-        if [[ -f "$TMPDIR/${bench_name}.elf" ]]; then
-            flash_output=$(mspdebug tilib "prog $TMPDIR/${bench_name}.elf" 2>&1) || true
-        fi
-
-        # Read serial output (debug-counters mode — real runtime halts in LPM4, no UART)
-        serial_output=""
+        # Flash, run, and read NVM (debug-counters mode only)
+        nvm_output=""
         if [[ "$DEBUG_COUNTERS" -eq 1 && -f "$TMPDIR/${bench_name}.elf" ]]; then
-            serial_output=$(uv run python3 "$SCRIPT_DIR/lib/read_serial.py" \
-                --timeout 30 \
-                --reset-cmd "mspdebug tilib \"reset\" \"run\"" \
-                2>"$TMPDIR/serial.err") || true
+            nvm_output=$(flash_run_and_read \
+                "$TMPDIR/${bench_name}.elf" 30 \
+                __nvm_done __nvm_result cnt_boundary cnt_save_reg cnt_restore_reg cnt_store_mem cnt_restore_mem \
+                2>"$TMPDIR/nvm_read.err") || true
         fi
 
-        # Merge compile + serial output for stat extraction
+        # Convert NVM key=value output to label: value format for extract_stat
+        nvm_as_labels=""
+        if [[ -n "$nvm_output" ]]; then
+            nvm_as_labels=$(echo "$nvm_output" | sed \
+                -e 's/^__nvm_result=/RESULT: /' \
+                -e 's/^cnt_boundary=/__region_boundary: /' \
+                -e 's/^cnt_save_reg=/reg_saves: /' \
+                -e 's/^cnt_restore_reg=/reg_restores: /' \
+                -e 's/^cnt_store_mem=/mem_stores: /' \
+                -e 's/^cnt_restore_mem=/mem_restores: /')
+        fi
+
+        # Merge compile output + NVM output for stat extraction
         full_output="${compile_output}
-${serial_output}"
+${nvm_as_labels}"
 
         if [[ "$VERBOSE" -eq 1 ]]; then
             echo "$full_output"
@@ -264,37 +258,54 @@ ${serial_output}"
             continue
         fi
 
+        # Extract pass statistics
         basic_blocks=$(extract_stat "$full_output" "Basic blocks")
         edges=$(extract_stat "$full_output" "Edges")
+        regions=$(extract_stat "$full_output" "Regions")
+        compilation_time=$(extract_stat "$full_output" "Compilation time (ms)")
+        peak_rss=$(extract_stat "$full_output" "Peak RSS (KB)")
+
+        # SCHEMATIC-specific pass stats
         candidate_globals=$(extract_stat "$full_output" "Candidate globals (V_elig)")
+        region_boundaries=$(extract_stat "$full_output" "Region boundaries")
         enabled_ckpts=$(extract_stat "$full_output" "Enabled checkpoints")
         loop_decisions=$(extract_stat "$full_output" "Loop decisions")
-        regions=$(extract_stat "$full_output" "Regions")
         paths_analyzed=$(extract_stat "$full_output" "Paths analyzed")
         runtime_calls=$(extract_stat "$full_output" "Runtime calls inserted")
-        compilation_time=$(extract_stat "$full_output" "Compilation time (ms)")
+
+        # Extract runtime counters from NVM readback
+        rt_boundary=$(extract_stat "$full_output" "__region_boundary")
+        rt_save_reg=$(extract_stat "$full_output" "reg_saves")
+        rt_restore_reg=$(extract_stat "$full_output" "reg_restores")
+        rt_store_mem=$(extract_stat "$full_output" "mem_stores")
+        rt_restore_mem=$(extract_stat "$full_output" "mem_restores")
+
+        # Extract computation result (semantic correctness check)
+        bench_result=$(extract_stat "$full_output" "RESULT")
+
+        # Default to 0/empty if not found
+        basic_blocks=${basic_blocks:-0}
+        edges=${edges:-0}
+        regions=${regions:-0}
         compilation_time=${compilation_time:-0}
-        peak_rss=$(extract_stat "$full_output" "Peak RSS (KB)")
         peak_rss=${peak_rss:-0}
-        execution_time=$(extract_stat "$full_output" "Execution time (ms)")
-        execution_time=${execution_time:-0}
-        boundary_checks=$(extract_stat "$full_output" "Boundary checks")
-        boundary_checks=${boundary_checks:-0}
+        candidate_globals=${candidate_globals:-0}
+        region_boundaries=${region_boundaries:-0}
+        enabled_ckpts=${enabled_ckpts:-0}
+        loop_decisions=${loop_decisions:-0}
+        paths_analyzed=${paths_analyzed:-0}
+        runtime_calls=${runtime_calls:-0}
+        rt_boundary=${rt_boundary:-0}
+        rt_save_reg=${rt_save_reg:-0}
+        rt_restore_reg=${rt_restore_reg:-0}
+        rt_store_mem=${rt_store_mem:-0}
+        rt_restore_mem=${rt_restore_mem:-0}
+        bench_result=${bench_result:-}
 
-        # Extract debug counter stats (same labels as schematic_debug_counters.c)
-        rt_boundary=$(extract_counter "$full_output" "__region_boundary")
-        rt_save_reg=$(extract_counter "$full_output" "reg_saves")
-        rt_restore_reg=$(extract_counter "$full_output" "reg_restores")
-        rt_store_mem=$(extract_counter "$full_output" "mem_stores")
-        rt_restore_mem=$(extract_counter "$full_output" "mem_restores")
-
-        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$PROFILING_TIME_MS,$execution_time,$boundary_checks,$rt_boundary,$rt_save_reg,$rt_restore_reg,$rt_store_mem,$rt_restore_mem,$candidate_globals,$enabled_ckpts,$loop_decisions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$PROFILING_TIME_MS,$rt_boundary,$rt_save_reg,$rt_restore_reg,$rt_store_mem,$rt_restore_mem,$bench_result,$candidate_globals,$region_boundaries,$enabled_ckpts,$loop_decisions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $rt_boundary boundaries)"
     done
 done
-
-# Cleanup
-rm -rf "$TMPDIR"
 
 echo ""
 echo "=========================================="

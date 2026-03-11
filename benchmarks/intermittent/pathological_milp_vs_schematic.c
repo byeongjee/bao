@@ -20,8 +20,8 @@
         (x) ^= ((x) >> (sh));                                                                      \
     } while (0)
 
-static uint32_t g_state __attribute__((used, section(".nvm"))) = 0x12345678u;
-static uint32_t g_ring[8] __attribute__((used, section(".nvm")));
+static uint32_t g_state __attribute__((used, section(".fram"))) = 0x12345678u;
+static uint32_t g_ring[8] __attribute__((used, section(".fram")));
 
 int main(void) {
     DEBUG_INIT();

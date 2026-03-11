@@ -48,8 +48,8 @@ MEMORY {
   INFOB            : ORIGIN = 0x1900, LENGTH = 0x0080 /* END=0x197F, size 128 */
   INFOC            : ORIGIN = 0x1880, LENGTH = 0x0080 /* END=0x18FF, size 128 */
   INFOD            : ORIGIN = 0x1800, LENGTH = 0x0080 /* END=0x187F, size 128 */
-  /* MODIFIED: Split FRAM to reserve 1KB for RockClimb NVM checkpoint storage */
-  NVM (rxw)        : ORIGIN = 0x4000, LENGTH = 0x0400 /* END=0x43FF, size 1024 - RockClimb NVM */
+  /* MODIFIED: Split FRAM to reserve 1KB for NVM runtime state (counters, result) */
+  NVM (rxw)        : ORIGIN = 0x4000, LENGTH = 0x0400 /* END=0x43FF, size 1024 - NVM */
   FRAM (rwx)       : ORIGIN = 0x4400, LENGTH = 0xBB80 /* END=0xFF7F, size 48000 (was 49024) */
   HIFRAM (rxw)     : ORIGIN = 0x00010000, LENGTH = 0x00033FF7 /* Boundaries changed to fix CPU47 */
   JTAGSIGNATURE    : ORIGIN = 0xFF80, LENGTH = 0x0004
@@ -417,7 +417,15 @@ SECTIONS
     *(.upper.text.* .upper.text)
   } > HIFRAM
 
-  /* RockClimb NVM storage section.
+  /* Benchmark globals annotated section(".fram") — placed in main FRAM. */
+  .fram :
+  {
+    . = ALIGN(2);
+    *(.fram)
+    . = ALIGN(2);
+  } > FRAM
+
+  /* NVM storage section for runtime state (counters, result, checkpoint data).
      Placed AFTER .text so that .rodata (in FRAM) is the first loadable
      section in the ELF.  This prevents the linker from including ELF
      headers in the .nvm LOAD segment, which would push the segment's

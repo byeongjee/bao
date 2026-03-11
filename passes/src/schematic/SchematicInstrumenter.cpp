@@ -345,10 +345,12 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
     // Step 1: Declare runtime functions.
     declareRuntimeFunctions();
 
-    // Step 2: Apply .nvm section to candidate globals (not allocas).
+    // Step 2: Ensure candidate globals have a FRAM section if not already annotated.
     for (llvm::Value *V : state.getCandidates()) {
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
-            GV->setSection(".nvm");
+        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+            if (GV->getSection().empty())
+                GV->setSection(".fram");
+        }
     }
 
     // Step 3: Create shadow globals.

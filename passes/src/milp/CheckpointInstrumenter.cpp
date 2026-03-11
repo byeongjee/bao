@@ -48,8 +48,12 @@ unsigned CheckpointInstrumenter::instrumentFunction(llvm::Function &F, const MIL
 }
 
 void CheckpointInstrumenter::applyMemoryPlacement(const StateAnalysis &state) {
+    // Ensure VM-placed globals are in FRAM (non-volatile).
+    // Globals already annotated (e.g., .fram) keep their section.
+    // Unannotated globals get placed in .fram explicitly.
     for (llvm::GlobalVariable *GV : state.getVMObjs()) {
-        GV->setSection(".nvm");
+        if (GV->getSection().empty())
+            GV->setSection(".fram");
     }
 }
 

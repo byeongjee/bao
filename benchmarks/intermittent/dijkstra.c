@@ -89,7 +89,7 @@ static const uint8_t AdjMatrix[NUM_NODES][NUM_NODES] = {
      255, 255, 255, 255, 3,   10, 255, 50,  30, 46, 38, 37,  38, 255, 20, 0},
 };
 
-static uint32_t g_checksum_sink __attribute__((used, section(".nvm"))) = 0;
+static uint32_t g_checksum_sink __attribute__((used, section(".fram"))) = 0;
 
 FORCE_INLINE uint16_t dijkstra(uint16_t start, uint16_t end) {
     uint16_t ch;

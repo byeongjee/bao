@@ -20,7 +20,7 @@ typedef struct {
     uint32_t frac;
 } int_sqrt_t;
 
-static double g_accum __attribute__((section(".nvm"))) = 0.0;
+static double g_accum __attribute__((section(".fram"))) = 0.0;
 static int_sqrt_t g_last_sqrt __attribute__((used));
 
 FORCE_INLINE void solve_cubic(double a, double b, double c, double d, uint32_t *solutions,

@@ -37,12 +37,12 @@ def test_vm_nvm_enforcement(run_milp, tmp_path):
 
     ir = result.output_ir
 
-    # Both globals get .nvm section
-    assert has_section(ir, "g_hot", ".nvm"), (
-        "@g_hot must have section \".nvm\""
+    # Both globals get .fram section
+    assert has_section(ir, "g_hot", ".fram"), (
+        "@g_hot must have section \".fram\""
     )
-    assert has_section(ir, "g_cold", ".nvm"), (
-        "@g_cold must have section \".nvm\""
+    assert has_section(ir, "g_cold", ".fram"), (
+        "@g_cold must have section \".fram\""
     )
 
     # Shadow global for the hot variable must exist
@@ -84,8 +84,8 @@ def test_vm_overflow(run_milp, tmp_path):
 
     # All 5 globals must be placed in NVM
     for g in ("g_a", "g_b", "g_c", "g_d", "g_e"):
-        assert has_section(ir, g, ".nvm"), (
-            f"@{g} must have section \".nvm\""
+        assert has_section(ir, g, ".fram"), (
+            f"@{g} must have section \".fram\""
         )
 
     # With vm_capacity=16 bytes and 5 globals x 4 bytes, at most 4 fit in VM
@@ -111,7 +111,7 @@ def test_vm_overflow(run_milp, tmp_path):
 # Test 3: Basic VM/NVM placement on existing test file
 # ---------------------------------------------------------------------------
 def test_vm_nvm_basic(run_milp, tmp_path):
-    """test_vm_nvm_placement.c: frequently_accessed gets .nvm section and a shadow."""
+    """test_vm_nvm_placement.c: frequently_accessed gets .fram section and a shadow."""
     src = TESTS_DIR / "test_vm_nvm_placement.c"
     energy_config = TESTS_DIR / "estimator_ir_uniform.json"
     milp_config = TESTS_DIR / "milp_params_small.json"
@@ -122,9 +122,9 @@ def test_vm_nvm_basic(run_milp, tmp_path):
 
     ir = result.output_ir
 
-    # At least one global must carry a .nvm section annotation
-    assert 'section ".nvm"' in ir, (
-        "Expected at least one global with section \".nvm\" in IR"
+    # At least one global must carry a .fram section annotation
+    assert 'section ".fram"' in ir, (
+        "Expected at least one global with section \".fram\" in IR"
     )
 
     # At least one shadow global must be present
