@@ -109,7 +109,7 @@ if [[ "$DEBUG_COUNTERS" -eq 1 ]]; then
 fi
 
 # CSV header — shared columns match RockClimb, then SCHEMATIC-specific columns
-HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,runtime_region_boundary_calls,runtime_save_reg_calls,runtime_restore_reg_calls,runtime_store_mem_calls,runtime_restore_mem_calls,result,candidate_globals,region_boundaries,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted"
+HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,result,candidate_globals,region_boundaries,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 FAIL_COLS=",,,,,,,,,,,,,,,,,,,"  # 19 empty fields for error rows
@@ -282,11 +282,11 @@ ${nvm_as_labels}"
         runtime_calls=$(extract_stat "$full_output" "Runtime calls inserted")
 
         # Extract runtime counters from NVM readback (device only)
-        rt_boundary=$(extract_stat "$full_output" "__region_boundary")
-        rt_save_reg=$(extract_stat "$full_output" "reg_saves")
-        rt_restore_reg=$(extract_stat "$full_output" "reg_restores")
-        rt_store_mem=$(extract_stat "$full_output" "mem_stores")
-        rt_restore_mem=$(extract_stat "$full_output" "mem_restores")
+        runtime_boundary=$(extract_stat "$full_output" "__region_boundary")
+        runtime_save_reg=$(extract_stat "$full_output" "reg_saves")
+        runtime_restore_reg=$(extract_stat "$full_output" "reg_restores")
+        runtime_store_mem=$(extract_stat "$full_output" "mem_stores")
+        runtime_restore_mem=$(extract_stat "$full_output" "mem_restores")
 
         # Extract computation result (semantic correctness check)
         bench_result=$(extract_stat "$full_output" "RESULT")
@@ -303,15 +303,15 @@ ${nvm_as_labels}"
         loop_decisions=${loop_decisions:-0}
         paths_analyzed=${paths_analyzed:-0}
         runtime_calls=${runtime_calls:-0}
-        rt_boundary=${rt_boundary:-0}
-        rt_save_reg=${rt_save_reg:-0}
-        rt_restore_reg=${rt_restore_reg:-0}
-        rt_store_mem=${rt_store_mem:-0}
-        rt_restore_mem=${rt_restore_mem:-0}
+        runtime_boundary=${runtime_boundary:-0}
+        runtime_save_reg=${runtime_save_reg:-0}
+        runtime_restore_reg=${runtime_restore_reg:-0}
+        runtime_store_mem=${runtime_store_mem:-0}
+        runtime_restore_mem=${runtime_restore_mem:-0}
         bench_result=${bench_result:-}
 
-        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$PROFILING_TIME_MS,$rt_boundary,$rt_save_reg,$rt_restore_reg,$rt_store_mem,$rt_restore_mem,$bench_result,$candidate_globals,$region_boundaries,$enabled_ckpts,$loop_decisions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
-        echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $rt_boundary boundaries)"
+        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$PROFILING_TIME_MS,$runtime_boundary,$runtime_save_reg,$runtime_restore_reg,$runtime_store_mem,$runtime_restore_mem,$bench_result,$candidate_globals,$region_boundaries,$enabled_ckpts,$loop_decisions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
+        echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $runtime_boundary boundaries)"
     done
 done
 
