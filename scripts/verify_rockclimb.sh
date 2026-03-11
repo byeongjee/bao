@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 CAP_SIZE="1uF"
 TIMEOUT=30
 VERBOSE=0
-HALT_MODE="bor"
+HALT_MODE="debug"
 FILTER_BENCHMARKS=()
 
 while [[ $# -gt 0 ]]; do
@@ -130,20 +130,15 @@ compile_baseline() {
         "${output}.o" "${output}.debug_counters.o" -o "${output}.elf"
 }
 
-# Flash ELF and read serial output.
-# Returns: serial output on stdout.
-# Exit codes: 0=success, 1=error, 2=timeout.
+# NVM symbols to read from device
+NVM_SYMBOLS=("__nvm_done" "__nvm_result" "cnt_boundary" "cnt_save_reg" "cnt_restore_reg")
+
+# Flash ELF, run program, and read NVM results.
+# Usage: flash_and_read <elf> <timeout>
+# Returns: key=value pairs on stdout.
 flash_and_read() {
     local elf="$1" timeout="$2"
-
-    # Flash
-    mspdebug tilib "prog $elf" 2>&1 || { echo "FLASH_ERROR"; return 1; }
-
-    # Read serial
-    uv run python3 "$SCRIPT_DIR/lib/read_serial.py" \
-        --timeout "$timeout" \
-        --reset-cmd "mspdebug tilib \"reset\" \"run\""
-    return $?
+    flash_run_and_read "$elf" "$timeout" "${NVM_SYMBOLS[@]}"
 }
 
 # ── Main loop ────────────────────────────────────────────────────────────────
@@ -179,14 +174,27 @@ for bench_path in "${BENCHMARKS[@]}"; do
         continue
     fi
 
-    # ── B: Flash + read baseline ─────────────────────────────────────────
-    baseline_serial=$(flash_and_read "$TMP_DIR/baseline.elf" "$TIMEOUT" 2>"$TMP_DIR/baseline_serial.err") || true
+    # ── B: Flash + read baseline (always Mode A — baseline has no BOR) ──
+    baseline_nvm=$(flash_and_read "$TMP_DIR/baseline.elf" "$TIMEOUT" 2>"$TMP_DIR/baseline_read.err") || true
 
     if [[ "$VERBOSE" -eq 1 ]]; then
-        echo "  [baseline serial] $baseline_serial"
+        echo "  [baseline nvm] $baseline_nvm"
     fi
 
-    baseline_result=$(extract_stat "$baseline_serial" "RESULT") || true
+    # Parse key=value output (portable — no grep -P on macOS)
+    baseline_done=$(echo "$baseline_nvm" | awk -F= '/^__nvm_done=/{print $2}')
+    baseline_result=$(echo "$baseline_nvm" | awk -F= '/^__nvm_result=/{print $2}')
+
+    if [[ "$baseline_done" != "1" ]]; then
+        echo "  ERROR: Baseline did not complete (__nvm_done=$baseline_done)"
+        if [[ -s "$TMP_DIR/baseline_read.err" ]]; then
+            echo "  [baseline stderr]"
+            cat "$TMP_DIR/baseline_read.err" | sed 's/^/    /'
+        fi
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+        RESULTS+=("$(printf "  %-20s ERROR (baseline incomplete)" "$bench_name")")
+        continue
+    fi
     if [[ -z "$baseline_result" ]]; then
         echo "  ERROR: No RESULT from baseline"
         ERROR_COUNT=$((ERROR_COUNT + 1))
@@ -231,13 +239,33 @@ for bench_path in "${BENCHMARKS[@]}"; do
     fi
 
     # ── E: Flash + read RockClimb ────────────────────────────────────────
-    rockclimb_serial=$(flash_and_read "$TMP_DIR/rockclimb.elf" "$TIMEOUT" 2>"$TMP_DIR/rockclimb_serial.err") || true
+    rockclimb_nvm=$(flash_and_read "$TMP_DIR/rockclimb.elf" "$TIMEOUT" 2>"$TMP_DIR/rockclimb_read.err") || true
 
     if [[ "$VERBOSE" -eq 1 ]]; then
-        echo "  [rockclimb serial] $rockclimb_serial"
+        echo "  [rockclimb nvm] $rockclimb_nvm"
     fi
 
-    rockclimb_result=$(extract_stat "$rockclimb_serial" "RESULT") || true
+    # Parse key=value output (portable — no grep -P on macOS)
+    rockclimb_done=$(echo "$rockclimb_nvm" | awk -F= '/^__nvm_done=/{print $2}')
+    rockclimb_result=$(echo "$rockclimb_nvm" | awk -F= '/^__nvm_result=/{print $2}')
+
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        rc_boundary=$(echo "$rockclimb_nvm" | awk -F= '/^cnt_boundary=/{print $2}')
+        rc_save=$(echo "$rockclimb_nvm" | awk -F= '/^cnt_save_reg=/{print $2}')
+        rc_restore=$(echo "$rockclimb_nvm" | awk -F= '/^cnt_restore_reg=/{print $2}')
+        echo "  [rockclimb counters] boundary=$rc_boundary save_reg=$rc_save restore_reg=$rc_restore"
+    fi
+
+    if [[ "$rockclimb_done" != "1" ]]; then
+        echo "  ERROR: RockClimb did not complete (__nvm_done=$rockclimb_done)"
+        if [[ -s "$TMP_DIR/rockclimb_read.err" ]]; then
+            echo "  [rockclimb stderr]"
+            cat "$TMP_DIR/rockclimb_read.err" | sed 's/^/    /'
+        fi
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+        RESULTS+=("$(printf "  %-20s ERROR (rockclimb incomplete)  baseline=%s" "$bench_name" "$baseline_result")")
+        continue
+    fi
     if [[ -z "$rockclimb_result" ]]; then
         echo "  ERROR: No RESULT from RockClimb"
         ERROR_COUNT=$((ERROR_COUNT + 1))

@@ -115,3 +115,72 @@ compile_to_ir() {
 
     $CLANG $flags "$input" -o "$output"
 }
+
+# ── flash_run_and_read ──────────────────────────────────────────────────────
+#
+# Flash an ELF, run the program, and read NVM symbols via mspdebug md.
+#
+# Usage: flash_run_and_read <elf> <timeout> <symbol1> [symbol2 ...]
+# Output: key=value pairs on stdout (one per symbol)
+#
+# Single mspdebug session: flash, set HW breakpoint at __nvm_breakpoint,
+# run (stops when program writes NVM values), then read NVM via md.
+# Works for both baseline and RockClimb modes.
+#
+flash_run_and_read() {
+    local elf="$1" timeout="$2"
+    shift 2
+    local symbols=("$@")
+
+    local sym_csv
+    sym_csv=$(IFS=,; echo "${symbols[*]}")
+
+    local read_nvm_script
+    read_nvm_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/read_nvm.py"
+
+    # Get breakpoint address: __nvm_breakpoint is called right after NVM writes.
+    # Setting a HW breakpoint here makes mspdebug "run" return after the program
+    # stores results, so we can read NVM in the same session.
+    local bkpt_addr
+    bkpt_addr=$(msp430-elf-nm "$elf" | awk '/ __nvm_breakpoint$/{print "0x"$1}')
+    if [[ -z "$bkpt_addr" ]]; then
+        echo "Error: __nvm_breakpoint symbol not found in $elf" >&2
+        return 1
+    fi
+
+    # Compute md command from symbol addresses
+    local md_cmd md_err
+    md_err=$(mktemp)
+    md_cmd=$(uv run python3 "$read_nvm_script" --elf "$elf" --symbols "$sym_csv" --md-cmd-only 2>"$md_err") || {
+        echo "Error: Failed to compute md command" >&2
+        cat "$md_err" >&2
+        rm -f "$md_err"
+        return 1
+    }
+    rm -f "$md_err"
+
+    if [[ -z "$md_cmd" ]]; then
+        echo "Error: md command is empty" >&2
+        return 1
+    fi
+
+    # Single mspdebug session: flash → set breakpoint → run → read NVM
+    echo "  [flash_run_and_read] bkpt=$bkpt_addr md='$md_cmd'" >&2
+    local md_output
+    local mspdebug_rc=0
+    md_output=$(timeout "$timeout" mspdebug tilib \
+        "prog $elf" \
+        "setbreak $bkpt_addr" \
+        "run" \
+        "$md_cmd" 2>&1) || mspdebug_rc=$?
+
+    if [[ $mspdebug_rc -ne 0 ]]; then
+        echo "Error: mspdebug session failed (exit code $mspdebug_rc)" >&2
+        echo "  Last 5 lines of mspdebug output:" >&2
+        echo "$md_output" | tail -5 >&2
+        return 1
+    fi
+
+    # Parse hex dump from mspdebug output and extract symbol values
+    echo "$md_output" | uv run python3 "$read_nvm_script" --elf "$elf" --symbols "$sym_csv" --parse-md
+}

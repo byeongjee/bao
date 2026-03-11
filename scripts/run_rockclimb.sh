@@ -21,6 +21,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/lib/common.sh"
 
 OUTPUT_CSV="$PROJECT_DIR/benchmarks/rockclimb_benchmark_summary.csv"
 VERBOSE=0
@@ -151,24 +152,24 @@ for bench_path in "${BENCHMARKS[@]}"; do
         # Run compile, capture all output regardless of exit code
         compile_output=$("${run_cmd[@]}" 2>&1) || true
 
-        # Flash via mspdebug
-        flash_output=""
-        if [[ -f "$TMP_DIR/${bench_name}.elf" ]]; then
-            flash_output=$(mspdebug tilib "prog $TMP_DIR/${bench_name}.elf" 2>&1) || true
-        fi
-
-        # Read serial output (debug-counters mode only — real runtime halts in LPM4, no UART)
-        serial_output=""
+        # Flash, run, and read NVM (debug-counters mode only)
+        nvm_output=""
         if [[ "$DEBUG_COUNTERS" -eq 1 && -f "$TMP_DIR/${bench_name}.elf" ]]; then
-            serial_output=$(uv run python3 "$SCRIPT_DIR/lib/read_serial.py" \
-                --timeout 30 \
-                --reset-cmd "mspdebug tilib \"reset\" \"run\"" \
-                2>"$TMP_DIR/serial.err") || true
+            nvm_output=$(flash_run_and_read \
+                "$TMP_DIR/${bench_name}.elf" 30 \
+                __nvm_done __nvm_result cnt_boundary cnt_save_reg cnt_restore_reg \
+                2>"$TMP_DIR/nvm_read.err") || true
         fi
 
-        # Merge compile stderr + serial output for stat extraction
+        # Convert NVM key=value output to label: value format for extract_stat
+        nvm_as_labels=""
+        if [[ -n "$nvm_output" ]]; then
+            nvm_as_labels=$(echo "$nvm_output" | sed 's/^__nvm_result=/RESULT: /; s/^cnt_boundary=/__region_boundary: /; s/^cnt_save_reg=/reg_saves: /; s/^cnt_restore_reg=/reg_restores: /')
+        fi
+
+        # Merge compile output + NVM output for stat extraction
         full_output="${compile_output}
-${serial_output}"
+${nvm_as_labels}"
 
         if [[ "$VERBOSE" -eq 1 ]]; then
             echo "$full_output"
