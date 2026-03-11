@@ -533,7 +533,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
 
     // Step 12: Instrument.
-    SchematicInstrumenter instrumenter(*F.getParent(), params.addDebugMarkers, params.N_reg);
+    SchematicInstrumenter instrumenter(*F.getParent(), params.addDebugMarkers);
     unsigned inserted = instrumenter.instrumentFunction(F, solution, state);
 
     const auto totalEnd = std::chrono::steady_clock::now();

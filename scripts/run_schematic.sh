@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 #
 # Benchmark SCHEMATIC checkpoint insertion across all intermittent benchmarks
-# and capacitor sizes. Outputs a CSV summary.
+# and capacitor sizes. Compiles via compile_schematic.sh, flashes to MSP430
+# via mspdebug, and reads runtime counters over UART.
+#
+# Outputs a CSV summary.
 #
 # Pipeline per benchmark:
 #   1. Collect trace once via compile_schematic.sh --trace-only
-#   2. Per capacitor: compile_and_run.sh --mode schematic -t <trace.json>
+#   2. Per capacitor: compile with --link --debug-counters, flash, read serial
 #
 # Usage:
-#   ./scripts/run_schematic.sh [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#   ./scripts/run_schematic.sh [--debug-counters] [--halt-mode] [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#
+# Options:
+#   --debug-counters  Link debug counter runtime (UART output + NVM counters).
+#   --halt-mode       Enable LPM4 halt at region boundaries.
+#   --cap <size>      Run only the given capacitor size (1uF, 10uF, 100uF).
+#                     Can be repeated: --cap 1uF --cap 10uF
 #
 # If benchmark names are given, only those are run (matched by filename without .c).
-# Example: ./scripts/run_schematic.sh sha256 aes
+# Example: ./scripts/run_schematic.sh --debug-counters sha256 aes
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +28,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 OUTPUT_CSV="$PROJECT_DIR/benchmarks/schematic_benchmark_summary.csv"
 VERBOSE=0
+DEBUG_COUNTERS=0
+HALT_MODE=0
 FILTER_BENCHMARKS=()
 FILTER_CAPS=()
 
@@ -26,8 +37,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) OUTPUT_CSV="$2"; shift 2 ;;
         -v|--verbose) VERBOSE=1; shift ;;
+        --debug-counters) DEBUG_COUNTERS=1; shift ;;
+        --halt-mode) HALT_MODE=1; shift ;;
         --cap) FILTER_CAPS+=("$2"); shift 2 ;;
-        -h|--help) echo "Usage: $0 [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
+        -h|--help) echo "Usage: $0 [--debug-counters] [--halt-mode] [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) FILTER_BENCHMARKS+=("$1"); shift ;;
     esac
@@ -84,10 +97,10 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls,candidate_globals,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted"
+HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,boundary_checks,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,candidate_globals,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted"
 echo "$HEADER" > "$OUTPUT_CSV"
 
-FAIL_COLS=",,,,,,,,,,,,,,,,,,,,"  # 19 empty fields for error rows
+FAIL_COLS=",,,,,,,,,,,,,,,,,,"  # 18 empty fields for error rows
 
 # Extract first numeric/token value after "label:" from output.
 extract_stat() {
@@ -109,7 +122,7 @@ extract_stat() {
     return 1
 }
 
-# Extract runtime counter value from mock counter output.
+# Extract runtime counter value from debug counter output.
 extract_counter() {
     local output="$1"
     local label="$2"
@@ -171,7 +184,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
     mv "$TMPDIR/${bench_name}_trace.json" "$trace_json"
     echo "  Trace collected for $bench_name (profiling: ${PROFILING_TIME_MS}ms)"
 
-    # === Per-capacitor: compile + run via orchestrator ===
+    # === Per-capacitor: compile, flash, read serial ===
     for cap_entry in "${CAPACITOR_CONFIGS[@]}"; do
         cap_label="${cap_entry%%:*}"
         cap_config="${cap_entry#*:}"
@@ -186,24 +199,51 @@ for bench_path in "${BENCHMARKS[@]}"; do
             continue
         fi
 
+        # Build compile command
         run_cmd=(
-            "$SCRIPT_DIR/compile_and_run.sh"
-            --mode schematic
-            --runtime mock-counter
+            "$SCRIPT_DIR/compile_schematic.sh"
             -e "$ENERGY_CONFIG"
             -s "$cap_config"
-            -t "$trace_json"
+            -o "$TMPDIR/$bench_name"
             -Oc 0
-            --local
+            --trace "$trace_json"
+            --add-debug-markers
+            --link
             -I "$PROJECT_DIR/passes/runtime"
-            --verbose
-            "$bench_path"
         )
+        [[ "$VERBOSE" -eq 1 ]] && run_cmd+=(--verbose)
+        [[ "$DEBUG_COUNTERS" -eq 1 ]] && run_cmd+=(--debug-counters)
+        [[ "$HALT_MODE" -eq 1 ]] && run_cmd+=(--halt-mode)
+        run_cmd+=("$bench_path")
+
         printf -v run_cmd_display '%q ' "${run_cmd[@]}"
         run_cmd_display="${run_cmd_display% }"
         echo "  Command: $run_cmd_display"
 
-        full_output=$("${run_cmd[@]}" 2>&1) || true
+        compile_output=$("${run_cmd[@]}" 2>&1) || true
+
+        if [[ "$VERBOSE" -eq 1 ]]; then
+            echo "$compile_output"
+        fi
+
+        # Flash via mspdebug
+        flash_output=""
+        if [[ -f "$TMPDIR/${bench_name}.elf" ]]; then
+            flash_output=$(mspdebug tilib "prog $TMPDIR/${bench_name}.elf" 2>&1) || true
+        fi
+
+        # Read serial output (debug-counters mode — real runtime halts in LPM4, no UART)
+        serial_output=""
+        if [[ "$DEBUG_COUNTERS" -eq 1 && -f "$TMPDIR/${bench_name}.elf" ]]; then
+            serial_output=$(uv run python3 "$SCRIPT_DIR/lib/read_serial.py" \
+                --timeout 30 \
+                --reset-cmd "mspdebug tilib \"reset\" \"run\"" \
+                2>"$TMPDIR/serial.err") || true
+        fi
+
+        # Merge compile + serial output for stat extraction
+        full_output="${compile_output}
+${serial_output}"
 
         if [[ "$VERBOSE" -eq 1 ]]; then
             echo "$full_output"
@@ -238,17 +278,18 @@ for bench_path in "${BENCHMARKS[@]}"; do
         peak_rss=${peak_rss:-0}
         execution_time=$(extract_stat "$full_output" "Execution time (ms)")
         execution_time=${execution_time:-0}
+        boundary_checks=$(extract_stat "$full_output" "Boundary checks")
+        boundary_checks=${boundary_checks:-0}
 
-        # Extract mock counter stats
-        rt_prologue=$(extract_counter "$full_output" "__region_prologue")
-        rt_epilogue=$(extract_counter "$full_output" "__region_epilogue")
-        rt_store_reg=$(extract_counter "$full_output" "__checkpoint_store_reg")
-        rt_store_mem=$(extract_counter "$full_output" "__checkpoint_store_mem")
-        rt_restore_reg=$(extract_counter "$full_output" "__restore_reg")
-        rt_restore_mem=$(extract_counter "$full_output" "__restore_mem")
+        # Extract debug counter stats (same labels as schematic_debug_counters.c)
+        rt_boundary=$(extract_counter "$full_output" "__region_boundary")
+        rt_save_reg=$(extract_counter "$full_output" "reg_saves")
+        rt_restore_reg=$(extract_counter "$full_output" "reg_restores")
+        rt_store_mem=$(extract_counter "$full_output" "mem_stores")
+        rt_restore_mem=$(extract_counter "$full_output" "mem_restores")
 
-        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$PROFILING_TIME_MS,$execution_time,$rt_prologue,$rt_epilogue,$rt_store_reg,$rt_store_mem,$rt_restore_reg,$rt_restore_mem,$candidate_globals,$enabled_ckpts,$loop_decisions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
-        echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $rt_prologue prologues)"
+        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$PROFILING_TIME_MS,$execution_time,$boundary_checks,$rt_boundary,$rt_save_reg,$rt_restore_reg,$rt_store_mem,$rt_restore_mem,$candidate_globals,$enabled_ckpts,$loop_decisions,$paths_analyzed,$runtime_calls" >> "$OUTPUT_CSV"
+        echo "  OK ($regions regions, $enabled_ckpts checkpoints, $runtime_calls runtime calls, $rt_boundary boundaries)"
     done
 done
 

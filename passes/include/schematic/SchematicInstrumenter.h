@@ -12,7 +12,7 @@ namespace checkpoint {
 
 class SchematicInstrumenter {
   public:
-    SchematicInstrumenter(llvm::Module &M, bool addDebugMarkers, unsigned N_reg);
+    SchematicInstrumenter(llvm::Module &M, bool addDebugMarkers);
 
     unsigned instrumentFunction(llvm::Function &F, const SchematicSolution &solution,
                                 const SchematicStateAnalysis &state);
@@ -20,14 +20,12 @@ class SchematicInstrumenter {
   private:
     llvm::Module &M_;
     bool addDebugMarkers_;
-    unsigned N_reg_;
 
-    llvm::FunctionCallee prologueFn_;
-    llvm::FunctionCallee epilogueFn_;
-    llvm::FunctionCallee storeMemFn_;
-    llvm::FunctionCallee restoreMemFn_;
-    llvm::FunctionCallee storeRegFn_;
-    llvm::FunctionCallee restoreRegFn_;
+    llvm::FunctionCallee boundaryFn_;
+
+    /// NVM debug counter globals for memory ops (boundary/reg counters are in assembly)
+    llvm::GlobalVariable *cntStoreMemGV_ = nullptr;
+    llvm::GlobalVariable *cntRestoreMemGV_ = nullptr;
 
     /// Shadow globals: original Value (GV or alloca) -> VM shadow GV
     std::map<llvm::Value *, llvm::GlobalVariable *> shadowMap_;

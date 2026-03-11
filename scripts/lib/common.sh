@@ -50,6 +50,10 @@ MILP_LINKER="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
 
 SCHEMATIC_TRACE_RUNTIME="$PROJECT_DIR/passes/runtime/schematic_trace_runtime.c"
 SCHEMATIC_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/schematic_mock_ckpt_counter.c"
+SCHEMATIC_RUNTIME="$PROJECT_DIR/passes/runtime/schematic_runtime.c"
+SCHEMATIC_BOOT="$PROJECT_DIR/passes/runtime/schematic_boot.S"
+SCHEMATIC_LINKER="$PROJECT_DIR/passes/runtime/rockclimb_msp430fr5994.ld"
+SCHEMATIC_DEBUG_COUNTERS="$PROJECT_DIR/passes/runtime/schematic_debug_counters.c"
 
 BB_FREQ_RUNTIME="$PROJECT_DIR/passes/runtime/bb_freq_runtime.c"
 
