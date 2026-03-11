@@ -83,7 +83,8 @@ TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 # Build compile_to_ir args — compile at -O0 to preserve loops for tripcount
-IR_ARGS=("$INPUT" "$TMP_DIR/input.ll" --clang-opt-level 0)
+IR_ARGS=("$INPUT" "$TMP_DIR/input.ll" --clang-opt-level 0
+    -I "$PROJECT_DIR/passes/runtime")
 [[ "$DEBUG_MODE" == "true" ]] && IR_ARGS+=(--debug)
 for word in $EXTRA_INCLUDES; do
     if [[ "$word" == -I* ]]; then
