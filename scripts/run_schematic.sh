@@ -97,6 +97,17 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# Check for MSP430 device (needed for NVM readback with --debug-counters)
+HAS_DEVICE=0
+if [[ "$DEBUG_COUNTERS" -eq 1 ]]; then
+    if timeout 3 mspdebug tilib "exit" &>/dev/null; then
+        HAS_DEVICE=1
+        echo "MSP430 device detected — will flash and read NVM counters."
+    else
+        echo "Warning: No MSP430 device detected — skipping NVM readback (runtime counters will be 0)."
+    fi
+fi
+
 # CSV header — shared columns match RockClimb, then SCHEMATIC-specific columns
 HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,runtime_region_boundary_calls,runtime_save_reg_calls,runtime_restore_reg_calls,runtime_store_mem_calls,runtime_restore_mem_calls,result,candidate_globals,region_boundaries,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted"
 echo "$HEADER" > "$OUTPUT_CSV"
@@ -120,7 +131,8 @@ extract_stat() {
             fi
         fi
     done
-    return 1
+    # No match — caller uses ${var:-0} defaults; return 0 to avoid set -e exit.
+    return 0
 }
 
 TMPDIR="${TMPDIR:-/tmp}/schematic_bench_$$"
@@ -214,9 +226,9 @@ for bench_path in "${BENCHMARKS[@]}"; do
             echo "$compile_output"
         fi
 
-        # Flash, run, and read NVM (debug-counters mode only)
+        # Flash, run, and read NVM (debug-counters mode only, requires device)
         nvm_output=""
-        if [[ "$DEBUG_COUNTERS" -eq 1 && -f "$TMPDIR/${bench_name}.elf" ]]; then
+        if [[ "$HAS_DEVICE" -eq 1 && -f "$TMPDIR/${bench_name}.elf" ]]; then
             nvm_output=$(flash_run_and_read \
                 "$TMPDIR/${bench_name}.elf" 30 \
                 __nvm_done __nvm_result cnt_boundary cnt_save_reg cnt_restore_reg cnt_store_mem cnt_restore_mem \
@@ -238,10 +250,6 @@ for bench_path in "${BENCHMARKS[@]}"; do
         # Merge compile output + NVM output for stat extraction
         full_output="${compile_output}
 ${nvm_as_labels}"
-
-        if [[ "$VERBOSE" -eq 1 ]]; then
-            echo "$full_output"
-        fi
 
         # Check for infeasibility
         if echo "$full_output" | grep -q "SCHEMATIC infeasible"; then
@@ -273,7 +281,7 @@ ${nvm_as_labels}"
         paths_analyzed=$(extract_stat "$full_output" "Paths analyzed")
         runtime_calls=$(extract_stat "$full_output" "Runtime calls inserted")
 
-        # Extract runtime counters from NVM readback
+        # Extract runtime counters from NVM readback (device only)
         rt_boundary=$(extract_stat "$full_output" "__region_boundary")
         rt_save_reg=$(extract_stat "$full_output" "reg_saves")
         rt_restore_reg=$(extract_stat "$full_output" "reg_restores")

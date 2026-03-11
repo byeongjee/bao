@@ -560,6 +560,9 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     errs() << "  Paths analyzed:                  " << solution.pathsAnalyzed << "\n";
     errs() << "  Enabled checkpoints:             " << solution.enabledCheckpoints.size() << "\n";
     errs() << "  Loop decisions:                  " << solution.loopDecisions.size() << "\n";
+    errs() << "  Boundary calls inserted:         " << instrumenter.boundaryCalls() << "\n";
+    errs() << "  Store mem calls inserted:        " << instrumenter.storeMemCalls() << "\n";
+    errs() << "  Restore mem calls inserted:      " << instrumenter.restoreMemCalls() << "\n";
     errs() << "  Trace-guided:                    yes\n";
 
     return PreservedAnalyses::none();

@@ -91,6 +91,17 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# Check for MSP430 device (needed for NVM readback with --debug-counters)
+HAS_DEVICE=0
+if [[ "$DEBUG_COUNTERS" -eq 1 ]]; then
+    if timeout 3 mspdebug tilib "exit" &>/dev/null; then
+        HAS_DEVICE=1
+        echo "MSP430 device detected — will flash and read NVM counters."
+    else
+        echo "Warning: No MSP430 device detected — skipping NVM readback (runtime counters will be 0)."
+    fi
+fi
+
 # CSV header
 HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,boundary_checks,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls,result"
 echo "$HEADER" > "$OUTPUT_CSV"
@@ -113,7 +124,8 @@ extract_stat() {
             fi
         fi
     done
-    return 1
+    # No match — caller uses ${var:-0} defaults; return 0 to avoid set -e exit.
+    return 0
 }
 
 total=$((${#BENCHMARKS[@]} * ${#CAPACITOR_CONFIGS[@]}))
@@ -158,7 +170,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
 
         # Flash, run, and read NVM (debug-counters mode only)
         nvm_output=""
-        if [[ "$DEBUG_COUNTERS" -eq 1 && -f "$TMP_DIR/${bench_name}.elf" ]]; then
+        if [[ "$HAS_DEVICE" -eq 1 && -f "$TMP_DIR/${bench_name}.elf" ]]; then
             nvm_output=$(flash_run_and_read \
                 "$TMP_DIR/${bench_name}.elf" 30 \
                 __nvm_done __nvm_result cnt_boundary cnt_save_reg cnt_restore_reg \

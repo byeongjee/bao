@@ -11,6 +11,7 @@ set -e
 
 # ── Project paths ────────────────────────────────────────────────────────────
 
+_COMMON_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
@@ -79,7 +80,7 @@ _now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
 #
 compile_to_ir() {
     local input="" output="" local_mode="false" clang_opt_level="2" debug="false"
-    local extra_includes=""
+    local extra_includes="" extra_defines=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -87,6 +88,7 @@ compile_to_ir() {
             --clang-opt-level) clang_opt_level="$2"; shift 2 ;;
             --debug) debug="true"; shift ;;
             -I) extra_includes="$extra_includes -I$2"; shift 2 ;;
+            -D) extra_defines="$extra_defines -D$2"; shift 2 ;;
             *)
                 if [[ -z "$input" ]]; then
                     input="$1"
@@ -114,7 +116,7 @@ compile_to_ir() {
     fi
 
     [[ "$clang_opt_level" == "0" ]] && flags="$flags -Xclang -disable-O0-optnone"
-    flags="$flags $extra_includes"
+    flags="$flags $extra_includes $extra_defines"
     [[ "$debug" == "true" ]] && flags="$flags -DDEBUG"
 
     $CLANG $flags "$input" -o "$output"
@@ -139,8 +141,7 @@ flash_run_and_read() {
     local sym_csv
     sym_csv=$(IFS=,; echo "${symbols[*]}")
 
-    local read_nvm_script
-    read_nvm_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/read_nvm.py"
+    local read_nvm_script="$_COMMON_SH_DIR/read_nvm.py"
 
     # Get breakpoint address: __nvm_breakpoint is called right after NVM writes.
     # Setting a HW breakpoint here makes mspdebug "run" return after the program

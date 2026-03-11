@@ -198,6 +198,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
                     emitCounterIncrement(builder, cntStoreMemGV_);
             }
             inserted++;
+            storeMemCalls_++;
         }
     }
 
@@ -206,6 +207,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
     // cnt_restore_reg internally via #ifdef DEBUG_COUNTERS.
     builder.CreateCall(boundaryFn_);
     inserted++;
+    boundaryCalls_++;
 
     // Phase 3: Restore starting region's VM vars with live_start=true.
     // For globals: memcpy GV -> shadow (FRAM -> SRAM).
@@ -238,6 +240,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
                     emitCounterIncrement(builder, cntRestoreMemGV_);
             }
             inserted++;
+            restoreMemCalls_++;
         }
     }
 
@@ -341,6 +344,9 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
                                                    const SchematicStateAnalysis &state) {
 
     unsigned inserted = 0;
+    boundaryCalls_ = 0;
+    storeMemCalls_ = 0;
+    restoreMemCalls_ = 0;
 
     // Step 1: Declare runtime functions.
     declareRuntimeFunctions();

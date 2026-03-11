@@ -17,6 +17,11 @@ class SchematicInstrumenter {
     unsigned instrumentFunction(llvm::Function &F, const SchematicSolution &solution,
                                 const SchematicStateAnalysis &state);
 
+    /// Per-type insertion counts (populated after instrumentFunction).
+    unsigned boundaryCalls() const { return boundaryCalls_; }
+    unsigned storeMemCalls() const { return storeMemCalls_; }
+    unsigned restoreMemCalls() const { return restoreMemCalls_; }
+
   private:
     llvm::Module &M_;
     bool addDebugMarkers_;
@@ -26,6 +31,11 @@ class SchematicInstrumenter {
     /// NVM debug counter globals for memory ops (boundary/reg counters are in assembly)
     llvm::GlobalVariable *cntStoreMemGV_ = nullptr;
     llvm::GlobalVariable *cntRestoreMemGV_ = nullptr;
+
+    /// Per-type insertion counters.
+    unsigned boundaryCalls_ = 0;
+    unsigned storeMemCalls_ = 0;
+    unsigned restoreMemCalls_ = 0;
 
     /// Shadow globals: original Value (GV or alloca) -> VM shadow GV
     std::map<llvm::Value *, llvm::GlobalVariable *> shadowMap_;

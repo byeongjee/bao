@@ -94,6 +94,7 @@ trap "rm -rf $TMP_DIR" EXIT
 # Always target MSP430 so BB names match between trace collection and the pass.
 IR_ARGS=("$INPUT" "$TMP_DIR/input.ll" --clang-opt-level 0)
 [[ "$DEBUG_MODE" == "true" ]] && IR_ARGS+=(--debug)
+[[ "$DEBUG_COUNTERS" == "true" ]] && IR_ARGS+=(-D DEBUG_COUNTERS)
 for word in $EXTRA_INCLUDES; do
     if [[ "$word" == -I* ]]; then
         IR_ARGS+=(-I "${word#-I}")
