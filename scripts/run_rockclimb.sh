@@ -119,6 +119,10 @@ extract_stat() {
 total=$((${#BENCHMARKS[@]} * ${#CAPACITOR_CONFIGS[@]}))
 count=0
 
+ALL_TMP_DIRS=()
+cleanup_all() { rm -rf "${ALL_TMP_DIRS[@]}"; }
+trap cleanup_all EXIT
+
 for bench_path in "${BENCHMARKS[@]}"; do
     bench_name=$(basename "$bench_path" .c)
 
@@ -131,7 +135,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         echo "[$count/$total] Running $row_name ..."
 
         TMP_DIR=$(mktemp -d)
-        trap "rm -rf $TMP_DIR" EXIT
+        ALL_TMP_DIRS+=("$TMP_DIR")
 
         run_cmd=(
             "$SCRIPT_DIR/compile_rockclimb.sh"

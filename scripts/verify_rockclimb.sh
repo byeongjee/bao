@@ -151,6 +151,10 @@ RESULTS=()
 total=${#BENCHMARKS[@]}
 count=0
 
+ALL_TMP_DIRS=()
+cleanup_all() { rm -rf "${ALL_TMP_DIRS[@]}"; }
+trap cleanup_all EXIT
+
 for bench_path in "${BENCHMARKS[@]}"; do
     bench_name=$(basename "$bench_path" .c)
     count=$((count + 1))
@@ -158,7 +162,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
     echo "[$count/$total] $bench_name ..."
 
     TMP_DIR=$(mktemp -d)
-    trap "rm -rf $TMP_DIR" EXIT
+    ALL_TMP_DIRS+=("$TMP_DIR")
 
     # ── A: Compile baseline ──────────────────────────────────────────────
     baseline_output=""
