@@ -229,7 +229,7 @@ ${nvm_as_labels}"
             optimal="no"
         fi
         regions=$(extract_stat "$full_output" "Regions")
-        boundaries=$(extract_stat "$full_output" "Region boundaries inserted")
+        boundaries=$(extract_stat "$full_output" "Region boundaries")
         dist_ckpts=$(extract_stat "$full_output" \
             "Distributed checkpoints inserted" \
             "Boundary commits enabled")

@@ -86,6 +86,7 @@ trap "rm -rf $TMP_DIR" EXIT
 IR_ARGS=("$INPUT" "$TMP_DIR/input.ll" --clang-opt-level 0
     -I "$PROJECT_DIR/passes/runtime")
 [[ "$DEBUG_MODE" == "true" ]] && IR_ARGS+=(--debug)
+[[ "$DEBUG_COUNTERS" == "true" ]] && IR_ARGS+=(-D DEBUG_COUNTERS)
 for word in $EXTRA_INCLUDES; do
     if [[ "$word" == -I* ]]; then
         IR_ARGS+=(-I "${word#-I}")
@@ -124,8 +125,18 @@ if ! $OPT -load-pass-plugin="$PASS_LIB" \
     error "BB frequency collection pass failed"
 fi
 
+# Strip MSP430 target triple so clang compiles a native binary for profiling.
+sed 's/^target triple = .*//' "$TMP_DIR/freq_inst.ll" \
+  | sed 's/^target datalayout = .*//' > "$TMP_DIR/freq_inst_native.ll"
+
+# Provide host stubs for MSP430-specific debug_init/debug_exit
+cat > "$TMP_DIR/debug_stubs.c" << 'STUBS'
+void debug_init(void) {}
+void debug_exit(int result) { (void)result; }
+STUBS
+
 if ! $CLANG -O0 $_SYSROOT_FLAGS \
-    "$TMP_DIR/freq_inst.ll" "$BB_FREQ_RUNTIME" \
+    "$TMP_DIR/freq_inst_native.ll" "$BB_FREQ_RUNTIME" "$TMP_DIR/debug_stubs.c" \
     -o "$TMP_DIR/freq_run" 2>&1; then
     error "BB frequency runtime compilation failed"
 fi
