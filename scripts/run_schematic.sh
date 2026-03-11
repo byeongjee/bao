@@ -158,7 +158,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
         -s "$PROJECT_DIR/benchmarks/sample_schematic_config_10uF.json" \
         -o "$TMPDIR/${bench_name}" \
         -Oc 0 \
-        --local $VERBOSE_FLAG \
+        $VERBOSE_FLAG \
         -I "$PROJECT_DIR/passes/runtime" \
         --trace-only \
         "$bench_path" 2>&1) || true

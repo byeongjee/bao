@@ -12,7 +12,6 @@
 #   -O <level>           LLC optimization level (default: 2)
 #   -Oc <level>          Clang optimization level (default: 2)
 #   -I <dir>             Add include directory (can be repeated)
-#   --local              Compile for host machine instead of MSP430
 #   --verbose            Show detailed pass output
 #   --debug              Enable DEBUG output
 #   --add-debug-markers  Insert mock-counter debug markers
@@ -35,7 +34,6 @@ OUTPUT=""
 OPT_LEVEL="2"
 CLANG_OPT_LEVEL="2"
 EXTRA_INCLUDES=""
-LOCAL_MODE="false"
 VERBOSE="false"
 DEBUG_MODE="false"
 ADD_DEBUG_MARKERS="false"
@@ -57,7 +55,6 @@ while [[ $# -gt 0 ]]; do
         -O) OPT_LEVEL="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
-        --local) LOCAL_MODE="true"; shift ;;
         --verbose) VERBOSE="true"; shift ;;
         --debug) DEBUG_MODE="true"; shift ;;
         --add-debug-markers) ADD_DEBUG_MARKERS="true"; shift ;;
@@ -94,8 +91,8 @@ TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 # Build compile_to_ir args — compile at -O0 to preserve loops for tripcount
+# Always target MSP430 so BB names match between trace collection and the pass.
 IR_ARGS=("$INPUT" "$TMP_DIR/input.ll" --clang-opt-level 0)
-[[ "$LOCAL_MODE" == "true" ]] && IR_ARGS+=(--local)
 [[ "$DEBUG_MODE" == "true" ]] && IR_ARGS+=(--debug)
 for word in $EXTRA_INCLUDES; do
     if [[ "$word" == -I* ]]; then
@@ -139,8 +136,12 @@ else
         error "Trace instrumentation pass failed"
     fi
 
+    # Strip MSP430 target triple so clang compiles a native binary for tracing.
+    sed 's/^target triple = .*//' "$TMP_DIR/trace_inst.ll" \
+      | sed 's/^target datalayout = .*//' > "$TMP_DIR/trace_inst_native.ll"
+
     if ! $CLANG -O0 $_SYSROOT_FLAGS \
-        "$TMP_DIR/trace_inst.ll" "$SCHEMATIC_TRACE_RUNTIME" \
+        "$TMP_DIR/trace_inst_native.ll" "$SCHEMATIC_TRACE_RUNTIME" \
         -o "$TMP_DIR/trace_run" 2>&1; then
         error "Trace binary compilation failed"
     fi
@@ -187,54 +188,49 @@ else
 fi
 
 # Output
-if [[ "$LOCAL_MODE" == "true" ]]; then
-    sed -i '' 's/, section ".nvm"//g' "$TMP_DIR/ckpt.ll"
-    cp "$TMP_DIR/ckpt.ll" "${OUTPUT}.ll"
-else
-    $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
-    $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
-        -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
-    cp "$TMP_DIR/ckpt.o" "${OUTPUT}.o"
-    cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+$LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
+$GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
+    -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
+cp "$TMP_DIR/ckpt.o" "${OUTPUT}.o"
+cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
 
-    # Optional: Assemble + link to produce .elf
-    if [[ "$LINK" == "true" ]]; then
-        info "Linking with SCHEMATIC runtime..."
+# Optional: Assemble + link to produce .elf
+if [[ "$LINK" == "true" ]]; then
+    info "Linking with SCHEMATIC runtime..."
 
-        # Determine linker script
-        [[ -z "$LINKER_SCRIPT" ]] && LINKER_SCRIPT="$SCHEMATIC_LINKER"
+    # Determine linker script
+    [[ -z "$LINKER_SCRIPT" ]] && LINKER_SCRIPT="$SCHEMATIC_LINKER"
 
-        # Assemble boot.S
-        BOOT_ASM_FLAGS=""
-        [[ "$DEBUG_COUNTERS" == "true" ]] && BOOT_ASM_FLAGS="$BOOT_ASM_FLAGS -DDEBUG_COUNTERS"
-        [[ "$HALT_MODE" == "true" ]] && BOOT_ASM_FLAGS="$BOOT_ASM_FLAGS -DHALT_MODE"
+    # Assemble boot.S
+    BOOT_ASM_FLAGS=""
+    [[ "$DEBUG_COUNTERS" == "true" ]] && BOOT_ASM_FLAGS="$BOOT_ASM_FLAGS -DDEBUG_COUNTERS"
+    [[ "$HALT_MODE" == "true" ]] && BOOT_ASM_FLAGS="$BOOT_ASM_FLAGS -DHALT_MODE"
 
-        $GCC -mmcu=$DEVICE -msmall $BOOT_ASM_FLAGS \
-            -c "$SCHEMATIC_BOOT" -o "$TMP_DIR/boot.o"
+    $GCC -mmcu=$DEVICE -msmall $BOOT_ASM_FLAGS \
+        -c "$SCHEMATIC_BOOT" -o "$TMP_DIR/boot.o"
 
-        # Compile runtime.c
-        $GCC -mmcu=$DEVICE -msmall -O2 \
+    # Compile runtime.c
+    $GCC -mmcu=$DEVICE -msmall -O2 \
+        -I"$MSP430GCC_SUPPORT_PATH/include" \
+        -I"$PROJECT_DIR/passes/runtime" \
+        -c "$SCHEMATIC_RUNTIME" -o "$TMP_DIR/runtime.o"
+
+    LINK_OBJS=("$TMP_DIR/ckpt.o" "$TMP_DIR/boot.o" "$TMP_DIR/runtime.o")
+
+    if [[ "$DEBUG_COUNTERS" == "true" ]]; then
+        $GCC -mmcu=$DEVICE -msmall -O2 -DDEBUG_COUNTERS \
             -I"$MSP430GCC_SUPPORT_PATH/include" \
             -I"$PROJECT_DIR/passes/runtime" \
-            -c "$SCHEMATIC_RUNTIME" -o "$TMP_DIR/runtime.o"
+            -c "$SCHEMATIC_DEBUG_COUNTERS" -o "$TMP_DIR/debug_counters.o"
 
-        LINK_OBJS=("$TMP_DIR/ckpt.o" "$TMP_DIR/boot.o" "$TMP_DIR/runtime.o")
-
-        if [[ "$DEBUG_COUNTERS" == "true" ]]; then
-            $GCC -mmcu=$DEVICE -msmall -O2 -DDEBUG_COUNTERS \
-                -I"$MSP430GCC_SUPPORT_PATH/include" \
-                -I"$PROJECT_DIR/passes/runtime" \
-                -c "$SCHEMATIC_DEBUG_COUNTERS" -o "$TMP_DIR/debug_counters.o"
-
-            LINK_OBJS+=("$TMP_DIR/debug_counters.o")
-        fi
-
-        $GCC -mmcu=$DEVICE -msmall \
-            -L"$MSP430GCC_SUPPORT_PATH/include" \
-            -T "$LINKER_SCRIPT" \
-            -Wl,--nmagic \
-            "${LINK_OBJS[@]}" -o "${OUTPUT}.elf"
-
-        $SIZE "${OUTPUT}.elf"
+        LINK_OBJS+=("$TMP_DIR/debug_counters.o")
     fi
+
+    $GCC -mmcu=$DEVICE -msmall \
+        -L"$MSP430GCC_SUPPORT_PATH/include" \
+        -T "$LINKER_SCRIPT" \
+        -Wl,--nmagic \
+        "${LINK_OBJS[@]}" -o "${OUTPUT}.elf"
+
+    $SIZE "${OUTPUT}.elf"
 fi
