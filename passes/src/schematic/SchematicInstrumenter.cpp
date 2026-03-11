@@ -1,5 +1,4 @@
 #include "schematic/SchematicInstrumenter.h"
-#include "common/BlockUtils.h"
 
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
@@ -10,23 +9,27 @@
 
 namespace checkpoint {
 
-SchematicInstrumenter::SchematicInstrumenter(llvm::Module &M, bool addDebugMarkers, unsigned N_reg)
-    : M_(M), addDebugMarkers_(addDebugMarkers), N_reg_(N_reg) {}
+SchematicInstrumenter::SchematicInstrumenter(llvm::Module &M, bool addDebugMarkers)
+    : M_(M), addDebugMarkers_(addDebugMarkers) {}
 
 void SchematicInstrumenter::declareRuntimeFunctions() {
     llvm::LLVMContext &Ctx = M_.getContext();
     llvm::Type *VoidTy = llvm::Type::getVoidTy(Ctx);
-    llvm::Type *I32Ty = llvm::Type::getInt32Ty(Ctx);
-    llvm::Type *PtrTy = llvm::PointerType::getUnqual(Ctx);
 
-    prologueFn_ = M_.getOrInsertFunction("__region_prologue", VoidTy);
-    epilogueFn_ = M_.getOrInsertFunction("__region_epilogue", VoidTy);
+    boundaryFn_ = M_.getOrInsertFunction("__region_boundary", VoidTy);
 
-    llvm::Type *I64Ty = llvm::Type::getInt64Ty(Ctx);
-    storeMemFn_ = M_.getOrInsertFunction("__checkpoint_store_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-    restoreMemFn_ = M_.getOrInsertFunction("__restore_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-    storeRegFn_ = M_.getOrInsertFunction("__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
-    restoreRegFn_ = M_.getOrInsertFunction("__restore_reg", VoidTy, I32Ty, PtrTy);
+    if (addDebugMarkers_) {
+        llvm::Type *I16Ty = llvm::Type::getInt16Ty(Ctx);
+        cntStoreMemGV_ =
+            llvm::dyn_cast<llvm::GlobalVariable>(M_.getOrInsertGlobal("cnt_store_mem", I16Ty));
+        assert(cntStoreMemGV_ && "cnt_store_mem must be a GlobalVariable");
+        cntStoreMemGV_->setLinkage(llvm::GlobalValue::ExternalLinkage);
+
+        cntRestoreMemGV_ =
+            llvm::dyn_cast<llvm::GlobalVariable>(M_.getOrInsertGlobal("cnt_restore_mem", I16Ty));
+        assert(cntRestoreMemGV_ && "cnt_restore_mem must be a GlobalVariable");
+        cntRestoreMemGV_->setLinkage(llvm::GlobalValue::ExternalLinkage);
+    }
 }
 
 void SchematicInstrumenter::createShadowGlobals(llvm::Function &F,
@@ -148,6 +151,14 @@ void SchematicInstrumenter::rewriteAccessesInRegion(const std::vector<llvm::Basi
     }
 }
 
+/// Emit an inline increment of an i16 NVM counter global: load, add 1, store.
+static void emitCounterIncrement(llvm::IRBuilder<> &builder, llvm::GlobalVariable *counterGV) {
+    llvm::Type *I16Ty = llvm::Type::getInt16Ty(builder.getContext());
+    llvm::Value *val = builder.CreateLoad(I16Ty, counterGV);
+    llvm::Value *inc = builder.CreateAdd(val, llvm::ConstantInt::get(I16Ty, 1));
+    builder.CreateStore(inc, counterGV);
+}
+
 unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptBB,
                                                          const RegionAllocation *endingAlloc,
                                                          const RegionAllocation *startingAlloc,
@@ -179,43 +190,24 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
                 builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
                                      shadowIt->second->getAlign(), size);
                 if (addDebugMarkers_)
-                    builder.CreateCall(storeMemFn_, {GV, shadowIt->second, size});
+                    emitCounterIncrement(builder, cntStoreMemGV_);
             } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(v)) {
                 builder.CreateMemCpy(AI, AI->getAlign(), shadowIt->second,
                                      shadowIt->second->getAlign(), size);
                 if (addDebugMarkers_)
-                    builder.CreateCall(storeMemFn_, {AI, shadowIt->second, size});
+                    emitCounterIncrement(builder, cntStoreMemGV_);
             }
             inserted++;
         }
     }
 
-    // Phase 2: Epilogue + register save markers.
-    builder.CreateCall(epilogueFn_);
+    // Phase 2: Call __region_boundary.
+    // Assembly handles bulk register save/restore, cnt_boundary, cnt_save_reg,
+    // cnt_restore_reg internally via #ifdef DEBUG_COUNTERS.
+    builder.CreateCall(boundaryFn_);
     inserted++;
-    if (addDebugMarkers_) {
-        for (unsigned r = 0; r < N_reg_; ++r) {
-            auto *slotId = llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), r);
-            auto *val = llvm::ConstantInt::get(llvm::Type::getInt64Ty(M_.getContext()), 0);
-            builder.CreateCall(storeRegFn_, {slotId, val});
-            inserted++;
-        }
-    }
 
-    // Phase 3: Prologue + register restore markers.
-    builder.CreateCall(prologueFn_);
-    inserted++;
-    if (addDebugMarkers_) {
-        for (unsigned r = 0; r < N_reg_; ++r) {
-            auto *slotId = llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), r);
-            auto *nullPtr =
-                llvm::ConstantPointerNull::get(llvm::PointerType::getUnqual(M_.getContext()));
-            builder.CreateCall(restoreRegFn_, {slotId, nullPtr});
-            inserted++;
-        }
-    }
-
-    // Phase 4: Restore starting region's VM vars with live_start=true.
+    // Phase 3: Restore starting region's VM vars with live_start=true.
     // For globals: memcpy GV -> shadow (FRAM -> SRAM).
     // For allocas: memcpy alloca -> shadow (FRAM stack -> SRAM).
     if (startingAlloc) {
@@ -238,12 +230,12 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
                 builder.CreateMemCpy(shadowIt->second, shadowIt->second->getAlign(), GV,
                                      GV->getAlign(), size);
                 if (addDebugMarkers_)
-                    builder.CreateCall(restoreMemFn_, {shadowIt->second, GV, size});
+                    emitCounterIncrement(builder, cntRestoreMemGV_);
             } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(v)) {
                 builder.CreateMemCpy(shadowIt->second, shadowIt->second->getAlign(), AI,
                                      AI->getAlign(), size);
                 if (addDebugMarkers_)
-                    builder.CreateCall(restoreMemFn_, {shadowIt->second, AI, size});
+                    emitCounterIncrement(builder, cntRestoreMemGV_);
             }
             inserted++;
         }
@@ -366,14 +358,9 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
     for (const auto &region : solution.regions)
         rewriteAccessesInRegion(region.blocks, region.allocation);
 
-    // Step 5: Insert entry prologue after allocas in entry block.
-    {
-        llvm::BasicBlock &entryBB = F.getEntryBlock();
-        llvm::BasicBlock::iterator insertPt = getInsertPointAfterAllocas(entryBB);
-        llvm::IRBuilder<> builder(&entryBB, insertPt);
-        builder.CreateCall(prologueFn_);
-        inserted++;
-    }
+    // Step 5: Entry block — no boundary call (consistent with RockClimb,
+    // which skips the entry block boundary). The first region starts at
+    // program entry without a checkpoint.
 
     // Step 6: Insert checkpoints at enabled edges.
     // Build a lookup from regions for ending/starting allocations.

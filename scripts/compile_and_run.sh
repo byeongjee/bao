@@ -259,8 +259,8 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             if [[ "$LOCAL_MODE" == "true" ]]; then
                 link_local "$TMP_DIR/ckpt.ll" "$SCHEMATIC_MOCK_CKPT_COUNTER"
             else
-                link_runtime "$SCHEMATIC_MOCK_CKPT_COUNTER" "$MILP_RUNTIME" \
-                    "$MILP_BOOT" "$MILP_LINKER"
+                link_runtime "$SCHEMATIC_MOCK_CKPT_COUNTER" "$SCHEMATIC_RUNTIME" \
+                    "$SCHEMATIC_BOOT" "$SCHEMATIC_LINKER"
                 cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
             fi
             ;;

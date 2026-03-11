@@ -18,6 +18,10 @@
 #   --add-debug-markers  Insert mock-counter debug markers
 #   --trace <file>       Use pre-collected trace (skip collection)
 #   --trace-only         Collect trace and stop; output <output>_trace.json
+#   --link               Assemble + link to produce .elf (real runtime: boot.S + runtime.c)
+#   --debug-counters     Link debug counter runtime alongside real runtime (implies --link)
+#   --halt-mode          Pass -DHALT_MODE when assembling boot.S
+#   --linker <script>    Linker script (default: rockclimb_msp430fr5994.ld)
 #   -h, --help           Show this help message
 #
 
@@ -37,9 +41,13 @@ DEBUG_MODE="false"
 ADD_DEBUG_MARKERS="false"
 TRACE_FILE=""
 TRACE_ONLY="false"
+LINK="false"
+DEBUG_COUNTERS="false"
+HALT_MODE="false"
+LINKER_SCRIPT=""
 INPUT=""
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \?//'; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -55,6 +63,10 @@ while [[ $# -gt 0 ]]; do
         --add-debug-markers) ADD_DEBUG_MARKERS="true"; shift ;;
         --trace) TRACE_FILE="$2"; shift 2 ;;
         --trace-only) TRACE_ONLY="true"; shift ;;
+        --link) LINK="true"; shift ;;
+        --debug-counters) DEBUG_COUNTERS="true"; LINK="true"; shift ;;
+        --halt-mode) HALT_MODE="true"; shift ;;
+        --linker) LINKER_SCRIPT="$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) error "Unknown option: $1" ;;
         *) INPUT="$1"; shift ;;
@@ -184,4 +196,45 @@ else
         -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
     cp "$TMP_DIR/ckpt.o" "${OUTPUT}.o"
     cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+
+    # Optional: Assemble + link to produce .elf
+    if [[ "$LINK" == "true" ]]; then
+        info "Linking with SCHEMATIC runtime..."
+
+        # Determine linker script
+        [[ -z "$LINKER_SCRIPT" ]] && LINKER_SCRIPT="$SCHEMATIC_LINKER"
+
+        # Assemble boot.S
+        BOOT_ASM_FLAGS=""
+        [[ "$DEBUG_COUNTERS" == "true" ]] && BOOT_ASM_FLAGS="$BOOT_ASM_FLAGS -DDEBUG_COUNTERS"
+        [[ "$HALT_MODE" == "true" ]] && BOOT_ASM_FLAGS="$BOOT_ASM_FLAGS -DHALT_MODE"
+
+        $GCC -mmcu=$DEVICE -msmall $BOOT_ASM_FLAGS \
+            -c "$SCHEMATIC_BOOT" -o "$TMP_DIR/boot.o"
+
+        # Compile runtime.c
+        $GCC -mmcu=$DEVICE -msmall -O2 \
+            -I"$MSP430GCC_SUPPORT_PATH/include" \
+            -I"$PROJECT_DIR/passes/runtime" \
+            -c "$SCHEMATIC_RUNTIME" -o "$TMP_DIR/runtime.o"
+
+        LINK_OBJS=("$TMP_DIR/ckpt.o" "$TMP_DIR/boot.o" "$TMP_DIR/runtime.o")
+
+        if [[ "$DEBUG_COUNTERS" == "true" ]]; then
+            $GCC -mmcu=$DEVICE -msmall -O2 -DDEBUG_COUNTERS \
+                -I"$MSP430GCC_SUPPORT_PATH/include" \
+                -I"$PROJECT_DIR/passes/runtime" \
+                -c "$SCHEMATIC_DEBUG_COUNTERS" -o "$TMP_DIR/debug_counters.o"
+
+            LINK_OBJS+=("$TMP_DIR/debug_counters.o")
+        fi
+
+        $GCC -mmcu=$DEVICE -msmall \
+            -L"$MSP430GCC_SUPPORT_PATH/include" \
+            -T "$LINKER_SCRIPT" \
+            -Wl,--nmagic \
+            "${LINK_OBJS[@]}" -o "${OUTPUT}.elf"
+
+        $SIZE "${OUTPUT}.elf"
+    fi
 fi

@@ -1,10 +1,11 @@
 /*
  * SCHEMATIC Mock Checkpoint Counter Runtime
  *
- * Implements the 6 SCHEMATIC checkpoint functions as no-op counters.
- * Each function increments a static counter without performing any NVM
- * operations.  Call __schematic_print_counts() at program exit to print a
- * summary of all counters.
+ * Implements __region_boundary as a counter stub for host-based evaluation.
+ * cnt_store_mem and cnt_restore_mem are globals incremented inline at IR level
+ * by the instrumenter (load-add-store pattern).
+ *
+ * Call __schematic_print_counts() at program exit to print a summary.
  *
  * Intended for evaluation under continuous power only.
  */
@@ -14,45 +15,19 @@
 
 #include "debug_counters.h"
 
-static uint32_t cnt_region_prologue;
-static uint32_t cnt_region_epilogue;
-static uint32_t cnt_checkpoint_store_reg;
-static uint32_t cnt_checkpoint_store_mem;
+static uint32_t cnt_boundary;
+static uint32_t cnt_save_reg;
 static uint32_t cnt_restore_reg;
-static uint32_t cnt_restore_mem;
 
-void __region_prologue(void) {
-    cnt_region_prologue++;
-}
+/* These are incremented inline by the instrumenter at IR level.
+   Declared as globals (not static) so the instrumenter can reference them. */
+uint16_t cnt_store_mem;
+uint16_t cnt_restore_mem;
 
-void __region_epilogue(void) {
-    cnt_region_epilogue++;
-}
-
-void __checkpoint_store_reg(int32_t slot_id, int64_t value) {
-    (void)slot_id;
-    (void)value;
-    cnt_checkpoint_store_reg++;
-}
-
-void __checkpoint_store_mem(void *nvm_dst, void *vm_src, int32_t size) {
-    (void)nvm_dst;
-    (void)vm_src;
-    (void)size;
-    cnt_checkpoint_store_mem++;
-}
-
-void __restore_reg(int32_t slot_id, void *dest) {
-    (void)slot_id;
-    (void)dest;
-    cnt_restore_reg++;
-}
-
-void __restore_mem(void *vm_dst, void *nvm_src, int32_t size) {
-    (void)vm_dst;
-    (void)nvm_src;
-    (void)size;
-    cnt_restore_mem++;
+void __region_boundary(void) {
+    cnt_boundary++;
+    cnt_save_reg += 12;    /* Simulate bulk save of R4-R15 */
+    cnt_restore_reg += 12; /* Simulate bulk restore of R4-R15 */
 }
 
 /* No-op stub for loop trip-count annotations that survive into the final IR. */
@@ -61,12 +36,11 @@ void __loop_tripcount(int max_iterations) {
 }
 
 __attribute__((destructor)) void __schematic_print_counts(void) {
-    printf("=== SCHEMATIC Checkpoint Counter Summary ===\n");
-    printf("  __region_prologue:       %u\n", cnt_region_prologue);
-    printf("  __region_epilogue:       %u\n", cnt_region_epilogue);
-    printf("  __checkpoint_store_reg:  %u\n", cnt_checkpoint_store_reg);
-    printf("  __checkpoint_store_mem:  %u\n", cnt_checkpoint_store_mem);
-    printf("  __restore_reg:           %u\n", cnt_restore_reg);
-    printf("  __restore_mem:           %u\n", cnt_restore_mem);
+    printf("=== Debug Counter Summary ===\n");
+    printf("  __region_boundary:    %u\n", cnt_boundary);
+    printf("  reg_saves:            %u\n", cnt_save_reg);
+    printf("  reg_restores:         %u\n", cnt_restore_reg);
+    printf("  mem_stores:           %u\n", (uint32_t)cnt_store_mem);
+    printf("  mem_restores:         %u\n", (uint32_t)cnt_restore_mem);
     printf(DEBUG_END_MARKER "\n");
 }
