@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 #
 # Benchmark MILP checkpoint insertion across all intermittent benchmarks
-# and capacitor sizes. Outputs a CSV summary.
+# and capacitor sizes. Compiles via compile_milp.sh, flashes to MSP430
+# via mspdebug, and reads runtime counters from NVM.
+#
+# Outputs a CSV summary.
 #
 # Usage:
-#   ./scripts/run_milp.sh [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#   ./scripts/run_milp.sh [--debug-counters] [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]
+#
+# Options:
+#   --debug-counters  Link debug counter runtime (UART output + NVM counters).
+#               Default: real runtime only (boot.S save+halt, FRAM recovery).
+#   --cap <size>      Run only the given capacitor size (1uF, 10uF, 100uF).
+#                     Can be repeated: --cap 1uF --cap 10uF
 #
 # If benchmark names are given, only those are run (matched by filename without .c).
 # Example: ./scripts/run_milp.sh crc chacha20 rsa
@@ -12,9 +21,11 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/lib/common.sh"
 
 OUTPUT_CSV="$PROJECT_DIR/benchmarks/milp_benchmark_summary.csv"
 VERBOSE=0
+DEBUG_COUNTERS=0
 FILTER_BENCHMARKS=()
 FILTER_CAPS=()
 
@@ -22,8 +33,9 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) OUTPUT_CSV="$2"; shift 2 ;;
         -v|--verbose) VERBOSE=1; shift ;;
+        --debug-counters) DEBUG_COUNTERS=1; shift ;;
         --cap) FILTER_CAPS+=("$2"); shift 2 ;;
-        -h|--help) echo "Usage: $0 [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
+        -h|--help) echo "Usage: $0 [--debug-counters] [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) FILTER_BENCHMARKS+=("$1"); shift ;;
     esac
@@ -79,8 +91,19 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# Check for MSP430 device (needed for NVM readback with --debug-counters)
+HAS_DEVICE=0
+if [[ "$DEBUG_COUNTERS" -eq 1 ]]; then
+    if timeout 3 mspdebug tilib "exit" &>/dev/null; then
+        HAS_DEVICE=1
+        echo "MSP430 device detected — will flash and read NVM counters."
+    else
+        echo "Warning: No MSP430 device detected — skipping NVM readback (runtime counters will be 0)."
+    fi
+fi
+
 # CSV header
-HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,runtime_region_prologue_calls,runtime_region_epilogue_calls,runtime_checkpoint_store_reg_calls,runtime_checkpoint_store_mem_calls,runtime_restore_reg_calls,runtime_restore_mem_calls,candidate_globals,milp_variables,milp_constraints,optimal_solution,region_boundaries_inserted,distributed_checkpoints_inserted,milp_solve_time_ms"
+HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,runtime_region_boundary_calls,runtime_debug_save_vreg_calls,runtime_debug_restore_vreg_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,candidate_globals,milp_variables,milp_constraints,optimal_solution,region_boundaries_inserted,distributed_checkpoints_inserted,milp_solve_time_ms,result"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 # Extract first numeric/token value after "label:" from output.
@@ -101,11 +124,16 @@ extract_stat() {
             fi
         fi
     done
-    return 1
+    # No match — caller uses ${var:-0} defaults; return 0 to avoid set -e exit.
+    return 0
 }
 
 total=$((${#BENCHMARKS[@]} * ${#CAPACITOR_CONFIGS[@]}))
 count=0
+
+ALL_TMP_DIRS=()
+cleanup_all() { rm -rf "${ALL_TMP_DIRS[@]}"; }
+trap cleanup_all EXIT
 
 for bench_path in "${BENCHMARKS[@]}"; do
     bench_name=$(basename "$bench_path" .c)
@@ -118,23 +146,53 @@ for bench_path in "${BENCHMARKS[@]}"; do
         row_name="${bench_name}-${cap_label}"
         echo "[$count/$total] Running $row_name ..."
 
+        TMP_DIR=$(mktemp -d)
+        ALL_TMP_DIRS+=("$TMP_DIR")
+
         run_cmd=(
-            "$SCRIPT_DIR/compile_and_run.sh"
-            --mode milp
-            --runtime mock-counter
+            "$SCRIPT_DIR/compile_milp.sh"
             -e "$ENERGY_CONFIG"
             -m "$cap_config"
-            --local
-            -I "$PROJECT_DIR/passes/runtime"
+            -o "$TMP_DIR/$bench_name"
+            --link
             --verbose
-            "$bench_path"
+            --add-debug-markers
         )
+        if [[ "$DEBUG_COUNTERS" -eq 1 ]]; then
+            run_cmd+=(--debug-counters)
+        fi
+        run_cmd+=("$bench_path")
         printf -v run_cmd_display '%q ' "${run_cmd[@]}"
         run_cmd_display="${run_cmd_display% }"
         echo "  Command: $run_cmd_display"
 
-        # Run compile_and_run, capture all output regardless of exit code
-        full_output=$("${run_cmd[@]}" 2>&1) || true
+        # Run compile, capture all output regardless of exit code
+        compile_output=$("${run_cmd[@]}" 2>&1) || true
+
+        # Flash, run, and read NVM (debug-counters mode only)
+        nvm_output=""
+        if [[ "$HAS_DEVICE" -eq 1 && -f "$TMP_DIR/${bench_name}.elf" ]]; then
+            nvm_output=$(flash_run_and_read \
+                "$TMP_DIR/${bench_name}.elf" 30 \
+                __nvm_done __nvm_result cnt_boundary cnt_save_vreg cnt_restore_vreg cnt_store_mem cnt_restore_mem \
+                2>"$TMP_DIR/nvm_read.err") || true
+        fi
+
+        # Convert NVM key=value output to label: value format for extract_stat
+        nvm_as_labels=""
+        if [[ -n "$nvm_output" ]]; then
+            nvm_as_labels=$(echo "$nvm_output" | sed \
+                -e 's/^__nvm_result=/RESULT: /' \
+                -e 's/^cnt_boundary=/__region_boundary: /' \
+                -e 's/^cnt_save_vreg=/vreg_saves: /' \
+                -e 's/^cnt_restore_vreg=/vreg_restores: /' \
+                -e 's/^cnt_store_mem=/mem_stores: /' \
+                -e 's/^cnt_restore_mem=/mem_restores: /')
+        fi
+
+        # Merge compile output + NVM output for stat extraction
+        full_output="${compile_output}
+${nvm_as_labels}"
 
         if [[ "$VERBOSE" -eq 1 ]]; then
             echo "$full_output"
@@ -143,19 +201,19 @@ for bench_path in "${BENCHMARKS[@]}"; do
         # Check for infeasibility
         if echo "$full_output" | grep -q "blocks exceed energy capacity"; then
             echo "  INFEASIBLE (blocks exceed capacity)"
-            echo "$row_name,$cap_label,infeasible,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,infeasible,,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
         if echo "$full_output" | grep -q "Optimization failed"; then
             echo "  INFEASIBLE (solver found no feasible solution)"
-            echo "$row_name,$cap_label,infeasible,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,infeasible,,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
 
         # Check for compilation failure (no MILP statistics at all)
         if ! echo "$full_output" | grep -q "Checkpoint Insertion Statistics"; then
             echo "  FAILED (compilation error)"
-            echo "$row_name,$cap_label,failed,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
+            echo "$row_name,$cap_label,failed,,,,,,,,,,,,,,,,,,,,,," >> "$OUTPUT_CSV"
             continue
         fi
 
@@ -195,24 +253,26 @@ for bench_path in "${BENCHMARKS[@]}"; do
         profiling_time=${profiling_time:-0}
         execution_time=${execution_time:-0}
 
-        # Extract mock counter stats
-        prologue=$(extract_stat "$full_output" "__region_prologue")
-        epilogue=$(extract_stat "$full_output" "__region_epilogue")
-        store_reg=$(extract_stat "$full_output" "__checkpoint_store_reg")
-        store_mem=$(extract_stat "$full_output" "__checkpoint_store_mem")
-        restore_reg=$(extract_stat "$full_output" "__restore_reg")
-        restore_mem=$(extract_stat "$full_output" "__restore_mem")
+        # Extract runtime counter stats
+        runtime_boundary=$(extract_stat "$full_output" "__region_boundary")
+        runtime_save_vreg=$(extract_stat "$full_output" "vreg_saves")
+        runtime_restore_vreg=$(extract_stat "$full_output" "vreg_restores")
+        runtime_store_mem=$(extract_stat "$full_output" "mem_stores")
+        runtime_restore_mem=$(extract_stat "$full_output" "mem_restores")
+
+        # Extract computation result (semantic correctness check)
+        bench_result=$(extract_stat "$full_output" "RESULT")
 
         # Default to 0 if not found
-        prologue=${prologue:-0}
-        epilogue=${epilogue:-0}
-        store_reg=${store_reg:-0}
-        store_mem=${store_mem:-0}
-        restore_reg=${restore_reg:-0}
-        restore_mem=${restore_mem:-0}
+        runtime_boundary=${runtime_boundary:-0}
+        runtime_save_vreg=${runtime_save_vreg:-0}
+        runtime_restore_vreg=${runtime_restore_vreg:-0}
+        runtime_store_mem=${runtime_store_mem:-0}
+        runtime_restore_mem=${runtime_restore_mem:-0}
         solve_time=${solve_time:-0}
+        bench_result=${bench_result:-}
 
-        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$profiling_time,$execution_time,$prologue,$epilogue,$store_reg,$store_mem,$restore_reg,$restore_mem,$candidate_globals,$milp_vars,$milp_constrs,$optimal,$boundaries,$dist_ckpts,$solve_time" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,$profiling_time,$execution_time,$runtime_boundary,$runtime_save_vreg,$runtime_restore_vreg,$runtime_store_mem,$runtime_restore_mem,$candidate_globals,$milp_vars,$milp_constrs,$optimal,$boundaries,$dist_ckpts,$solve_time,$bench_result" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $boundaries boundaries, $optimal)"
     done
 done

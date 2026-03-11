@@ -12,10 +12,12 @@
 #   -O <level>           LLC optimization level (default: 2)
 #   -Oc <level>          Clang optimization level (default: 2)
 #   -I <dir>             Add include directory (can be repeated)
-#   --local              Compile for host machine instead of MSP430
+#   --link               Assemble + link for MSP430
+#   --halt-mode <mode>   Halt mode: debug (default), bor, lpm4
+#   --debug-counters     Link debug counter runtime (UART + NVM counters)
 #   --verbose            Show detailed pass output
 #   --debug              Enable DEBUG output
-#   --add-debug-markers  Insert mock-counter debug markers
+#   --add-debug-markers  Insert debug counter markers in IR
 #   -h, --help           Show this help message
 #
 
@@ -29,13 +31,15 @@ OUTPUT=""
 OPT_LEVEL="2"
 CLANG_OPT_LEVEL="2"
 EXTRA_INCLUDES=""
-LOCAL_MODE="false"
 VERBOSE="false"
 DEBUG_MODE="false"
 ADD_DEBUG_MARKERS="false"
+LINK="false"
+HALT_MODE="debug"
+DEBUG_COUNTERS="false"
 INPUT=""
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \?//'; exit 0; }
+usage() { sed -n '2,24p' "$0" | sed 's/^# \?//'; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -45,7 +49,9 @@ while [[ $# -gt 0 ]]; do
         -O) OPT_LEVEL="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
-        --local) LOCAL_MODE="true"; shift ;;
+        --link) LINK="true"; shift ;;
+        --halt-mode) HALT_MODE="$2"; shift 2 ;;
+        --debug-counters) DEBUG_COUNTERS="true"; shift ;;
         --verbose) VERBOSE="true"; shift ;;
         --debug) DEBUG_MODE="true"; shift ;;
         --add-debug-markers) ADD_DEBUG_MARKERS="true"; shift ;;
@@ -54,6 +60,10 @@ while [[ $# -gt 0 ]]; do
         *) INPUT="$1"; shift ;;
     esac
 done
+
+# bor/lpm4 halt modes and debug-counters imply --link
+[[ "$HALT_MODE" == "bor" || "$HALT_MODE" == "lpm4" ]] && LINK="true"
+[[ "$DEBUG_COUNTERS" == "true" ]] && LINK="true"
 
 # Validate
 [[ -z "$INPUT" ]] && error "No input file specified"
@@ -74,7 +84,6 @@ trap "rm -rf $TMP_DIR" EXIT
 
 # Build compile_to_ir args — compile at -O0 to preserve loops for tripcount
 IR_ARGS=("$INPUT" "$TMP_DIR/input.ll" --clang-opt-level 0)
-[[ "$LOCAL_MODE" == "true" ]] && IR_ARGS+=(--local)
 [[ "$DEBUG_MODE" == "true" ]] && IR_ARGS+=(--debug)
 for word in $EXTRA_INCLUDES; do
     if [[ "$word" == -I* ]]; then
@@ -152,14 +161,57 @@ else
     error "MILP pass failed (see output above)"
 fi
 
-# Output
-if [[ "$LOCAL_MODE" == "true" ]]; then
-    sed -i '' 's/, section ".nvm"//g' "$TMP_DIR/ckpt.ll"
-    cp "$TMP_DIR/ckpt.ll" "${OUTPUT}.ll"
-else
-    $LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
-    $GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
-        -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
-    cp "$TMP_DIR/ckpt.o" "${OUTPUT}.o"
-    cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+# Output: compile to MSP430 object
+$LLC -march=msp430 -O"$OPT_LEVEL" "$TMP_DIR/ckpt.ll" -o "$TMP_DIR/ckpt.s"
+$GCC -mmcu=$DEVICE -msmall -I"$MSP430GCC_SUPPORT_PATH/include" \
+    -c "$TMP_DIR/ckpt.s" -o "$TMP_DIR/ckpt.o"
+cp "$TMP_DIR/ckpt.o" "${OUTPUT}.o"
+cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
+
+# Optional: assemble + link
+if [[ "$LINK" == "true" ]]; then
+    echo "=== Assemble + Link ==="
+
+    BOOT_SRC="$PROJECT_DIR/passes/runtime/milp_boot.S"
+    RUNTIME_SRC="$PROJECT_DIR/passes/runtime/milp_runtime.c"
+    LINKER_SCRIPT="$PROJECT_DIR/passes/runtime/milp_msp430fr5994.ld"
+
+    [[ ! -f "$BOOT_SRC" ]] && error "$BOOT_SRC not found"
+    [[ ! -f "$RUNTIME_SRC" ]] && error "$RUNTIME_SRC not found"
+    [[ ! -f "$LINKER_SCRIPT" ]] && error "$LINKER_SCRIPT not found"
+
+    BOOT_ASM_FLAGS=""
+    case "$HALT_MODE" in
+        bor)  BOOT_ASM_FLAGS="-DMILP_HALT_BOR" ;;
+        lpm4) BOOT_ASM_FLAGS="-DMILP_HALT_LPM4" ;;
+    esac
+    [[ "$DEBUG_COUNTERS" == "true" ]] && BOOT_ASM_FLAGS="$BOOT_ASM_FLAGS -DDEBUG_COUNTERS"
+
+    $GCC -mmcu=$DEVICE -msmall $BOOT_ASM_FLAGS -c "$BOOT_SRC" -o "${OUTPUT}.boot.o"
+    $GCC -mmcu=$DEVICE -msmall -O2 \
+        -I"$MSP430GCC_SUPPORT_PATH/include" \
+        -I"$PROJECT_DIR/passes/runtime" \
+        -c "$RUNTIME_SRC" -o "${OUTPUT}.runtime.o"
+
+    LINK_OBJS=("${OUTPUT}.o" "${OUTPUT}.boot.o" "${OUTPUT}.runtime.o")
+
+    if [[ "$DEBUG_COUNTERS" == "true" ]]; then
+        DEBUG_SRC="$PROJECT_DIR/passes/runtime/milp_debug_counters.c"
+        [[ ! -f "$DEBUG_SRC" ]] && error "$DEBUG_SRC not found"
+
+        $GCC -mmcu=$DEVICE -msmall -O2 -DDEBUG_COUNTERS \
+            -I"$MSP430GCC_SUPPORT_PATH/include" \
+            -I"$PROJECT_DIR/passes/runtime" \
+            -c "$DEBUG_SRC" -o "${OUTPUT}.debug_counters.o"
+
+        LINK_OBJS+=("${OUTPUT}.debug_counters.o")
+    fi
+
+    $GCC -mmcu=$DEVICE -msmall \
+        -L"$MSP430GCC_SUPPORT_PATH/include" \
+        -T "$LINKER_SCRIPT" \
+        -Wl,--nmagic \
+        "${LINK_OBJS[@]}" -o "${OUTPUT}.elf"
+
+    $SIZE "${OUTPUT}.elf"
 fi

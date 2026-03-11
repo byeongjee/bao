@@ -1,10 +1,11 @@
 /*
  * MILP Mock Checkpoint Counter Runtime
  *
- * Implements the 6 MILP checkpoint functions as no-op counters.
- * Each function increments a static counter without performing any NVM
- * operations.  Call __milp_print_counts() at program exit to print a
- * summary of all counters.
+ * Implements __region_boundary as a no-op counter and provides globals
+ * for IR-level debug counters (cnt_save_vreg, cnt_restore_vreg, etc.)
+ * that are incremented directly by the MILP instrumenter.
+ *
+ * Call __milp_print_counts() at program exit to print a summary.
  *
  * Intended for evaluation under continuous power only.
  */
@@ -13,47 +14,19 @@
 #include <stdio.h>
 
 #include "debug_counters.h"
-#include "milp_runtime.h"
 
-static uint32_t cnt_region_prologue;
-static uint32_t cnt_region_epilogue;
-static uint32_t cnt_checkpoint_store_reg;
-static uint32_t cnt_checkpoint_store_mem;
-static uint32_t cnt_restore_reg;
-static uint32_t cnt_restore_mem;
+static uint32_t cnt_region_boundary;
 
-void __region_prologue(void) {
-    cnt_region_prologue++;
-}
+/* IR-level debug counters — incremented by load-add-store sequences
+   inserted by CheckpointInstrumenter when --add-debug-markers is used.
+   Must be non-static so the LLVM pass can resolve them. */
+uint16_t cnt_save_vreg;
+uint16_t cnt_restore_vreg;
+uint16_t cnt_store_mem;
+uint16_t cnt_restore_mem;
 
-void __region_epilogue(void) {
-    cnt_region_epilogue++;
-}
-
-void __checkpoint_store_reg(int32_t slot_id, int64_t value) {
-    (void)slot_id;
-    (void)value;
-    cnt_checkpoint_store_reg++;
-}
-
-void __checkpoint_store_mem(void *nvm_dst, void *vm_src, int32_t size) {
-    (void)nvm_dst;
-    (void)vm_src;
-    (void)size;
-    cnt_checkpoint_store_mem++;
-}
-
-void __restore_reg(int32_t slot_id, void *dest) {
-    (void)slot_id;
-    (void)dest;
-    cnt_restore_reg++;
-}
-
-void __restore_mem(void *vm_dst, void *nvm_src, int32_t size) {
-    (void)vm_dst;
-    (void)nvm_src;
-    (void)size;
-    cnt_restore_mem++;
+void __region_boundary(void) {
+    cnt_region_boundary++;
 }
 
 /* No-op stub for loop trip-count annotations that survive into the final IR. */
@@ -63,11 +36,10 @@ void __loop_tripcount(int max_iterations) {
 
 __attribute__((destructor)) void __milp_print_counts(void) {
     printf("=== MILP Checkpoint Counter Summary ===\n");
-    printf("  __region_prologue:       %u\n", cnt_region_prologue);
-    printf("  __region_epilogue:       %u\n", cnt_region_epilogue);
-    printf("  __checkpoint_store_reg:  %u\n", cnt_checkpoint_store_reg);
-    printf("  __checkpoint_store_mem:  %u\n", cnt_checkpoint_store_mem);
-    printf("  __restore_reg:           %u\n", cnt_restore_reg);
-    printf("  __restore_mem:           %u\n", cnt_restore_mem);
+    printf("  __region_boundary:    %u\n", cnt_region_boundary);
+    printf("  vreg_saves:           %u\n", cnt_save_vreg);
+    printf("  vreg_restores:        %u\n", cnt_restore_vreg);
+    printf("  mem_stores:           %u\n", cnt_store_mem);
+    printf("  mem_restores:         %u\n", cnt_restore_mem);
     printf(DEBUG_END_MARKER "\n");
 }

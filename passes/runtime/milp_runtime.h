@@ -1,12 +1,17 @@
 /*
  * MILP Checkpoint Runtime (MSP430)
  *
- * Declares the 6 runtime functions called by the MILP checkpoint insertion
- * pass (CheckpointInstrumenter):
+ * Declares NVM storage for boot recovery and debug counters.
  *
- *   __region_prologue / __region_epilogue   – region boundary markers
- *   __checkpoint_store_reg / __restore_reg  – register save/restore
- *   __checkpoint_store_mem / __restore_mem  – memory-range save/restore
+ * Key difference from RockClimb/SCHEMATIC: no __nvm_regs array.
+ * MILP commits/restores all live state at IR level — after register
+ * allocation, these IR-level stores/loads become physical register
+ * saves/restores automatically.
+ *
+ * Debug counters use "vreg" terminology because the counts are IR-level
+ * value saves, not physical register saves.
+ * TODO: Register spilling may cause divergence between IR-level vreg
+ * counts and actual physical register save/restore counts.
  */
 
 #ifndef MILP_RUNTIME_H
@@ -18,12 +23,35 @@
 extern "C" {
 #endif
 
-void __region_prologue(void);
-void __region_epilogue(void);
-void __checkpoint_store_reg(int32_t slot_id, int64_t value);
-void __checkpoint_store_mem(void *nvm_dst, void *vm_src, int32_t size);
-void __restore_reg(int32_t slot_id, void *dest);
-void __restore_mem(void *vm_dst, void *nvm_src, int32_t size);
+/* Section attribute for NVM placement (ELF targets only) */
+#if defined(__ELF__)
+#define NVM_SECTION __attribute__((section(".nvm")))
+#else
+#define NVM_SECTION
+#endif
+
+/* Saved program counter for recovery */
+extern uint16_t __nvm_pc NVM_SECTION;
+
+/* Saved stack pointer for recovery */
+extern uint16_t __nvm_sp NVM_SECTION;
+
+/* NVM Debug Counters (guarded by DEBUG_COUNTERS) */
+extern uint16_t cnt_boundary NVM_SECTION;
+extern uint16_t cnt_save_vreg NVM_SECTION;
+extern uint16_t cnt_restore_vreg NVM_SECTION;
+extern uint16_t cnt_store_mem NVM_SECTION;
+extern uint16_t cnt_restore_mem NVM_SECTION;
+
+/**
+ * Region boundary: save PC + SP and halt (deep sleep).
+ *
+ * Saves return address (region body start) and SP to NVM, then halts.
+ * On reboot, milp_boot.S recovers from saved state.
+ *
+ * Provided by milp_boot.S (assembly).
+ */
+void __region_boundary(void);
 
 #ifdef __cplusplus
 }

@@ -26,14 +26,16 @@ class CheckpointInstrumenter {
     llvm::Module &M_;
     bool addDebugMarkers_;
 
-    llvm::FunctionCallee prologueFn_;
-    llvm::FunctionCallee epilogueFn_;
-    llvm::FunctionCallee storeMemFn_;
-    llvm::FunctionCallee restoreMemFn_;
-    llvm::FunctionCallee storeRegFn_;
-    llvm::FunctionCallee restoreRegFn_;
+    llvm::FunctionCallee boundaryFn_;
 
-    unsigned slotCounter_ = 0;
+    /// Debug counter globals (resolved when addDebugMarkers_ is true).
+    /// cnt_save_vreg/cnt_restore_vreg count IR-level value saves which may
+    /// not map 1:1 to physical register saves due to register spilling.
+    /// TODO: Post-regalloc pass for exact physical register counting.
+    llvm::GlobalVariable *cntSaveVregGV_ = nullptr;
+    llvm::GlobalVariable *cntRestoreVregGV_ = nullptr;
+    llvm::GlobalVariable *cntStoreMemGV_ = nullptr;
+    llvm::GlobalVariable *cntRestoreMemGV_ = nullptr;
 
     /// Maps candidate globals to their SRAM shadow globals.
     std::map<llvm::GlobalVariable *, llvm::GlobalVariable *> shadowMap_;
@@ -55,7 +57,8 @@ class CheckpointInstrumenter {
                                     const StateAnalysis &state);
     void applyMemoryPlacement(const StateAnalysis &state);
 
-    llvm::Value *convertToI64(llvm::IRBuilder<> &builder, llvm::Value *V);
+    /// Emit a load-add-store sequence to increment a 16-bit debug counter global.
+    void emitCounterIncrement(llvm::IRBuilder<> &builder, llvm::GlobalVariable *counter);
 };
 
 } // namespace checkpoint

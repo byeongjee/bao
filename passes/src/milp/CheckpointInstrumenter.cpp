@@ -21,17 +21,34 @@ CheckpointInstrumenter::CheckpointInstrumenter(llvm::Module &M, bool addDebugMar
 void CheckpointInstrumenter::declareRuntimeFunctions() {
     llvm::LLVMContext &Ctx = M_.getContext();
     llvm::Type *VoidTy = llvm::Type::getVoidTy(Ctx);
-    llvm::Type *I32Ty = llvm::Type::getInt32Ty(Ctx);
-    llvm::Type *PtrTy = llvm::PointerType::getUnqual(Ctx);
 
-    prologueFn_ = M_.getOrInsertFunction("__region_prologue", VoidTy);
-    epilogueFn_ = M_.getOrInsertFunction("__region_epilogue", VoidTy);
+    boundaryFn_ = M_.getOrInsertFunction("__region_boundary", VoidTy);
 
-    llvm::Type *I64Ty = llvm::Type::getInt64Ty(Ctx);
-    storeMemFn_ = M_.getOrInsertFunction("__checkpoint_store_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-    restoreMemFn_ = M_.getOrInsertFunction("__restore_mem", VoidTy, PtrTy, PtrTy, I32Ty);
-    storeRegFn_ = M_.getOrInsertFunction("__checkpoint_store_reg", VoidTy, I32Ty, I64Ty);
-    restoreRegFn_ = M_.getOrInsertFunction("__restore_reg", VoidTy, I32Ty, PtrTy);
+    if (addDebugMarkers_) {
+        llvm::Type *I16Ty = llvm::Type::getInt16Ty(Ctx);
+        auto getOrCreateCounter = [&](const char *name) -> llvm::GlobalVariable * {
+            if (auto *existing = M_.getGlobalVariable(name))
+                return existing;
+            auto *GV = new llvm::GlobalVariable(M_, I16Ty, /*isConstant=*/false,
+                                                llvm::GlobalValue::ExternalLinkage,
+                                                /*Initializer=*/nullptr, name);
+            return GV;
+        };
+        // cnt_save_vreg/cnt_restore_vreg count IR-level value saves which may
+        // not map 1:1 to physical register saves due to register spilling.
+        // TODO: Post-regalloc pass for exact physical register counting.
+        cntSaveVregGV_ = getOrCreateCounter("cnt_save_vreg");
+        cntRestoreVregGV_ = getOrCreateCounter("cnt_restore_vreg");
+        cntStoreMemGV_ = getOrCreateCounter("cnt_store_mem");
+        cntRestoreMemGV_ = getOrCreateCounter("cnt_restore_mem");
+    }
+}
+
+void CheckpointInstrumenter::emitCounterIncrement(llvm::IRBuilder<> &builder,
+                                                  llvm::GlobalVariable *counter) {
+    llvm::Value *val = builder.CreateLoad(counter->getValueType(), counter);
+    llvm::Value *inc = builder.CreateAdd(val, llvm::ConstantInt::get(counter->getValueType(), 1));
+    builder.CreateStore(inc, counter);
 }
 
 unsigned CheckpointInstrumenter::instrumentFunction(llvm::Function &F, const MILPSolution &solution,
@@ -209,7 +226,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
     std::map<llvm::Value *, std::vector<std::pair<llvm::GlobalVariable *, llvm::Instruction *>>>
         pendingSSACommits;
 
-    // Phase 1: Insert commit stores, epilogues, prologues, and restore loads
+    // Phase 1: Insert commit stores, region boundaries, and restore loads
     // at each boundary block. Accumulate SSA restore definitions for Phase 2.
     for (llvm::BasicBlock &BB : F) {
         auto itNodeVec = nodesByBlock.find(&BB);
@@ -233,7 +250,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
         std::set<llvm::Instruction *> commitInsts;
 
         // For b != b0, emit boundary-end code first.
-        // Order: commit stores -> epilogue -> prologue -> restores
+        // Order: commit stores -> region boundary -> restores
         if (!isEntryNode) {
             // Deferred SSA commits for this boundary block.
             std::vector<std::pair<llvm::Value *, llvm::GlobalVariable *>> ssaCommitsHere;
@@ -259,10 +276,8 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     auto *mc = builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
                                                     shadowIt->second->getAlign(), size);
                     commitInsts.insert(mc);
-                    if (addDebugMarkers_) {
-                        auto *call = builder.CreateCall(storeMemFn_, {GV, shadowIt->second, size});
-                        commitInsts.insert(call);
-                    }
+                    if (addDebugMarkers_)
+                        emitCounterIncrement(builder, cntStoreMemGV_);
                 } else if (llvm::isa<llvm::AllocaInst>(V)) {
                     // Stack alloca -> NVM backup (memcpy)
                     llvm::Value *size =
@@ -277,10 +292,8 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                                                  AI->getAlign(), size);
                         commitInsts.insert(mc);
                     }
-                    if (addDebugMarkers_) {
-                        auto *call = builder.CreateCall(storeMemFn_, {backupIt->second, V, size});
-                        commitInsts.insert(call);
-                    }
+                    if (addDebugMarkers_)
+                        emitCounterIncrement(builder, cntStoreMemGV_);
                 } else {
                     // SSA register: defer — direct store may violate dominance.
                     // Phase 2 will use SSAUpdater to find the reaching def.
@@ -291,19 +304,16 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 inserted++;
             }
 
-            // Finalize the old region after all commits are done.
-            auto *epilogueCall = builder.CreateCall(epilogueFn_);
+            // Insert region boundary (replaces old epilogue + prologue pair).
+            auto *boundaryCall = builder.CreateCall(boundaryFn_);
             inserted++;
 
-            // Transfer deferred SSA commits with the epilogue as insertion point.
+            // Transfer deferred SSA commits with the boundary call as insertion point.
             for (auto &[origVal, nvmBackup] : ssaCommitsHere) {
-                pendingSSACommits[origVal].emplace_back(nvmBackup, epilogueCall);
+                pendingSSACommits[origVal].emplace_back(nvmBackup, boundaryCall);
             }
         }
-
-        // Then emit boundary-start code.
-        builder.CreateCall(prologueFn_);
-        inserted++;
+        // Entry node: no boundary call at program start.
 
         // Eligible restores (needRestore).
         std::set<llvm::GlobalVariable *> restoreGVs;
@@ -324,7 +334,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             builder.CreateMemCpy(shadowIt->second, shadowIt->second->getAlign(), GV, GV->getAlign(),
                                  size);
             if (addDebugMarkers_)
-                builder.CreateCall(restoreMemFn_, {shadowIt->second, GV, size});
+                emitCounterIncrement(builder, cntRestoreMemGV_);
             inserted++;
         }
 
@@ -358,7 +368,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second,
                                      backupIt->second->getAlign(), size);
                 if (addDebugMarkers_)
-                    builder.CreateCall(restoreMemFn_, {V, backupIt->second, size});
+                    emitCounterIncrement(builder, cntRestoreMemGV_);
                 inserted++;
             } else {
                 // SSA register: typed load from NVM slot.
@@ -366,11 +376,8 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 ssaRestoreDefs[V].emplace_back(&BB, restored);
                 inserted++;
 
-                if (addDebugMarkers_) {
-                    auto *slotId = llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()),
-                                                          slotCounter_++);
-                    builder.CreateCall(restoreRegFn_, {slotId, backupIt->second});
-                }
+                if (addDebugMarkers_)
+                    emitCounterIncrement(builder, cntRestoreVregGV_);
             }
         }
 
@@ -395,7 +402,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
 
         for (auto &[nvmBackup, insertBefore] : commits) {
             // GetValueInMiddleOfBlock is correct here: commit stores sit
-            // at the top of the boundary block (before the epilogue).
+            // at the top of the boundary block (before the boundary call).
             // When the defining block *is* the boundary, GVIMOB walks
             // predecessors to find the incoming value — the value from
             // the closing region, which is exactly what we want to commit.
@@ -405,19 +412,8 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             auto *store = commitBuilder.CreateStore(reaching, nvmBackup);
             allCommitInsts.insert(store);
 
-            if (addDebugMarkers_) {
-                llvm::Value *valAsI64 = convertToI64(commitBuilder, reaching);
-                // Mark conversion instructions (ptrtoint, zext, etc.) as
-                // commit-related so Phase 3 restore rewriting skips them.
-                // Otherwise SSAUpdater may rewrite their operand to the
-                // restore load which is positioned after them in the block.
-                if (auto *convInst = llvm::dyn_cast<llvm::Instruction>(valAsI64))
-                    allCommitInsts.insert(convInst);
-                auto *slotId =
-                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), slotCounter_++);
-                auto *call = commitBuilder.CreateCall(storeRegFn_, {slotId, valAsI64});
-                allCommitInsts.insert(call);
-            }
+            if (addDebugMarkers_)
+                emitCounterIncrement(commitBuilder, cntSaveVregGV_);
         }
 
         // Mark new PHIs as commit-related so Phase 3 restore rewriting
@@ -474,32 +470,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
     }
 
     return inserted;
-}
-
-llvm::Value *CheckpointInstrumenter::convertToI64(llvm::IRBuilder<> &builder, llvm::Value *V) {
-    llvm::Type *Ty = V->getType();
-    llvm::Type *I64Ty = llvm::Type::getInt64Ty(M_.getContext());
-
-    if (Ty->isIntegerTy()) {
-        unsigned bits = Ty->getIntegerBitWidth();
-        if (bits < 64)
-            return builder.CreateZExt(V, I64Ty);
-        if (bits == 64)
-            return V;
-        // Wider than 64-bit: truncate (unlikely but safe fallback)
-        return builder.CreateTrunc(V, I64Ty);
-    }
-    if (Ty->isPointerTy())
-        return builder.CreatePtrToInt(V, I64Ty);
-    if (Ty->isFloatTy()) {
-        llvm::Value *asI32 = builder.CreateBitCast(V, llvm::Type::getInt32Ty(M_.getContext()));
-        return builder.CreateZExt(asI32, I64Ty);
-    }
-    if (Ty->isDoubleTy())
-        return builder.CreateBitCast(V, I64Ty);
-
-    // Fallback for unsupported types
-    return llvm::ConstantInt::get(I64Ty, 0);
 }
 
 } // namespace checkpoint

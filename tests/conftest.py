@@ -361,48 +361,38 @@ def check_assertions(r: PassResult, expect: dict):
             f"Expected <= {expect['max_boundary']} __region_boundary calls, got {n}"
         )
 
-    # Legacy prologue/epilogue assertions (MILP still uses these)
+    # min_prologue/max_prologue/min_epilogue: unified as __region_boundary.
+    # MILP now uses a single __region_boundary call at non-entry region starts
+    # (no call at the entry node). Old prologue count included the entry node,
+    # so boundary count = old prologue count - 1.
     if "min_prologue" in expect:
-        n = count_calls(ir, "__region_prologue")
-        assert n >= expect["min_prologue"], (
-            f"Expected >= {expect['min_prologue']} __region_prologue calls, got {n}"
+        n = count_calls(ir, "__region_boundary")
+        threshold = expect["min_prologue"] - 1
+        assert n >= threshold, (
+            f"Expected >= {threshold} __region_boundary calls "
+            f"(min_prologue={expect['min_prologue']} - 1), got {n}"
         )
 
     if "max_prologue" in expect:
-        n = count_calls(ir, "__region_prologue")
-        assert n <= expect["max_prologue"], (
-            f"Expected <= {expect['max_prologue']} __region_prologue calls, got {n}"
+        n = count_calls(ir, "__region_boundary")
+        threshold = expect["max_prologue"] - 1
+        assert n <= threshold, (
+            f"Expected <= {threshold} __region_boundary calls "
+            f"(max_prologue={expect['max_prologue']} - 1), got {n}"
         )
 
     if "min_epilogue" in expect:
-        n = count_calls(ir, "__region_epilogue")
+        # Old epilogue count = non-entry region starts = same as new boundary count
+        n = count_calls(ir, "__region_boundary")
         assert n >= expect["min_epilogue"], (
-            f"Expected >= {expect['min_epilogue']} __region_epilogue calls, got {n}"
-        )
-
-    if "min_store_reg" in expect:
-        n = count_calls(ir, "__checkpoint_store_reg")
-        assert n >= expect["min_store_reg"], (
-            f"Expected >= {expect['min_store_reg']} __checkpoint_store_reg calls, got {n}"
-        )
-
-    if "min_store_mem" in expect:
-        n = count_calls(ir, "__checkpoint_store_mem")
-        assert n >= expect["min_store_mem"], (
-            f"Expected >= {expect['min_store_mem']} __checkpoint_store_mem calls, got {n}"
-        )
-
-    if "min_restore_mem" in expect:
-        n = count_calls(ir, "__restore_mem")
-        assert n >= expect["min_restore_mem"], (
-            f"Expected >= {expect['min_restore_mem']} __restore_mem calls, got {n}"
+            f"Expected >= {expect['min_epilogue']} __region_boundary calls, got {n}"
         )
 
     if "no_prologue_in" in expect:
         for label in expect["no_prologue_in"]:
-            n = calls_in_block(ir, label, "__region_prologue")
+            n = calls_in_block(ir, label, "__region_boundary")
             assert n == 0, (
-                f"Expected no __region_prologue in block '{label}', but found {n}"
+                f"Expected no __region_boundary in block '{label}', but found {n}"
             )
 
     if "has_shadow" in expect:

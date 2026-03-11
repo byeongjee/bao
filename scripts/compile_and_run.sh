@@ -233,18 +233,27 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
             ;;
 
         milp)
+            [[ "$LOCAL_MODE" == "true" ]] && error "MILP mode does not support --local (MSP430 only)"
+
+            # Build MILP-specific args (COMPILE_ARGS may contain --local from other modes)
+            MILP_COMPILE_ARGS=(-e "$ESTIMATOR_CONFIG" -o "$TMP_DIR/ckpt")
+            [[ "$VERBOSE" == "true" ]] && MILP_COMPILE_ARGS+=(--verbose)
+            [[ "$DEBUG_MODE" == "true" ]] && MILP_COMPILE_ARGS+=(--debug)
+            [[ "$RUNTIME_TYPE" == "mock-counter" ]] && MILP_COMPILE_ARGS+=(--add-debug-markers)
+            [[ -n "$OPT_LEVEL" ]] && MILP_COMPILE_ARGS+=(-O "$OPT_LEVEL")
+            [[ -n "$CLANG_OPT_LEVEL" ]] && MILP_COMPILE_ARGS+=(-Oc "$CLANG_OPT_LEVEL")
+            for word in $EXTRA_INCLUDES; do
+                [[ "$word" == -I* ]] && MILP_COMPILE_ARGS+=(-I "${word#-I}")
+            done
+
             "$SCRIPT_DIR/compile_milp.sh" \
                 -m "$MILP_CONFIG" \
-                "${COMPILE_ARGS[@]}" \
+                --link \
+                "${MILP_COMPILE_ARGS[@]}" \
                 "$INPUT"
 
-            if [[ "$LOCAL_MODE" == "true" ]]; then
-                link_local "$TMP_DIR/ckpt.ll" "$MILP_MOCK_CKPT_COUNTER"
-            else
-                link_runtime "$MILP_MOCK_CKPT_COUNTER" "$MILP_RUNTIME" \
-                    "$MILP_BOOT" "$MILP_LINKER"
-                cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s"
-            fi
+            cp "$TMP_DIR/ckpt.elf" "${OUTPUT}.elf" 2>/dev/null || true
+            cp "$TMP_DIR/ckpt.s" "${OUTPUT}.s" 2>/dev/null || true
             ;;
 
         schematic)
