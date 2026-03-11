@@ -25,8 +25,8 @@ SCENARIOS = [
         "scenario_no_ckpt.c",
         ENERGY_CONFIG,
         SCHEMATIC_CONFIG,
-        # Trivial function fits in one region: exactly 1 prologue, no epilogues.
-        {"exit": 0, "min_prologue": 1, "max_prologue": 1,
+        # Trivial function fits in one region: no boundaries needed.
+        {"exit": 0, "max_boundary": 0,
          "stderr_contains": "Enabled checkpoints:             0"},
     ),
     (
@@ -34,8 +34,8 @@ SCENARIOS = [
         "scenario_loop.c",
         ENERGY_CONFIG,
         SCHEMATIC_CONFIG,
-        # Loop requires checkpoints: multiple prologues/epilogues, loop analysis must run.
-        {"exit": 0, "min_prologue": 2, "min_epilogue": 1,
+        # Loop requires checkpoints: multiple boundaries, loop analysis must run.
+        {"exit": 0, "min_boundary": 2,
          "stderr_contains": "Loop decisions:                  1"},
     ),
     (
@@ -45,7 +45,7 @@ SCENARIOS = [
         SCHEMATIC_CONFIG,
         # Multi-path CFG: must NOT be falsely infeasible (the main energy propagation bug).
         # Requires multiple regions due to divergent paths with different energy costs.
-        {"exit": 0, "min_prologue": 2, "min_epilogue": 1,
+        {"exit": 0, "min_boundary": 2,
          "stderr_contains": "Paths analyzed:"},
     ),
 ]
@@ -93,9 +93,11 @@ def test_schematic_alloca_placement(run_schematic_o0, tmp_path_factory):
         f"Expected exit=0 but got {result.exit_code}.\nstderr: {result.stderr[:1000]}"
     )
 
-    # Must have at least one prologue (entry region).
-    from conftest import count_calls
-    assert count_calls(result.output_ir, "__region_prologue") >= 1
+    # The __region_boundary function must be declared (even if not called,
+    # since this trivial function may fit in a single region with 0 boundaries).
+    assert "__region_boundary" in result.output_ir, (
+        "Expected __region_boundary to be declared in the output IR"
+    )
 
     # The function has local variables compiled at O0 (alloca-based).
     # Check that the pass found candidates (globals + allocas).

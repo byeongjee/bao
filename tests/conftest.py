@@ -349,6 +349,19 @@ def check_assertions(r: PassResult, expect: dict):
 
     ir = r.output_ir
 
+    if "min_boundary" in expect:
+        n = count_calls(ir, "__region_boundary")
+        assert n >= expect["min_boundary"], (
+            f"Expected >= {expect['min_boundary']} __region_boundary calls, got {n}"
+        )
+
+    if "max_boundary" in expect:
+        n = count_calls(ir, "__region_boundary")
+        assert n <= expect["max_boundary"], (
+            f"Expected <= {expect['max_boundary']} __region_boundary calls, got {n}"
+        )
+
+    # Legacy prologue/epilogue assertions (MILP still uses these)
     if "min_prologue" in expect:
         n = count_calls(ir, "__region_prologue")
         assert n >= expect["min_prologue"], (
