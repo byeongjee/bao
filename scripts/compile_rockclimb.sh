@@ -105,7 +105,13 @@ echo "=== Step 1: C → LLVM IR (clang -O${CLANG_OPT_LEVEL}) ==="
     -isystem "$MSP430GCC_SUPPORT_PATH/msp430-elf/include" \
     -I"$PROJECT_DIR/passes/runtime" \
     $CLANG_DEBUG_FLAGS \
-    "$INPUT" -o "${OUTPUT}.ll"
+    "$INPUT" -o "${OUTPUT}.raw.ll"
+
+# Step 1b: Strip __loop_tripcount calls
+echo "=== Step 1b: Strip __loop_tripcount calls ==="
+"$OPT" -load-pass-plugin="$PASS_LIB" \
+    -passes=tripcount-annotation \
+    -S "${OUTPUT}.raw.ll" -o "${OUTPUT}.ll"
 
 if [[ "$PRECOMPUTED_ENERGY" == "true" ]]; then
     # Step 2: Assign BB debug info for DWARF-based energy analysis
