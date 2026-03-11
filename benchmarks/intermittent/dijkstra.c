@@ -171,6 +171,6 @@ int main(void) {
     }
 
     g_checksum_sink = checksum;
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)checksum);
     return (int)checksum;
 }

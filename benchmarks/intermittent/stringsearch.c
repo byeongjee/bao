@@ -140,6 +140,6 @@ __attribute__((noinline)) int main(void) {
         }
     }
 
-    DEBUG_EXIT();
+    DEBUG_EXIT(total_found);
     return total_found;
 }

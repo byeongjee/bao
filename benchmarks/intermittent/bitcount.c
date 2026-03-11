@@ -177,6 +177,6 @@ int main(void) {
         checksum ^= (set_bits + (i * 0x9E3779B9u));
     }
 
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)checksum);
     return (int)checksum;
 }

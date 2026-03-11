@@ -10,8 +10,8 @@
  *       WDTCTL = WDTPW | WDTHOLD;
  *       DEBUG_INIT();
  *       // ... benchmark code ...
- *       DEBUG_EXIT();
- *       return 0;
+ *       DEBUG_EXIT(result);
+ *       return result;
  *   }
  *
  * Compile with -DDEBUG_COUNTERS to enable. Without it, macros expand to nothing.
@@ -26,15 +26,15 @@
 #ifdef DEBUG_COUNTERS
 
 void debug_init(void);
-void debug_exit(void);
+void debug_exit(int result);
 
 #define DEBUG_INIT() debug_init()
-#define DEBUG_EXIT() debug_exit()
+#define DEBUG_EXIT(result) debug_exit((result))
 
 #else
 
 #define DEBUG_INIT()
-#define DEBUG_EXIT()
+#define DEBUG_EXIT(result) ((void)(result))
 
 #endif /* DEBUG_COUNTERS */
 

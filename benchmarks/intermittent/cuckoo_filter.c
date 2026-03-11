@@ -177,6 +177,6 @@ __attribute__((noinline)) int main() {
             found++;
     }
 
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)(inserts + found));
     return (int)(inserts + found);
 }

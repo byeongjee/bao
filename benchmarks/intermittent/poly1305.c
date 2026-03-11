@@ -259,6 +259,6 @@ __attribute__((noinline)) int main(void) {
     poly1305_init(&g_ctx, key);
     poly1305_update(&g_ctx, test_data, TEST_DATA_LEN);
     poly1305_final(&g_ctx, g_hash);
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)g_hash[0]);
     return (int)g_hash[0];
 }

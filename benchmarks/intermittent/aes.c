@@ -403,6 +403,6 @@ __attribute__((noinline)) int main(void) {
     AES_ctx_set_iv(&g_ctx, g_iv);
     AES_CBC_decrypt_buffer(&g_ctx, 64);
 
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)g_buf[0]);
     return (int)g_buf[0];
 }

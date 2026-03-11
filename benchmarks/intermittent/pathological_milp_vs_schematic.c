@@ -49,6 +49,6 @@ int main(void) {
 
     g_state = x ^ g_ring[0] ^ g_ring[1] ^ g_ring[2] ^ g_ring[3] ^ g_ring[4] ^ g_ring[5] ^
               g_ring[6] ^ g_ring[7];
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)(g_state & 0x7fffffffU));
     return (int)(g_state & 0x7fffffffU);
 }

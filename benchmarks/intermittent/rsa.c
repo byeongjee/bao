@@ -339,6 +339,6 @@ __attribute__((noinline)) int main(void) {
         }
     }
 
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)g_cyphertext_len);
     return (int)g_cyphertext_len;
 }

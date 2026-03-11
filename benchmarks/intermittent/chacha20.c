@@ -249,6 +249,6 @@ __attribute__((noinline)) int main(void) {
     /* Encrypt */
     ChaCha20_xor(&ctx, enc_output, enc_output, INPUT_SIZE);
 
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)enc_output[0]);
     return (int)enc_output[0];
 }

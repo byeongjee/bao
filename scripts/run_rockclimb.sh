@@ -91,7 +91,7 @@ if [[ ${#BENCHMARKS[@]} -eq 0 ]]; then
 fi
 
 # CSV header
-HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,boundary_checks,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls"
+HEADER="benchmark,capacitor,status,basic_blocks,edges,regions,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_ms,boundary_checks,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls,result"
 echo "$HEADER" > "$OUTPUT_CSV"
 
 # Extract first numeric/token value after "label:" from output.
@@ -203,10 +203,12 @@ ${serial_output}"
         execution_time=$(extract_stat "$full_output" "Execution time (ms)")
 
         # Extract debug counter stats from serial output
-        # (same format as "=== RockClimb Debug Counter Summary ===")
         runtime_check=$(extract_stat "$full_output" "__region_boundary")
         runtime_save_reg=$(extract_stat "$full_output" "reg_saves")
         runtime_restore_reg=$(extract_stat "$full_output" "reg_restores")
+
+        # Extract computation result (semantic correctness check)
+        bench_result=$(extract_stat "$full_output" "RESULT")
 
         # Default to 0 if not found
         basic_blocks=${basic_blocks:-0}
@@ -219,8 +221,9 @@ ${serial_output}"
         runtime_check=${runtime_check:-0}
         runtime_save_reg=${runtime_save_reg:-0}
         runtime_restore_reg=${runtime_restore_reg:-0}
+        bench_result=${bench_result:-}
 
-        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,,$execution_time,$boundary_checks,$runtime_check,$runtime_save_reg,$runtime_restore_reg" >> "$OUTPUT_CSV"
+        echo "$row_name,$cap_label,ok,$basic_blocks,$edges,$regions,$compilation_time,$peak_rss,,$execution_time,$boundary_checks,$runtime_check,$runtime_save_reg,$runtime_restore_reg,$bench_result" >> "$OUTPUT_CSV"
         echo "  OK ($regions regions, $boundary_checks boundaries)"
     done
 done

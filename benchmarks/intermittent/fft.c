@@ -180,6 +180,6 @@ int main(void) {
     /* Inverse FFT */
     fft_float(MAXSIZE, TRUE, realin, imagin, realout, imagout);
 
-    DEBUG_EXIT();
+    DEBUG_EXIT(0);
     return 0;
 }

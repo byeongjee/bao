@@ -830,6 +830,6 @@ __attribute__((noinline)) int main(void) {
         __loop_tripcount(TESTCASES);
         g_output = c6h6_model_predict(testFeatures[i], 7);
     }
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)g_output);
     return (int)g_output;
 }

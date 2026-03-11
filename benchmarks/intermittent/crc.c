@@ -117,6 +117,6 @@ __attribute__((noinline)) int main(void) {
     DEBUG_INIT();
     crcInit();
     volatile crc result = crcFast((const uint8_t *)test_data, TEST_DATA_LEN);
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)result);
     return (int)result;
 }

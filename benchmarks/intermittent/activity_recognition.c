@@ -272,6 +272,6 @@ __attribute__((noinline)) int main() {
     mock_scenario = 0;
     unsigned total = recognize_loop(&global_model);
 
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)total);
     return (int)total;
 }

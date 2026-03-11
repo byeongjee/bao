@@ -155,6 +155,6 @@ int main(void) {
     g_accum = accum;
     g_last_sqrt = q;
 
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)(((uint64_t)(accum * 1000.0)) & 0x7FFFFFFF));
     return (int)(((uint64_t)(accum * 1000.0)) & 0x7FFFFFFF);
 }

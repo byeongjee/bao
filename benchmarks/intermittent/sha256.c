@@ -251,6 +251,6 @@ __attribute__((noinline)) int main(void) {
     sha256_init(&g_ctx);
     sha256_update(&g_ctx, data, DATA_LEN);
     sha256_final(&g_ctx, g_hash);
-    DEBUG_EXIT();
+    DEBUG_EXIT((int)g_hash[0]);
     return (int)g_hash[0];
 }

@@ -433,6 +433,6 @@ __attribute__((noinline)) int main(void) {
         if (sec_a[i] != sec_b[i])
             match = 0;
     }
-    DEBUG_EXIT();
+    DEBUG_EXIT(match);
     return match;
 }

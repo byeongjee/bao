@@ -96,8 +96,11 @@ void debug_init(void) {
     uart_puts("BOOT\r\n");
 }
 
-void debug_exit(void) {
+void debug_exit(int result) {
     uart_init(); /* Re-init UART — may be uninitialized after BOR/LPM4 recovery */
+    uart_puts("RESULT: ");
+    uart_put_u16((uint16_t)result);
+    uart_puts("\r\n");
     uart_puts("=== Debug Counter Summary ===\r\n");
     uart_puts("  __region_boundary:    ");
     uart_put_u16(cnt_boundary);
