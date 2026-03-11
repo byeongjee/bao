@@ -27,7 +27,7 @@ typedef struct {
 /* --- Mutable globals --- */
 
 ChaCha20_Ctx ctx;
-uint8_t enc_output[INPUT_SIZE];
+uint8_t enc_output[INPUT_SIZE] __attribute__((section(".nvm")));
 
 /* --- Const data (no annotation) --- */
 

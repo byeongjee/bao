@@ -86,10 +86,7 @@ void CheckpointInstrumenter::createNVMBackupGlobals(llvm::Function &F, const MIL
         llvm::Type *backupType = nullptr;
         std::string backupName;
 
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-            backupType = GV->getValueType();
-            backupName = "__nvm_backup_" + GV->getName().str();
-        } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
+        if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
             auto *arraySizeCI = llvm::cast<llvm::ConstantInt>(AI->getArraySize());
             uint64_t elemCount = arraySizeCI->getZExtValue();
             if (elemCount <= 1) {
@@ -252,30 +249,15 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     llvm::Value *size =
                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
                     auto shadowIt = shadowMap_.find(GV);
-                    if (shadowIt != shadowMap_.end()) {
-                        // Eligible: copy shadow (VM/SRAM) -> original (NVM/FRAM)
-                        auto *mc = builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
-                                                        shadowIt->second->getAlign(), size);
-                        commitInsts.insert(mc);
-                        if (addDebugMarkers_) {
-                            auto *call =
-                                builder.CreateCall(storeMemFn_, {GV, shadowIt->second, size});
-                            commitInsts.insert(call);
-                        }
-                    } else {
-                        // Ineligible global: copy SRAM original -> NVM backup
-                        auto backupIt = nvmBackupMap_.find(GV);
-                        assert(backupIt != nvmBackupMap_.end() &&
-                               "ineligible commit requires an NVM backup");
-                        auto *mc =
-                            builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(), GV,
-                                                 GV->getAlign(), size);
-                        commitInsts.insert(mc);
-                        if (addDebugMarkers_) {
-                            auto *call =
-                                builder.CreateCall(storeMemFn_, {backupIt->second, GV, size});
-                            commitInsts.insert(call);
-                        }
+                    assert(shadowIt != shadowMap_.end() &&
+                           "eligible global commit requires a VM shadow");
+                    // Eligible: copy shadow (VM/SRAM) -> original (NVM/FRAM)
+                    auto *mc = builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
+                                                    shadowIt->second->getAlign(), size);
+                    commitInsts.insert(mc);
+                    if (addDebugMarkers_) {
+                        auto *call = builder.CreateCall(storeMemFn_, {GV, shadowIt->second, size});
+                        commitInsts.insert(call);
                     }
                 } else if (llvm::isa<llvm::AllocaInst>(V)) {
                     // Stack alloca -> NVM backup (memcpy)
@@ -360,22 +342,17 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             if (!isLiveIn)
                 continue;
 
-            if (llvm::isa<llvm::GlobalVariable>(V) || llvm::isa<llvm::AllocaInst>(V)) {
-                // Memory object: memcpy from NVM backup.
+            if (llvm::isa<llvm::AllocaInst>(V)) {
+                // Stack alloca: memcpy from NVM backup.
                 unsigned sizeBytes = state.getVarSizeBytes(V);
                 if (sizeBytes == 0)
                     continue;
                 llvm::Value *size =
                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
                 // Restore: copy NVM backup -> SRAM original
-                if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-                    builder.CreateMemCpy(GV, GV->getAlign(), backupIt->second,
-                                         backupIt->second->getAlign(), size);
-                } else {
-                    auto *AI = llvm::cast<llvm::AllocaInst>(V);
-                    builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second,
-                                         backupIt->second->getAlign(), size);
-                }
+                auto *AI = llvm::cast<llvm::AllocaInst>(V);
+                builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second,
+                                     backupIt->second->getAlign(), size);
                 if (addDebugMarkers_)
                     builder.CreateCall(restoreMemFn_, {V, backupIt->second, size});
                 inserted++;

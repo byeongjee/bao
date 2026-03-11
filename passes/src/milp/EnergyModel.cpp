@@ -121,17 +121,8 @@ void EnergyModel::computeNvmPenalties() {
         }
     };
 
-    // Collect ineligible globals for NVM penalty computation.
-    std::vector<llvm::GlobalVariable *> ineligGlobals;
-    for (llvm::Value *V : state_.getIneligibleObjs()) {
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
-            ineligGlobals.push_back(GV);
-    }
-
     for (const llvm::BasicBlock *BB : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjs())
-            computeForGV(GV, BB);
-        for (llvm::GlobalVariable *GV : ineligGlobals)
             computeForGV(GV, BB);
     }
 }

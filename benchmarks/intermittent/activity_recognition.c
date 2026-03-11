@@ -13,7 +13,7 @@
 #define SAMPLE_NOISE_FLOOR 10
 #define SAMPLES_TO_COLLECT 64 // Reduced for faster demo loop
 
-static uint16_t lfsr_state;
+static uint16_t lfsr_state __attribute__((section(".nvm")));
 
 FORCE_INLINE uint16_t simple_rand(void) {
     // If the last bit is 1, shift and XOR. If 0, just shift.
@@ -78,7 +78,7 @@ FORCE_INLINE unsigned sqrt16(unsigned long n) {
 
 // --- Sensor Abstraction (Mock Data) ---
 
-static int mock_scenario;
+static int mock_scenario __attribute__((section(".nvm")));
 
 FORCE_INLINE void ACCEL_init() {
     // Real sensor init would go here

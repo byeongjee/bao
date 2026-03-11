@@ -29,7 +29,7 @@ typedef struct {
 /* --- Mutable globals --- */
 
 poly1305_ctx_t g_ctx;
-uint8_t g_hash[16];
+uint8_t g_hash[16] __attribute__((section(".nvm")));
 
 /* --- Const data (no annotation) --- */
 

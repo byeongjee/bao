@@ -15,8 +15,8 @@
 #define RNG_SEED 0x0C728394u
 #define ITERATIONS 100000U
 
-static uint32_t g_seed = RNG_SEED;
-static uint32_t g_totals[NUM_FUNCS] __attribute__((used));
+static uint32_t g_seed __attribute__((section(".nvm"))) = RNG_SEED;
+static uint32_t g_totals[NUM_FUNCS] __attribute__((used, section(".nvm")));
 
 static const uint8_t g_bits[256] = {
     0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,

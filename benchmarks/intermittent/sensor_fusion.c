@@ -15,7 +15,7 @@
 
 // --- Mutable globals (MILP candidates) ---
 
-float g_output;
+float g_output __attribute__((section(".nvm")));
 
 // --- Const test data (from data.h) ---
 

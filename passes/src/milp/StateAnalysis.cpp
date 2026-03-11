@@ -387,13 +387,6 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
 }
 
 void StateAnalysis::computeAccessMaps() {
-    // Collect ineligible globals for AA-based access tracking.
-    std::vector<llvm::GlobalVariable *> ineligGlobals;
-    for (llvm::Value *V : ineligibleObjs_) {
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
-            ineligGlobals.push_back(GV);
-    }
-
     for (llvm::BasicBlock &BB : F_) {
         const llvm::BasicBlock *BBKey = &BB;
 
@@ -416,23 +409,6 @@ void StateAnalysis::computeAccessMaps() {
 
             for (llvm::GlobalVariable *GV : vmObjs_)
                 processEligGV(GV);
-
-            // Process ineligible globals (for NVM penalty and def tracking).
-            auto processIneligGV = [&](llvm::GlobalVariable *GV) {
-                auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
-                llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
-                auto key = std::make_pair(BBKey, GV);
-
-                if (llvm::isRefSet(MRI))
-                    loadCounts_[key]++;
-                if (llvm::isModSet(MRI)) {
-                    storeCounts_[key]++;
-                    ineligDefVars_[BBKey].insert(GV);
-                }
-            };
-
-            for (llvm::GlobalVariable *GV : ineligGlobals)
-                processIneligGV(GV);
         }
     }
 

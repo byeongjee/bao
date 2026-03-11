@@ -32,7 +32,7 @@ typedef struct {
 /* --- Mutable globals --- */
 
 SHA256_CTX g_ctx;
-uint8_t g_hash[SHA256_HASH_SIZE];
+uint8_t g_hash[SHA256_HASH_SIZE] __attribute__((section(".nvm")));
 
 /* --- Const data (no annotation) --- */
 

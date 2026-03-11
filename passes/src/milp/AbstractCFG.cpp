@@ -413,14 +413,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
         model.eSaveByVar_[V] = energy.getESave(V);
         model.eRestoreByVar_[V] = energy.getERestore(V);
     }
-    std::vector<llvm::GlobalVariable *> ineligGlobals;
-    ineligGlobals.reserve(model.ineligibleObjs_.size());
-    for (llvm::Value *V : model.ineligibleObjs_) {
-        if (auto *GV = dyn_cast<llvm::GlobalVariable>(V)) {
-            ineligGlobals.push_back(GV);
-        }
-    }
-
     // Build per-BB energy map from CFGAnalysis.
     DenseMap<const BasicBlock *, double> blockEnergyByBB;
     std::set<std::string> usedNodeNames;
@@ -521,9 +513,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
         double perIterNvmPenalty = 0.0;
         for (const BasicBlock *BB : path.blocksOnPath) {
             for (llvm::GlobalVariable *GV : model.vmObjs_) {
-                perIterNvmPenalty += energy.getENvm(BB, GV);
-            }
-            for (llvm::GlobalVariable *GV : ineligGlobals) {
                 perIterNvmPenalty += energy.getENvm(BB, GV);
             }
         }
