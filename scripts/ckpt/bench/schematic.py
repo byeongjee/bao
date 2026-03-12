@@ -126,6 +126,7 @@ def run_schematic_benchmarks(
     verbose: bool = False,
     energy_config: Path | None = None,
     trace_config: Path | None = None,
+    estimator_mode: str = "ir",
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -225,6 +226,7 @@ def run_schematic_benchmarks(
                     trace_only=True,
                     verbose=verbose,
                     extra_includes=[str(env.project_dir / "passes" / "runtime")],
+                    estimator_mode=estimator_mode,
                 )
                 trace_result: SchematicCompileResult = compile_schematic(
                     tc, env, trace_opts
@@ -301,6 +303,7 @@ def run_schematic_benchmarks(
                         halt_mode=halt_mode,
                         verbose=verbose,
                         extra_includes=[str(env.project_dir / "passes" / "runtime")],
+                        estimator_mode=estimator_mode,
                     )
                     compile_result: SchematicCompileResult = compile_schematic(
                         tc, env, compile_opts

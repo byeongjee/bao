@@ -23,6 +23,8 @@ from .common import (
     compile_to_ir,
     compile_to_object,
     optimize_ir,
+    run_assembly_energy,
+    write_assembly_energy_config,
 )
 
 
@@ -46,6 +48,7 @@ class SchematicCompileOptions:
     debug_counters: bool = False
     halt_mode: bool = False
     linker_script: Path | None = None
+    estimator_mode: str = "ir"  # ir, assembly
 
 
 @dataclass
@@ -121,9 +124,21 @@ def compile_schematic(
                 profiling_time_ms=profiling_ms,
             )
 
+        # Assembly energy estimation (single-pass, no strip-mining)
+        energy_config = opts.energy_config
+        if opts.estimator_mode == "assembly":
+            run_assembly_energy(
+                tc, env, schematic_input_ll, tmp / "asm", opts.energy_config,
+            )
+            energy_config = write_assembly_energy_config(
+                tmp / "asm_energy_config.json",
+                tmp / "asm.bb_energy.json",
+            )
+
         # SCHEMATIC pass
         pass_output = _run_schematic_pass(
             tc, env, opts, tmp, schematic_input_ll, trace_json,
+            energy_config=energy_config,
         )
 
         # Compile to MSP430 object
@@ -243,13 +258,16 @@ def _run_schematic_pass(
     tmp: Path,
     input_ll: Path,
     trace_json: Path,
+    *,
+    energy_config: Path | None = None,
 ) -> str:
     """Run the SCHEMATIC opt pass and return its captured output."""
+    cfg = energy_config or opts.energy_config
     cmd: list[str] = [
         tc.opt,
         f"-load-pass-plugin={env.pass_lib}",
         "-passes=tripcount-annotation,schematic",
-        f"-energy-config={opts.energy_config}",
+        f"-energy-config={cfg}",
         f"-schematic-config={opts.schematic_config}",
         f"-schematic-trace={trace_json}",
     ]

@@ -199,6 +199,12 @@ def compile_rockclimb_cmd(
 @click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
+@click.option(
+    "--estimator-mode",
+    type=click.Choice(["assembly", "ir"]),
+    default="ir",
+    help="Energy estimator mode.",
+)
 @click.pass_context
 def compile_schematic_cmd(
     ctx: click.Context,
@@ -216,6 +222,7 @@ def compile_schematic_cmd(
     opt_level: int,
     clang_opt_level: int,
     extra_includes: tuple[str, ...],
+    estimator_mode: str,
 ) -> None:
     """Run the SCHEMATIC trace-based compilation pipeline."""
     from .compile.schematic import SchematicCompileOptions, compile_schematic
@@ -246,6 +253,7 @@ def compile_schematic_cmd(
             trace_only=trace_only,
             link=link,
             debug_counters=debug_counters,
+            estimator_mode=estimator_mode,
         ),
     )
 
@@ -286,7 +294,7 @@ def compile_schematic_cmd(
     "--estimator-mode",
     type=click.Choice(["assembly", "ir"]),
     default="assembly",
-    help="Energy estimator mode (MILP only).",
+    help="Energy estimator mode (MILP and SCHEMATIC).",
 )
 @click.pass_context
 def compile_run_cmd(
@@ -397,6 +405,7 @@ def compile_run_cmd(
                 trace_file=Path(trace_file) if trace_file else None,
                 link=True,
                 debug_counters=debug_counters,
+                estimator_mode=estimator_mode,
             ),
         )
         elf = result.elf_file
@@ -529,6 +538,12 @@ def bench_rockclimb_cmd(
     type=click.Path(exists=True),
     help="Override trace-collection config (default: config_10uF.json).",
 )
+@click.option(
+    "--estimator-mode",
+    type=click.Choice(["assembly", "ir"]),
+    default="ir",
+    help="Energy estimator mode.",
+)
 @click.pass_context
 def bench_schematic_cmd(
     ctx: click.Context,
@@ -539,6 +554,7 @@ def bench_schematic_cmd(
     verbose: bool,
     energy_config: str | None,
     trace_config: str | None,
+    estimator_mode: str,
 ) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -553,6 +569,7 @@ def bench_schematic_cmd(
         verbose=verbose,
         energy_config=Path(energy_config) if energy_config else None,
         trace_config=Path(trace_config) if trace_config else None,
+        estimator_mode=estimator_mode,
     )
 
 
