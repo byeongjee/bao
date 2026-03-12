@@ -16,7 +16,7 @@ from ..output_parser import (
     PassStatistics,
     extract_stat,
 )
-from ..runner import CompilationError
+
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import (

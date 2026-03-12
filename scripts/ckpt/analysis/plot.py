@@ -238,7 +238,7 @@ def plot_benchmarks(
         print("No data to plot.", file=sys.stderr)
         return
 
-    fig, ax = plt.subplots(figsize=(max(10, n_benchmarks * 1.2), 6))
+    _fig, ax = plt.subplots(figsize=(max(10, n_benchmarks * 1.2), 6))
 
     bar_width = 0.8 / n_algorithms
     x = np.arange(n_benchmarks)

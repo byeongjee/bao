@@ -21,7 +21,7 @@ from ..compile.common import (
 )
 from ..compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 from ..env import ProjectEnv
-from ..output_parser import detect_infeasibility, parse_nvm_output
+from ..output_parser import detect_infeasibility
 from ..runner import CompilationError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain

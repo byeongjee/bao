@@ -19,7 +19,6 @@ from .common import (
     annotate_tripcounts,
     assemble_and_link,
     assemble_boot,
-    collect_bb_freq,
     compile_runtime_c,
     compile_to_ir,
     compile_to_object,

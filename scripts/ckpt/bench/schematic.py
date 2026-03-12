@@ -30,12 +30,11 @@ from ..runner import CompilationError
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import (
-    CapacitorConfig,
     default_energy_config,
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import BenchmarkRow, run_benchmark_matrix, write_csv_row
+from .runner import BenchmarkRow, write_csv_row
 
 _CSV_HEADER: list[str] = [
     "benchmark",
