@@ -527,7 +527,7 @@ def bench_rockclimb_cmd(
 @click.option(
     "--trace-config",
     type=click.Path(exists=True),
-    help="Override trace-collection config (default: sample_schematic_config_10uF.json).",
+    help="Override trace-collection config (default: config_10uF.json).",
 )
 @click.pass_context
 def bench_schematic_cmd(

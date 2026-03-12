@@ -180,7 +180,7 @@ def run_schematic_benchmarks(
 
     # Config for trace collection phase (any capacitor works; 10uF by default)
     if trace_config is None:
-        trace_config = env.project_dir / "benchmarks" / "sample_schematic_config_10uF.json"
+        trace_config = env.project_dir / "benchmarks" / "config_10uF.json"
 
     # Check device availability if debug counters requested
     has_device = False
