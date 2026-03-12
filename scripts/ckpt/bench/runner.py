@@ -194,7 +194,7 @@ def run_benchmark_matrix(
                 write_csv_row(writer, row, csv_header)
 
                 # Print detailed summary
-                print_benchmark_summary(row.status, row_fields)
+                print_benchmark_summary(row.status, row_fields, debug_counters=debug_counters)
 
     # ----- Final summary -----
     print()
@@ -246,7 +246,12 @@ def _flash_and_read(tc: Toolchain, elf: Path, symbols: list[str]) -> NvmCounters
         return None
 
 
-def print_benchmark_summary(status: str, fields: dict[str, str | int | None]) -> None:
+def print_benchmark_summary(
+    status: str,
+    fields: dict[str, str | int | None],
+    *,
+    debug_counters: bool = False,
+) -> None:
     """Print a detailed multi-line summary for a benchmark run."""
     label = status.upper() if status != "ok" else "OK"
     print(f"  {label}")
@@ -302,20 +307,21 @@ def print_benchmark_summary(status: str, fields: dict[str, str | int | None]) ->
         ("paths analyzed", _fmt("paths_analyzed", fields)),
     ])
 
-    # Runtime (NVM counters from device readback — show even when 0)
-    runtime_items: list[tuple[str, str | None]] = []
-    for key, name in [
-        ("runtime_region_boundary_calls", "region boundaries"),
-        ("runtime_debug_save_reg_calls", "reg saves"),
-        ("runtime_debug_save_vreg_calls", "vreg saves"),
-        ("runtime_debug_restore_reg_calls", "reg restores"),
-        ("runtime_debug_restore_vreg_calls", "vreg restores"),
-        ("runtime_debug_store_mem_calls", "mem stores"),
-        ("runtime_debug_restore_mem_calls", "mem restores"),
-    ]:
-        if key in fields:
-            runtime_items.append((name, str(fields[key])))
-    _print_group("Runtime", runtime_items)
+    # Runtime (debug counters — show even when 0)
+    if debug_counters:
+        runtime_items: list[tuple[str, str | None]] = []
+        for key, name in [
+            ("runtime_region_boundary_calls", "region boundaries"),
+            ("runtime_debug_save_reg_calls", "reg saves"),
+            ("runtime_debug_save_vreg_calls", "vreg saves"),
+            ("runtime_debug_restore_reg_calls", "reg restores"),
+            ("runtime_debug_restore_vreg_calls", "vreg restores"),
+            ("runtime_debug_store_mem_calls", "mem stores"),
+            ("runtime_debug_restore_mem_calls", "mem restores"),
+        ]:
+            if key in fields:
+                runtime_items.append((name, str(fields[key])))
+        _print_group("Runtime", runtime_items)
 
     # Timing
     timing_items: list[tuple[str, str | None]] = []

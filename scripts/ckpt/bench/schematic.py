@@ -393,7 +393,7 @@ def run_schematic_benchmarks(
                 write_csv_row(writer, row, _CSV_HEADER)
 
                 # Print detailed summary
-                print_benchmark_summary(row.status, row_fields)
+                print_benchmark_summary(row.status, row_fields, debug_counters=debug_counters)
 
     # Final summary
     print()
