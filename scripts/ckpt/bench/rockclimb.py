@@ -98,6 +98,7 @@ def run_rockclimb_benchmarks(
     caps: list[str] | None = None,
     output_csv: Path | None = None,
     debug_counters: bool,
+    halt_mode: str,
     verbose: bool,
     energy_config: Path | None = None,
 ) -> None:
@@ -152,7 +153,7 @@ def run_rockclimb_benchmarks(
                 verbose=True,
                 link=True,
                 debug_counters=debug_counters,
-                halt_mode="nop",
+                halt_mode=halt_mode,
             )
 
             result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)

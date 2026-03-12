@@ -228,7 +228,7 @@ def run_schematic_benchmarks(
                     trace_only=True,
                     link=False,
                     debug_counters=False,
-                    halt_mode="nop",
+                    halt_mode=halt_mode,
                     clang_opt_level=0,
                     extra_includes=[str(env.project_dir / "passes" / "runtime")],
                 )

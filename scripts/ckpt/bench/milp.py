@@ -119,6 +119,7 @@ def run_milp_benchmarks(
     caps: list[str] | None = None,
     output_csv: Path | None = None,
     debug_counters: bool,
+    halt_mode: str,
     verbose: bool,
     estimator_mode: str,
     energy_config: Path | None = None,
@@ -184,7 +185,7 @@ def run_milp_benchmarks(
                 debug=False,
                 add_debug_markers=True,
                 link=True,
-                halt_mode="nop",
+                halt_mode=halt_mode,
                 debug_counters=debug_counters,
             )
 

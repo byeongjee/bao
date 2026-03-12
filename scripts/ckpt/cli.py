@@ -193,6 +193,12 @@ def compile_rockclimb_cmd(
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
 @click.option("--add-debug-markers", is_flag=True, help="Add debug markers.")
 @click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
+@click.option(
     "--trace-file", type=click.Path(exists=True), help="Pre-collected trace JSON."
 )
 @click.option("--trace-only", is_flag=True, help="Only collect trace, skip insertion.")
@@ -217,6 +223,7 @@ def compile_schematic_cmd(
     debug: bool,
     debug_counters: bool,
     add_debug_markers: bool,
+    halt_mode: str,
     trace_file: str | None,
     trace_only: bool,
     opt_level: int,
@@ -250,7 +257,7 @@ def compile_schematic_cmd(
             trace_only=trace_only,
             link=link,
             debug_counters=debug_counters,
-            halt_mode="nop",
+            halt_mode=halt_mode,
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
             extra_includes=list(extra_includes),
@@ -292,6 +299,12 @@ def compile_schematic_cmd(
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
 @click.option("--compile-only", is_flag=True, help="Compile but don't flash.")
 @click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
+@click.option(
     "--estimator-mode",
     type=click.Choice(["assembly", "ir"]),
     default="assembly",
@@ -315,6 +328,7 @@ def compile_run_cmd(
     debug: bool,
     debug_counters: bool,
     compile_only: bool,
+    halt_mode: str,
     estimator_mode: str,
 ) -> None:
     """Compile with checkpoint insertion and optionally flash.
@@ -347,7 +361,7 @@ def compile_run_cmd(
                 debug=debug,
                 add_debug_markers=False,
                 link=True,
-                halt_mode="nop",
+                halt_mode=halt_mode,
                 debug_counters=debug_counters,
                 opt_level=opt_level,
                 clang_opt_level=clang_opt_level,
@@ -378,7 +392,7 @@ def compile_run_cmd(
                 verbose=verbose,
                 link=True,
                 debug_counters=debug_counters,
-                halt_mode="nop",
+                halt_mode=halt_mode,
                 clang_opt_level=clang_opt_level,
             ),
         )
@@ -409,7 +423,7 @@ def compile_run_cmd(
                 trace_only=False,
                 link=True,
                 debug_counters=debug_counters,
-                halt_mode="nop",
+                halt_mode=halt_mode,
                 opt_level=opt_level,
                 clang_opt_level=clang_opt_level,
                 extra_includes=list(extra_includes),
@@ -454,6 +468,12 @@ def bench() -> None:
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
 @click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
+@click.option(
     "--estimator-mode",
     type=click.Choice(["assembly", "ir"]),
     default="assembly",
@@ -473,6 +493,7 @@ def bench_milp_cmd(
     debug_counters: bool,
     output: str | None,
     verbose: bool,
+    halt_mode: str,
     estimator_mode: str,
     energy_config: str | None,
 ) -> None:
@@ -485,6 +506,7 @@ def bench_milp_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         debug_counters=debug_counters,
+        halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         verbose=verbose,
         estimator_mode=estimator_mode,
@@ -499,6 +521,12 @@ def bench_milp_cmd(
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
 @click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
+@click.option(
     "-e",
     "--energy-config",
     type=click.Path(exists=True),
@@ -512,6 +540,7 @@ def bench_rockclimb_cmd(
     debug_counters: bool,
     output: str | None,
     verbose: bool,
+    halt_mode: str,
     energy_config: str | None,
 ) -> None:
     """Run RockClimb benchmarks across programs and capacitor sizes."""
@@ -523,6 +552,7 @@ def bench_rockclimb_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         debug_counters=debug_counters,
+        halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         verbose=verbose,
         energy_config=Path(energy_config) if energy_config else None,
@@ -535,6 +565,12 @@ def bench_rockclimb_cmd(
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
 @click.option(
     "-e",
     "--energy-config",
@@ -560,6 +596,7 @@ def bench_schematic_cmd(
     debug_counters: bool,
     output: str | None,
     verbose: bool,
+    halt_mode: str,
     energy_config: str | None,
     trace_config: str | None,
     estimator_mode: str,
@@ -573,7 +610,7 @@ def bench_schematic_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         debug_counters=debug_counters,
-        halt_mode="nop",
+        halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         verbose=verbose,
         energy_config=Path(energy_config) if energy_config else None,
@@ -612,6 +649,12 @@ def verify() -> None:
     type=click.Path(exists=True),
     help="Override default RockClimb config.",
 )
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
 @click.pass_context
 def verify_rockclimb_cmd(
     ctx: click.Context,
@@ -621,6 +664,7 @@ def verify_rockclimb_cmd(
     verbose: bool,
     energy_config: str | None,
     rockclimb_config: str | None,
+    halt_mode: str,
 ) -> None:
     """Verify semantic correctness of RockClimb checkpoint insertion."""
     from .verify.rockclimb import verify_rockclimb
@@ -632,6 +676,7 @@ def verify_rockclimb_cmd(
         cap_size=cap,
         timeout=timeout,
         verbose=verbose,
+        halt_mode=halt_mode,
         energy_config=Path(energy_config) if energy_config else None,
         rockclimb_config=Path(rockclimb_config) if rockclimb_config else None,
     )

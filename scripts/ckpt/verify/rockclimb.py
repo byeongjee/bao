@@ -157,6 +157,7 @@ def verify_rockclimb(
     cap_size: str = "1uF",
     timeout: int = 30,
     verbose: bool = False,
+    halt_mode: str,
     energy_config: Path | None = None,
     rockclimb_config: Path | None = None,
 ) -> bool:
@@ -210,6 +211,7 @@ def verify_rockclimb(
             cap_config=rockclimb_config,
             timeout=timeout,
             verbose=verbose,
+            halt_mode=halt_mode,
         )
         results.append(result)
 
@@ -232,6 +234,7 @@ def _verify_one(
     cap_config: Path,
     timeout: int,
     verbose: bool,
+    halt_mode: str,
 ) -> _BenchResult:
     """Run verification for a single benchmark."""
     with compilation_workdir(prefix=f"ckpt_verify_{bench_name}_") as tmp:
@@ -284,7 +287,7 @@ def _verify_one(
                     verbose=verbose,
                     link=True,
                     debug_counters=True,
-                    halt_mode="nop",
+                    halt_mode=halt_mode,
                 ),
             )
             compile_output = rc_result.pass_output
