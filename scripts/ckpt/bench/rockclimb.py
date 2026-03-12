@@ -1,0 +1,170 @@
+"""RockClimb benchmark runner -- replaces run_rockclimb.sh.
+
+Iterates over (benchmark x capacitor), compiles with the machine-level
+RockClimb (PFI) pass via ``llc``, optionally flashes to an MSP430 device,
+and writes a CSV summary of pass statistics and runtime counters.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from ..compile.rockclimb import (
+    RockClimbCompileOptions,
+    RockClimbCompileResult,
+    compile_rockclimb,
+)
+from ..env import ProjectEnv
+from ..output_parser import (
+    NvmCounters,
+    PassStatistics,
+    extract_stat,
+)
+from ..runner import CompilationError
+from ..tempdir import compilation_workdir
+from ..toolchain import Toolchain
+from .config import (
+    CapacitorConfig,
+    default_energy_config,
+    discover_benchmarks,
+    discover_capacitors,
+)
+from .runner import run_benchmark_matrix
+
+_CSV_HEADER: list[str] = [
+    "benchmark",
+    "capacitor",
+    "status",
+    "basic_blocks",
+    "edges",
+    "regions",
+    "compilation_time_ms",
+    "peak_rss_kb",
+    "profiling_time_ms",
+    "execution_time_ms",
+    "boundary_checks",
+    "runtime_region_boundary_calls",
+    "runtime_debug_save_reg_calls",
+    "runtime_debug_restore_reg_calls",
+    "result",
+]
+
+_NVM_SYMBOLS: list[str] = [
+    "__nvm_done",
+    "__nvm_result",
+    "cnt_boundary",
+    "cnt_save_reg",
+    "cnt_restore_reg",
+]
+
+
+def _build_row(
+    bench_name: str,
+    cap_label: str,
+    stats: PassStatistics,
+    nvm: NvmCounters | None,
+    full_output: str,
+) -> dict[str, str | int | None]:
+    """Build a CSV row dict from parsed statistics and NVM counters."""
+
+    # Runtime counters from NVM readback (default to 0)
+    runtime_boundary = nvm.region_boundary if nvm and nvm.region_boundary is not None else 0
+    runtime_save_reg = nvm.save_reg if nvm and nvm.save_reg is not None else 0
+    runtime_restore_reg = nvm.restore_reg if nvm and nvm.restore_reg is not None else 0
+
+    # Computation result (semantic correctness)
+    bench_result = extract_stat(full_output, "RESULT")
+
+    return {
+        "basic_blocks": stats.basic_blocks or 0,
+        "edges": stats.edges or 0,
+        "regions": stats.regions or 0,
+        "compilation_time_ms": stats.compilation_time_ms or 0,
+        "peak_rss_kb": stats.peak_rss_kb or 0,
+        "profiling_time_ms": "",
+        "execution_time_ms": stats.execution_time_ms or 0,
+        "boundary_checks": stats.boundary_checks or 0,
+        "runtime_region_boundary_calls": runtime_boundary,
+        "runtime_debug_save_reg_calls": runtime_save_reg,
+        "runtime_debug_restore_reg_calls": runtime_restore_reg,
+        "result": bench_result or "",
+    }
+
+
+def run_rockclimb_benchmarks(
+    env: ProjectEnv,
+    tc: Toolchain,
+    *,
+    benchmarks: list[str] | None = None,
+    caps: list[str] | None = None,
+    output_csv: Path | None = None,
+    debug_counters: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Run RockClimb checkpoint insertion across all benchmarks and capacitor sizes.
+
+    This is the Python equivalent of ``scripts/run_rockclimb.sh``.
+
+    Parameters
+    ----------
+    benchmarks:
+        Optional list of benchmark names (without ``.c``).  If ``None``,
+        all benchmarks under ``benchmarks/intermittent/`` are used.
+    caps:
+        Optional list of capacitor labels (e.g. ``["1uF", "10uF"]``).
+        If ``None``, all three default sizes are used.
+    output_csv:
+        Where to write the CSV summary.  Defaults to
+        ``benchmarks/rockclimb_benchmark_summary.csv``.
+    debug_counters:
+        Link the debug-counter runtime and attempt NVM readback.
+    verbose:
+        Print full compiler output for each benchmark.
+    """
+    bench_paths = discover_benchmarks(env, benchmarks)
+    if not bench_paths:
+        print("Error: No benchmarks to run", file=__import__("sys").stderr)
+        raise SystemExit(1)
+
+    capacitors = discover_capacitors(env, "rockclimb", caps)
+
+    if output_csv is None:
+        output_csv = env.project_dir / "benchmarks" / "rockclimb_benchmark_summary.csv"
+
+    energy_config = default_energy_config(env, "rockclimb")
+
+    with compilation_workdir(prefix="rockclimb_bench_") as workdir:
+
+        def compile_fn(
+            bench_path: Path, cap: CapacitorConfig
+        ) -> tuple[Path, str]:
+            bench_name = bench_path.stem
+            out_dir = workdir / f"{bench_name}_{cap.label}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            opts = RockClimbCompileOptions(
+                input_c=bench_path,
+                output_prefix=out_dir / bench_name,
+                energy_config=energy_config,
+                rockclimb_config=cap.config_path,
+                link=True,
+                verbose=True,
+                debug_counters=debug_counters,
+            )
+
+            result: RockClimbCompileResult = compile_rockclimb(env, tc, opts)
+            return out_dir, result.output
+
+        run_benchmark_matrix(
+            env,
+            tc,
+            bench_paths,
+            capacitors,
+            compile_fn,
+            output_csv,
+            nvm_symbols=_NVM_SYMBOLS,
+            debug_counters=debug_counters,
+            verbose=verbose,
+            csv_header=_CSV_HEADER,
+            row_builder=_build_row,
+        )

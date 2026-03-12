@@ -1,13 +1,23 @@
 [project]
 name = "checkpoint-insertion"
 version = "0.1.0"
-description = "Add your description here"
+description = "MILP-based checkpoint insertion tool for intermittent computing"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = ["pyserial>=3.5"]
+dependencies = ["pyserial>=3.5", "click>=8.1"]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-xdist>=3.0"]
+plot = ["matplotlib>=3.5", "numpy>=1.20"]
+
+[project.scripts]
+ckpt = "ckpt.cli:main"
+
+[tool.setuptools.package-dir]
+"" = "scripts"
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
 
 [tool.pytest.ini_options]
 markers = [
