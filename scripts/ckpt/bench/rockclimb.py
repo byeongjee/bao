@@ -152,7 +152,7 @@ def run_rockclimb_benchmarks(
                 verbose=True,
                 link=True,
                 debug_counters=debug_counters,
-                halt_mode="debug",
+                halt_mode="nop",
             )
 
             result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)

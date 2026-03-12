@@ -43,7 +43,7 @@ class SchematicCompileOptions:
     trace_only: bool
     link: bool
     debug_counters: bool
-    halt_mode: bool
+    halt_mode: str
     opt_level: int = 2
     clang_opt_level: int = 2
     extra_includes: list[str] = field(default_factory=list)
@@ -299,7 +299,7 @@ def _link_schematic(
     boot_defines: list[str] = []
     if opts.debug_counters:
         boot_defines.append("DEBUG_COUNTERS")
-    if opts.halt_mode:
+    if opts.halt_mode in ("bor", "lpm4"):
         boot_defines.append("HALT_MODE")
 
     # Assemble boot.S

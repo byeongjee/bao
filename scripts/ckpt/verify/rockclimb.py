@@ -284,7 +284,7 @@ def _verify_one(
                     verbose=verbose,
                     link=True,
                     debug_counters=True,
-                    halt_mode="debug",
+                    halt_mode="nop",
                 ),
             )
             compile_output = rc_result.pass_output

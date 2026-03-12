@@ -58,8 +58,8 @@ def compile() -> None:
 @click.option("--add-debug-markers", is_flag=True, help="Add debug markers.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["debug", "bor", "lpm4"]),
-    default="debug",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
     help="Halt mode for linked binary.",
 )
 @click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
@@ -128,8 +128,8 @@ def compile_milp_cmd(
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["debug", "bor", "lpm4"]),
-    default="debug",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
     help="Halt mode for linked binary.",
 )
 @click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
@@ -250,7 +250,7 @@ def compile_schematic_cmd(
             trace_only=trace_only,
             link=link,
             debug_counters=debug_counters,
-            halt_mode=False,
+            halt_mode="nop",
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
             extra_includes=list(extra_includes),
@@ -347,7 +347,7 @@ def compile_run_cmd(
                 debug=debug,
                 add_debug_markers=False,
                 link=True,
-                halt_mode="debug",
+                halt_mode="nop",
                 debug_counters=debug_counters,
                 opt_level=opt_level,
                 clang_opt_level=clang_opt_level,
@@ -378,7 +378,7 @@ def compile_run_cmd(
                 verbose=verbose,
                 link=True,
                 debug_counters=debug_counters,
-                halt_mode="debug",
+                halt_mode="nop",
                 clang_opt_level=clang_opt_level,
             ),
         )
@@ -409,7 +409,7 @@ def compile_run_cmd(
                 trace_only=False,
                 link=True,
                 debug_counters=debug_counters,
-                halt_mode=False,
+                halt_mode="nop",
                 opt_level=opt_level,
                 clang_opt_level=clang_opt_level,
                 extra_includes=list(extra_includes),
@@ -573,7 +573,7 @@ def bench_schematic_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         debug_counters=debug_counters,
-        halt_mode=False,
+        halt_mode="nop",
         output_csv=Path(output) if output else None,
         verbose=verbose,
         energy_config=Path(energy_config) if energy_config else None,

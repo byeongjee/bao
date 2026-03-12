@@ -122,7 +122,7 @@ def run_schematic_benchmarks(
     caps: list[str] | None = None,
     output_csv: Path | None = None,
     debug_counters: bool,
-    halt_mode: bool,
+    halt_mode: str,
     verbose: bool,
     energy_config: Path | None = None,
     trace_config: Path | None = None,
@@ -149,7 +149,7 @@ def run_schematic_benchmarks(
     debug_counters:
         Link the debug-counter runtime and attempt NVM readback.
     halt_mode:
-        Enable LPM4 halt at region boundaries.
+        Halt mode at region boundaries (nop/bor/lpm4).
     verbose:
         Print full compiler output for each benchmark.
     """
@@ -229,7 +229,7 @@ def run_schematic_benchmarks(
                     trace_only=True,
                     link=False,
                     debug_counters=False,
-                    halt_mode=False,
+                    halt_mode="nop",
                     clang_opt_level=0,
                     extra_includes=[str(env.project_dir / "passes" / "runtime")],
                 )
