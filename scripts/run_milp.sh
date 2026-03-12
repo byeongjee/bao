@@ -28,20 +28,28 @@ VERBOSE=0
 DEBUG_COUNTERS=0
 FILTER_BENCHMARKS=()
 FILTER_CAPS=()
+ESTIMATOR_MODE="assembly"
+ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_assembly_energy_params.json"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) OUTPUT_CSV="$2"; shift 2 ;;
         -v|--verbose) VERBOSE=1; shift ;;
+        -e|--energy-config) ENERGY_CONFIG="$2"; shift 2 ;;
         --debug-counters) DEBUG_COUNTERS=1; shift ;;
         --cap) FILTER_CAPS+=("$2"); shift 2 ;;
-        -h|--help) echo "Usage: $0 [--debug-counters] [--cap <size>] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
+        --ir-energy) ESTIMATOR_MODE="ir"; ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_energy_config_ir.json"; shift ;;
+        --estimator-mode) ESTIMATOR_MODE="$2"; shift 2 ;;
+        -h|--help) echo "Usage: $0 [--debug-counters] [--cap <size>] [--ir-energy] [-e config] [-o output.csv] [-v|--verbose] [bench1 bench2 ...]"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) FILTER_BENCHMARKS+=("$1"); shift ;;
     esac
 done
 
-ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_energy_config_ir.json"
+# If estimator mode changed to ir but energy config still points to assembly default, fix it
+if [[ "$ESTIMATOR_MODE" == "ir" && "$ENERGY_CONFIG" == "$PROJECT_DIR/benchmarks/sample_assembly_energy_params.json" ]]; then
+    ENERGY_CONFIG="$PROJECT_DIR/benchmarks/sample_energy_config_ir.json"
+fi
 
 ALL_CAPACITOR_CONFIGS=(
     "1uF:$PROJECT_DIR/benchmarks/sample_milp_config_1uF.json"
@@ -154,6 +162,7 @@ for bench_path in "${BENCHMARKS[@]}"; do
             -e "$ENERGY_CONFIG"
             -m "$cap_config"
             -o "$TMP_DIR/$bench_name"
+            --estimator-mode "$ESTIMATOR_MODE"
             --link
             --verbose
             --add-debug-markers

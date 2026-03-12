@@ -40,6 +40,12 @@ DEVICE="MSP430FR5994"
 # Pass plugin
 PASS_LIB="$PROJECT_DIR/passes/build/CheckpointPass.so"
 
+# BB debug info pass plugin (for assign-bb-debuginfo)
+BB_DEBUGINFO_LIB="$PROJECT_DIR/passes/build/bb-debuginfo/BBDebugInfoPass.so"
+
+# bb-energy-analyzer
+BB_ANALYZER="$PROJECT_DIR/passes/build/bb-energy-analyzer/bb-energy-analyzer"
+
 # ── Runtime file paths ───────────────────────────────────────────────────────
 
 ROCKCLIMB_MOCK_CKPT_COUNTER="$PROJECT_DIR/passes/runtime/rockclimb_mock_ckpt_counter.c"

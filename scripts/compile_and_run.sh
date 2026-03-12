@@ -51,6 +51,7 @@ MILP_CONFIG=""
 ROCKCLIMB_CONFIG=""
 SCHEMATIC_CONFIG=""
 SCHEMATIC_TRACE=""
+ESTIMATOR_MODE=""
 usage() { sed -n '2,31p' "$0" | sed 's/^# \?//'; exit 0; }
 
 # Link checkpoint object with mock counter or real runtime.
@@ -124,6 +125,8 @@ while [[ $# -gt 0 ]]; do
         -c|--rockclimb-config) ROCKCLIMB_CONFIG="$2"; shift 2 ;;
         -s|--schematic-config) SCHEMATIC_CONFIG="$2"; shift 2 ;;
         -t|--schematic-trace) SCHEMATIC_TRACE="$2"; shift 2 ;;
+        --estimator-mode) ESTIMATOR_MODE="$2"; shift 2 ;;
+        --ir-energy) ESTIMATOR_MODE="ir"; shift ;;
         -O) OPT_LEVEL="$2"; shift 2 ;;
         -Oc) CLANG_OPT_LEVEL="$2"; shift 2 ;;
         -I) EXTRA_INCLUDES="$EXTRA_INCLUDES -I$2"; shift 2 ;;
@@ -246,9 +249,13 @@ if [[ "$FLASH_ONLY" != "true" ]]; then
                 [[ "$word" == -I* ]] && MILP_COMPILE_ARGS+=(-I "${word#-I}")
             done
 
+            MILP_EXTRA_ARGS=()
+            [[ -n "$ESTIMATOR_MODE" ]] && MILP_EXTRA_ARGS+=(--estimator-mode "$ESTIMATOR_MODE")
+
             "$SCRIPT_DIR/compile_milp.sh" \
                 -m "$MILP_CONFIG" \
                 --link \
+                "${MILP_EXTRA_ARGS[@]}" \
                 "${MILP_COMPILE_ARGS[@]}" \
                 "$INPUT"
 

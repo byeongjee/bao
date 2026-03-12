@@ -33,12 +33,6 @@ source "$SCRIPT_DIR/lib/common.sh"
 # Pass plugin
 MACHINE_PASS_LIB="$PROJECT_DIR/passes/build/rockclimb-backend/RockClimbMachinePass.so"
 
-# BB debug info pass plugin (for assign-bb-debuginfo)
-BB_DEBUGINFO_LIB="$PROJECT_DIR/passes/build/bb-debuginfo/BBDebugInfoPass.so"
-
-# bb-energy-analyzer
-BB_ANALYZER="$PROJECT_DIR/passes/build/bb-energy-analyzer/bb-energy-analyzer"
-
 # Defaults
 ESTIMATOR_CONFIG=""
 ROCKCLIMB_CONFIG=""

@@ -18,6 +18,8 @@
 #   --verbose            Show detailed pass output
 #   --debug              Enable DEBUG output
 #   --add-debug-markers  Insert debug counter markers in IR
+#   --estimator-mode <m> Energy estimator: assembly (default), ir
+#   --ir-energy          Shorthand for --estimator-mode ir
 #   -h, --help           Show this help message
 #
 
@@ -37,6 +39,7 @@ ADD_DEBUG_MARKERS="false"
 LINK="false"
 HALT_MODE="debug"
 DEBUG_COUNTERS="false"
+ESTIMATOR_MODE="assembly"
 INPUT=""
 
 usage() { sed -n '2,24p' "$0" | sed 's/^# \?//'; exit 0; }
@@ -55,6 +58,8 @@ while [[ $# -gt 0 ]]; do
         --verbose) VERBOSE="true"; shift ;;
         --debug) DEBUG_MODE="true"; shift ;;
         --add-debug-markers) ADD_DEBUG_MARKERS="true"; shift ;;
+        --estimator-mode) ESTIMATOR_MODE="$2"; shift 2 ;;
+        --ir-energy) ESTIMATOR_MODE="ir"; shift ;;
         -h|--help) usage ;;
         -*) error "Unknown option: $1" ;;
         *) INPUT="$1"; shift ;;
@@ -73,6 +78,13 @@ done
 [[ -z "$MILP_CONFIG" ]] && error "MILP config required: use -m <config.json>"
 [[ ! -f "$MILP_CONFIG" ]] && error "MILP config not found: $MILP_CONFIG"
 [[ ! -f "$PASS_LIB" ]] && error "Pass not found: $PASS_LIB"
+if [[ "$ESTIMATOR_MODE" != "assembly" && "$ESTIMATOR_MODE" != "ir" ]]; then
+    error "Unknown estimator mode: $ESTIMATOR_MODE (use: assembly, ir)"
+fi
+if [[ "$ESTIMATOR_MODE" == "assembly" ]]; then
+    [[ ! -f "$BB_DEBUGINFO_LIB" ]] && error "BBDebugInfoPass.so not found (needed for assembly energy)"
+    [[ ! -f "$BB_ANALYZER" ]] && error "bb-energy-analyzer not found (needed for assembly energy)"
+fi
 
 # Output name
 BUILD_DIR="$PROJECT_DIR/build"
@@ -114,63 +126,167 @@ if [[ "$CLANG_OPT_LEVEL" != "0" ]]; then
     MILP_INPUT_LL="$TMP_DIR/input_optimized.ll"
 fi
 
-# BB frequency collection: instrument, compile, run, get bb_freq.json
-PROFILE_START=$(_now_ms)
-info "Collecting BB frequencies..."
-if ! $OPT -load-pass-plugin="$PASS_LIB" \
-    -passes=bb-freq-collect \
-    -energy-config="$ESTIMATOR_CONFIG" \
-    -milp-config="$MILP_CONFIG" \
-    -S "$MILP_INPUT_LL" -o "$TMP_DIR/freq_inst.ll" 2>&1; then
-    error "BB frequency collection pass failed"
-fi
+# Helper: run assembly-based energy estimation on an IR file.
+# Usage: run_assembly_energy <input.ll> <output_prefix> <energy_params_config>
+# Outputs: <prefix>.bb_energy.json, <prefix>.bb_mapping.json
+run_assembly_energy() {
+    local input_ll="$1" prefix="$2" params_config="$3"
 
-# Strip MSP430 target triple so clang compiles a native binary for profiling.
-sed 's/^target triple = .*//' "$TMP_DIR/freq_inst.ll" \
-  | sed 's/^target datalayout = .*//' > "$TMP_DIR/freq_inst_native.ll"
+    if ! $OPT -load-pass-plugin="$BB_DEBUGINFO_LIB" \
+        -passes=assign-bb-debuginfo \
+        -bb-mapping="${prefix}.bb_mapping.json" \
+        -S "$input_ll" -o "${prefix}.bbinfo.ll" 2>&1; then
+        error "assign-bb-debuginfo pass failed for $input_ll"
+    fi
 
-# Provide host stubs for MSP430-specific debug_init/debug_exit
-cat > "$TMP_DIR/debug_stubs.c" << 'STUBS'
+    if ! $LLC -march=msp430 -filetype=obj "${prefix}.bbinfo.ll" -o "${prefix}.energy.o" 2>&1; then
+        error "LLC compilation to object failed for ${prefix}.bbinfo.ll"
+    fi
+
+    if ! "$BB_ANALYZER" \
+        --energy-params "$params_config" \
+        --bb-mapping "${prefix}.bb_mapping.json" \
+        "${prefix}.energy.o" > "${prefix}.bb_energy.json"; then
+        error "bb-energy-analyzer failed for ${prefix}.energy.o"
+    fi
+}
+
+# Helper: compile and run BB frequency profiling binary.
+# Usage: collect_bb_freq <instrumented.ll> <output_bb_freq.json>
+collect_bb_freq() {
+    local inst_ll="$1" out_json="$2"
+
+    # Strip MSP430 target triple so clang compiles a native binary for profiling.
+    sed 's/^target triple = .*//' "$inst_ll" \
+      | sed 's/^target datalayout = .*//' > "$TMP_DIR/freq_inst_native.ll"
+
+    # Provide host stubs for MSP430-specific debug_init/debug_exit
+    cat > "$TMP_DIR/debug_stubs.c" << 'STUBS'
 void debug_init(void) {}
 void debug_exit(int result) { (void)result; }
 STUBS
 
-if ! $CLANG -O0 $_SYSROOT_FLAGS \
-    "$TMP_DIR/freq_inst_native.ll" "$BB_FREQ_RUNTIME" "$TMP_DIR/debug_stubs.c" \
-    -o "$TMP_DIR/freq_run" 2>&1; then
-    error "BB frequency runtime compilation failed"
-fi
+    if ! $CLANG -O0 $_SYSROOT_FLAGS \
+        "$TMP_DIR/freq_inst_native.ll" "$BB_FREQ_RUNTIME" "$TMP_DIR/debug_stubs.c" \
+        -o "$TMP_DIR/freq_run" 2>&1; then
+        error "BB frequency runtime compilation failed"
+    fi
 
-BB_FREQ_JSON="$TMP_DIR/bb_freq.json"
-(cd "$TMP_DIR" && ./freq_run) || true
-if [[ ! -f "$BB_FREQ_JSON" ]]; then
-    error "BB frequency collection did not produce bb_freq.json"
-fi
-PROFILE_END=$(_now_ms)
-echo "Profiling time (ms): $((PROFILE_END - PROFILE_START))"
+    (cd "$TMP_DIR" && ./freq_run) || true
+    if [[ ! -f "$out_json" ]]; then
+        error "BB frequency collection did not produce $(basename "$out_json")"
+    fi
+}
 
-# MILP pass
 MILP_EXTRA_FLAGS=""
 [[ "$ADD_DEBUG_MARKERS" == "true" ]] && MILP_EXTRA_FLAGS="-add-debug-markers"
 [[ "$VERBOSE" == "true" ]] && MILP_EXTRA_FLAGS="$MILP_EXTRA_FLAGS -loop-strip-mining-verbose -abstract-cfg-verbose"
 
-PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
-if $OPT -load-pass-plugin="$PASS_LIB" \
-    -passes=milp \
-    -energy-config="$ESTIMATOR_CONFIG" \
-    -milp-config="$MILP_CONFIG" \
-    -bb-freq-file="$BB_FREQ_JSON" \
-    $MILP_EXTRA_FLAGS \
-    -S "$MILP_INPUT_LL" -o "$TMP_DIR/ckpt.ll" \
-    >"$PASS_LOG" 2>&1; then
-    if [[ "$VERBOSE" == "true" ]]; then
-        cat "$PASS_LOG"
-    else
-        head -10 "$PASS_LOG"
+if [[ "$ESTIMATOR_MODE" == "assembly" ]]; then
+    # ── Assembly-based two-pass energy estimation ────────────────────────────
+
+    # Phase 2: Pre-strip-mining assembly energy
+    info "Phase 2: Pre-strip-mining assembly energy..."
+    run_assembly_energy "$MILP_INPUT_LL" "$TMP_DIR/pre" "$ESTIMATOR_CONFIG"
+
+    # Generate temporary energy config pointing to pre-strip-mining energy data
+    cat > "$TMP_DIR/pre_energy_config.json" << EOF
+{"estimator_type": "assembly", "energy_data_path": "$TMP_DIR/pre.bb_energy.json"}
+EOF
+
+    # Phase 3: Preprocessing only (loop canonicalization + strip-mining)
+    info "Phase 3: Preprocessing (LoopSimplify + LCSSA + LoopRotate + IndVarSimplify + LoopStripMining)..."
+    if ! $OPT -load-pass-plugin="$PASS_LIB" \
+        -passes=milp-preprocess \
+        -energy-config="$TMP_DIR/pre_energy_config.json" \
+        -milp-config="$MILP_CONFIG" \
+        $([[ "$VERBOSE" == "true" ]] && echo "-loop-strip-mining-verbose") \
+        -S "$MILP_INPUT_LL" -o "$TMP_DIR/preprocessed.ll" 2>&1; then
+        error "MILP preprocessing pass failed"
     fi
+
+    # Phase 4: Post-strip-mining assembly energy
+    info "Phase 4: Post-strip-mining assembly energy..."
+    run_assembly_energy "$TMP_DIR/preprocessed.ll" "$TMP_DIR/post" "$ESTIMATOR_CONFIG"
+
+    # Generate temporary energy config pointing to post-strip-mining energy data
+    cat > "$TMP_DIR/post_energy_config.json" << EOF
+{"estimator_type": "assembly", "energy_data_path": "$TMP_DIR/post.bb_energy.json"}
+EOF
+
+    # Phase 5: BB frequency collection (on preprocessed IR, no re-preprocessing)
+    PROFILE_START=$(_now_ms)
+    info "Phase 5: Collecting BB frequencies..."
+    if ! $OPT -load-pass-plugin="$PASS_LIB" \
+        -passes=bb-freq-collect-only \
+        -S "$TMP_DIR/preprocessed.ll" -o "$TMP_DIR/freq_inst.ll" 2>&1; then
+        error "BB frequency collection pass failed"
+    fi
+
+    BB_FREQ_JSON="$TMP_DIR/bb_freq.json"
+    collect_bb_freq "$TMP_DIR/freq_inst.ll" "$BB_FREQ_JSON"
+    PROFILE_END=$(_now_ms)
+    echo "Profiling time (ms): $((PROFILE_END - PROFILE_START))"
+
+    # Phase 6: MILP solving only (on preprocessed IR, no re-preprocessing)
+    info "Phase 6: MILP solving..."
+    PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
+    if $OPT -load-pass-plugin="$PASS_LIB" \
+        -passes=milp-solve-only \
+        -energy-config="$TMP_DIR/post_energy_config.json" \
+        -milp-config="$MILP_CONFIG" \
+        -bb-freq-file="$BB_FREQ_JSON" \
+        $MILP_EXTRA_FLAGS \
+        -S "$TMP_DIR/preprocessed.ll" -o "$TMP_DIR/ckpt.ll" \
+        >"$PASS_LOG" 2>&1; then
+        if [[ "$VERBOSE" == "true" ]]; then
+            cat "$PASS_LOG"
+        else
+            head -10 "$PASS_LOG"
+        fi
+    else
+        cat "$PASS_LOG" >&2
+        error "MILP pass failed (see output above)"
+    fi
+
 else
-    cat "$PASS_LOG" >&2
-    error "MILP pass failed (see output above)"
+    # ── IR-based single-pass energy estimation (existing flow) ───────────────
+
+    # BB frequency collection: instrument, compile, run, get bb_freq.json
+    PROFILE_START=$(_now_ms)
+    info "Collecting BB frequencies..."
+    if ! $OPT -load-pass-plugin="$PASS_LIB" \
+        -passes=bb-freq-collect \
+        -energy-config="$ESTIMATOR_CONFIG" \
+        -milp-config="$MILP_CONFIG" \
+        -S "$MILP_INPUT_LL" -o "$TMP_DIR/freq_inst.ll" 2>&1; then
+        error "BB frequency collection pass failed"
+    fi
+
+    BB_FREQ_JSON="$TMP_DIR/bb_freq.json"
+    collect_bb_freq "$TMP_DIR/freq_inst.ll" "$BB_FREQ_JSON"
+    PROFILE_END=$(_now_ms)
+    echo "Profiling time (ms): $((PROFILE_END - PROFILE_START))"
+
+    # MILP pass
+    PASS_LOG=$(mktemp "$TMP_DIR/pass_XXXXXX.log")
+    if $OPT -load-pass-plugin="$PASS_LIB" \
+        -passes=milp \
+        -energy-config="$ESTIMATOR_CONFIG" \
+        -milp-config="$MILP_CONFIG" \
+        -bb-freq-file="$BB_FREQ_JSON" \
+        $MILP_EXTRA_FLAGS \
+        -S "$MILP_INPUT_LL" -o "$TMP_DIR/ckpt.ll" \
+        >"$PASS_LOG" 2>&1; then
+        if [[ "$VERBOSE" == "true" ]]; then
+            cat "$PASS_LOG"
+        else
+            head -10 "$PASS_LOG"
+        fi
+    else
+        cat "$PASS_LOG" >&2
+        error "MILP pass failed (see output above)"
+    fi
 fi
 
 # Output: compile to MSP430 object

@@ -109,6 +109,22 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(checkpoint::BBFreqCollectorPass());
                         return true;
                     }
+                    if (Name == "milp-preprocess") {
+                        FPM.addPass(LoopSimplifyPass());
+                        FPM.addPass(LCSSAPass());
+                        FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
+                        FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+                        FPM.addPass(checkpoint::LoopStripMiningPass());
+                        return true;
+                    }
+                    if (Name == "milp-solve-only") {
+                        FPM.addPass(checkpoint::MILPCheckpointPass());
+                        return true;
+                    }
+                    if (Name == "bb-freq-collect-only") {
+                        FPM.addPass(checkpoint::BBFreqCollectorPass());
+                        return true;
+                    }
                     return false;
                 });
             }};
