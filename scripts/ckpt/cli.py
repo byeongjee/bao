@@ -202,7 +202,7 @@ def compile_rockclimb_cmd(
 @click.option(
     "--estimator-mode",
     type=click.Choice(["assembly", "ir"]),
-    default="ir",
+    default="assembly",
     help="Energy estimator mode.",
 )
 @click.pass_context
@@ -541,7 +541,7 @@ def bench_rockclimb_cmd(
 @click.option(
     "--estimator-mode",
     type=click.Choice(["assembly", "ir"]),
-    default="ir",
+    default="assembly",
     help="Energy estimator mode.",
 )
 @click.pass_context

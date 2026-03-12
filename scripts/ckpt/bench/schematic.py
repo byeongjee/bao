@@ -126,7 +126,7 @@ def run_schematic_benchmarks(
     verbose: bool = False,
     energy_config: Path | None = None,
     trace_config: Path | None = None,
-    estimator_mode: str = "ir",
+    estimator_mode: str = "assembly",
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 

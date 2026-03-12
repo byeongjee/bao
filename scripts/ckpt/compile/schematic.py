@@ -48,7 +48,7 @@ class SchematicCompileOptions:
     debug_counters: bool = False
     halt_mode: bool = False
     linker_script: Path | None = None
-    estimator_mode: str = "ir"  # ir, assembly
+    estimator_mode: str = "assembly"  # assembly, ir
 
 
 @dataclass
