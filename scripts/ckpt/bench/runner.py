@@ -193,16 +193,14 @@ def run_benchmark_matrix(
                 )
                 write_csv_row(writer, row, csv_header)
 
-                # Print a brief summary
-                _print_ok_summary(row_fields)
+                # Print detailed summary
+                print_benchmark_summary(row.status, row_fields)
 
     # ----- Final summary -----
     print()
     print("==========================================")
     print(f"Results written to: {output_csv}")
     print("==========================================")
-    print()
-    _print_csv_table(output_csv)
 
 
 def write_csv_row(
@@ -248,28 +246,80 @@ def _flash_and_read(tc: Toolchain, elf: Path, symbols: list[str]) -> NvmCounters
         return None
 
 
-def _print_ok_summary(fields: dict[str, str | int | None]) -> None:
-    """Print a brief OK summary from row fields."""
-    parts: list[str] = []
-    for key in ("regions", "region_boundaries", "boundary_checks"):
-        val = fields.get(key)
-        if val is not None:
-            parts.append(f"{val} {key.replace('_', ' ')}")
-    for key in ("optimal_solution",):
-        val = fields.get(key)
-        if val is not None:
-            parts.append(str(val))
-    summary = ", ".join(parts) if parts else "done"
-    print(f"  OK ({summary})")
+def print_benchmark_summary(status: str, fields: dict[str, str | int | None]) -> None:
+    """Print a detailed multi-line summary for a benchmark run."""
+    label = status.upper() if status != "ok" else "OK"
+    print(f"  {label}")
 
+    def _fmt(key: str, fields: dict[str, str | int | None]) -> str | None:
+        val = fields.get(key)
+        if val is None or val == "" or val == 0:
+            return None
+        return str(val)
 
-def _print_csv_table(csv_path: Path) -> None:
-    """Print the CSV as a formatted table using ``column -t``."""
-    try:
-        subprocess.run(
-            ["column", "-t", "-s,", str(csv_path)],
-            check=False,
-        )
-    except FileNotFoundError:
-        # column not available; just cat it
-        print(csv_path.read_text())
+    def _print_group(title: str, items: list[tuple[str, str | None]]) -> None:
+        parts = [f"{name} {val}" for name, val in items if val is not None]
+        if parts:
+            print(f"    {title + ':':<16}{', '.join(parts)}")
+
+    # CFG
+    _print_group("CFG", [
+        ("blocks", _fmt("basic_blocks", fields)),
+        ("edges", _fmt("edges", fields)),
+        ("regions", _fmt("regions", fields)),
+    ])
+
+    # MILP
+    milp_items: list[tuple[str, str | None]] = [
+        ("variables", _fmt("milp_variables", fields)),
+        ("constraints", _fmt("milp_constraints", fields)),
+        ("solve", f"{fields['milp_solve_time_ms']}ms" if _fmt("milp_solve_time_ms", fields) else None),
+    ]
+    optimal = _fmt("optimal_solution", fields)
+    if optimal is not None:
+        milp_items.append(("optimal", optimal))
+    _print_group("MILP", milp_items)
+
+    # Checkpoints
+    ckpt_items: list[tuple[str, str | None]] = []
+    for key, name in [
+        ("region_boundaries", "region boundaries"),
+        ("region_boundaries_inserted", "boundaries inserted"),
+        ("enabled_checkpoints", "enabled"),
+        ("distributed_checkpoints_inserted", "distributed inserted"),
+        ("boundary_checks", "boundary checks"),
+        ("runtime_calls_inserted", "runtime calls"),
+    ]:
+        val = _fmt(key, fields)
+        if val is not None:
+            ckpt_items.append((name, val))
+    _print_group("Checkpoints", ckpt_items)
+
+    # Analysis
+    _print_group("Analysis", [
+        ("candidate globals", _fmt("candidate_globals", fields)),
+        ("loop decisions", _fmt("loop_decisions", fields)),
+        ("paths analyzed", _fmt("paths_analyzed", fields)),
+    ])
+
+    # Timing
+    timing_items: list[tuple[str, str | None]] = []
+    for key, name in [
+        ("compilation_time_ms", "compile"),
+        ("profiling_time_ms", "profiling"),
+        ("execution_time_ms", "execution"),
+    ]:
+        raw = _fmt(key, fields)
+        if raw is not None:
+            timing_items.append((name, f"{raw}ms"))
+    _print_group("Timing", timing_items)
+
+    # Memory
+    rss = _fmt("peak_rss_kb", fields)
+    if rss is not None:
+        print(f"    {'Memory:':<16}{rss} KB peak RSS")
+
+    # Result
+    result = fields.get("result")
+    if result is not None and result != "":
+        print(f"    {'Result:':<16}{result}")

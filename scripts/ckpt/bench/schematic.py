@@ -34,7 +34,7 @@ from .config import (
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import BenchmarkRow, write_csv_row
+from .runner import BenchmarkRow, print_benchmark_summary, write_csv_row
 
 _CSV_HEADER: list[str] = [
     "benchmark",
@@ -154,7 +154,6 @@ def run_schematic_benchmarks(
         Print full compiler output for each benchmark.
     """
     import csv
-    import subprocess
 
     from ..output_parser import (
         detect_infeasibility,
@@ -393,26 +392,11 @@ def run_schematic_benchmarks(
                 )
                 write_csv_row(writer, row, _CSV_HEADER)
 
-                # Print brief summary
-                regions = row_fields.get("regions", 0)
-                enabled_ckpts = row_fields.get("enabled_checkpoints", 0)
-                runtime_calls = row_fields.get("runtime_calls_inserted", 0)
-                rt_boundary = row_fields.get("runtime_region_boundary_calls", 0)
-                print(
-                    f"  OK ({regions} regions, {enabled_ckpts} checkpoints, "
-                    f"{runtime_calls} runtime calls, {rt_boundary} boundaries)"
-                )
+                # Print detailed summary
+                print_benchmark_summary(row.status, row_fields)
 
     # Final summary
     print()
     print("==========================================")
     print(f"Results written to: {output_csv}")
     print("==========================================")
-    print()
-    try:
-        subprocess.run(
-            ["column", "-t", "-s,", str(output_csv)],
-            check=False,
-        )
-    except FileNotFoundError:
-        print(output_csv.read_text())
