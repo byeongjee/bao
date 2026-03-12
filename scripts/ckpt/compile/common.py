@@ -385,7 +385,9 @@ def write_assembly_energy_config(path: Path, energy_data_path: Path) -> Path:
     """Write a temporary energy config JSON pointing to assembly energy data."""
     config = {
         "estimator_type": "assembly",
-        "energy_data_path": str(energy_data_path),
+        "energy_parameters": {
+            "energy_data_path": str(energy_data_path),
+        },
     }
     path.write_text(json.dumps(config))
     return path
