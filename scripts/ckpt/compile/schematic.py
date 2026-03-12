@@ -141,22 +141,26 @@ def compile_schematic(
             energy_config=energy_config,
         )
 
-        # Compile to MSP430 object
-        ckpt_ll = tmp / "ckpt.ll"
-        out_s = tmp / "ckpt.s"
-        out_o = tmp / "ckpt.o"
-        compile_to_object(
-            tc, env, ckpt_ll, out_s, out_o,
-            opt_level=opts.opt_level,
-        )
-
-        shutil.copy2(out_o, opts.output.with_suffix(".o"))
-        shutil.copy2(out_s, opts.output.with_suffix(".s"))
-
-        # Optional: link
+        # Compile to MSP430 object + optional link
+        # Wrap post-pass steps so pass_output is preserved on failure.
         elf_file: Path | None = None
-        if opts.link or opts.debug_counters:
-            elf_file = _link_schematic(tc, env, opts, tmp)
+        try:
+            ckpt_ll = tmp / "ckpt.ll"
+            out_s = tmp / "ckpt.s"
+            out_o = tmp / "ckpt.o"
+            compile_to_object(
+                tc, env, ckpt_ll, out_s, out_o,
+                opt_level=opts.opt_level,
+            )
+
+            shutil.copy2(out_o, opts.output.with_suffix(".o"))
+            shutil.copy2(out_s, opts.output.with_suffix(".s"))
+
+            if opts.link or opts.debug_counters:
+                elf_file = _link_schematic(tc, env, opts, tmp)
+        except CompilationError as exc:
+            exc.pass_output = pass_output
+            raise
 
     return SchematicCompileResult(
         object_file=opts.output.with_suffix(".o"),

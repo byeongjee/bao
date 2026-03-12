@@ -294,6 +294,7 @@ def run_schematic_benchmarks(
                 out_dir = workdir / f"{bench_name}_{cap.label}"
                 out_dir.mkdir(parents=True, exist_ok=True)
 
+                had_compilation_error = False
                 try:
                     compile_opts = SchematicCompileOptions(
                         input_c=bench_path,
@@ -317,7 +318,8 @@ def run_schematic_benchmarks(
                     )
                     compile_output = compile_result.pass_output
                 except CompilationError as exc:
-                    compile_output = exc.result.output if exc.result else ""
+                    compile_output = exc.pass_output or (exc.result.output if exc.result else "")
+                    had_compilation_error = True
 
                 if verbose:
                     print(compile_output)
@@ -386,7 +388,7 @@ def run_schematic_benchmarks(
                 row = BenchmarkRow(
                     benchmark=row_name,
                     capacitor=cap.label,
-                    status="ok",
+                    status="link_failed" if had_compilation_error else "ok",
                     fields=row_fields,
                 )
                 write_csv_row(writer, row, _CSV_HEADER)

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import run
+from ..runner import CompilationError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .common import (
@@ -130,20 +130,23 @@ def compile_milp(
                 tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
             )
 
-        # Compile to MSP430 object
-        ckpt_ll = tmp / "ckpt.ll"
-        out_s = tmp / "ckpt.s"
-        out_o = tmp / "ckpt.o"
-        compile_to_object(tc, env, ckpt_ll, out_s, out_o, opt_level=opts.opt_level)
-
-        # Copy outputs
-        shutil.copy2(out_o, opts.output.with_suffix(".o"))
-        shutil.copy2(out_s, opts.output.with_suffix(".s"))
-
-        # Optional: link
+        # Compile to MSP430 object + optional link
+        # Wrap post-pass steps so pass_output is preserved on failure.
         elf_file: Path | None = None
-        if link:
-            elf_file = _link_milp(tc, env, opts)
+        try:
+            ckpt_ll = tmp / "ckpt.ll"
+            out_s = tmp / "ckpt.s"
+            out_o = tmp / "ckpt.o"
+            compile_to_object(tc, env, ckpt_ll, out_s, out_o, opt_level=opts.opt_level)
+
+            shutil.copy2(out_o, opts.output.with_suffix(".o"))
+            shutil.copy2(out_s, opts.output.with_suffix(".s"))
+
+            if link:
+                elf_file = _link_milp(tc, env, opts)
+        except CompilationError as exc:
+            exc.pass_output = pass_output
+            raise
 
     return MilpCompileResult(
         object_file=opts.output.with_suffix(".o"),

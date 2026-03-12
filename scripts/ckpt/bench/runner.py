@@ -128,11 +128,13 @@ def run_benchmark_matrix(
                 print(f"[{count}/{total}] Running {row_name} ...")
 
                 # ----- Compile -----
+                had_compilation_error = False
                 try:
                     output_dir, compile_output = compile_fn(bench_path, cap)
                 except CompilationError as exc:
-                    compile_output = exc.result.output if exc.result else ""
+                    compile_output = exc.pass_output or (exc.result.output if exc.result else "")
                     output_dir = None
+                    had_compilation_error = True
 
                 # ----- Flash + NVM read -----
                 nvm: NvmCounters | None = None
@@ -186,7 +188,7 @@ def run_benchmark_matrix(
                 row = BenchmarkRow(
                     benchmark=row_name,
                     capacitor=cap.label,
-                    status="ok",
+                    status="link_failed" if had_compilation_error else "ok",
                     fields=row_fields,
                 )
                 write_csv_row(writer, row, csv_header)

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import run
+from ..runner import CompilationError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .common import (
@@ -99,28 +99,32 @@ def compile_rockclimb(
         else:
             pass_output = _mir_estimation_pipeline(tc, env, opts, tmp, annotated_ll)
 
-        # Step 5: Resume compilation — instrumented MIR -> assembly
-        instrumented_mir = tmp / "instrumented.mir"
-        raw_s = tmp / "raw.s"
-        run(
-            [
-                tc.llc, "-march=msp430",
-                "-start-after=virtregrewriter",
-                str(instrumented_mir),
-                "-o", str(raw_s),
-            ],
-            step_name="llc-mir-to-asm",
-        )
-
-        # Workaround: strip .cfi_* directives (LLVM MSP430 backend bug)
-        clean_s = tmp / "clean.s"
-        _strip_cfi_directives(raw_s, clean_s)
-        shutil.copy2(clean_s, output.with_suffix(".s"))
-
-        # Optional: assemble + link
+        # Post-pass steps: MIR -> assembly -> optional link
+        # Wrap so pass_output is preserved on failure.
         elf_file: Path | None = None
-        if link:
-            elf_file = _link_rockclimb(tc, env, opts)
+        try:
+            instrumented_mir = tmp / "instrumented.mir"
+            raw_s = tmp / "raw.s"
+            run(
+                [
+                    tc.llc, "-march=msp430",
+                    "-start-after=virtregrewriter",
+                    str(instrumented_mir),
+                    "-o", str(raw_s),
+                ],
+                step_name="llc-mir-to-asm",
+            )
+
+            # Workaround: strip .cfi_* directives (LLVM MSP430 backend bug)
+            clean_s = tmp / "clean.s"
+            _strip_cfi_directives(raw_s, clean_s)
+            shutil.copy2(clean_s, output.with_suffix(".s"))
+
+            if link:
+                elf_file = _link_rockclimb(tc, env, opts)
+        except CompilationError as exc:
+            exc.pass_output = pass_output
+            raise
 
     return RockClimbCompileResult(
         assembly_file=output.with_suffix(".s"),

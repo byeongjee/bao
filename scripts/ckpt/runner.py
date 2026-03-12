@@ -20,7 +20,13 @@ class ToolError(Exception):
 
 
 class CompilationError(ToolError):
-    """A compilation step failed."""
+    """A compilation step failed.
+
+    When a post-pass step (e.g. linking) fails, ``pass_output`` may carry
+    the earlier LLVM pass output so that statistics are not lost.
+    """
+
+    pass_output: str = ""
 
 
 class InfeasibleError(Exception):
