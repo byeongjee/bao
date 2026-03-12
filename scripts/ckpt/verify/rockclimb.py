@@ -137,18 +137,12 @@ def _compile_baseline(
 # NVM reading helpers
 # ---------------------------------------------------------------------------
 
-def _read_nvm(elf: Path, symbols: list[str], timeout: int) -> dict[str, str]:
+def _read_nvm(tc: Toolchain, elf: Path, symbols: list[str], timeout: int) -> dict[str, str]:
     """Flash, run, and read NVM symbols. Returns key=value dict."""
     from ..device.flash import flash_run_and_read
 
-    output = flash_run_and_read(elf, timeout, symbols)
-    result: dict[str, str] = {}
-    for line in output.splitlines():
-        line = line.strip()
-        if "=" in line:
-            key, _, value = line.partition("=")
-            result[key.strip()] = value.strip()
-    return result
+    nvm_dict = flash_run_and_read(tc, elf, timeout, symbols)
+    return {k: str(v) for k, v in nvm_dict.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +157,8 @@ def verify_rockclimb(
     cap_size: str = "1uF",
     timeout: int = 30,
     verbose: bool = False,
+    energy_config: Path | None = None,
+    rockclimb_config: Path | None = None,
 ) -> bool:
     """Verify semantic correctness of RockClimb checkpoint insertion.
 
@@ -183,16 +179,18 @@ def verify_rockclimb(
         print("Error: No benchmarks to verify", file=sys.stderr)
         return False
 
-    # Resolve config paths
-    cap_config = env.project_dir / "benchmarks" / f"sample_rockclimb_config_{cap_size}.json"
-    if not cap_config.is_file():
+    # Resolve config paths (use defaults if not provided)
+    if rockclimb_config is None:
+        rockclimb_config = env.project_dir / "benchmarks" / f"sample_rockclimb_config_{cap_size}.json"
+    if not rockclimb_config.is_file():
         print(
-            f"Error: Config not found for cap size '{cap_size}': {cap_config}",
+            f"Error: RockClimb config not found: {rockclimb_config}",
             file=sys.stderr,
         )
         return False
 
-    energy_config = env.project_dir / "benchmarks" / "sample_assembly_energy_params.json"
+    if energy_config is None:
+        energy_config = env.project_dir / "benchmarks" / "sample_assembly_energy_params.json"
     if not energy_config.is_file():
         print(f"Error: Energy config not found: {energy_config}", file=sys.stderr)
         return False
@@ -209,7 +207,7 @@ def verify_rockclimb(
             bench_path=bench_path,
             bench_name=bench_name,
             energy_config=energy_config,
-            cap_config=cap_config,
+            cap_config=rockclimb_config,
             timeout=timeout,
             verbose=verbose,
         )
@@ -250,7 +248,7 @@ def _verify_one(
 
         # ── B: Flash + read baseline ──
         try:
-            baseline_nvm = _read_nvm(baseline_elf, _NVM_SYMBOLS, timeout)
+            baseline_nvm = _read_nvm(tc, baseline_elf, _NVM_SYMBOLS, timeout)
         except Exception as exc:
             msg = f"Baseline flash/read failed: {exc}"
             if verbose:
@@ -330,7 +328,7 @@ def _verify_one(
 
         # ── E: Flash + read RockClimb ──
         try:
-            rockclimb_nvm = _read_nvm(rockclimb_elf, _NVM_SYMBOLS, timeout)
+            rockclimb_nvm = _read_nvm(tc, rockclimb_elf, _NVM_SYMBOLS, timeout)
         except Exception as exc:
             msg = f"RockClimb flash/read failed: {exc}"
             if verbose:

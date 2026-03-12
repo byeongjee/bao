@@ -125,6 +125,8 @@ def run_schematic_benchmarks(
     debug_counters: bool = False,
     halt_mode: bool = False,
     verbose: bool = False,
+    energy_config: Path | None = None,
+    trace_config: Path | None = None,
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -173,10 +175,12 @@ def run_schematic_benchmarks(
     if output_csv is None:
         output_csv = env.project_dir / "benchmarks" / "schematic_benchmark_summary.csv"
 
-    energy_config = default_energy_config(env, "schematic")
+    if energy_config is None:
+        energy_config = default_energy_config(env, "schematic")
 
-    # Use the 10uF config as dummy for trace collection
-    dummy_config = env.project_dir / "benchmarks" / "sample_schematic_config_10uF.json"
+    # Config for trace collection phase (any capacitor works; 10uF by default)
+    if trace_config is None:
+        trace_config = env.project_dir / "benchmarks" / "sample_schematic_config_10uF.json"
 
     # Check device availability if debug counters requested
     has_device = False
@@ -215,23 +219,23 @@ def run_schematic_benchmarks(
             try:
                 trace_opts = SchematicCompileOptions(
                     input_c=bench_path,
-                    output_prefix=workdir / bench_name,
+                    output=workdir / bench_name,
                     energy_config=energy_config,
-                    schematic_config=dummy_config,
+                    schematic_config=trace_config,
                     clang_opt_level=0,
                     trace_only=True,
                     verbose=verbose,
                     extra_includes=[str(env.project_dir / "passes" / "runtime")],
                 )
                 trace_result: SchematicCompileResult = compile_schematic(
-                    env, tc, trace_opts
+                    tc, env, trace_opts
                 )
 
                 if verbose:
-                    print(trace_result.output)
+                    print(trace_result.pass_output)
 
                 # Extract profiling time from trace output
-                raw_prof = extract_stat(trace_result.output, "Profiling time (ms)")
+                raw_prof = extract_stat(trace_result.pass_output, "Profiling time (ms)")
                 if raw_prof is not None:
                     try:
                         profiling_time_ms = int(raw_prof)
@@ -284,11 +288,11 @@ def run_schematic_benchmarks(
                 try:
                     compile_opts = SchematicCompileOptions(
                         input_c=bench_path,
-                        output_prefix=out_dir / bench_name,
+                        output=out_dir / bench_name,
                         energy_config=energy_config,
                         schematic_config=cap.config_path,
                         clang_opt_level=0,
-                        trace_path=trace_json,
+                        trace_file=trace_json,
                         link=True,
                         add_debug_markers=True,
                         debug_counters=debug_counters,
@@ -297,9 +301,9 @@ def run_schematic_benchmarks(
                         extra_includes=[str(env.project_dir / "passes" / "runtime")],
                     )
                     compile_result: SchematicCompileResult = compile_schematic(
-                        env, tc, compile_opts
+                        tc, env, compile_opts
                     )
-                    compile_output = compile_result.output
+                    compile_output = compile_result.pass_output
                 except CompilationError as exc:
                     compile_output = exc.result.output if exc.result else ""
 
@@ -314,9 +318,10 @@ def run_schematic_benchmarks(
                         try:
                             from ..device.flash import flash_run_and_read
 
-                            nvm_text = flash_run_and_read(
-                                str(elf), 30, *_NVM_SYMBOLS
+                            nvm_dict = flash_run_and_read(
+                                tc, elf, 30, _NVM_SYMBOLS
                             )
+                            nvm_text = "\n".join(f"{k}={v}" for k, v in nvm_dict.items())
                             nvm = parse_nvm_output(nvm_text)
                         except Exception:
                             nvm = None

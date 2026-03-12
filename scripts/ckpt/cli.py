@@ -417,7 +417,7 @@ def compile_run_cmd(
         from .device.flash import flash_run_and_read
 
         click.echo("Flashing and reading output...")
-        output_text = flash_run_and_read(elf, timeout=30, symbols=[])
+        output_text = flash_run_and_read(tc, elf, timeout=30, symbols=[])
         click.echo(output_text)
 
 
@@ -466,12 +466,12 @@ def bench_milp_cmd(
         ctx.obj["env"],
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
-        capacitors=list(cap) if cap else None,
+        caps=list(cap) if cap else None,
         debug_counters=debug_counters,
         output_csv=Path(output) if output else None,
         verbose=verbose,
         estimator_mode=estimator_mode,
-        energy_config_override=Path(energy_config) if energy_config else None,
+        energy_config=Path(energy_config) if energy_config else None,
     )
 
 
@@ -504,11 +504,11 @@ def bench_rockclimb_cmd(
         ctx.obj["env"],
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
-        capacitors=list(cap) if cap else None,
+        caps=list(cap) if cap else None,
         debug_counters=debug_counters,
         output_csv=Path(output) if output else None,
         verbose=verbose,
-        energy_config_override=Path(energy_config) if energy_config else None,
+        energy_config=Path(energy_config) if energy_config else None,
     )
 
 
@@ -524,6 +524,11 @@ def bench_rockclimb_cmd(
     type=click.Path(exists=True),
     help="Override default energy config.",
 )
+@click.option(
+    "--trace-config",
+    type=click.Path(exists=True),
+    help="Override trace-collection config (default: sample_schematic_config_10uF.json).",
+)
 @click.pass_context
 def bench_schematic_cmd(
     ctx: click.Context,
@@ -533,6 +538,7 @@ def bench_schematic_cmd(
     output: str | None,
     verbose: bool,
     energy_config: str | None,
+    trace_config: str | None,
 ) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -541,11 +547,12 @@ def bench_schematic_cmd(
         ctx.obj["env"],
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
-        capacitors=list(cap) if cap else None,
+        caps=list(cap) if cap else None,
         debug_counters=debug_counters,
         output_csv=Path(output) if output else None,
         verbose=verbose,
-        energy_config_override=Path(energy_config) if energy_config else None,
+        energy_config=Path(energy_config) if energy_config else None,
+        trace_config=Path(trace_config) if trace_config else None,
     )
 
 
@@ -567,6 +574,18 @@ def verify() -> None:
 )
 @click.option("--timeout", type=int, default=30, help="Serial timeout in seconds.")
 @click.option("-v", "--verbose", is_flag=True, help="Show full compile/serial output.")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Override default energy config.",
+)
+@click.option(
+    "-c",
+    "--rockclimb-config",
+    type=click.Path(exists=True),
+    help="Override default RockClimb config.",
+)
 @click.pass_context
 def verify_rockclimb_cmd(
     ctx: click.Context,
@@ -574,6 +593,8 @@ def verify_rockclimb_cmd(
     cap: str,
     timeout: int,
     verbose: bool,
+    energy_config: str | None,
+    rockclimb_config: str | None,
 ) -> None:
     """Verify semantic correctness of RockClimb checkpoint insertion."""
     from .verify.rockclimb import verify_rockclimb
@@ -585,6 +606,8 @@ def verify_rockclimb_cmd(
         cap_size=cap,
         timeout=timeout,
         verbose=verbose,
+        energy_config=Path(energy_config) if energy_config else None,
+        rockclimb_config=Path(rockclimb_config) if rockclimb_config else None,
     )
     if not success:
         raise SystemExit(1)

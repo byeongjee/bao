@@ -20,7 +20,6 @@ from ..output_parser import (
     PassStatistics,
     extract_stat,
 )
-from ..runner import CompilationError
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import (
@@ -100,6 +99,7 @@ def run_rockclimb_benchmarks(
     output_csv: Path | None = None,
     debug_counters: bool = False,
     verbose: bool = False,
+    energy_config: Path | None = None,
 ) -> None:
     """Run RockClimb checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -131,7 +131,8 @@ def run_rockclimb_benchmarks(
     if output_csv is None:
         output_csv = env.project_dir / "benchmarks" / "rockclimb_benchmark_summary.csv"
 
-    energy_config = default_energy_config(env, "rockclimb")
+    if energy_config is None:
+        energy_config = default_energy_config(env, "rockclimb")
 
     with compilation_workdir(prefix="rockclimb_bench_") as workdir:
 
@@ -144,7 +145,7 @@ def run_rockclimb_benchmarks(
 
             opts = RockClimbCompileOptions(
                 input_c=bench_path,
-                output_prefix=out_dir / bench_name,
+                output=out_dir / bench_name,
                 energy_config=energy_config,
                 rockclimb_config=cap.config_path,
                 link=True,
@@ -152,8 +153,8 @@ def run_rockclimb_benchmarks(
                 debug_counters=debug_counters,
             )
 
-            result: RockClimbCompileResult = compile_rockclimb(env, tc, opts)
-            return out_dir, result.output
+            result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)
+            return out_dir, result.pass_output
 
         run_benchmark_matrix(
             env,
