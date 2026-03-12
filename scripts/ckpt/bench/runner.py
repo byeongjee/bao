@@ -45,12 +45,12 @@ def check_device_available() -> bool:
     Runs ``mspdebug tilib 'exit'`` with a 3-second timeout.
     """
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["mspdebug", "tilib", "exit"],
             capture_output=True,
             timeout=3,
         )
-        return True
+        return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return False
 
@@ -194,7 +194,7 @@ def run_benchmark_matrix(
                 write_csv_row(writer, row, csv_header)
 
                 # Print detailed summary
-                print_benchmark_summary(row.status, row_fields, debug_counters=debug_counters)
+                print_benchmark_summary(row.status, row_fields, debug_counters=debug_counters and has_device)
 
     # ----- Final summary -----
     print()
