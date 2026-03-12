@@ -27,8 +27,8 @@ std::map<std::string, std::map<std::string, std::string>> loadBBMapping(const st
         errs() << "error: JSON parse error in BB mapping file: " << path << "\n";
         return result;
     }
-    for (auto& [funcName, funcMapping] : mapping.items()) {
-        for (auto& [idx, bbName] : funcMapping.items()) {
+    for (auto &[funcName, funcMapping] : mapping.items()) {
+        for (auto &[idx, bbName] : funcMapping.items()) {
             result[funcName][idx] = bbName.get<std::string>();
         }
     }
@@ -36,22 +36,20 @@ std::map<std::string, std::map<std::string, std::string>> loadBBMapping(const st
 }
 
 // Command line options
-static cl::opt<std::string> InputELF(cl::Positional, cl::Required,
-                                      cl::desc("<input.elf>"));
+static cl::opt<std::string> InputELF(cl::Positional, cl::Required, cl::desc("<input.elf>"));
 
-static cl::opt<std::string>
-    EnergyParams("energy-params",
-                 cl::desc("Path to assembly energy parameters JSON"));
+static cl::opt<std::string> EnergyParams("energy-params",
+                                         cl::desc("Path to assembly energy parameters JSON"));
 
 static cl::opt<std::string>
     BBMappingFile("bb-mapping",
                   cl::desc("Path to BB index-to-name mapping JSON (from bb-debuginfo pass)"));
 
 static cl::opt<std::string> OutputFile("o", cl::init("-"),
-                                        cl::desc("Output JSON file (default: stdout)"));
+                                       cl::desc("Output JSON file (default: stdout)"));
 
 static cl::opt<bool> DumpLineMap("dump-line-map", cl::init(false),
-                                  cl::desc("Dump resolved address->BB line map and exit"));
+                                 cl::desc("Dump resolved address->BB line map and exit"));
 
 int main(int argc, char **argv) {
     cl::ParseCommandLineOptions(
@@ -125,7 +123,7 @@ int main(int argc, char **argv) {
     errs() << "Loading BB mapping from " << BBMappingFile << "...\n";
     auto bbMapping = loadBBMapping(BBMappingFile);
     if (bbMapping.empty()) {
-        return 1;  // Error already printed
+        return 1; // Error already printed
     }
 
     // 4. Compute per-BB energy
@@ -168,11 +166,12 @@ int main(int argc, char **argv) {
                 if (bbIt != funcIt->second.end()) {
                     bbName = bbIt->second;
                 } else {
-                    bbName = "bb" + std::to_string(bbIndex - 1);  // fallback
-                    errs() << "warning: BB " << bbIndex << " not found in mapping for '" << funcName << "'\n";
+                    bbName = "bb" + std::to_string(bbIndex - 1); // fallback
+                    errs() << "warning: BB " << bbIndex << " not found in mapping for '" << funcName
+                           << "'\n";
                 }
             } else {
-                bbName = "bb" + std::to_string(bbIndex - 1);  // fallback
+                bbName = "bb" + std::to_string(bbIndex - 1); // fallback
                 errs() << "warning: function '" << funcName << "' not found in BB mapping\n";
             }
 
@@ -181,26 +180,41 @@ int main(int argc, char **argv) {
                        << "' has no instructions\n";
             }
 
-            funcOutput["bb_energy"][bbName] = {
-                {"energy", bbEnergy}, {"instruction_count", instrCount}};
+            funcOutput["bb_energy"][bbName] = {{"energy", bbEnergy},
+                                               {"instruction_count", instrCount}};
         }
 
         output["functions"][funcName] = funcOutput;
+    }
+
+    // Add zero-energy entries for BBs in the mapping but not found in DWARF.
+    // These are structural BBs (preheaders, loop exits) that produce no machine
+    // instructions after codegen — their energy is correctly zero.
+    for (const auto &[funcName, funcBBs] : bbMapping) {
+        if (!output["functions"].contains(funcName)) {
+            output["functions"][funcName] = {{"bb_count", 0}, {"bb_energy", json::object()}};
+        }
+        auto &funcEntry = output["functions"][funcName];
+        for (const auto &[bbIdx, bbName] : funcBBs) {
+            if (!funcEntry["bb_energy"].contains(bbName)) {
+                funcEntry["bb_energy"][bbName] = {{"energy", 0.0}, {"instruction_count", 0}};
+            }
+        }
+        funcEntry["bb_count"] = funcEntry["bb_energy"].size();
     }
 
     // Check for unmapped instructions
     for (size_t i = 0; i < instructions.size(); ++i) {
         if (!instructionMapped[i]) {
             const auto &insn = instructions[i];
-            errs() << "warning: instruction at 0x" << Twine::utohexstr(insn.address)
-                   << " (" << insn.mnemonic << ") not mapped to any BB\n";
+            errs() << "warning: instruction at 0x" << Twine::utohexstr(insn.address) << " ("
+                   << insn.mnemonic << ") not mapped to any BB\n";
             unmappedCount++;
             unmappedEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
         }
     }
 
-    output["unmapped"] = {{"instruction_count", unmappedCount},
-                          {"energy", unmappedEnergy}};
+    output["unmapped"] = {{"instruction_count", unmappedCount}, {"energy", unmappedEnergy}};
 
     // 5. Write output
     std::ostream *out = &std::cout;
@@ -216,12 +230,11 @@ int main(int argc, char **argv) {
 
     *out << output.dump(2) << "\n";
 
-    errs() << "Done. Analyzed " << bbMaps.size() << " functions, "
-           << instructions.size() << " instructions.\n";
+    errs() << "Done. Analyzed " << bbMaps.size() << " functions, " << instructions.size()
+           << " instructions.\n";
 
     if (unmappedCount > 0) {
-        errs() << "Note: " << unmappedCount
-               << " instructions not mapped to any basic block.\n";
+        errs() << "Note: " << unmappedCount << " instructions not mapped to any basic block.\n";
     }
 
     return 0;
