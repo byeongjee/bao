@@ -80,8 +80,8 @@ def run_benchmark_matrix(
     output_csv: Path,
     *,
     nvm_symbols: list[str] | None = None,
-    debug_counters: bool = False,
-    verbose: bool = False,
+    debug_counters: bool,
+    verbose: bool,
     csv_header: list[str],
     row_builder: RowBuilder,
 ) -> None:
@@ -250,7 +250,7 @@ def print_benchmark_summary(
     status: str,
     fields: dict[str, str | int | None],
     *,
-    debug_counters: bool = False,
+    debug_counters: bool,
 ) -> None:
     """Print a detailed multi-line summary for a benchmark run."""
     label = status.upper() if status != "ok" else "OK"

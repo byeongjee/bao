@@ -86,6 +86,7 @@ def compile_schematic(
 
         compile_to_ir(
             tc, env, opts.input_c, input_ll,
+            local_mode=False,
             clang_opt_level=0,
             debug=opts.debug,
             debug_counters=opts.debug_counters,

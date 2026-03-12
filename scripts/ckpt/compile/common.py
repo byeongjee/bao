@@ -25,10 +25,10 @@ def compile_to_ir(
     input_c: Path,
     output_ll: Path,
     *,
-    local_mode: bool = False,
+    local_mode: bool,
     clang_opt_level: int = 2,
-    debug: bool = False,
-    debug_counters: bool = False,
+    debug: bool,
+    debug_counters: bool,
     extra_includes: list[str] | None = None,
     extra_defines: list[str] | None = None,
 ) -> StepResult:

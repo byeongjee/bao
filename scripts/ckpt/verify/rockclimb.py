@@ -88,7 +88,9 @@ def _compile_baseline(
     # Step 1: C -> LLVM IR
     compile_to_ir(
         tc, env, input_c, raw_ll,
+        local_mode=False,
         clang_opt_level=2,
+        debug=False,
         debug_counters=True,
         extra_includes=[str(env.project_dir / "passes" / "runtime")],
     )
@@ -156,7 +158,7 @@ def verify_rockclimb(
     benchmarks: list[str] | None = None,
     cap_size: str = "1uF",
     timeout: int = 30,
-    verbose: bool = False,
+    verbose: bool,
     halt_mode: str,
     energy_config: Path | None = None,
     rockclimb_config: Path | None = None,
