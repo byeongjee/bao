@@ -203,8 +203,8 @@ def plot_benchmarks(
     ``pip install checkpoint-insertion[plot]``).
     """
     try:
-        import matplotlib.pyplot as plt
-        import numpy as np
+        import matplotlib.pyplot as plt  # type: ignore[import-untyped]
+        import numpy as np  # type: ignore[import-untyped]
     except ImportError as exc:
         raise ImportError(
             "Plotting requires matplotlib and numpy. "

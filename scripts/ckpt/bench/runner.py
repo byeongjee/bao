@@ -144,7 +144,7 @@ def run_benchmark_matrix(
                 ):
                     elf = output_dir / f"{bench_name}.elf"
                     if elf.is_file():
-                        nvm = _flash_and_read(elf, nvm_symbols)
+                        nvm = _flash_and_read(tc, elf, nvm_symbols)
 
                 # ----- Merge compile output + NVM labels -----
                 full_output = compile_output
@@ -205,7 +205,7 @@ def run_benchmark_matrix(
 
 
 def write_csv_row(
-    writer: csv.writer,
+    writer: csv.writer,  # type: ignore[type-arg]
     row: BenchmarkRow,
     header: list[str],
 ) -> None:
@@ -232,7 +232,7 @@ def write_csv_row(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _flash_and_read(elf: Path, symbols: list[str]) -> NvmCounters | None:
+def _flash_and_read(tc: Toolchain, elf: Path, symbols: list[str]) -> NvmCounters | None:
     """Flash an ELF, run it, and read NVM counters.
 
     Returns ``None`` on any error so the caller can continue gracefully.
@@ -240,8 +240,9 @@ def _flash_and_read(elf: Path, symbols: list[str]) -> NvmCounters | None:
     try:
         from ..device.flash import flash_run_and_read
 
-        result = flash_run_and_read(str(elf), 30, *symbols)
-        return parse_nvm_output(result)
+        result = flash_run_and_read(tc, elf, 30, symbols)
+        nvm_text = "\n".join(f"{k}={v}" for k, v in result.items())
+        return parse_nvm_output(nvm_text)
     except Exception:
         return None
 

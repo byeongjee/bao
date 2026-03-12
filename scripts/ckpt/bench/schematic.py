@@ -252,8 +252,11 @@ def run_schematic_benchmarks(
 
             except (CompilationError, FileNotFoundError, OSError) as exc:
                 print(f"  FAILED: trace collection for {bench_name}")
-                if verbose and hasattr(exc, "result"):
-                    print(exc.result.output[-500:] if exc.result else str(exc))
+                if verbose:
+                    if isinstance(exc, CompilationError) and exc.result:
+                        print(exc.result.output[-500:])
+                    else:
+                        print(str(exc))
                 # Write failure rows for all capacitors
                 for cap in capacitors:
                     count += 1

@@ -176,7 +176,7 @@ def run_milp_benchmarks(
 
             opts = MilpCompileOptions(
                 input_c=bench_path,
-                output_prefix=out_dir / bench_name,
+                output=out_dir / bench_name,
                 energy_config=energy_config,
                 milp_config=cap.config_path,
                 estimator_mode=estimator_mode,
@@ -186,8 +186,8 @@ def run_milp_benchmarks(
                 debug_counters=debug_counters,
             )
 
-            result: MilpCompileResult = compile_milp(env, tc, opts)
-            return out_dir, result.output
+            result: MilpCompileResult = compile_milp(tc, env, opts)
+            return out_dir, result.pass_output
 
         run_benchmark_matrix(
             env,

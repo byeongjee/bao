@@ -703,13 +703,12 @@ def device_read_nvm_cmd(
     symbols: tuple[str, ...],
 ) -> None:
     """Read NVM symbol values from a flashed device."""
-    from .device.nvm import read_nvm_symbols, resolve_symbols
+    from .device.flash import flash_run_and_read
 
     tc = ctx.obj["tc"]
     elf_path = Path(elf)
 
-    addresses = resolve_symbols(tc.nm, elf_path, list(symbols))
-    values = read_nvm_symbols(addresses)
+    values = flash_run_and_read(tc, elf_path, 30, list(symbols))
 
     for sym, val in values.items():
         click.echo(f"{sym}={val}")
