@@ -38,16 +38,16 @@ class MilpCompileOptions:
     energy_config: Path
     milp_config: Path
     output: Path
+    estimator_mode: str
+    verbose: bool
+    debug: bool
+    add_debug_markers: bool
+    link: bool
+    halt_mode: str
+    debug_counters: bool
     opt_level: int = 2
     clang_opt_level: int = 2
     extra_includes: list[str] = field(default_factory=list)
-    verbose: bool = False
-    debug: bool = False
-    add_debug_markers: bool = False
-    link: bool = False
-    halt_mode: str = "debug"  # debug, bor, lpm4
-    debug_counters: bool = False
-    estimator_mode: str = "assembly"  # assembly, ir
 
 
 @dataclass

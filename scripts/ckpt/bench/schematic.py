@@ -121,12 +121,12 @@ def run_schematic_benchmarks(
     benchmarks: list[str] | None = None,
     caps: list[str] | None = None,
     output_csv: Path | None = None,
-    debug_counters: bool = False,
-    halt_mode: bool = False,
-    verbose: bool = False,
+    debug_counters: bool,
+    halt_mode: bool,
+    verbose: bool,
     energy_config: Path | None = None,
     trace_config: Path | None = None,
-    estimator_mode: str = "assembly",
+    estimator_mode: str,
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -219,14 +219,19 @@ def run_schematic_benchmarks(
             try:
                 trace_opts = SchematicCompileOptions(
                     input_c=bench_path,
-                    output=workdir / bench_name,
                     energy_config=energy_config,
                     schematic_config=trace_config,
-                    clang_opt_level=0,
-                    trace_only=True,
-                    verbose=verbose,
-                    extra_includes=[str(env.project_dir / "passes" / "runtime")],
+                    output=workdir / bench_name,
                     estimator_mode=estimator_mode,
+                    verbose=verbose,
+                    debug=False,
+                    add_debug_markers=False,
+                    trace_only=True,
+                    link=False,
+                    debug_counters=False,
+                    halt_mode=False,
+                    clang_opt_level=0,
+                    extra_includes=[str(env.project_dir / "passes" / "runtime")],
                 )
                 trace_result: SchematicCompileResult = compile_schematic(
                     tc, env, trace_opts
@@ -292,18 +297,20 @@ def run_schematic_benchmarks(
                 try:
                     compile_opts = SchematicCompileOptions(
                         input_c=bench_path,
-                        output=out_dir / bench_name,
                         energy_config=energy_config,
                         schematic_config=cap.config_path,
-                        clang_opt_level=0,
-                        trace_file=trace_json,
-                        link=True,
+                        output=out_dir / bench_name,
+                        estimator_mode=estimator_mode,
+                        verbose=verbose,
+                        debug=False,
                         add_debug_markers=True,
+                        trace_only=False,
+                        link=True,
                         debug_counters=debug_counters,
                         halt_mode=halt_mode,
-                        verbose=verbose,
+                        clang_opt_level=0,
                         extra_includes=[str(env.project_dir / "passes" / "runtime")],
-                        estimator_mode=estimator_mode,
+                        trace_file=trace_json,
                     )
                     compile_result: SchematicCompileResult = compile_schematic(
                         tc, env, compile_opts

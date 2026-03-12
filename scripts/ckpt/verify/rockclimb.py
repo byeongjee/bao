@@ -280,10 +280,11 @@ def _verify_one(
                     energy_config=energy_config,
                     rockclimb_config=cap_config,
                     output=tmp / "rockclimb",
-                    debug_counters=True,
+                    precomputed_energy=True,
                     verbose=verbose,
-                    halt_mode="debug",
                     link=True,
+                    debug_counters=True,
+                    halt_mode="debug",
                 ),
             )
             compile_output = rc_result.pass_output

@@ -97,8 +97,8 @@ def run_rockclimb_benchmarks(
     benchmarks: list[str] | None = None,
     caps: list[str] | None = None,
     output_csv: Path | None = None,
-    debug_counters: bool = False,
-    verbose: bool = False,
+    debug_counters: bool,
+    verbose: bool,
     energy_config: Path | None = None,
 ) -> None:
     """Run RockClimb checkpoint insertion across all benchmarks and capacitor sizes.
@@ -145,12 +145,14 @@ def run_rockclimb_benchmarks(
 
             opts = RockClimbCompileOptions(
                 input_c=bench_path,
-                output=out_dir / bench_name,
                 energy_config=energy_config,
                 rockclimb_config=cap.config_path,
-                link=True,
+                output=out_dir / bench_name,
+                precomputed_energy=True,
                 verbose=True,
+                link=True,
                 debug_counters=debug_counters,
+                halt_mode="debug",
             )
 
             result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)

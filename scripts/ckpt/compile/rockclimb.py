@@ -31,12 +31,12 @@ class RockClimbCompileOptions:
     energy_config: Path
     rockclimb_config: Path
     output: Path
+    precomputed_energy: bool
+    verbose: bool
+    link: bool
+    debug_counters: bool
+    halt_mode: str
     clang_opt_level: int = 2
-    precomputed_energy: bool = True
-    verbose: bool = False
-    link: bool = False
-    debug_counters: bool = False
-    halt_mode: str = "debug"  # debug, bor, lpm4
     linker_script: Path | None = None
 
 

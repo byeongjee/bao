@@ -36,19 +36,19 @@ class SchematicCompileOptions:
     energy_config: Path
     schematic_config: Path | None  # None when trace_only
     output: Path
+    estimator_mode: str
+    verbose: bool
+    debug: bool
+    add_debug_markers: bool
+    trace_only: bool
+    link: bool
+    debug_counters: bool
+    halt_mode: bool
     opt_level: int = 2
     clang_opt_level: int = 2
     extra_includes: list[str] = field(default_factory=list)
-    verbose: bool = False
-    debug: bool = False
-    add_debug_markers: bool = False
     trace_file: Path | None = None
-    trace_only: bool = False
-    link: bool = False
-    debug_counters: bool = False
-    halt_mode: bool = False
     linker_script: Path | None = None
-    estimator_mode: str = "assembly"  # assembly, ir
 
 
 @dataclass

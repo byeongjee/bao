@@ -118,9 +118,9 @@ def run_milp_benchmarks(
     benchmarks: list[str] | None = None,
     caps: list[str] | None = None,
     output_csv: Path | None = None,
-    debug_counters: bool = False,
-    verbose: bool = False,
-    estimator_mode: str = "assembly",
+    debug_counters: bool,
+    verbose: bool,
+    estimator_mode: str,
     energy_config: Path | None = None,
 ) -> None:
     """Run MILP checkpoint insertion across all benchmarks and capacitor sizes.
@@ -176,13 +176,15 @@ def run_milp_benchmarks(
 
             opts = MilpCompileOptions(
                 input_c=bench_path,
-                output=out_dir / bench_name,
                 energy_config=energy_config,
                 milp_config=cap.config_path,
+                output=out_dir / bench_name,
                 estimator_mode=estimator_mode,
-                link=True,
                 verbose=True,
+                debug=False,
                 add_debug_markers=True,
+                link=True,
+                halt_mode="debug",
                 debug_counters=debug_counters,
             )
 
