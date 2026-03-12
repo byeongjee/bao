@@ -88,7 +88,6 @@ def _compile_baseline(
     # Step 1: C -> LLVM IR
     compile_to_ir(
         tc, env, input_c, raw_ll,
-        local_mode=False,
         clang_opt_level=2,
         debug=False,
         debug_counters=True,

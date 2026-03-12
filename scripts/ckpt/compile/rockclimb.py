@@ -85,7 +85,6 @@ def compile_rockclimb(
 
         compile_to_ir(
             tc, env, opts.input_c, raw_ll,
-            local_mode=False,
             clang_opt_level=opts.clang_opt_level,
             debug=False,
             debug_counters=opts.debug_counters,

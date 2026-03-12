@@ -25,34 +25,23 @@ def compile_to_ir(
     input_c: Path,
     output_ll: Path,
     *,
-    local_mode: bool,
     clang_opt_level: int = 2,
     debug: bool,
     debug_counters: bool,
     extra_includes: list[str] | None = None,
     extra_defines: list[str] | None = None,
 ) -> StepResult:
-    """Compile a C source file to LLVM IR.
-
-    In MSP430 mode (default): targets msp430-elf with MSP430 system headers.
-    In local mode: targets the host with optional macOS sysroot flags.
-    """
-    cmd: list[str] = [tc.clang]
-
-    if local_mode:
-        cmd += ["-S", "-emit-llvm", f"-O{clang_opt_level}"]
-        cmd += [f"-I{env.project_dir / 'passes' / 'include'}"]
-        cmd += env.sysroot_flags
-    else:
-        cmd += [
-            "--target=msp430-elf",
-            "-S", "-emit-llvm",
-            f"-O{clang_opt_level}",
-            "-D__MSP430FR5994__",
-            f"-I{env.project_dir / 'passes' / 'include'}",
-            f"-isystem", str(env.msp430gcc_support_path / "include"),
-            f"-isystem", str(env.msp430gcc_support_path / "msp430-elf" / "include"),
-        ]
+    """Compile a C source file to LLVM IR targeting msp430-elf."""
+    cmd: list[str] = [
+        tc.clang,
+        "--target=msp430-elf",
+        "-S", "-emit-llvm",
+        f"-O{clang_opt_level}",
+        "-D__MSP430FR5994__",
+        f"-I{env.project_dir / 'passes' / 'include'}",
+        f"-isystem", str(env.msp430gcc_support_path / "include"),
+        f"-isystem", str(env.msp430gcc_support_path / "msp430-elf" / "include"),
+    ]
 
     if clang_opt_level == 0:
         cmd += ["-Xclang", "-disable-O0-optnone"]
