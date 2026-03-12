@@ -64,7 +64,7 @@ def discover_capacitors(
 
     *algorithm*: ``"milp"``, ``"rockclimb"``, or ``"schematic"``.
 
-    Looks for ``benchmarks/sample_{algorithm}_config_{cap}.json`` files.
+    Looks for ``benchmarks/config_{cap}.json`` files.
     Default caps: 1uF, 10uF, 100uF.
 
     If *filter_caps* is given, only return matching ones.  Raises
@@ -75,7 +75,7 @@ def discover_capacitors(
 
     results: list[CapacitorConfig] = []
     for cap in caps_to_check:
-        cfg = bench_dir / f"sample_{algorithm}_config_{cap}.json"
+        cfg = bench_dir / f"config_{cap}.json"
         if cfg.is_file():
             results.append(CapacitorConfig(label=cap, config_path=cfg))
         elif filter_caps is not None:

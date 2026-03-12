@@ -181,7 +181,7 @@ def verify_rockclimb(
 
     # Resolve config paths (use defaults if not provided)
     if rockclimb_config is None:
-        rockclimb_config = env.project_dir / "benchmarks" / f"sample_rockclimb_config_{cap_size}.json"
+        rockclimb_config = env.project_dir / "benchmarks" / f"config_{cap_size}.json"
     if not rockclimb_config.is_file():
         print(
             f"Error: RockClimb config not found: {rockclimb_config}",
