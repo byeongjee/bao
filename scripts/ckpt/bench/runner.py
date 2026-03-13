@@ -164,15 +164,16 @@ def run_benchmark_matrix(
     pre_benchmark: PreBenchmarkFn | None = None,
     saleae_manager: object,
 ) -> None:
-    """Run compile + optional flash/NVM-read across benchmark x capacitor matrix.
+    """Run compile + Saleae timing + optional NVM-read across benchmark x capacitor matrix.
 
     For each ``(benchmark, capacitor)``:
 
     1. Call *compile_fn(benchmark, capacitor)* -> ``(output_dir, pass_output)``
-    2. If *debug_counters* and device available: ``flash_run_and_read``
-    3. Parse stats, detect infeasibility
-    4. Call *row_builder* to get CSV fields
-    5. Write to CSV
+    2. Flash ELF and measure execution time via Saleae GPIO capture
+    3. If *debug_counters*: read NVM counters from halted device
+    4. Parse stats, detect infeasibility
+    5. Call *row_builder* to get CSV fields, inject ``execution_time_us``
+    6. Write to CSV
 
     Prints progress like ``[1/12] Running crc-1uF ...`` and a summary at
     the end.
@@ -319,7 +320,7 @@ def run_benchmark_matrix(
                     bench_name, cap.label, stats, nvm, full_output
                 )
                 if execution_time_us is not None:
-                    row_fields["execution_time_us"] = round(execution_time_us, 2)
+                    row_fields["execution_time_us"] = str(round(execution_time_us, 2))
 
                 row = BenchmarkRow(
                     benchmark=row_name,
