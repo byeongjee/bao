@@ -20,7 +20,8 @@ tests/dwarf-validation/output/
 .vscode/
 
 # Claude Code / OMC
-.claude/
+.claude/**
+!.claude/CLAUDE.md
 .omc/
 .envrc
 
