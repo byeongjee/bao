@@ -129,7 +129,7 @@ def _extract_timing(csv_path: Path) -> float:
     prev_val: int | None = None
 
     with open(csv_path) as f:
-        header = f.readline()  # skip header
+        f.readline()  # skip header
         for line in f:
             parts = line.strip().split(",")
             if len(parts) < 2:
