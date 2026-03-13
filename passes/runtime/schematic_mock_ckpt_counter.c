@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "debug_counters.h"
+#include "benchmark.h"
 
 static uint32_t cnt_boundary;
 static uint32_t cnt_save_reg;

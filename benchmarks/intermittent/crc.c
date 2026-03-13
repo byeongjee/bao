@@ -5,7 +5,7 @@
  * Adapted for intermittent-computing checkpoint-insertion analysis.
  **********************************************************************/
 
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdint.h>
 
@@ -114,9 +114,9 @@ FORCE_INLINE crc crcFast(const uint8_t message[], uint32_t nBytes) {
 /* --- Main --- */
 
 __attribute__((noinline)) int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     crcInit();
     volatile crc result = crcFast((const uint8_t *)test_data, TEST_DATA_LEN);
-    DEBUG_EXIT((int)result);
+    BENCH_EXIT((int)result);
     return (int)result;
 }

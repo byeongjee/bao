@@ -3,7 +3,7 @@
  * Based on tiny-AES-c (public domain).
  * Simplified: AES128 CBC only, uint32_t instead of size_t for MSP430.
  */
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdint.h>
 
@@ -386,7 +386,7 @@ FORCE_INLINE void AES_CBC_decrypt_buffer(struct AES_ctx *ctx, uint32_t length) {
 /* --- Main --- */
 
 __attribute__((noinline)) int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     int i;
 
     /* Copy test data to working buffer */
@@ -403,6 +403,6 @@ __attribute__((noinline)) int main(void) {
     AES_ctx_set_iv(&g_ctx, g_iv);
     AES_CBC_decrypt_buffer(&g_ctx, 64);
 
-    DEBUG_EXIT((int)g_buf[0]);
+    BENCH_EXIT((int)g_buf[0]);
     return (int)g_buf[0];
 }

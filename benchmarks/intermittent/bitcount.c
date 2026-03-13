@@ -6,7 +6,7 @@
 #include <limits.h>
 #include <stdint.h>
 
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
@@ -127,7 +127,7 @@ FORCE_INLINE uint32_t bit_shifter(uint32_t x) {
 }
 
 int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     uint32_t i;
     uint32_t j;
     uint32_t num;
@@ -177,6 +177,6 @@ int main(void) {
         checksum ^= (set_bits + (i * 0x9E3779B9u));
     }
 
-    DEBUG_EXIT((int)checksum);
+    BENCH_EXIT((int)checksum);
     return (int)checksum;
 }

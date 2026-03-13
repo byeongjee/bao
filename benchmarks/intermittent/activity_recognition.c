@@ -1,4 +1,4 @@
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -254,7 +254,7 @@ FORCE_INLINE unsigned recognize_loop(volatile model_t *model) {
 volatile model_t global_model;
 
 __attribute__((noinline)) int main() {
-    DEBUG_INIT();
+    BENCH_INIT();
     lfsr_state = 0xACE1u;
     mock_scenario = 0;
 
@@ -272,6 +272,6 @@ __attribute__((noinline)) int main() {
     mock_scenario = 0;
     unsigned total = recognize_loop(&global_model);
 
-    DEBUG_EXIT((int)total);
+    BENCH_EXIT((int)total);
     return (int)total;
 }

@@ -7,7 +7,7 @@
  * Hashes a 128-byte input message for intermittent computing benchmark.
  */
 
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdint.h>
 
@@ -247,10 +247,10 @@ FORCE_INLINE void sha256_final(SHA256_CTX *sc, uint8_t hash[SHA256_HASH_SIZE]) {
 /* --- Main --- */
 
 __attribute__((noinline)) int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     sha256_init(&g_ctx);
     sha256_update(&g_ctx, data, DATA_LEN);
     sha256_final(&g_ctx, g_hash);
-    DEBUG_EXIT((int)g_hash[0]);
+    BENCH_EXIT((int)g_hash[0]);
     return (int)g_hash[0];
 }

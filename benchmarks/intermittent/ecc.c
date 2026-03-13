@@ -7,7 +7,7 @@
  * Source: ulswap-bench/src/ecc/
  */
 
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdint.h>
 
@@ -421,7 +421,7 @@ FORCE_INLINE int ecdh_shared_secret(const uint8_t *private_key, const uint8_t *o
 /* ========================================================================= */
 
 __attribute__((noinline)) int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     ecdh_shared_secret(prv_a, pub_b, sec_a);
     ecdh_shared_secret(prv_b, pub_a, sec_b);
 
@@ -433,6 +433,6 @@ __attribute__((noinline)) int main(void) {
         if (sec_a[i] != sec_b[i])
             match = 0;
     }
-    DEBUG_EXIT(match);
+    BENCH_EXIT(match);
     return match;
 }
