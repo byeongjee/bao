@@ -16,10 +16,8 @@ from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .common import (
     annotate_tripcounts,
-    assemble_and_link,
-    assemble_boot,
-    compile_runtime_c,
     compile_to_ir,
+    link_algorithm,
 )
 
 
@@ -299,7 +297,6 @@ def _link_rockclimb(
 ) -> Path:
     """Assemble and link the RockClimb output with boot.S + runtime.c."""
     output = opts.output
-    clean_s = output.with_suffix(".s")
 
     # Assemble the checkpoint-instrumented assembly to object
     asm_o = output.with_suffix(".o")
@@ -308,46 +305,26 @@ def _link_rockclimb(
             tc.gcc,
             f"-mmcu={env.device}",
             "-msmall",
-            "-c", str(clean_s),
+            "-c", str(output.with_suffix(".s")),
             "-o", str(asm_o),
         ],
         step_name="gcc-assemble",
     )
 
-    # Linker script
-    linker_script = opts.linker_script or env.rockclimb_linker
-
-    # Boot assembly flags
     boot_defines: list[str] = []
     if opts.halt_mode == "bor":
         boot_defines.append("ROCKCLIMB_HALT_BOR")
     elif opts.halt_mode == "lpm4":
         boot_defines.append("ROCKCLIMB_HALT_LPM4")
 
-    # Assemble boot.S
-    boot_o = output.with_suffix(".boot.o")
-    assemble_boot(tc, env, env.rockclimb_boot, boot_o, extra_defines=boot_defines)
-
-    # Compile runtime.c
-    runtime_o = output.with_suffix(".runtime.o")
-    compile_runtime_c(tc, env, env.rockclimb_runtime, runtime_o)
-
-    link_objs: list[Path] = [asm_o, boot_o, runtime_o]
-
-    # Debug counters
-    if opts.debug_counters:
-        debug_o = output.with_suffix(".debug_counters.o")
-        compile_runtime_c(
-            tc, env, env.rockclimb_debug_counters, debug_o,
-            extra_defines=["DEBUG_COUNTERS"],
-        )
-        link_objs.append(debug_o)
-
-    # Link
-    elf = output.with_suffix(".elf")
-    assemble_and_link(
-        tc, env, link_objs, elf,
-        linker_script=linker_script,
+    return link_algorithm(
+        tc, env,
+        main_object=asm_o,
+        output_elf=output.with_suffix(".elf"),
+        boot_source=env.rockclimb_boot,
+        runtime_source=env.rockclimb_runtime,
+        linker_script=opts.linker_script or env.rockclimb_linker,
+        boot_defines=boot_defines,
+        debug_counters=opts.debug_counters,
+        debug_counters_source=env.rockclimb_debug_counters,
     )
-
-    return elf
