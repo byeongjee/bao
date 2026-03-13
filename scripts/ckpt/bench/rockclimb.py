@@ -28,7 +28,7 @@ from .config import (
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import build_base_fields, nvm_counter, run_benchmark_matrix
+from .runner import build_base_fields, check_device_available, nvm_counter, run_benchmark_matrix
 
 _CSV_HEADER: list[str] = [
     "benchmark",
@@ -40,6 +40,7 @@ _CSV_HEADER: list[str] = [
     "compilation_time_ms",
     "peak_rss_kb",
     "profiling_time_ms",
+    "execution_time_us",
     "boundary_checks",
     "runtime_region_boundary_calls",
     "runtime_debug_save_reg_calls",
@@ -119,6 +120,12 @@ def run_rockclimb_benchmarks(
     if energy_config is None:
         energy_config = default_energy_config(env, "rockclimb")
 
+    from ..device.saleae import discover_saleae
+
+    saleae_manager = discover_saleae()
+    if not check_device_available():
+        raise ConfigError("No MSP430 device detected")
+
     with compilation_workdir(prefix="rockclimb_bench_") as workdir:
 
         def compile_fn(
@@ -155,4 +162,5 @@ def run_rockclimb_benchmarks(
             verbose=verbose,
             csv_header=_CSV_HEADER,
             row_builder=_build_row,
+            saleae_manager=saleae_manager,
         )
