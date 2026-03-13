@@ -85,7 +85,6 @@ def run_rockclimb_benchmarks(
     output_csv: Path | None = None,
     debug_counters: bool,
     halt_mode: str,
-    verbose: bool,
     energy_config: Path | None = None,
     cpu_freq: int,
 ) -> None:
@@ -106,8 +105,6 @@ def run_rockclimb_benchmarks(
         ``benchmarks/rockclimb_benchmark_summary.csv``.
     debug_counters:
         Link the debug-counter runtime and attempt NVM readback.
-    verbose:
-        Print full compiler output for each benchmark.
     """
     bench_paths = discover_benchmarks(env, benchmarks)
     if not bench_paths:
@@ -161,7 +158,6 @@ def run_rockclimb_benchmarks(
             output_csv,
             nvm_symbols=_NVM_SYMBOLS,
             debug_counters=debug_counters,
-            verbose=verbose,
             csv_header=_CSV_HEADER,
             row_builder=_build_row,
             saleae_manager=saleae_manager,
