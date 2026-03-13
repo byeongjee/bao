@@ -33,6 +33,9 @@ from ..runner import CompilationError
 from ..toolchain import Toolchain
 from .config import CapacitorConfig
 
+_FLASH_TIMEOUT = 30   # seconds
+_CAPTURE_TIMEOUT = 60  # seconds (longer — includes device execution)
+
 
 @dataclass
 class BenchmarkRow:
@@ -159,6 +162,7 @@ def run_benchmark_matrix(
     csv_header: list[str],
     row_builder: RowBuilder,
     pre_benchmark: PreBenchmarkFn | None = None,
+    saleae_manager: object,
 ) -> None:
     """Run compile + optional flash/NVM-read across benchmark x capacitor matrix.
 
@@ -173,18 +177,6 @@ def run_benchmark_matrix(
     Prints progress like ``[1/12] Running crc-1uF ...`` and a summary at
     the end.
     """
-    # Lazily check device only when debug counters are requested
-    has_device = False
-    if debug_counters:
-        has_device = check_device_available()
-        if has_device:
-            print("MSP430 device detected -- will flash and read NVM counters.")
-        else:
-            print(
-                "Warning: No MSP430 device detected -- "
-                "skipping NVM readback (runtime counters will be 0)."
-            )
-
     # Open CSV and write header
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(output_csv, "w", newline="") as csvfile:
@@ -248,16 +240,31 @@ def run_benchmark_matrix(
                         all_required_keys.update(req)
                         all_missing_keys.update(miss)
 
-                # ----- Flash + NVM read -----
+                # ----- Saleae timing + NVM read -----
                 nvm: NvmCounters | None = None
-                if (
-                    has_device
-                    and output_dir is not None
-                    and nvm_symbols
-                ):
+                execution_time_us: float | None = None
+                if output_dir is not None:
                     elf = output_dir / f"{bench_name}.elf"
                     if elf.is_file():
-                        nvm = _flash_and_read(tc, elf, nvm_symbols)
+                        try:
+                            from ..device.saleae import saleae_run
+                            from ..device.flash import read_nvm
+
+                            execution_time_us = saleae_run(
+                                tc, elf, saleae_manager,
+                                _FLASH_TIMEOUT, _CAPTURE_TIMEOUT,
+                            )
+
+                            if debug_counters and nvm_symbols:
+                                nvm_dict = read_nvm(
+                                    tc, elf, _FLASH_TIMEOUT, nvm_symbols,
+                                )
+                                nvm_text = "\n".join(
+                                    f"{k}={v}" for k, v in nvm_dict.items()
+                                )
+                                nvm = parse_nvm_output(nvm_text)
+                        except DeviceError as exc:
+                            print(f"  DEVICE ERROR: {exc}")
 
                 # ----- Merge compile output + NVM labels -----
                 full_output = compile_output
@@ -311,6 +318,8 @@ def run_benchmark_matrix(
                 row_fields = row_builder(
                     bench_name, cap.label, stats, nvm, full_output
                 )
+                if execution_time_us is not None:
+                    row_fields["execution_time_us"] = round(execution_time_us, 2)
 
                 row = BenchmarkRow(
                     benchmark=row_name,
@@ -321,7 +330,10 @@ def run_benchmark_matrix(
                 write_csv_row(writer, row, csv_header)
 
                 # Print detailed summary
-                print_benchmark_summary(row.status, row_fields, debug_counters=debug_counters and has_device)
+                print_benchmark_summary(
+                    row.status, row_fields,
+                    debug_counters=debug_counters,
+                )
 
     # ----- Energy parameters summary -----
     if all_required_keys:
@@ -359,25 +371,6 @@ def write_csv_row(
             val = row.fields.get(col)
             values.append("" if val is None else str(val))
     writer.writerow(values)
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _flash_and_read(tc: Toolchain, elf: Path, symbols: list[str]) -> NvmCounters | None:
-    """Flash an ELF, run it, and read NVM counters.
-
-    Returns ``None`` on any error so the caller can continue gracefully.
-    """
-    try:
-        from ..device.flash import flash_run_and_read
-
-        result = flash_run_and_read(tc, elf, 30, symbols)
-        nvm_text = "\n".join(f"{k}={v}" for k, v in result.items())
-        return parse_nvm_output(nvm_text)
-    except (DeviceError, OSError):
-        return None
 
 
 def print_benchmark_summary(
@@ -459,13 +452,14 @@ def print_benchmark_summary(
 
     # Timing
     timing_items: list[tuple[str, str | None]] = []
-    for key, name in [
-        ("compilation_time_ms", "compile"),
-        ("profiling_time_ms", "profiling"),
+    for key, name, unit in [
+        ("compilation_time_ms", "compile", "ms"),
+        ("profiling_time_ms", "profiling", "ms"),
+        ("execution_time_us", "execution", "us"),
     ]:
         raw = _fmt(key, fields)
         if raw is not None:
-            timing_items.append((name, f"{raw}ms"))
+            timing_items.append((name, f"{raw}{unit}"))
     _print_group("Timing", timing_items)
 
     # Memory
