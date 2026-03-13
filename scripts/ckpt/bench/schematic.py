@@ -12,7 +12,6 @@ Optionally flashes to an MSP430 device and writes a CSV summary.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from ..compile.schematic import (
@@ -26,7 +25,8 @@ from ..output_parser import (
     PassStatistics,
     extract_stat,
 )
-from ..runner import CompilationError
+from ..errors import ConfigError
+from ..runner import CompilationError, StepResult
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import (
@@ -146,8 +146,7 @@ def run_schematic_benchmarks(
     """
     bench_paths = discover_benchmarks(env, benchmarks)
     if not bench_paths:
-        print("Error: No benchmarks to run", file=sys.stderr)
-        raise SystemExit(1)
+        raise ConfigError("No benchmarks to run")
 
     capacitors = discover_capacitors(env, "schematic", caps)
 
@@ -209,18 +208,26 @@ def run_schematic_benchmarks(
                         pass
 
                 if not trace_json.is_file():
-                    raise FileNotFoundError(f"Trace file not produced: {trace_json}")
+                    raise CompilationError(
+                        "trace-collect",
+                        StepResult(
+                            returncode=0,
+                            stdout="",
+                            stderr=f"Trace file not produced: {trace_json}",
+                            duration_ms=0,
+                        ),
+                    )
 
                 print(f"  Trace collected for {bench_name} (profiling: {profiling_time_ms}ms)")
 
-            except (CompilationError, FileNotFoundError, OSError) as exc:
+            except (CompilationError, OSError) as exc:
                 print(f"  FAILED: trace collection for {bench_name}")
                 if verbose:
                     if isinstance(exc, CompilationError) and exc.result:
                         print(exc.result.output[-500:])
                     else:
                         print(str(exc))
-                raise BenchmarkSkipped("TRACE_FAILED")
+                raise BenchmarkSkipped("TRACE_FAILED") from exc
 
         def compile_fn(
             bench_path: Path, cap: CapacitorConfig

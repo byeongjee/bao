@@ -10,6 +10,8 @@ import csv
 import sys
 from pathlib import Path
 
+from ..errors import ConfigError
+
 ALGORITHMS = {
     "milp": {
         "file": "milp_benchmark_summary.csv",
@@ -212,7 +214,7 @@ def plot_benchmarks(
         ) from exc
 
     if metric not in METRICS:
-        raise ValueError(
+        raise ConfigError(
             f"Unknown metric: {metric!r}. "
             f"Available: {', '.join(METRICS)}"
         )

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..compile.milp import MilpCompileOptions, MilpCompileResult, compile_milp
 from ..env import ProjectEnv
+from ..errors import ConfigError
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
@@ -134,8 +135,7 @@ def run_milp_benchmarks(
     """
     bench_paths = discover_benchmarks(env, benchmarks)
     if not bench_paths:
-        print("Error: No benchmarks to run", file=__import__("sys").stderr)
-        raise SystemExit(1)
+        raise ConfigError("No benchmarks to run")
 
     capacitors = discover_capacitors(env, "milp", caps)
 

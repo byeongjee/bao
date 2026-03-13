@@ -9,8 +9,8 @@ from pathlib import Path
 from .env import ProjectEnv
 
 
-class ToolNotFoundError(Exception):
-    """A required toolchain binary was not found."""
+# Canonical definition lives in errors.py; re-exported for compatibility.
+from .errors import ToolNotFoundError  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -62,4 +62,4 @@ class Toolchain:
         """Check that critical LLVM tools exist."""
         for name, path in [("clang", self.clang), ("opt", self.opt), ("llc", self.llc)]:
             if not Path(path).exists() and not shutil.which(path):
-                raise ToolNotFoundError(f"{name} not found at: {path}")
+                raise ToolNotFoundError(name, path)

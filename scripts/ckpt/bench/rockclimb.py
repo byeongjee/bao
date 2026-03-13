@@ -15,6 +15,7 @@ from ..compile.rockclimb import (
     compile_rockclimb,
 )
 from ..env import ProjectEnv
+from ..errors import ConfigError
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
@@ -110,8 +111,7 @@ def run_rockclimb_benchmarks(
     """
     bench_paths = discover_benchmarks(env, benchmarks)
     if not bench_paths:
-        print("Error: No benchmarks to run", file=__import__("sys").stderr)
-        raise SystemExit(1)
+        raise ConfigError("No benchmarks to run")
 
     capacitors = discover_capacitors(env, "rockclimb", caps)
 

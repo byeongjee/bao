@@ -11,13 +11,46 @@ from pathlib import Path
 import click
 
 from .analysis.plot import ALGORITHMS, METRICS
+from .errors import (
+    CkptError,
+    CompilationError,
+    ConfigError,
+    DeviceError,
+    InfeasibleError,
+    ToolNotFoundError,
+)
+
+# Exit code mapping for CkptError subclasses.
+_EXIT_CODES: list[tuple[type[CkptError], int]] = [
+    (ConfigError, 2),
+    (ToolNotFoundError, 3),
+    (CompilationError, 4),
+    (InfeasibleError, 5),
+    (DeviceError, 6),
+]
+
+
+class CkptGroup(click.Group):
+    """Custom group that catches :class:`CkptError` and exits cleanly."""
+
+    def invoke(self, ctx: click.Context) -> None:
+        try:
+            super().invoke(ctx)
+        except CkptError as exc:
+            code = 1
+            for exc_type, exc_code in _EXIT_CODES:
+                if isinstance(exc, exc_type):
+                    code = exc_code
+                    break
+            click.secho(f"Error: {exc}", fg="red", err=True)
+            ctx.exit(code)
 
 
 # ---------------------------------------------------------------------------
 # Root group
 # ---------------------------------------------------------------------------
 
-@click.group()
+@click.group(cls=CkptGroup)
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """ckpt -- Checkpoint insertion toolchain."""

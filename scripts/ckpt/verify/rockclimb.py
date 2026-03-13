@@ -22,6 +22,7 @@ from ..compile.common import (
 from ..compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 from ..env import ProjectEnv
 from ..output_parser import detect_infeasibility
+from ..errors import DeviceError
 from ..runner import CompilationError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
@@ -253,7 +254,7 @@ def _verify_one(
         # ── B: Flash + read baseline ──
         try:
             baseline_nvm = _read_nvm(tc, baseline_elf, _NVM_SYMBOLS, timeout)
-        except Exception as exc:
+        except (DeviceError, OSError) as exc:
             msg = f"Baseline flash/read failed: {exc}"
             if verbose:
                 print(f"  {msg}")
@@ -334,7 +335,7 @@ def _verify_one(
         # ── E: Flash + read RockClimb ──
         try:
             rockclimb_nvm = _read_nvm(tc, rockclimb_elf, _NVM_SYMBOLS, timeout)
-        except Exception as exc:
+        except (DeviceError, OSError) as exc:
             msg = f"RockClimb flash/read failed: {exc}"
             if verbose:
                 print(f"  {msg}")

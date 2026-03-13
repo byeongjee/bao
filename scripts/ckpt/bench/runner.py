@@ -28,6 +28,7 @@ from ..output_parser import (
     parse_nvm_output,
     parse_pass_output,
 )
+from ..errors import DeviceError
 from ..runner import CompilationError
 from ..toolchain import Toolchain
 from .config import CapacitorConfig
@@ -375,7 +376,7 @@ def _flash_and_read(tc: Toolchain, elf: Path, symbols: list[str]) -> NvmCounters
         result = flash_run_and_read(tc, elf, 30, symbols)
         nvm_text = "\n".join(f"{k}={v}" for k, v in result.items())
         return parse_nvm_output(nvm_text)
-    except Exception:
+    except (DeviceError, OSError):
         return None
 
 

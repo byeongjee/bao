@@ -6,12 +6,12 @@ across run_milp.sh, run_rockclimb.sh, and run_schematic.sh.
 
 from __future__ import annotations
 
-import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..env import ProjectEnv
+from ..errors import ConfigError
 
 _DEFAULT_CAPS = ["1uF", "10uF", "100uF"]
 
@@ -86,12 +86,10 @@ def discover_capacitors(
 
     if not results:
         available = ", ".join(_DEFAULT_CAPS)
-        print(
-            f"Error: No matching capacitor sizes for {algorithm}. "
-            f"Available: {available}",
-            file=sys.stderr,
+        raise ConfigError(
+            f"No matching capacitor sizes for {algorithm}. "
+            f"Available: {available}"
         )
-        raise SystemExit(1)
 
     return results
 
@@ -104,7 +102,7 @@ def default_energy_config(env: ProjectEnv, algorithm: str) -> Path:
     """
     filename = _ENERGY_CONFIG_MAP.get(algorithm)
     if filename is None:
-        raise ValueError(
+        raise ConfigError(
             f"Unknown algorithm: {algorithm!r}. "
             f"Expected one of: {', '.join(_ENERGY_CONFIG_MAP)}"
         )

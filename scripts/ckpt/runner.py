@@ -5,46 +5,17 @@ from __future__ import annotations
 import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 
-class ToolError(Exception):
-    """A tool invocation failed."""
-
-    def __init__(self, step: str, result: StepResult) -> None:
-        self.step = step
-        self.result = result
-        super().__init__(
-            f"{step} failed (exit code {result.returncode})\n"
-            f"stderr: {result.stderr[:500]}"
-        )
-
-
-class CompilationError(ToolError):
-    """A compilation step failed.
-
-    When a post-pass step (e.g. linking) fails, ``pass_output`` may carry
-    the earlier LLVM pass output so that statistics are not lost.
-    """
-
-    pass_output: str = ""
-    stats_json: Path | None = None
-
-
-class InfeasibleError(Exception):
-    """The optimization problem is infeasible."""
-
-    def __init__(self, reason: str) -> None:
-        self.reason = reason
-        super().__init__(f"Infeasible: {reason}")
-
-
-class DeviceError(Exception):
-    """A device interaction failed."""
-
-
-class ConfigError(Exception):
-    """A configuration error."""
+# Exception classes — canonical definitions live in errors.py.
+# Re-exported here for backward compatibility.
+from .errors import (  # noqa: F401
+    CompilationError,
+    ConfigError,
+    DeviceError,
+    InfeasibleError,
+    ToolError,
+)
 
 
 @dataclass(frozen=True)
