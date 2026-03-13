@@ -1,4 +1,4 @@
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -266,7 +266,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
 }
 
 __attribute__((noinline)) int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     unsigned message_length = sizeof(PLAINTEXT) - 1;
     unsigned block_offset = 0;
 
@@ -339,6 +339,6 @@ __attribute__((noinline)) int main(void) {
         }
     }
 
-    DEBUG_EXIT((int)g_cyphertext_len);
+    BENCH_EXIT((int)g_cyphertext_len);
     return (int)g_cyphertext_len;
 }

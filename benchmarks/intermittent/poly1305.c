@@ -4,7 +4,7 @@
  * Simplified: concrete struct instead of opaque double[], no function pointers,
  * uint32_t instead of size_t for MSP430.
  */
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdint.h>
 
@@ -255,10 +255,10 @@ FORCE_INLINE void poly1305_final(poly1305_ctx_t *ctx, uint8_t mac[16]) {
 /* --- Main --- */
 
 __attribute__((noinline)) int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     poly1305_init(&g_ctx, key);
     poly1305_update(&g_ctx, test_data, TEST_DATA_LEN);
     poly1305_final(&g_ctx, g_hash);
-    DEBUG_EXIT((int)g_hash[0]);
+    BENCH_EXIT((int)g_hash[0]);
     return (int)g_hash[0];
 }

@@ -5,7 +5,7 @@
 
 #include <stdint.h>
 
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
@@ -157,7 +157,7 @@ FORCE_INLINE uint16_t dijkstra(uint16_t start, uint16_t end) {
 }
 
 int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     uint16_t i;
     uint16_t j;
     uint16_t dist;
@@ -171,6 +171,6 @@ int main(void) {
     }
 
     g_checksum_sink = checksum;
-    DEBUG_EXIT((int)checksum);
+    BENCH_EXIT((int)checksum);
     return (int)checksum;
 }

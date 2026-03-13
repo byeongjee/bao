@@ -4,7 +4,7 @@
 ** Original by Jerry Coffin (1991), Public Domain.
 */
 
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdint.h>
 
@@ -116,7 +116,7 @@ FORCE_INLINE const char *strsearch(const char *pattern, const char *text) {
 // --- Main ---
 
 __attribute__((noinline)) int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     volatile int total_found = 0;
     int i;
 
@@ -140,6 +140,6 @@ __attribute__((noinline)) int main(void) {
         }
     }
 
-    DEBUG_EXIT(total_found);
+    BENCH_EXIT(total_found);
     return total_found;
 }

@@ -3,7 +3,7 @@
  * Based on Don Cross FFT implementation (public domain) from MiBench/ulswap-bench.
  * Merged into single file: fftmisc.c + fourierf.c + main.c + common RNG.
  */
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <math.h>
 #include <stddef.h>
@@ -149,7 +149,7 @@ FORCE_INLINE void fft_float(uint32_t NumSamples, int32_t InverseTransform, float
 /* --- Main benchmark entry point --- */
 
 int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     uint32_t i, j;
 
     my_srand(1);
@@ -180,6 +180,6 @@ int main(void) {
     /* Inverse FFT */
     fft_float(MAXSIZE, TRUE, realin, imagin, realout, imagout);
 
-    DEBUG_EXIT(0);
+    BENCH_EXIT(0);
     return 0;
 }

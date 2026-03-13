@@ -1,4 +1,4 @@
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -142,7 +142,7 @@ FORCE_INLINE bool lookup(fingerprint_t *filter, value_t key) {
 // --- Main ---
 
 __attribute__((noinline)) int main() {
-    DEBUG_INIT();
+    BENCH_INIT();
     lfsr_state = 0xACE1u;
 
     // Clear Filter
@@ -177,6 +177,6 @@ __attribute__((noinline)) int main() {
             found++;
     }
 
-    DEBUG_EXIT((int)(inserts + found));
+    BENCH_EXIT((int)(inserts + found));
     return (int)(inserts + found);
 }

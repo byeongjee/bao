@@ -6,7 +6,7 @@
 #include <math.h>
 #include <stdint.h>
 
-#include "debug_counters.h"
+#include "benchmark.h"
 #include "loop_tripcount.h"
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
@@ -78,7 +78,7 @@ FORCE_INLINE double deg2rad(double deg) {
 }
 
 int main(void) {
-    DEBUG_INIT();
+    BENCH_INIT();
     double a1 = 1.0;
     double b1 = -10.5;
     double c1 = 32.0;
@@ -155,6 +155,6 @@ int main(void) {
     g_accum = accum;
     g_last_sqrt = q;
 
-    DEBUG_EXIT((int)(((uint64_t)(accum * 1000.0)) & 0x7FFFFFFF));
+    BENCH_EXIT((int)(((uint64_t)(accum * 1000.0)) & 0x7FFFFFFF));
     return (int)(((uint64_t)(accum * 1000.0)) & 0x7FFFFFFF);
 }

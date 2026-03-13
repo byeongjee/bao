@@ -20,7 +20,7 @@
 #include <msp430.h>
 #include <stdint.h>
 
-#include "debug_counters.h"
+#include "benchmark.h"
 
 /* ============================================================================
  * UART Setup for MSP430FR5994
