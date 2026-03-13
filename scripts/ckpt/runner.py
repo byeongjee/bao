@@ -17,6 +17,10 @@ from .errors import (  # noqa: F401
     ToolError,
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class StepResult:
@@ -46,6 +50,9 @@ def run(
 
     Raises CompilationError on non-zero exit if check=True.
     """
+    if step_name:
+        logger.info("Running %s...", step_name)
+
     start = time.monotonic()
     result = subprocess.run(
         cmd,
@@ -56,6 +63,11 @@ def run(
         input=input,
     )
     elapsed_ms = int((time.monotonic() - start) * 1000)
+
+    if result.stdout:
+        logger.debug("%s stdout:\n%s", step_name or "subprocess", result.stdout.rstrip())
+    if result.stderr:
+        logger.debug("%s stderr:\n%s", step_name or "subprocess", result.stderr.rstrip())
 
     step = StepResult(
         returncode=result.returncode,
