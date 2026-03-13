@@ -12,7 +12,10 @@ Optionally flashes to an MSP430 device and writes a CSV summary.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from ..compile.schematic import (
     SchematicCompileOptions,
@@ -116,7 +119,6 @@ def run_schematic_benchmarks(
     output_csv: Path | None = None,
     debug_counters: bool,
     halt_mode: str,
-    verbose: bool,
     energy_config: Path | None = None,
     trace_config: Path | None = None,
     estimator_mode: str,
@@ -144,8 +146,6 @@ def run_schematic_benchmarks(
         Link the debug-counter runtime and attempt NVM readback.
     halt_mode:
         Halt mode at region boundaries (nop/bor/lpm4).
-    verbose:
-        Print full compiler output for each benchmark.
     """
     bench_paths = discover_benchmarks(env, benchmarks)
     if not bench_paths:
@@ -179,8 +179,8 @@ def run_schematic_benchmarks(
             nonlocal profiling_time_ms, trace_json
             bench_name = bench_path.stem
 
-            print()
-            print(f"--- Collecting trace for {bench_name} ---")
+            logger.info("")
+            logger.info("--- Collecting trace for %s ---", bench_name)
 
             profiling_time_ms = 0
             trace_json = workdir / f"{bench_name}_trace.json"
@@ -205,8 +205,7 @@ def run_schematic_benchmarks(
                     tc, env, trace_opts
                 )
 
-                if verbose:
-                    print(trace_result.pass_output)
+                logger.debug("Trace output:\n%s", trace_result.pass_output)
 
                 # Extract profiling time from trace output
                 raw_prof = extract_stat(trace_result.pass_output, "Profiling time (ms)")
@@ -227,15 +226,14 @@ def run_schematic_benchmarks(
                         ),
                     )
 
-                print(f"  Trace collected for {bench_name} (profiling: {profiling_time_ms}ms)")
+                logger.info("  Trace collected for %s (profiling: %dms)", bench_name, profiling_time_ms)
 
             except (CompilationError, OSError) as exc:
-                print(f"  FAILED: trace collection for {bench_name}")
-                if verbose:
-                    if isinstance(exc, CompilationError) and exc.result:
-                        print(exc.result.output[-500:])
-                    else:
-                        print(str(exc))
+                logger.error("  FAILED: trace collection for %s", bench_name)
+                if isinstance(exc, CompilationError) and exc.result:
+                    logger.debug("%s", exc.result.output[-500:])
+                else:
+                    logger.debug("%s", exc)
                 raise BenchmarkSkipped("TRACE_FAILED") from exc
 
         def compile_fn(
@@ -287,7 +285,6 @@ def run_schematic_benchmarks(
             output_csv,
             nvm_symbols=_NVM_SYMBOLS,
             debug_counters=debug_counters,
-            verbose=verbose,
             csv_header=_CSV_HEADER,
             row_builder=row_builder,
             pre_benchmark=pre_benchmark,
