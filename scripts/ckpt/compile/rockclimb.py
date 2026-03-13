@@ -30,7 +30,6 @@ class RockClimbCompileOptions:
     rockclimb_config: Path
     output: Path
     precomputed_energy: bool
-    verbose: bool
     link: bool
     debug_counters: bool
     halt_mode: str

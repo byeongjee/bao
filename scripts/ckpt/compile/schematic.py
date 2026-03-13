@@ -35,7 +35,6 @@ class SchematicCompileOptions:
     schematic_config: Path | None  # None when trace_only
     output: Path
     estimator_mode: str
-    verbose: bool
     debug: bool
     trace_only: bool
     link: bool

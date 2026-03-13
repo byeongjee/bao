@@ -37,7 +37,7 @@ class MilpCompileOptions:
     milp_config: Path
     output: Path
     estimator_mode: str
-    verbose: bool
+    pass_verbose: bool
     debug: bool
     link: bool
     halt_mode: str
@@ -118,7 +118,7 @@ def compile_milp(
         milp_extra_flags: list[str] = []
         if opts.debug_counters:
             milp_extra_flags.append("-add-debug-markers")
-        if opts.verbose:
+        if opts.pass_verbose:
             milp_extra_flags += ["-loop-strip-mining-verbose", "-abstract-cfg-verbose"]
 
         if opts.estimator_mode == "assembly":
@@ -200,7 +200,7 @@ def _assembly_mode(
         f"-energy-config={pre_energy_config}",
         f"-milp-config={opts.milp_config}",
     ]
-    if opts.verbose:
+    if opts.pass_verbose:
         preprocess_cmd.append("-loop-strip-mining-verbose")
     preprocess_cmd += ["-S", str(milp_input_ll), "-o", str(preprocessed_ll)]
 
