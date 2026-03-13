@@ -528,7 +528,6 @@ def bench() -> None:
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
 @click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
-@click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -560,7 +559,6 @@ def bench_milp_cmd(
     cap: tuple[str, ...],
     debug_counters: bool,
     output: str | None,
-    verbose: bool,
     halt_mode: str,
     estimator_mode: str,
     energy_config: str | None,
@@ -577,7 +575,6 @@ def bench_milp_cmd(
         debug_counters=debug_counters,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
-        verbose=verbose,
         estimator_mode=estimator_mode,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
@@ -589,7 +586,6 @@ def bench_milp_cmd(
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
 @click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
-@click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -615,7 +611,6 @@ def bench_rockclimb_cmd(
     cap: tuple[str, ...],
     debug_counters: bool,
     output: str | None,
-    verbose: bool,
     halt_mode: str,
     energy_config: str | None,
     cpu_freq: str,
@@ -631,7 +626,6 @@ def bench_rockclimb_cmd(
         debug_counters=debug_counters,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
-        verbose=verbose,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
     )
@@ -642,7 +636,6 @@ def bench_rockclimb_cmd(
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
 @click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
-@click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -679,7 +672,6 @@ def bench_schematic_cmd(
     cap: tuple[str, ...],
     debug_counters: bool,
     output: str | None,
-    verbose: bool,
     halt_mode: str,
     energy_config: str | None,
     trace_config: str | None,
@@ -697,7 +689,6 @@ def bench_schematic_cmd(
         debug_counters=debug_counters,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
-        verbose=verbose,
         energy_config=Path(energy_config) if energy_config else None,
         trace_config=Path(trace_config) if trace_config else None,
         estimator_mode=estimator_mode,
