@@ -8,6 +8,7 @@ scripts.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from ..env import ProjectEnv
@@ -380,3 +381,55 @@ def write_assembly_energy_config(path: Path, energy_data_path: Path) -> Path:
     }
     path.write_text(json.dumps(config))
     return path
+
+
+# ---------------------------------------------------------------------------
+# Timing helper
+# ---------------------------------------------------------------------------
+
+def now_ms() -> int:
+    """Return the current time in milliseconds (monotonic clock)."""
+    return int(time.monotonic() * 1000)
+
+
+# ---------------------------------------------------------------------------
+# Shared link step
+# ---------------------------------------------------------------------------
+
+def link_algorithm(
+    tc: Toolchain,
+    env: ProjectEnv,
+    *,
+    main_object: Path,
+    output_elf: Path,
+    boot_source: Path,
+    runtime_source: Path,
+    linker_script: Path,
+    boot_defines: list[str] | None = None,
+    debug_counters: bool = False,
+    debug_counters_source: Path | None = None,
+) -> Path:
+    """Assemble boot + runtime and link with the main object into an ELF.
+
+    This is the shared link step used by all three algorithm pipelines.
+    """
+    stem = output_elf.with_suffix("")
+
+    boot_o = stem.with_suffix(".boot.o")
+    assemble_boot(tc, env, boot_source, boot_o, extra_defines=boot_defines or [])
+
+    runtime_o = stem.with_suffix(".runtime.o")
+    compile_runtime_c(tc, env, runtime_source, runtime_o)
+
+    link_objs = [main_object, boot_o, runtime_o]
+
+    if debug_counters and debug_counters_source is not None:
+        debug_o = stem.with_suffix(".debug_counters.o")
+        compile_runtime_c(
+            tc, env, debug_counters_source, debug_o,
+            extra_defines=["DEBUG_COUNTERS"],
+        )
+        link_objs.append(debug_o)
+
+    assemble_and_link(tc, env, link_objs, output_elf, linker_script=linker_script)
+    return output_elf

@@ -7,7 +7,6 @@ profiling, then use the SCHEMATIC pass to insert checkpoints.
 from __future__ import annotations
 
 import shutil
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,11 +16,10 @@ from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .common import (
     annotate_tripcounts,
-    assemble_and_link,
-    assemble_boot,
-    compile_runtime_c,
     compile_to_ir,
     compile_to_object,
+    link_algorithm,
+    now_ms,
     optimize_ir,
     run_assembly_energy,
     write_assembly_energy_config,
@@ -157,7 +155,7 @@ def compile_schematic(
             shutil.copy2(out_s, opts.output.with_suffix(".s"))
 
             if opts.link or opts.debug_counters:
-                elf_file = _link_schematic(tc, env, opts, tmp)
+                elf_file = _link_schematic(tc, env, opts)
         except CompilationError as exc:
             exc.pass_output = pass_output
             raise
@@ -190,7 +188,7 @@ def _collect_or_reuse_trace(
     if opts.trace_file is not None:
         return opts.trace_file, 0
 
-    profile_start = _now_ms()
+    profile_start = now_ms()
 
     # Instrument for trace collection
     trace_inst_ll = tmp / "trace_inst.ll"
@@ -247,7 +245,7 @@ def _collect_or_reuse_trace(
             StepResult(1, "", "schematic_trace.json was not produced", 0),
         )
 
-    profiling_ms = _now_ms() - profile_start
+    profiling_ms = now_ms() - profile_start
     return trace_json, profiling_ms
 
 
@@ -291,57 +289,22 @@ def _link_schematic(
     tc: Toolchain,
     env: ProjectEnv,
     opts: SchematicCompileOptions,
-    tmp: Path,
 ) -> Path:
     """Assemble and link the SCHEMATIC output with boot.S + runtime.c."""
-    output = opts.output
-
-    # Linker script
-    linker_script = opts.linker_script or env.schematic_linker
-
-    # Boot assembly flags
     boot_defines: list[str] = []
     if opts.debug_counters:
         boot_defines.append("DEBUG_COUNTERS")
     if opts.halt_mode in ("bor", "lpm4"):
         boot_defines.append("HALT_MODE")
 
-    # Assemble boot.S
-    boot_o = tmp / "boot.o"
-    assemble_boot(tc, env, env.schematic_boot, boot_o, extra_defines=boot_defines)
-
-    # Compile runtime.c
-    runtime_o = tmp / "runtime.o"
-    compile_runtime_c(tc, env, env.schematic_runtime, runtime_o)
-
-    link_objs: list[Path] = [
-        output.with_suffix(".o"),
-        boot_o,
-        runtime_o,
-    ]
-
-    # Debug counters
-    if opts.debug_counters:
-        debug_o = tmp / "debug_counters.o"
-        compile_runtime_c(
-            tc, env, env.schematic_debug_counters, debug_o,
-            extra_defines=["DEBUG_COUNTERS"],
-        )
-        link_objs.append(debug_o)
-
-    # Link
-    elf = output.with_suffix(".elf")
-    assemble_and_link(
-        tc, env, link_objs, elf,
-        linker_script=linker_script,
+    return link_algorithm(
+        tc, env,
+        main_object=opts.output.with_suffix(".o"),
+        output_elf=opts.output.with_suffix(".elf"),
+        boot_source=env.schematic_boot,
+        runtime_source=env.schematic_runtime,
+        linker_script=opts.linker_script or env.schematic_linker,
+        boot_defines=boot_defines,
+        debug_counters=opts.debug_counters,
+        debug_counters_source=env.schematic_debug_counters,
     )
-
-    return elf
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _now_ms() -> int:
-    return int(time.monotonic() * 1000)

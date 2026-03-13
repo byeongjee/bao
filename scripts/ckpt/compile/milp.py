@@ -8,7 +8,6 @@ Supports two estimator modes:
 from __future__ import annotations
 
 import shutil
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,12 +17,11 @@ from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .common import (
     annotate_tripcounts,
-    assemble_and_link,
-    assemble_boot,
     collect_bb_freq,
-    compile_runtime_c,
     compile_to_ir,
     compile_to_object,
+    link_algorithm,
+    now_ms,
     optimize_ir,
     run_assembly_energy,
     write_assembly_energy_config,
@@ -205,7 +203,7 @@ def _assembly_mode(
     )
 
     # Phase 5: BB frequency collection
-    profile_start = _now_ms()
+    profile_start = now_ms()
 
     freq_inst_ll = tmp / "freq_inst.ll"
     run(
@@ -221,7 +219,7 @@ def _assembly_mode(
 
     bb_freq_json = collect_bb_freq(tc, env, freq_inst_ll, tmp)
 
-    profiling_ms = _now_ms() - profile_start
+    profiling_ms = now_ms() - profile_start
 
     # Phase 6: MILP solving (on preprocessed IR)
     pass_output = _run_milp_pass(
@@ -254,7 +252,7 @@ def _ir_mode(
     Returns (pass_output, profiling_time_ms).
     """
     # BB frequency collection
-    profile_start = _now_ms()
+    profile_start = now_ms()
 
     freq_inst_ll = tmp / "freq_inst.ll"
     run(
@@ -272,7 +270,7 @@ def _ir_mode(
 
     bb_freq_json = collect_bb_freq(tc, env, freq_inst_ll, tmp)
 
-    profiling_ms = _now_ms() - profile_start
+    profiling_ms = now_ms() - profile_start
 
     # MILP pass
     pass_output = _run_milp_pass(
@@ -330,9 +328,6 @@ def _link_milp(
     opts: MilpCompileOptions,
 ) -> Path:
     """Assemble and link the MILP output with boot.S + runtime.c."""
-    output = opts.output
-
-    # Boot assembly flags
     boot_defines: list[str] = []
     if opts.halt_mode == "bor":
         boot_defines.append("MILP_HALT_BOR")
@@ -341,42 +336,14 @@ def _link_milp(
     if opts.debug_counters:
         boot_defines.append("DEBUG_COUNTERS")
 
-    # Assemble boot.S
-    boot_o = output.with_suffix(".boot.o")
-    assemble_boot(tc, env, env.milp_boot, boot_o, extra_defines=boot_defines)
-
-    # Compile runtime.c
-    runtime_o = output.with_suffix(".runtime.o")
-    compile_runtime_c(tc, env, env.milp_runtime, runtime_o)
-
-    link_objs: list[Path] = [
-        output.with_suffix(".o"),
-        boot_o,
-        runtime_o,
-    ]
-
-    # Debug counters
-    if opts.debug_counters:
-        debug_o = output.with_suffix(".debug_counters.o")
-        compile_runtime_c(
-            tc, env, env.milp_debug_counters, debug_o,
-            extra_defines=["DEBUG_COUNTERS"],
-        )
-        link_objs.append(debug_o)
-
-    # Link
-    elf = output.with_suffix(".elf")
-    assemble_and_link(
-        tc, env, link_objs, elf,
+    return link_algorithm(
+        tc, env,
+        main_object=opts.output.with_suffix(".o"),
+        output_elf=opts.output.with_suffix(".elf"),
+        boot_source=env.milp_boot,
+        runtime_source=env.milp_runtime,
         linker_script=env.milp_linker,
+        boot_defines=boot_defines,
+        debug_counters=opts.debug_counters,
+        debug_counters_source=env.milp_debug_counters,
     )
-
-    return elf
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _now_ms() -> int:
-    return int(time.monotonic() * 1000)

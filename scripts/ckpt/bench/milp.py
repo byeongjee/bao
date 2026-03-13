@@ -14,7 +14,6 @@ from ..env import ProjectEnv
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
-    extract_stat,
 )
 
 from ..tempdir import compilation_workdir
@@ -25,7 +24,7 @@ from .config import (
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import run_benchmark_matrix
+from .runner import build_base_fields, nvm_counter, run_benchmark_matrix
 
 _CSV_HEADER: list[str] = [
     "benchmark",
@@ -72,34 +71,18 @@ def _build_row(
     full_output: str,
 ) -> dict[str, str | int | None]:
     """Build a CSV row dict from parsed statistics and NVM counters."""
-
+    fields = build_base_fields(stats, full_output)
     optimal = stats.optimal_solution
     if optimal is not None:
         optimal = "yes" if optimal == "yes" else "no"
-
-    # Runtime counters from NVM readback (default to 0)
-    runtime_boundary = nvm.region_boundary if nvm and nvm.region_boundary is not None else 0
-    runtime_save_vreg = nvm.save_vreg if nvm and nvm.save_vreg is not None else 0
-    runtime_restore_vreg = nvm.restore_vreg if nvm and nvm.restore_vreg is not None else 0
-    runtime_store_mem = nvm.store_mem if nvm and nvm.store_mem is not None else 0
-    runtime_restore_mem = nvm.restore_mem if nvm and nvm.restore_mem is not None else 0
-
-    # Computation result (semantic correctness)
-    bench_result = extract_stat(full_output, "RESULT")
-
-    return {
-        "basic_blocks": stats.basic_blocks or 0,
-        "edges": stats.edges or 0,
-        "regions": stats.regions or 0,
-        "compilation_time_ms": stats.compilation_time_ms or 0,
-        "peak_rss_kb": stats.peak_rss_kb or 0,
+    fields.update({
         "profiling_time_ms": stats.profiling_time_ms or 0,
         "execution_time_ms": stats.execution_time_ms or 0,
-        "runtime_region_boundary_calls": runtime_boundary,
-        "runtime_debug_save_vreg_calls": runtime_save_vreg,
-        "runtime_debug_restore_vreg_calls": runtime_restore_vreg,
-        "runtime_debug_store_mem_calls": runtime_store_mem,
-        "runtime_debug_restore_mem_calls": runtime_restore_mem,
+        "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
+        "runtime_debug_save_vreg_calls": nvm_counter(nvm, "save_vreg"),
+        "runtime_debug_restore_vreg_calls": nvm_counter(nvm, "restore_vreg"),
+        "runtime_debug_store_mem_calls": nvm_counter(nvm, "store_mem"),
+        "runtime_debug_restore_mem_calls": nvm_counter(nvm, "restore_mem"),
         "candidate_globals": stats.candidate_globals or 0,
         "milp_variables": stats.milp_variables or 0,
         "milp_constraints": stats.milp_constraints or 0,
@@ -107,8 +90,8 @@ def _build_row(
         "region_boundaries_inserted": stats.region_boundaries or 0,
         "distributed_checkpoints_inserted": stats.distributed_checkpoints or 0,
         "milp_solve_time_ms": stats.solve_time_ms or 0,
-        "result": bench_result or "",
-    }
+    })
+    return fields
 
 
 def run_milp_benchmarks(

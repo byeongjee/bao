@@ -19,6 +19,7 @@ from ..output_parser import (
     NvmCounters,
     PassStatistics,
     detect_infeasibility,
+    extract_stat,
     has_pass_statistics,
     nvm_counters_to_labels,
     parse_nvm_output,
@@ -37,6 +38,28 @@ class BenchmarkRow:
     capacitor: str
     status: str  # "ok", "infeasible", "failed"
     fields: dict[str, str | int | None] = field(default_factory=dict)
+
+
+def nvm_counter(nvm: NvmCounters | None, attr: str) -> int:
+    """Safely read an NVM counter attribute, defaulting to 0."""
+    if nvm is None:
+        return 0
+    val = getattr(nvm, attr, None)
+    return val if val is not None else 0
+
+
+def build_base_fields(
+    stats: PassStatistics, full_output: str,
+) -> dict[str, str | int | None]:
+    """Build the common stats fields shared by all algorithms."""
+    return {
+        "basic_blocks": stats.basic_blocks or 0,
+        "edges": stats.edges or 0,
+        "regions": stats.regions or 0,
+        "compilation_time_ms": stats.compilation_time_ms or 0,
+        "peak_rss_kb": stats.peak_rss_kb or 0,
+        "result": extract_stat(full_output, "RESULT") or "",
+    }
 
 
 def check_device_available() -> bool:
@@ -70,6 +93,16 @@ RowBuilder = Callable[
 #   (bench_path, capacitor) -> (output_dir, compile_output_text)
 CompileFn = Callable[[Path, CapacitorConfig], tuple[Path, str]]
 
+# Type alias for the optional per-benchmark pre-hook (e.g. trace collection).
+PreBenchmarkFn = Callable[[Path], None]
+
+
+class BenchmarkSkipped(Exception):
+    """Raised by pre_benchmark to skip all capacitors for a benchmark."""
+
+    def __init__(self, status: str):
+        self.status = status
+
 
 def run_benchmark_matrix(
     env: ProjectEnv,
@@ -84,6 +117,7 @@ def run_benchmark_matrix(
     verbose: bool,
     csv_header: list[str],
     row_builder: RowBuilder,
+    pre_benchmark: PreBenchmarkFn | None = None,
 ) -> None:
     """Run compile + optional flash/NVM-read across benchmark x capacitor matrix.
 
@@ -121,6 +155,21 @@ def run_benchmark_matrix(
 
         for bench_path in benchmarks:
             bench_name = bench_path.stem
+
+            # Per-benchmark setup (e.g. trace collection for SCHEMATIC)
+            if pre_benchmark is not None:
+                try:
+                    pre_benchmark(bench_path)
+                except BenchmarkSkipped as exc:
+                    for cap in capacitors:
+                        count += 1
+                        row = BenchmarkRow(
+                            benchmark=f"{bench_name}-{cap.label}",
+                            capacitor=cap.label,
+                            status=exc.status,
+                        )
+                        write_csv_row(writer, row, csv_header)
+                    continue
 
             for cap in capacitors:
                 count += 1

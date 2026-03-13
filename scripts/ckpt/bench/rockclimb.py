@@ -18,7 +18,6 @@ from ..env import ProjectEnv
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
-    extract_stat,
 )
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
@@ -28,7 +27,7 @@ from .config import (
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import run_benchmark_matrix
+from .runner import build_base_fields, nvm_counter, run_benchmark_matrix
 
 _CSV_HEADER: list[str] = [
     "benchmark",
@@ -65,29 +64,16 @@ def _build_row(
     full_output: str,
 ) -> dict[str, str | int | None]:
     """Build a CSV row dict from parsed statistics and NVM counters."""
-
-    # Runtime counters from NVM readback (default to 0)
-    runtime_boundary = nvm.region_boundary if nvm and nvm.region_boundary is not None else 0
-    runtime_save_reg = nvm.save_reg if nvm and nvm.save_reg is not None else 0
-    runtime_restore_reg = nvm.restore_reg if nvm and nvm.restore_reg is not None else 0
-
-    # Computation result (semantic correctness)
-    bench_result = extract_stat(full_output, "RESULT")
-
-    return {
-        "basic_blocks": stats.basic_blocks or 0,
-        "edges": stats.edges or 0,
-        "regions": stats.regions or 0,
-        "compilation_time_ms": stats.compilation_time_ms or 0,
-        "peak_rss_kb": stats.peak_rss_kb or 0,
+    fields = build_base_fields(stats, full_output)
+    fields.update({
         "profiling_time_ms": "",
         "execution_time_ms": stats.execution_time_ms or 0,
         "boundary_checks": stats.boundary_checks or 0,
-        "runtime_region_boundary_calls": runtime_boundary,
-        "runtime_debug_save_reg_calls": runtime_save_reg,
-        "runtime_debug_restore_reg_calls": runtime_restore_reg,
-        "result": bench_result or "",
-    }
+        "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
+        "runtime_debug_save_reg_calls": nvm_counter(nvm, "save_reg"),
+        "runtime_debug_restore_reg_calls": nvm_counter(nvm, "restore_reg"),
+    })
+    return fields
 
 
 def run_rockclimb_benchmarks(

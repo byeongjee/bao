@@ -30,11 +30,17 @@ from ..runner import CompilationError
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import (
+    CapacitorConfig,
     default_energy_config,
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import BenchmarkRow, print_benchmark_summary, write_csv_row
+from .runner import (
+    BenchmarkSkipped,
+    build_base_fields,
+    nvm_counter,
+    run_benchmark_matrix,
+)
 
 _CSV_HEADER: list[str] = [
     "benchmark",
@@ -81,37 +87,22 @@ def _build_row(
     profiling_time_ms: int = 0,
 ) -> dict[str, str | int | None]:
     """Build a CSV row dict from parsed statistics and NVM counters."""
-
-    # Runtime counters from NVM readback (default to 0)
-    runtime_boundary = nvm.region_boundary if nvm and nvm.region_boundary is not None else 0
-    runtime_save_reg = nvm.save_reg if nvm and nvm.save_reg is not None else 0
-    runtime_restore_reg = nvm.restore_reg if nvm and nvm.restore_reg is not None else 0
-    runtime_store_mem = nvm.store_mem if nvm and nvm.store_mem is not None else 0
-    runtime_restore_mem = nvm.restore_mem if nvm and nvm.restore_mem is not None else 0
-
-    # Computation result (semantic correctness)
-    bench_result = extract_stat(full_output, "RESULT")
-
-    return {
-        "basic_blocks": stats.basic_blocks or 0,
-        "edges": stats.edges or 0,
-        "regions": stats.regions or 0,
-        "compilation_time_ms": stats.compilation_time_ms or 0,
-        "peak_rss_kb": stats.peak_rss_kb or 0,
+    fields = build_base_fields(stats, full_output)
+    fields.update({
         "profiling_time_ms": profiling_time_ms,
-        "runtime_region_boundary_calls": runtime_boundary,
-        "runtime_debug_save_reg_calls": runtime_save_reg,
-        "runtime_debug_restore_reg_calls": runtime_restore_reg,
-        "runtime_debug_store_mem_calls": runtime_store_mem,
-        "runtime_debug_restore_mem_calls": runtime_restore_mem,
-        "result": bench_result or "",
+        "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
+        "runtime_debug_save_reg_calls": nvm_counter(nvm, "save_reg"),
+        "runtime_debug_restore_reg_calls": nvm_counter(nvm, "restore_reg"),
+        "runtime_debug_store_mem_calls": nvm_counter(nvm, "store_mem"),
+        "runtime_debug_restore_mem_calls": nvm_counter(nvm, "restore_mem"),
         "candidate_globals": stats.candidate_globals or 0,
         "region_boundaries": stats.region_boundaries or 0,
         "enabled_checkpoints": stats.enabled_checkpoints or 0,
         "loop_decisions": stats.loop_decisions or 0,
         "paths_analyzed": stats.paths_analyzed or 0,
         "runtime_calls_inserted": stats.runtime_calls_inserted or 0,
-    }
+    })
+    return fields
 
 
 def run_schematic_benchmarks(
@@ -153,17 +144,6 @@ def run_schematic_benchmarks(
     verbose:
         Print full compiler output for each benchmark.
     """
-    import csv
-
-    from ..output_parser import (
-        detect_infeasibility,
-        has_pass_statistics,
-        nvm_counters_to_labels,
-        parse_nvm_output,
-        parse_pass_output,
-    )
-    from .runner import check_device_available
-
     bench_paths = discover_benchmarks(env, benchmarks)
     if not bench_paths:
         print("Error: No benchmarks to run", file=sys.stderr)
@@ -181,39 +161,21 @@ def run_schematic_benchmarks(
     if trace_config is None:
         trace_config = env.project_dir / "benchmarks" / "config_10uF.json"
 
-    # Check device availability if debug counters requested
-    has_device = False
-    if debug_counters:
-        has_device = check_device_available()
-        if has_device:
-            print("MSP430 device detected -- will flash and read NVM counters.")
-        else:
-            print(
-                "Warning: No MSP430 device detected -- "
-                "skipping NVM readback (runtime counters will be 0)."
-            )
+    # State shared between pre_benchmark and compile_fn/row_builder
+    profiling_time_ms = 0
+    trace_json: Path | None = None
 
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    with compilation_workdir(prefix="schematic_bench_") as workdir:
 
-    with (
-        compilation_workdir(prefix="schematic_bench_") as workdir,
-        open(output_csv, "w", newline="") as csvfile,
-    ):
-        writer = csv.writer(csvfile)
-        writer.writerow(_CSV_HEADER)
-
-        total = len(bench_paths) * len(capacitors)
-        count = 0
-
-        for bench_path in bench_paths:
+        def pre_benchmark(bench_path: Path) -> None:
+            nonlocal profiling_time_ms, trace_json
             bench_name = bench_path.stem
 
-            # === Phase 1: Collect trace once per benchmark ===
             print()
             print(f"--- Collecting trace for {bench_name} ---")
 
-            trace_json = workdir / f"{bench_name}_trace.json"
             profiling_time_ms = 0
+            trace_json = workdir / f"{bench_name}_trace.json"
 
             try:
                 trace_opts = SchematicCompileOptions(
@@ -247,11 +209,8 @@ def run_schematic_benchmarks(
                     except ValueError:
                         pass
 
-                # Move trace file to expected location
-                produced_trace = workdir / f"{bench_name}_trace.json"
-                if not produced_trace.is_file():
-                    raise FileNotFoundError(f"Trace file not produced: {produced_trace}")
-                trace_json = produced_trace
+                if not trace_json.is_file():
+                    raise FileNotFoundError(f"Trace file not produced: {trace_json}")
 
                 print(f"  Trace collected for {bench_name} (profiling: {profiling_time_ms}ms)")
 
@@ -262,141 +221,60 @@ def run_schematic_benchmarks(
                         print(exc.result.output[-500:])
                     else:
                         print(str(exc))
-                # Write failure rows for all capacitors
-                for cap in capacitors:
-                    count += 1
-                    row = BenchmarkRow(
-                        benchmark=f"{bench_name}-{cap.label}",
-                        capacitor=cap.label,
-                        status="TRACE_FAILED",
-                    )
-                    write_csv_row(writer, row, _CSV_HEADER)
-                continue
+                raise BenchmarkSkipped("TRACE_FAILED")
 
-            # === Phase 2: Per-capacitor compile + optional flash ===
-            for cap in capacitors:
-                count += 1
-                row_name = f"{bench_name}-{cap.label}"
-                print(f"[{count}/{total}] Running {row_name} ...")
+        def compile_fn(
+            bench_path: Path, cap: CapacitorConfig
+        ) -> tuple[Path, str]:
+            bench_name = bench_path.stem
+            out_dir = workdir / f"{bench_name}_{cap.label}"
+            out_dir.mkdir(parents=True, exist_ok=True)
 
-                if not cap.config_path.is_file():
-                    print(f"  SKIPPED: config not found: {cap.config_path}")
-                    row = BenchmarkRow(
-                        benchmark=row_name,
-                        capacitor=cap.label,
-                        status="CONFIG_NOT_FOUND",
-                    )
-                    write_csv_row(writer, row, _CSV_HEADER)
-                    continue
+            compile_opts = SchematicCompileOptions(
+                input_c=bench_path,
+                energy_config=energy_config,
+                schematic_config=cap.config_path,
+                output=out_dir / bench_name,
+                estimator_mode=estimator_mode,
+                verbose=verbose,
+                debug=False,
+                add_debug_markers=True,
+                trace_only=False,
+                link=True,
+                debug_counters=debug_counters,
+                halt_mode=halt_mode,
+                clang_opt_level=0,
+                extra_includes=[str(env.project_dir / "passes" / "runtime")],
+                trace_file=trace_json,
+            )
+            result: SchematicCompileResult = compile_schematic(
+                tc, env, compile_opts
+            )
+            return out_dir, result.pass_output
 
-                # Compile with trace
-                out_dir = workdir / f"{bench_name}_{cap.label}"
-                out_dir.mkdir(parents=True, exist_ok=True)
+        def row_builder(
+            bench_name: str,
+            cap_label: str,
+            stats: PassStatistics,
+            nvm: NvmCounters | None,
+            full_output: str,
+        ) -> dict[str, str | int | None]:
+            return _build_row(
+                bench_name, cap_label, stats, nvm, full_output,
+                profiling_time_ms=profiling_time_ms,
+            )
 
-                had_compilation_error = False
-                try:
-                    compile_opts = SchematicCompileOptions(
-                        input_c=bench_path,
-                        energy_config=energy_config,
-                        schematic_config=cap.config_path,
-                        output=out_dir / bench_name,
-                        estimator_mode=estimator_mode,
-                        verbose=verbose,
-                        debug=False,
-                        add_debug_markers=True,
-                        trace_only=False,
-                        link=True,
-                        debug_counters=debug_counters,
-                        halt_mode=halt_mode,
-                        clang_opt_level=0,
-                        extra_includes=[str(env.project_dir / "passes" / "runtime")],
-                        trace_file=trace_json,
-                    )
-                    compile_result: SchematicCompileResult = compile_schematic(
-                        tc, env, compile_opts
-                    )
-                    compile_output = compile_result.pass_output
-                except CompilationError as exc:
-                    compile_output = exc.pass_output or (exc.result.output if exc.result else "")
-                    had_compilation_error = True
-
-                if verbose:
-                    print(compile_output)
-
-                # Flash + NVM read
-                nvm: NvmCounters | None = None
-                if has_device:
-                    elf = out_dir / f"{bench_name}.elf"
-                    if elf.is_file():
-                        try:
-                            from ..device.flash import flash_run_and_read
-
-                            nvm_dict = flash_run_and_read(
-                                tc, elf, 30, _NVM_SYMBOLS
-                            )
-                            nvm_text = "\n".join(f"{k}={v}" for k, v in nvm_dict.items())
-                            nvm = parse_nvm_output(nvm_text)
-                        except Exception:
-                            nvm = None
-
-                # Merge outputs
-                full_output = compile_output
-                if nvm is not None:
-                    nvm_labels = nvm_counters_to_labels(nvm)
-                    full_output = f"{compile_output}\n{nvm_labels}"
-
-                # Check infeasibility
-                infeasible_reason = detect_infeasibility(full_output)
-                if infeasible_reason is not None:
-                    print(f"  INFEASIBLE ({infeasible_reason})")
-                    row = BenchmarkRow(
-                        benchmark=row_name,
-                        capacitor=cap.label,
-                        status="infeasible",
-                    )
-                    write_csv_row(writer, row, _CSV_HEADER)
-                    continue
-
-                # Check for compilation failure
-                if not has_pass_statistics(full_output):
-                    print("  FAILED (SCHEMATIC pass error)")
-                    if not verbose:
-                        # Show tail of output for debugging
-                        lines = full_output.strip().splitlines()
-                        for line in lines[-5:]:
-                            print(f"    {line}")
-                    row = BenchmarkRow(
-                        benchmark=row_name,
-                        capacitor=cap.label,
-                        status="failed",
-                    )
-                    write_csv_row(writer, row, _CSV_HEADER)
-                    continue
-
-                # Parse stats and build row
-                stats = parse_pass_output(full_output)
-                row_fields = _build_row(
-                    bench_name,
-                    cap.label,
-                    stats,
-                    nvm,
-                    full_output,
-                    profiling_time_ms=profiling_time_ms,
-                )
-
-                row = BenchmarkRow(
-                    benchmark=row_name,
-                    capacitor=cap.label,
-                    status="link_failed" if had_compilation_error else "ok",
-                    fields=row_fields,
-                )
-                write_csv_row(writer, row, _CSV_HEADER)
-
-                # Print detailed summary
-                print_benchmark_summary(row.status, row_fields, debug_counters=debug_counters and has_device)
-
-    # Final summary
-    print()
-    print("==========================================")
-    print(f"Results written to: {output_csv}")
-    print("==========================================")
+        run_benchmark_matrix(
+            env,
+            tc,
+            bench_paths,
+            capacitors,
+            compile_fn,
+            output_csv,
+            nvm_symbols=_NVM_SYMBOLS,
+            debug_counters=debug_counters,
+            verbose=verbose,
+            csv_header=_CSV_HEADER,
+            row_builder=row_builder,
+            pre_benchmark=pre_benchmark,
+        )
