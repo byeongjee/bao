@@ -61,7 +61,6 @@ class SchematicStateAnalysis {
   private:
     llvm::Function &F_;
     llvm::AAResults &AA_;
-    const CFGAnalysis &cfg_;
 
     // Placement candidates: globals + allocas
     std::vector<llvm::Value *> candidates_;

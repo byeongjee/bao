@@ -27,7 +27,7 @@ static bool isWhitelistedHelperName(llvm::StringRef N) {
 
 SchematicStateAnalysis::SchematicStateAnalysis(llvm::Function &F, llvm::AAResults &AA,
                                                const CFGAnalysis &cfg)
-    : F_(F), AA_(AA), cfg_(cfg) {
+    : F_(F), AA_(AA) {
     identifyCandidates();
     identifyIneligibleSSAValues();
     computeAccessMaps();
