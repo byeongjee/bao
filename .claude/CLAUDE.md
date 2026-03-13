@@ -58,20 +58,18 @@ Loop canonicalization (LoopSimplify + LCSSA) is required before LoopStripMining 
 
 ## Test Suite
 
-Tests use **pytest** via **uv**. Install with `uv pip install pytest pytest-xdist`.
-
-**IMPORTANT: Always run tests in parallel** with `-n auto` (uses pytest-xdist). Never omit `-n auto` when running pytest:
+Tests use **pytest** via **uv**. Default options (`-v -n auto`) are configured in `pyproject.toml` via `addopts`.
 
 ```bash
-# Run all tests (parallel)
-uv run pytest tests/ -v -n auto
+# Run all tests
+uv run pytest tests/
 
 # Run by category (pytest marks)
-uv run pytest tests/ -m milp -v            # MILP pass tests + scenarios
-uv run pytest tests/ -m rockclimb -v       # RockClimb pass tests
-uv run pytest tests/ -m schematic -v       # SCHEMATIC pass tests
-uv run pytest tests/ -m energy_validation -v  # Energy validation runtime tests
-uv run pytest tests/ -m vm_nvm -v          # VM/NVM placement tests
+uv run pytest tests/ -m milp            # MILP pass tests + scenarios
+uv run pytest tests/ -m rockclimb       # RockClimb pass tests
+uv run pytest tests/ -m schematic       # SCHEMATIC pass tests
+uv run pytest tests/ -m energy_validation  # Energy validation runtime tests
+uv run pytest tests/ -m vm_nvm          # VM/NVM placement tests
 
 # Shell wrapper (same flags)
 ./tests/run_tests.sh                # all tests

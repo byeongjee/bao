@@ -28,6 +28,7 @@ reportUnusedImport = "warning"
 reportUnusedVariable = "warning"
 
 [tool.pytest.ini_options]
+addopts = "-v -n auto"
 markers = [
     "milp: MILP checkpoint pass tests",
     "rockclimb: RockClimb machine-level (post-regalloc) pass tests",
