@@ -21,10 +21,10 @@ from .analysis.plot import ALGORITHMS, METRICS
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """ckpt -- Checkpoint insertion toolchain."""
-    from .env import load_env
+    from .env import ProjectEnv
     from .toolchain import Toolchain
 
-    env = load_env()
+    env = ProjectEnv.from_environ()
     tc = Toolchain.resolve(env)
     ctx.ensure_object(dict)
     ctx.obj["env"] = env

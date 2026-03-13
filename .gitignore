@@ -13,9 +13,6 @@ wheels/
 tmp/
 !tmp/.gitkeep
 
-# Environment configuration (user-specific)
-.env
-
 # Test output directories
 tests/dwarf-validation/output/
 

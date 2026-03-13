@@ -12,12 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TMP_DIR="$PROJECT_DIR/tmp"
 
-# Load environment variables from .env if it exists
-if [[ -f "$PROJECT_DIR/.env" ]]; then
-    source "$PROJECT_DIR/.env"
-fi
-
-# LLVM tools (use LLVM_DIR from .env, env vars, or fall back to PATH)
+# LLVM tools (use LLVM_DIR from environment or fall back to PATH)
 if [[ -n "${LLVM_DIR}" ]]; then
     CLANG="${CLANG:-${LLVM_DIR}/bin/clang}"
     OPT="${OPT:-${LLVM_DIR}/bin/opt}"

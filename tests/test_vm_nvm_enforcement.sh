@@ -8,10 +8,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-if [[ -f "$PROJECT_DIR/.env" ]]; then
-    source "$PROJECT_DIR/.env"
-fi
-
 if [[ -n "${LLVM_DIR}" ]]; then
     CLANG="${CLANG:-${LLVM_DIR}/bin/clang}"
     OPT="${OPT:-${LLVM_DIR}/bin/opt}"

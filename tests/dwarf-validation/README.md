@@ -32,7 +32,7 @@ cd passes/build && make
 
 ## Prerequisites
 
-- LLVM (set `LLVM_DIR` in `.env` or environment)
+- LLVM (set `LLVM_DIR` environment variable)
 - MSP430-GCC toolchain (set `MSP430_GCC_DIR` or uses default path)
 - Built `BBDebugInfoPass.so`
 

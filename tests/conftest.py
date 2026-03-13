@@ -40,14 +40,6 @@ class PassResult:
 @pytest.fixture(scope="session")
 def tools():
     """Resolve LLVM tool paths and skip all tests if pass library isn't built."""
-    env_file = PROJECT_DIR / ".env"
-    if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                os.environ.setdefault(k.strip(), v.strip())
-
     llvm_dir = os.environ.get("LLVM_DIR", "")
 
     if llvm_dir:

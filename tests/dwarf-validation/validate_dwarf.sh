@@ -16,14 +16,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT_DIR="$SCRIPT_DIR/output"
 
-# Source .env if it exists
-if [ -f "$PROJECT_ROOT/.env" ]; then
-    export $(grep -v '^#' "$PROJECT_ROOT/.env" | xargs)
-fi
-
 # Check LLVM_DIR
 if [ -z "$LLVM_DIR" ]; then
-    echo -e "${RED}Error: LLVM_DIR not set. Please set it in .env or environment.${NC}"
+    echo -e "${RED}Error: LLVM_DIR not set.${NC}"
     exit 1
 fi
 

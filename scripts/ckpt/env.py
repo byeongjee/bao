@@ -91,63 +91,26 @@ class ProjectEnv:
                 pass
         object.__setattr__(self, "sysroot_flags", flags)
 
+    @classmethod
+    def from_environ(cls, project_dir: Path | None = None) -> ProjectEnv:
+        """Construct from environment variables."""
+        if project_dir is None:
+            # Walk up from this file: scripts/ckpt/env.py -> scripts/ckpt -> scripts -> project
+            project_dir = Path(__file__).resolve().parent.parent.parent
 
-def _load_dotenv(path: Path) -> None:
-    """Load key=value pairs from a .env file into os.environ (setdefault)."""
-    if not path.is_file():
-        return
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip("'\"")
-        os.environ.setdefault(key, value)
+        llvm_dir_str = os.environ.get("LLVM_DIR", "")
+        llvm_dir = Path(llvm_dir_str) if llvm_dir_str else None
 
+        msp430gcc = Path(
+            os.environ.get("MSP430GCC_TOOLCHAIN_PATH", os.path.expanduser("~/ti/msp430-gcc"))
+        )
+        msp430gcc_support = Path(
+            os.environ.get("MSP430GCC_SUPPORT_PATH", str(msp430gcc))
+        )
 
-def _load_envrc(path: Path) -> None:
-    """Load export VAR=value lines from a .envrc file (subset of direnv)."""
-    if not path.is_file():
-        return
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if line.startswith("export "):
-            line = line[len("export "):]
-            if "=" in line:
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip("'\"")
-                # Expand $HOME and $VAR references
-                value = os.path.expandvars(value)
-                os.environ.setdefault(key, value)
-
-
-def load_env(project_dir: Path | None = None) -> ProjectEnv:
-    """Discover project root, load .env/.envrc, and return resolved ProjectEnv."""
-    if project_dir is None:
-        # Walk up from this file: scripts/ckpt/env.py -> scripts/ckpt -> scripts -> project
-        project_dir = Path(__file__).resolve().parent.parent.parent
-
-    # Load environment files
-    _load_dotenv(project_dir / ".env")
-    _load_envrc(project_dir / ".envrc")
-
-    llvm_dir_str = os.environ.get("LLVM_DIR", "")
-    llvm_dir = Path(llvm_dir_str) if llvm_dir_str else None
-
-    msp430gcc = Path(
-        os.environ.get("MSP430GCC_TOOLCHAIN_PATH", os.path.expanduser("~/ti/msp430-gcc"))
-    )
-    msp430gcc_support = Path(
-        os.environ.get("MSP430GCC_SUPPORT_PATH", str(msp430gcc))
-    )
-
-    return ProjectEnv(
-        project_dir=project_dir,
-        llvm_dir=llvm_dir,
-        msp430gcc_toolchain_path=msp430gcc,
-        msp430gcc_support_path=msp430gcc_support,
-    )
+        return cls(
+            project_dir=project_dir,
+            llvm_dir=llvm_dir,
+            msp430gcc_toolchain_path=msp430gcc,
+            msp430gcc_support_path=msp430gcc_support,
+        )
