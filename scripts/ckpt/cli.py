@@ -19,6 +19,7 @@ from .errors import (
     InfeasibleError,
     ToolNotFoundError,
 )
+from .log import setup_logging
 
 # Exit code mapping for CkptError subclasses.
 _EXIT_CODES: list[tuple[type[CkptError], int]] = [
@@ -51,17 +52,29 @@ class CkptGroup(click.Group):
 # ---------------------------------------------------------------------------
 
 @click.group(cls=CkptGroup)
+@click.option(
+    "--log-level",
+    type=click.Choice(
+        ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        case_sensitive=False,
+    ),
+    default="INFO",
+    help="Set logging level.",
+)
 @click.pass_context
-def main(ctx: click.Context) -> None:
+def main(ctx: click.Context, log_level: str) -> None:
     """ckpt -- Checkpoint insertion toolchain."""
     from .env import ProjectEnv
     from .toolchain import Toolchain
+
+    setup_logging(log_level)
 
     env = ProjectEnv.from_environ()
     tc = Toolchain.resolve(env)
     ctx.ensure_object(dict)
     ctx.obj["env"] = env
     ctx.obj["tc"] = tc
+    ctx.obj["pass_verbose"] = log_level.upper() == "DEBUG"
 
 
 # =========================================================================
