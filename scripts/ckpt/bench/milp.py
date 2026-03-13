@@ -171,7 +171,7 @@ def run_milp_benchmarks(
                 milp_config=cap.config_path,
                 output=out_dir / bench_name,
                 estimator_mode=estimator_mode,
-                verbose=True,
+                pass_verbose=True,
                 debug=False,
                 link=True,
                 halt_mode=halt_mode,

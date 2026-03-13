@@ -6,6 +6,7 @@ analysis, and device interaction.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import click
@@ -20,6 +21,8 @@ from .errors import (
     ToolNotFoundError,
 )
 from .log import setup_logging
+
+logger = logging.getLogger(__name__)
 
 # Exit code mapping for CkptError subclasses.
 _EXIT_CODES: list[tuple[type[CkptError], int]] = [
@@ -98,7 +101,6 @@ def compile() -> None:
     default="assembly",
     help="Energy estimator mode.",
 )
-@click.option("--verbose", is_flag=True, help="Show detailed pass output.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
 @click.option(
@@ -125,7 +127,6 @@ def compile_milp_cmd(
     output: str | None,
     link: bool,
     estimator_mode: str,
-    verbose: bool,
     debug: bool,
     debug_counters: bool,
     halt_mode: str,
@@ -152,7 +153,7 @@ def compile_milp_cmd(
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
             extra_includes=list(extra_includes),
-            verbose=verbose,
+            pass_verbose=ctx.obj["pass_verbose"],
             debug=debug,
             link=link,
             halt_mode=halt_mode,
@@ -162,12 +163,11 @@ def compile_milp_cmd(
         ),
     )
 
-    click.echo(f"Object: {result.object_file}")
-    click.echo(f"Assembly: {result.assembly_file}")
+    logger.info("Object: %s", result.object_file)
+    logger.info("Assembly: %s", result.assembly_file)
     if result.elf_file:
-        click.echo(f"ELF: {result.elf_file}")
-    if verbose:
-        click.echo(result.pass_output)
+        logger.info("ELF: %s", result.elf_file)
+    logger.debug("Pass output:\n%s", result.pass_output)
 
 
 @compile.command("rockclimb")
@@ -176,7 +176,6 @@ def compile_milp_cmd(
 @click.option("-c", "--rockclimb-config", required=True, type=click.Path(exists=True))
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
-@click.option("--verbose", is_flag=True, help="Show detailed pass output.")
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
 @click.option(
     "--halt-mode",
@@ -204,7 +203,6 @@ def compile_rockclimb_cmd(
     rockclimb_config: str,
     output: str | None,
     link: bool,
-    verbose: bool,
     debug_counters: bool,
     halt_mode: str,
     clang_opt_level: int,
@@ -228,7 +226,6 @@ def compile_rockclimb_cmd(
             output=output_path,
             clang_opt_level=clang_opt_level,
             precomputed_energy=not no_precomputed_energy,
-            verbose=verbose,
             link=link,
             debug_counters=debug_counters,
             halt_mode=halt_mode,
@@ -236,11 +233,10 @@ def compile_rockclimb_cmd(
         ),
     )
 
-    click.echo(f"Assembly: {result.assembly_file}")
+    logger.info("Assembly: %s", result.assembly_file)
     if result.elf_file:
-        click.echo(f"ELF: {result.elf_file}")
-    if verbose:
-        click.echo(result.pass_output)
+        logger.info("ELF: %s", result.elf_file)
+    logger.debug("Pass output:\n%s", result.pass_output)
 
 
 @compile.command("schematic")
@@ -249,7 +245,6 @@ def compile_rockclimb_cmd(
 @click.option("-s", "--schematic-config", type=click.Path(exists=True))
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
-@click.option("--verbose", is_flag=True, help="Show detailed pass output.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
 @click.option(
@@ -285,7 +280,6 @@ def compile_schematic_cmd(
     schematic_config: str | None,
     output: str | None,
     link: bool,
-    verbose: bool,
     debug: bool,
     debug_counters: bool,
     halt_mode: str,
@@ -318,7 +312,6 @@ def compile_schematic_cmd(
             schematic_config=Path(schematic_config) if schematic_config else None,
             output=output_path,
             estimator_mode=estimator_mode,
-            verbose=verbose,
             debug=debug,
             trace_only=trace_only,
             link=link,
@@ -333,15 +326,15 @@ def compile_schematic_cmd(
     )
 
     if result.object_file:
-        click.echo(f"Object: {result.object_file}")
+        logger.info("Object: %s", result.object_file)
     if result.assembly_file:
-        click.echo(f"Assembly: {result.assembly_file}")
+        logger.info("Assembly: %s", result.assembly_file)
     if result.elf_file:
-        click.echo(f"ELF: {result.elf_file}")
+        logger.info("ELF: %s", result.elf_file)
     if result.trace_file:
-        click.echo(f"Trace: {result.trace_file}")
-    if verbose and result.pass_output:
-        click.echo(result.pass_output)
+        logger.info("Trace: %s", result.trace_file)
+    if result.pass_output:
+        logger.debug("Pass output:\n%s", result.pass_output)
 
 
 @compile.command("run")
@@ -361,7 +354,6 @@ def compile_schematic_cmd(
 @click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
-@click.option("--verbose", is_flag=True, help="Show detailed pass output.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
 @click.option("--compile-only", is_flag=True, help="Compile but don't flash.")
@@ -397,7 +389,6 @@ def compile_run_cmd(
     opt_level: int,
     clang_opt_level: int,
     extra_includes: tuple[str, ...],
-    verbose: bool,
     debug: bool,
     debug_counters: bool,
     compile_only: bool,
@@ -432,7 +423,7 @@ def compile_run_cmd(
                 milp_config=Path(milp_config),
                 output=output_path,
                 estimator_mode=estimator_mode,
-                verbose=verbose,
+                pass_verbose=ctx.obj["pass_verbose"],
                 debug=debug,
                 link=True,
                 halt_mode=halt_mode,
@@ -444,9 +435,8 @@ def compile_run_cmd(
             ),
         )
         elf = result.elf_file
-        click.echo(f"MILP compiled: {result.object_file}")
-        if verbose:
-            click.echo(result.pass_output)
+        logger.info("MILP compiled: %s", result.object_file)
+        logger.debug("Pass output:\n%s", result.pass_output)
 
     elif mode == "rockclimb":
         if not energy_config:
@@ -464,7 +454,6 @@ def compile_run_cmd(
                 rockclimb_config=Path(rockclimb_config),
                 output=output_path,
                 precomputed_energy=True,
-                verbose=verbose,
                 link=True,
                 debug_counters=debug_counters,
                 halt_mode=halt_mode,
@@ -473,9 +462,8 @@ def compile_run_cmd(
             ),
         )
         elf = result.elf_file
-        click.echo(f"RockClimb compiled: {result.assembly_file}")
-        if verbose:
-            click.echo(result.pass_output)
+        logger.info("RockClimb compiled: %s", result.assembly_file)
+        logger.debug("Pass output:\n%s", result.pass_output)
 
     elif mode == "schematic":
         if not energy_config:
@@ -493,7 +481,6 @@ def compile_run_cmd(
                 schematic_config=Path(schematic_config),
                 output=output_path,
                 estimator_mode=estimator_mode,
-                verbose=verbose,
                 debug=debug,
                 trace_only=False,
                 link=True,
@@ -507,23 +494,22 @@ def compile_run_cmd(
             ),
         )
         elf = result.elf_file
-        click.echo(f"SCHEMATIC compiled: {result.object_file}")
-        if verbose and result.pass_output:
-            click.echo(result.pass_output)
+        logger.info("SCHEMATIC compiled: %s", result.object_file)
+        logger.debug("Pass output:\n%s", result.pass_output)
 
     elif mode == "none":
-        click.echo("Mode 'none': no checkpoint insertion. Use --mode to select.")
+        logger.info("Mode 'none': no checkpoint insertion.")
         return
     else:
         raise click.UsageError(f"Unknown mode: {mode}")
 
     if elf:
-        click.echo(f"ELF: {elf}")
+        logger.info("ELF: %s", elf)
 
     if not compile_only and elf and elf.exists():
         from .device.flash import flash_run_and_read
 
-        click.echo("Flashing and reading output...")
+        logger.info("Flashing and reading output...")
         output_text = flash_run_and_read(tc, elf, timeout=30, symbols=[])
         click.echo(output_text)
 

@@ -300,7 +300,6 @@ def _verify_one(
                     rockclimb_config=cap_config,
                     output=tmp / "rockclimb",
                     precomputed_energy=True,
-                    verbose=verbose,
                     link=True,
                     debug_counters=True,
                     halt_mode=halt_mode,
