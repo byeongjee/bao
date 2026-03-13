@@ -172,11 +172,11 @@ def _assembly_mode(
     Returns (pass_output, profiling_time_ms).
     """
     # Phase 2: Pre-strip-mining assembly energy
-    run_assembly_energy(tc, env, milp_input_ll, tmp / "pre", opts.energy_config)
+    pre_bb_energy, pre_stderr = run_assembly_energy(tc, env, milp_input_ll, tmp / "pre", opts.energy_config)
 
     pre_energy_config = write_assembly_energy_config(
         tmp / "pre_energy_config.json",
-        tmp / "pre.bb_energy.json",
+        pre_bb_energy,
     )
 
     # Phase 3: Preprocessing (loop canonicalization + strip-mining)
@@ -195,11 +195,11 @@ def _assembly_mode(
     run(preprocess_cmd, step_name="milp-preprocess")
 
     # Phase 4: Post-strip-mining assembly energy
-    run_assembly_energy(tc, env, preprocessed_ll, tmp / "post", opts.energy_config)
+    post_bb_energy, post_stderr = run_assembly_energy(tc, env, preprocessed_ll, tmp / "post", opts.energy_config)
 
     post_energy_config = write_assembly_energy_config(
         tmp / "post_energy_config.json",
-        tmp / "post.bb_energy.json",
+        post_bb_energy,
     )
 
     # Phase 5: BB frequency collection
@@ -232,6 +232,7 @@ def _assembly_mode(
         milp_extra_flags=milp_extra_flags,
     )
 
+    pass_output = pre_stderr + post_stderr + pass_output
     return pass_output, profiling_ms
 
 

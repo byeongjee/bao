@@ -124,17 +124,18 @@ def compile_schematic(
 
         # Assembly energy estimation (single-pass, no strip-mining)
         energy_config = opts.energy_config
+        analyzer_stderr = ""
         if opts.estimator_mode == "assembly":
-            run_assembly_energy(
+            bb_energy, analyzer_stderr = run_assembly_energy(
                 tc, env, schematic_input_ll, tmp / "asm", opts.energy_config,
             )
             energy_config = write_assembly_energy_config(
                 tmp / "asm_energy_config.json",
-                tmp / "asm.bb_energy.json",
+                bb_energy,
             )
 
         # SCHEMATIC pass
-        pass_output = _run_schematic_pass(
+        pass_output = analyzer_stderr + _run_schematic_pass(
             tc, env, opts, tmp, schematic_input_ll, trace_json,
             energy_config=energy_config,
         )

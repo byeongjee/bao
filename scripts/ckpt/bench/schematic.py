@@ -164,7 +164,6 @@ def run_schematic_benchmarks(
     # State shared between pre_benchmark and compile_fn/row_builder
     profiling_time_ms = 0
     trace_json: Path | None = None
-
     with compilation_workdir(prefix="schematic_bench_") as workdir:
 
         def pre_benchmark(bench_path: Path) -> None:

@@ -114,13 +114,14 @@ def optimize_ir(
 # Assembly-based energy estimation
 # ---------------------------------------------------------------------------
 
+
 def run_assembly_energy(
     tc: Toolchain,
     env: ProjectEnv,
     input_ll: Path,
     prefix: Path,
     params_config: Path,
-) -> Path:
+) -> tuple[Path, str]:
     """Run the assembly-based BB energy estimation pipeline.
 
     Steps:
@@ -128,7 +129,7 @@ def run_assembly_energy(
       2. llc -march=msp430 to obj  ->  <prefix>.energy.o
       3. bb-energy-analyzer         ->  <prefix>.bb_energy.json
 
-    Returns the path to the generated bb_energy.json file.
+    Returns (bb_energy_path, analyzer_stderr).
     """
     bbinfo_ll = Path(f"{prefix}.bbinfo.ll")
     bb_mapping = Path(f"{prefix}.bb_mapping.json")
@@ -172,7 +173,7 @@ def run_assembly_energy(
     )
 
     bb_energy.write_text(result.stdout)
-    return bb_energy
+    return bb_energy, result.stderr
 
 
 # ---------------------------------------------------------------------------

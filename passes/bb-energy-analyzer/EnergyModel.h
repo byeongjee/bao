@@ -1,5 +1,6 @@
 #pragma once
 
+#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -8,7 +9,7 @@ namespace bbanalyzer {
 /// Energy model for MSP430 assembly instructions.
 /// Loads costs from JSON configuration file.
 class EnergyModel {
-public:
+  public:
     /// Load energy model from JSON config
     /// @param configPath Path to assembly energy config JSON
     explicit EnergyModel(const std::string &configPath);
@@ -17,24 +18,29 @@ public:
     /// @param mnemonic Instruction mnemonic (e.g., "mov")
     /// @param addrMode Addressing mode (e.g., "register_indexed")
     /// @return Energy cost in configured units (typically nJ)
-    double getEnergy(const std::string &mnemonic,
-                     const std::string &addrMode) const;
+    double getEnergy(const std::string &mnemonic, const std::string &addrMode) const;
 
     /// Get default energy for unknown instructions
     double getDefaultEnergy() const { return defaultEnergy_; }
 
     /// Check if a specific instruction/mode combo is in the model
-    bool hasEnergy(const std::string &mnemonic,
-                   const std::string &addrMode) const;
+    bool hasEnergy(const std::string &mnemonic, const std::string &addrMode) const;
 
-private:
+    /// Get all keys that have been queried via getEnergy()
+    const std::set<std::string> &getRequiredKeys() const { return requiredKeys_; }
+
+    /// Get keys that were queried but not found in the model
+    const std::set<std::string> &getMissingKeys() const { return missingKeys_; }
+
+  private:
     // Key format: "mnemonic_addrmode" (e.g., "mov_register_indexed")
     std::unordered_map<std::string, double> costs_;
     double defaultEnergy_ = 1.0;
+    mutable std::set<std::string> requiredKeys_;
+    mutable std::set<std::string> missingKeys_;
 
     /// Build lookup key from mnemonic and addressing mode
-    static std::string makeKey(const std::string &mnemonic,
-                               const std::string &addrMode);
+    static std::string makeKey(const std::string &mnemonic, const std::string &addrMode);
 };
 
 } // namespace bbanalyzer

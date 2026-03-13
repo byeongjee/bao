@@ -216,6 +216,40 @@ int main(int argc, char **argv) {
 
     output["unmapped"] = {{"instruction_count", unmappedCount}, {"energy", unmappedEnergy}};
 
+    // Add required/missing energy parameter keys
+    json requiredParams = json::array();
+    for (const auto &key : model.getRequiredKeys()) {
+        requiredParams.push_back(key);
+    }
+    output["required_parameters"] = requiredParams;
+
+    json missingParams = json::array();
+    for (const auto &key : model.getMissingKeys()) {
+        missingParams.push_back(key);
+    }
+    output["missing_parameters"] = missingParams;
+
+    // Print summary to stderr (flows into pass_output for bench runners)
+    errs() << "\n--- Energy parameters ---\n";
+    errs() << "  Required (" << model.getRequiredKeys().size() << " keys):";
+    {
+        bool first = true;
+        for (const auto &key : model.getRequiredKeys()) {
+            errs() << (first ? " " : ", ") << key;
+            first = false;
+        }
+    }
+    errs() << "\n";
+    errs() << "  Missing  (" << model.getMissingKeys().size() << " keys):";
+    {
+        bool first = true;
+        for (const auto &key : model.getMissingKeys()) {
+            errs() << (first ? " " : ", ") << key;
+            first = false;
+        }
+    }
+    errs() << "\n";
+
     // 5. Write output
     std::ostream *out = &std::cout;
     std::ofstream outFile;

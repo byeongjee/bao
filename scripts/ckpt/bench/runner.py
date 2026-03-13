@@ -9,6 +9,7 @@ statistics, and writes CSV rows.
 from __future__ import annotations
 
 import csv
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,6 +98,37 @@ CompileFn = Callable[[Path, CapacitorConfig], tuple[Path, str]]
 PreBenchmarkFn = Callable[[Path], None]
 
 
+_ENERGY_PARAMS_RE = re.compile(
+    r"--- Energy parameters.*?---\n"
+    r"\s*Required \(\d+ keys?\):(.*)\n"
+    r"\s*Missing  \(\d+ keys?\):(.*)\n",
+)
+
+
+def extract_energy_params(text: str) -> tuple[list[str], list[str]] | None:
+    """Extract required and missing energy parameter keys from pass output.
+
+    Merges keys from all ``--- Energy parameters ---`` sections found in
+    *text* (there may be multiple from pre/post assembly or per-function).
+
+    Returns ``(required, missing)`` or ``None`` if no section was found.
+    """
+    required: set[str] = set()
+    missing: set[str] = set()
+    for match in _ENERGY_PARAMS_RE.finditer(text):
+        for k in match.group(1).split(","):
+            k = k.strip()
+            if k:
+                required.add(k)
+        for k in match.group(2).split(","):
+            k = k.strip()
+            if k:
+                missing.add(k)
+    if not required and not missing:
+        return None
+    return sorted(required), sorted(missing)
+
+
 class BenchmarkSkipped(Exception):
     """Raised by pre_benchmark to skip all capacitors for a benchmark."""
 
@@ -152,6 +184,8 @@ def run_benchmark_matrix(
 
         total = len(benchmarks) * len(capacitors)
         count = 0
+        all_required_keys: set[str] = set()
+        all_missing_keys: set[str] = set()
 
         for bench_path in benchmarks:
             bench_name = bench_path.stem
@@ -184,6 +218,12 @@ def run_benchmark_matrix(
                     compile_output = exc.pass_output or (exc.result.output if exc.result else "")
                     output_dir = None
                     had_compilation_error = True
+
+                # ----- Collect energy params -----
+                ep = extract_energy_params(compile_output)
+                if ep is not None:
+                    all_required_keys.update(ep[0])
+                    all_missing_keys.update(ep[1])
 
                 # ----- Flash + NVM read -----
                 nvm: NvmCounters | None = None
@@ -244,6 +284,13 @@ def run_benchmark_matrix(
 
                 # Print detailed summary
                 print_benchmark_summary(row.status, row_fields, debug_counters=debug_counters and has_device)
+
+    # ----- Energy parameters summary -----
+    if all_required_keys:
+        print()
+        print("--- Energy parameters ---")
+        print(f"  Required ({len(all_required_keys)} keys): {', '.join(sorted(all_required_keys))}")
+        print(f"  Missing  ({len(all_missing_keys)} keys): {', '.join(sorted(all_missing_keys))}")
 
     # ----- Final summary -----
     print()
