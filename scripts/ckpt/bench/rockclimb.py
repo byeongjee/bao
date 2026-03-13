@@ -40,7 +40,6 @@ _CSV_HEADER: list[str] = [
     "compilation_time_ms",
     "peak_rss_kb",
     "profiling_time_ms",
-    "execution_time_ms",
     "boundary_checks",
     "runtime_region_boundary_calls",
     "runtime_debug_save_reg_calls",
@@ -68,7 +67,6 @@ def _build_row(
     fields = build_base_fields(stats, full_output, nvm)
     fields.update({
         "profiling_time_ms": "",
-        "execution_time_ms": stats.execution_time_ms or 0,
         "boundary_checks": stats.boundary_checks or 0,
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
         "runtime_debug_save_reg_calls": nvm_counter(nvm, "save_reg"),

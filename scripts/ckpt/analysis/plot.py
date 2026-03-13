@@ -46,11 +46,6 @@ METRICS = {
         "ylabel": "Profiling Time (ms)",
         "title": "Profiling Time",
     },
-    "execution_time": {
-        "column": "execution_time_ms",
-        "ylabel": "Execution Time (ms)",
-        "title": "Execution Time",
-    },
     "peak_memory": {
         "column": "peak_rss_kb",
         "ylabel": "Peak RSS (KB)",
