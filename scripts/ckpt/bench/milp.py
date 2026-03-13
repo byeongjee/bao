@@ -103,7 +103,6 @@ def run_milp_benchmarks(
     output_csv: Path | None = None,
     debug_counters: bool,
     halt_mode: str,
-    verbose: bool,
     estimator_mode: str,
     energy_config: Path | None = None,
     cpu_freq: int,
@@ -125,8 +124,6 @@ def run_milp_benchmarks(
         ``benchmarks/milp_benchmark_summary.csv``.
     debug_counters:
         Link the debug-counter runtime and attempt NVM readback.
-    verbose:
-        Print full compiler output for each benchmark.
     estimator_mode:
         ``"assembly"`` (default) or ``"ir"``.
     energy_config:
@@ -191,7 +188,6 @@ def run_milp_benchmarks(
             output_csv,
             nvm_symbols=_NVM_SYMBOLS,
             debug_counters=debug_counters,
-            verbose=verbose,
             csv_header=_CSV_HEADER,
             row_builder=_build_row,
             saleae_manager=saleae_manager,
