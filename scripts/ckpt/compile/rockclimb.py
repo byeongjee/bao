@@ -45,6 +45,7 @@ class RockClimbCompileResult:
     assembly_file: Path
     elf_file: Path | None
     pass_output: str
+    stats_json: Path | None
 
 
 def compile_rockclimb(
@@ -99,6 +100,14 @@ def compile_rockclimb(
         else:
             pass_output = _mir_estimation_pipeline(tc, env, opts, tmp, annotated_ll)
 
+        # Copy stats JSON if available
+        stats_json: Path | None = None
+        stats_json_src = tmp / "stats.json"
+        if stats_json_src.is_file():
+            stats_json_dst = opts.output.with_suffix(".stats.json")
+            shutil.copy2(stats_json_src, stats_json_dst)
+            stats_json = stats_json_dst
+
         # Post-pass steps: MIR -> assembly -> optional link
         # Wrap so pass_output is preserved on failure.
         elf_file: Path | None = None
@@ -124,12 +133,14 @@ def compile_rockclimb(
                 elf_file = _link_rockclimb(tc, env, opts)
         except CompilationError as exc:
             exc.pass_output = pass_output
+            exc.stats_json = stats_json
             raise
 
     return RockClimbCompileResult(
         assembly_file=output.with_suffix(".s"),
         elf_file=elf_file,
         pass_output=pass_output,
+        stats_json=stats_json,
     )
 
 
@@ -266,6 +277,7 @@ def _run_rockclimb_pass(
         "-run-pass=rockclimb",
         f"-rockclimb-config={opts.rockclimb_config}",
         energy_flag[0] + "=" + energy_flag[1],
+        f"-ckpt-stats-json={instrumented_mir.parent / 'stats.json'}",
         str(mir_file),
         "-o", str(instrumented_mir),
     ]

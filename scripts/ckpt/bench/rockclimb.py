@@ -64,7 +64,7 @@ def _build_row(
     full_output: str,
 ) -> dict[str, str | int | None]:
     """Build a CSV row dict from parsed statistics and NVM counters."""
-    fields = build_base_fields(stats, full_output)
+    fields = build_base_fields(stats, full_output, nvm)
     fields.update({
         "profiling_time_ms": "",
         "execution_time_ms": stats.execution_time_ms or 0,
@@ -125,7 +125,7 @@ def run_rockclimb_benchmarks(
 
         def compile_fn(
             bench_path: Path, cap: CapacitorConfig
-        ) -> tuple[Path, str]:
+        ) -> tuple[Path, str, Path | None]:
             bench_name = bench_path.stem
             out_dir = workdir / f"{bench_name}_{cap.label}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -143,7 +143,7 @@ def run_rockclimb_benchmarks(
             )
 
             result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)
-            return out_dir, result.pass_output
+            return out_dir, result.pass_output, result.stats_json
 
         run_benchmark_matrix(
             env,

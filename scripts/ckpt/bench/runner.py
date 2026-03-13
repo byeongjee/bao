@@ -9,6 +9,7 @@ statistics, and writes CSV rows.
 from __future__ import annotations
 
 import csv
+import json as _json
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from ..output_parser import (
     detect_infeasibility,
     extract_stat,
     has_pass_statistics,
+    load_stats_json,
     nvm_counters_to_labels,
     parse_nvm_output,
     parse_pass_output,
@@ -51,15 +53,21 @@ def nvm_counter(nvm: NvmCounters | None, attr: str) -> int:
 
 def build_base_fields(
     stats: PassStatistics, full_output: str,
+    nvm: NvmCounters | None,
 ) -> dict[str, str | int | None]:
     """Build the common stats fields shared by all algorithms."""
+    result = ""
+    if nvm is not None and nvm.result is not None:
+        result = str(nvm.result)
+    else:
+        result = extract_stat(full_output, "RESULT") or ""
     return {
         "basic_blocks": stats.basic_blocks or 0,
         "edges": stats.edges or 0,
         "regions": stats.regions or 0,
         "compilation_time_ms": stats.compilation_time_ms or 0,
         "peak_rss_kb": stats.peak_rss_kb or 0,
-        "result": extract_stat(full_output, "RESULT") or "",
+        "result": result,
     }
 
 
@@ -92,7 +100,7 @@ RowBuilder = Callable[
 #
 # Signature:
 #   (bench_path, capacitor) -> (output_dir, compile_output_text)
-CompileFn = Callable[[Path, CapacitorConfig], tuple[Path, str]]
+CompileFn = Callable[[Path, CapacitorConfig], tuple[Path, str, Path | None]]
 
 # Type alias for the optional per-benchmark pre-hook (e.g. trace collection).
 PreBenchmarkFn = Callable[[Path], None]
@@ -212,18 +220,32 @@ def run_benchmark_matrix(
 
                 # ----- Compile -----
                 had_compilation_error = False
+                stats_json_path: Path | None = None
                 try:
-                    output_dir, compile_output = compile_fn(bench_path, cap)
+                    output_dir, compile_output, stats_json_path = compile_fn(bench_path, cap)
                 except CompilationError as exc:
                     compile_output = exc.pass_output or (exc.result.output if exc.result else "")
                     output_dir = None
+                    stats_json_path = getattr(exc, "stats_json", None)
                     had_compilation_error = True
+
+                # ----- Load JSON sidecar once (if available) -----
+                stats_json_data: dict | None = None
+                if stats_json_path is not None and stats_json_path.is_file():
+                    with open(stats_json_path) as _f:
+                        stats_json_data = _json.load(_f)
 
                 # ----- Collect energy params -----
                 ep = extract_energy_params(compile_output)
                 if ep is not None:
                     all_required_keys.update(ep[0])
                     all_missing_keys.update(ep[1])
+                elif stats_json_data is not None:
+                    req = stats_json_data.get("required_energy_keys", [])
+                    miss = stats_json_data.get("missing_energy_keys", [])
+                    if req or miss:
+                        all_required_keys.update(req)
+                        all_missing_keys.update(miss)
 
                 # ----- Flash + NVM read -----
                 nvm: NvmCounters | None = None
@@ -245,31 +267,46 @@ def run_benchmark_matrix(
                 if verbose:
                     print(full_output)
 
-                # ----- Check infeasibility -----
-                infeasible_reason = detect_infeasibility(full_output)
-                if infeasible_reason is not None:
-                    print(f"  INFEASIBLE ({infeasible_reason})")
-                    row = BenchmarkRow(
-                        benchmark=row_name,
-                        capacitor=cap.label,
-                        status="infeasible",
-                    )
-                    write_csv_row(writer, row, csv_header)
-                    continue
+                # ----- Parse stats (prefer JSON, fall back to text) -----
+                stats: PassStatistics | None = None
+                if stats_json_data is not None:
+                    stats, json_feasible, json_reason = load_stats_json(stats_json_data)
+                    if not json_feasible:
+                        print(f"  INFEASIBLE ({json_reason})")
+                        row = BenchmarkRow(
+                            benchmark=row_name,
+                            capacitor=cap.label,
+                            status="infeasible",
+                        )
+                        write_csv_row(writer, row, csv_header)
+                        continue
+                else:
+                    # ----- Check infeasibility (text fallback) -----
+                    infeasible_reason = detect_infeasibility(full_output)
+                    if infeasible_reason is not None:
+                        print(f"  INFEASIBLE ({infeasible_reason})")
+                        row = BenchmarkRow(
+                            benchmark=row_name,
+                            capacitor=cap.label,
+                            status="infeasible",
+                        )
+                        write_csv_row(writer, row, csv_header)
+                        continue
 
-                # ----- Check for compilation failure -----
-                if not has_pass_statistics(full_output):
-                    print("  FAILED (compilation error)")
-                    row = BenchmarkRow(
-                        benchmark=row_name,
-                        capacitor=cap.label,
-                        status="failed",
-                    )
-                    write_csv_row(writer, row, csv_header)
-                    continue
+                    # ----- Check for compilation failure -----
+                    if not has_pass_statistics(full_output):
+                        print("  FAILED (compilation error)")
+                        row = BenchmarkRow(
+                            benchmark=row_name,
+                            capacitor=cap.label,
+                            status="failed",
+                        )
+                        write_csv_row(writer, row, csv_header)
+                        continue
 
-                # ----- Parse stats and build row -----
-                stats = parse_pass_output(full_output)
+                    stats = parse_pass_output(full_output)
+
+                # ----- Build row -----
                 row_fields = row_builder(
                     bench_name, cap.label, stats, nvm, full_output
                 )

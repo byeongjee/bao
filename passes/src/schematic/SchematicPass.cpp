@@ -375,6 +375,27 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 errs() << "SCHEMATIC infeasible: energy capacity too small for function '"
                        << F.getName() << "', path #" << solution.pathsAnalyzed << ": "
                        << result.errorMessage << "\n";
+                if (!StatsJsonOpt.empty()) {
+                    const auto totalEnd = std::chrono::steady_clock::now();
+                    double totalMs =
+                        std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+                    CommonStats c;
+                    c.passName = "SCHEMATIC";
+                    c.functionName = F.getName().str();
+                    c.basicBlocks = ctx.cfg->getBlocks().size();
+                    c.edges = ctx.cfg->getEdges().size();
+                    c.candidateGlobals = state.getCandidates().size();
+                    c.compilationTimeMs = totalMs;
+                    c.peakRSSKb = getPeakRSSKb();
+                    json::Object root = commonStatsToJSON(c);
+                    root["feasible"] = false;
+                    root["infeasibility_reason"] = "energy capacity too small";
+                    root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
+                    root["enabled_checkpoints"] =
+                        static_cast<int64_t>(solution.enabledCheckpoints.size());
+                    root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
+                    writeStatsJSON(StatsJsonOpt, std::move(root));
+                }
                 return PreservedAnalyses::all();
             }
 
@@ -458,6 +479,27 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             errs() << "SCHEMATIC infeasible: energy capacity too small for function '"
                    << F.getName() << "', uncovered block '" << BB->getName()
                    << "': " << result.errorMessage << "\n";
+            if (!StatsJsonOpt.empty()) {
+                const auto totalEnd = std::chrono::steady_clock::now();
+                double totalMs =
+                    std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+                CommonStats c;
+                c.passName = "SCHEMATIC";
+                c.functionName = F.getName().str();
+                c.basicBlocks = ctx.cfg->getBlocks().size();
+                c.edges = ctx.cfg->getEdges().size();
+                c.candidateGlobals = state.getCandidates().size();
+                c.compilationTimeMs = totalMs;
+                c.peakRSSKb = getPeakRSSKb();
+                json::Object root = commonStatsToJSON(c);
+                root["feasible"] = false;
+                root["infeasibility_reason"] = "energy capacity too small";
+                root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
+                root["enabled_checkpoints"] =
+                    static_cast<int64_t>(solution.enabledCheckpoints.size());
+                root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
+                writeStatsJSON(StatsJsonOpt, std::move(root));
+            }
             return PreservedAnalyses::all();
         }
 
@@ -564,6 +606,26 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     errs() << "  Store mem calls inserted:        " << instrumenter.storeMemCalls() << "\n";
     errs() << "  Restore mem calls inserted:      " << instrumenter.restoreMemCalls() << "\n";
     errs() << "  Trace-guided:                    yes\n";
+
+    if (!StatsJsonOpt.empty()) {
+        CommonStats c;
+        c.passName = "SCHEMATIC";
+        c.functionName = F.getName().str();
+        c.basicBlocks = ctx.cfg->getBlocks().size();
+        c.edges = ctx.cfg->getEdges().size();
+        c.candidateGlobals = state.getCandidates().size();
+        c.regions = solution.regions.size();
+        c.regionBoundaries = solution.enabledCheckpoints.size();
+        c.runtimeCallsInserted = inserted;
+        c.compilationTimeMs = totalExecutionTimeMs;
+        c.peakRSSKb = getPeakRSSKb();
+        json::Object root = commonStatsToJSON(c);
+        root["feasible"] = true;
+        root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
+        root["enabled_checkpoints"] = static_cast<int64_t>(solution.enabledCheckpoints.size());
+        root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
+        writeStatsJSON(StatsJsonOpt, std::move(root));
+    }
 
     return PreservedAnalyses::none();
 }

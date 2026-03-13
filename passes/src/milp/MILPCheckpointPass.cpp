@@ -119,6 +119,25 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
                    << " (cost: " << abstractCFG.model->getBlockEnergyCost(block)
                    << ", capacity: " << ctx.milpParams.capacity << ")\n";
         }
+        if (!StatsJsonOpt.empty()) {
+            const auto totalEnd = std::chrono::steady_clock::now();
+            double totalMs =
+                std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+            CommonStats c;
+            c.passName = "MILP";
+            c.functionName = F.getName().str();
+            c.basicBlocks = ctx.cfg->getBlocks().size();
+            c.edges = ctx.cfg->getEdges().size();
+            c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+            c.compilationTimeMs = totalMs;
+            c.peakRSSKb = getPeakRSSKb();
+            json::Object root = commonStatsToJSON(c);
+            root["feasible"] = false;
+            root["infeasibility_reason"] = "blocks exceed energy capacity";
+            root["milp_variables"] = static_cast<int64_t>(optimizer.getNumVars());
+            root["milp_constraints"] = static_cast<int64_t>(optimizer.getNumConstrs());
+            writeStatsJSON(StatsJsonOpt, std::move(root));
+        }
         return PreservedAnalyses::all();
     }
 
@@ -188,6 +207,42 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             }
         }
 
+        if (!StatsJsonOpt.empty()) {
+            CommonStats c;
+            c.passName = "MILP";
+            c.functionName = F.getName().str();
+            c.basicBlocks = ctx.cfg->getBlocks().size();
+            c.edges = ctx.cfg->getEdges().size();
+            c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+            c.compilationTimeMs = totalExecutionTimeMs;
+            c.peakRSSKb = getPeakRSSKb();
+            json::Object root = commonStatsToJSON(c);
+            root["feasible"] = false;
+            root["infeasibility_reason"] = "solver found no feasible solution";
+            root["milp_variables"] = static_cast<int64_t>(optimizer.getNumVars());
+            root["milp_constraints"] = static_cast<int64_t>(optimizer.getNumConstrs());
+            root["optimal_solution"] = "no (solver failed)";
+            root["solve_time_ms"] = solveTimeMs;
+            root["boundary_commits_enabled"] = int64_t{0};
+            json::Object acfg;
+            acfg["abstract_nodes"] = static_cast<int64_t>(abstractCFG.stats.abstractNodes);
+            acfg["abstract_edges"] = static_cast<int64_t>(abstractCFG.stats.abstractEdges);
+            acfg["loops_seen"] = static_cast<int64_t>(abstractCFG.stats.loopsSeen);
+            acfg["loops_eligible"] = static_cast<int64_t>(abstractCFG.stats.loopsEligible);
+            acfg["loops_summarized"] = static_cast<int64_t>(abstractCFG.stats.loopsSummarized);
+            acfg["strip_mined_loops_seen"] =
+                static_cast<int64_t>(abstractCFG.stats.stripMinedLoopsSeen);
+            acfg["strip_mined_loops_summarized"] =
+                static_cast<int64_t>(abstractCFG.stats.stripMinedLoopsSummarized);
+            acfg["strip_mined_loops_skipped"] =
+                static_cast<int64_t>(abstractCFG.stats.stripMinedLoopsSkipped);
+            root["abstract_cfg"] = std::move(acfg);
+            root["ineligible_globals"] = static_cast<int64_t>(ineligGlobalCount);
+            root["ineligible_allocas"] = static_cast<int64_t>(ineligAllocaCount);
+            root["ineligible_ssa"] = static_cast<int64_t>(ineligSSACount);
+            writeStatsJSON(StatsJsonOpt, std::move(root));
+        }
+
         return PreservedAnalyses::all();
     }
     auto solveEnd = std::chrono::steady_clock::now();
@@ -197,6 +252,25 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
 
     if (solution.regionStarts.empty()) {
         errs() << "No region boundaries needed for function " << F.getName() << "\n";
+        if (!StatsJsonOpt.empty()) {
+            const auto totalEnd = std::chrono::steady_clock::now();
+            double totalMs =
+                std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+            CommonStats c;
+            c.passName = "MILP";
+            c.functionName = F.getName().str();
+            c.basicBlocks = ctx.cfg->getBlocks().size();
+            c.edges = ctx.cfg->getEdges().size();
+            c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+            c.compilationTimeMs = totalMs;
+            c.peakRSSKb = getPeakRSSKb();
+            json::Object root = commonStatsToJSON(c);
+            root["feasible"] = true;
+            root["milp_variables"] = static_cast<int64_t>(optimizer.getNumVars());
+            root["milp_constraints"] = static_cast<int64_t>(optimizer.getNumConstrs());
+            root["solve_time_ms"] = solveTimeMs;
+            writeStatsJSON(StatsJsonOpt, std::move(root));
+        }
         return PreservedAnalyses::all();
     }
 
@@ -260,6 +334,50 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         for (const auto &[reason, count] : abstractCFG.stats.skippedReasons) {
             errs() << "    - " << reason << ": " << count << "\n";
         }
+    }
+
+    if (!StatsJsonOpt.empty()) {
+        CommonStats c;
+        c.passName = "MILP";
+        c.functionName = F.getName().str();
+        c.basicBlocks = ctx.cfg->getBlocks().size();
+        c.edges = ctx.cfg->getEdges().size();
+        c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+        c.regions = solution.regionStarts.size();
+        c.regionBoundaries = solution.regionStarts.empty() ? 0 : solution.regionStarts.size() - 1;
+        c.runtimeCallsInserted = inserted;
+        c.compilationTimeMs = totalExecutionTimeMs;
+        c.peakRSSKb = getPeakRSSKb();
+        json::Object root = commonStatsToJSON(c);
+        root["feasible"] = true;
+        root["milp_variables"] = static_cast<int64_t>(optimizer.getNumVars());
+        root["milp_constraints"] = static_cast<int64_t>(optimizer.getNumConstrs());
+        if (solution.solverStatus == SolverStatus::Optimal) {
+            root["optimal_solution"] = "yes";
+        } else {
+            root["optimal_solution"] =
+                std::string("no (MIP gap: ") + std::to_string(solution.mipGap) + ")";
+        }
+        root["boundary_commits_enabled"] = static_cast<int64_t>(commitCount);
+        root["boundary_restores_enabled"] = static_cast<int64_t>(restoreCount);
+        root["solve_time_ms"] = solveTimeMs;
+        json::Object acfg;
+        acfg["abstract_nodes"] = static_cast<int64_t>(abstractCFG.stats.abstractNodes);
+        acfg["abstract_edges"] = static_cast<int64_t>(abstractCFG.stats.abstractEdges);
+        acfg["loops_seen"] = static_cast<int64_t>(abstractCFG.stats.loopsSeen);
+        acfg["loops_eligible"] = static_cast<int64_t>(abstractCFG.stats.loopsEligible);
+        acfg["loops_summarized"] = static_cast<int64_t>(abstractCFG.stats.loopsSummarized);
+        acfg["strip_mined_loops_seen"] =
+            static_cast<int64_t>(abstractCFG.stats.stripMinedLoopsSeen);
+        acfg["strip_mined_loops_summarized"] =
+            static_cast<int64_t>(abstractCFG.stats.stripMinedLoopsSummarized);
+        acfg["strip_mined_loops_skipped"] =
+            static_cast<int64_t>(abstractCFG.stats.stripMinedLoopsSkipped);
+        root["abstract_cfg"] = std::move(acfg);
+        root["ineligible_globals"] = static_cast<int64_t>(ineligGlobalCount);
+        root["ineligible_allocas"] = static_cast<int64_t>(ineligAllocaCount);
+        root["ineligible_ssa"] = static_cast<int64_t>(ineligSSACount);
+        writeStatsJSON(StatsJsonOpt, std::move(root));
     }
 
     return PreservedAnalyses::none();

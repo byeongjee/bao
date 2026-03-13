@@ -71,7 +71,7 @@ def _build_row(
     full_output: str,
 ) -> dict[str, str | int | None]:
     """Build a CSV row dict from parsed statistics and NVM counters."""
-    fields = build_base_fields(stats, full_output)
+    fields = build_base_fields(stats, full_output, nvm)
     optimal = stats.optimal_solution
     if optimal is not None:
         optimal = "yes" if optimal == "yes" else "no"
@@ -153,7 +153,7 @@ def run_milp_benchmarks(
 
         def compile_fn(
             bench_path: Path, cap: CapacitorConfig
-        ) -> tuple[Path, str]:
+        ) -> tuple[Path, str, Path | None]:
             bench_name = bench_path.stem
             out_dir = workdir / f"{bench_name}_{cap.label}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -173,7 +173,7 @@ def run_milp_benchmarks(
             )
 
             result: MilpCompileResult = compile_milp(tc, env, opts)
-            return out_dir, result.pass_output
+            return out_dir, result.pass_output, result.stats_json
 
         run_benchmark_matrix(
             env,

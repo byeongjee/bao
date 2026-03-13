@@ -1,8 +1,14 @@
 #pragma once
 
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <string>
+
+/// Shared CLI option for writing pass statistics to a JSON sidecar file.
+/// Defined in PassStatistics.cpp so it is available in every pass library.
+extern llvm::cl::opt<std::string> StatsJsonOpt;
 
 namespace checkpoint {
 
@@ -23,5 +29,11 @@ struct CommonStats {
 /// Print the common statistics header block.
 /// Each pass calls this, then prints its own pass-specific section.
 void printCommonStats(llvm::raw_ostream &OS, const CommonStats &stats);
+
+/// Serialize common statistics to a JSON object.
+llvm::json::Object commonStatsToJSON(const CommonStats &stats);
+
+/// Write a JSON object to a file.  Returns true on success.
+bool writeStatsJSON(llvm::StringRef path, llvm::json::Object root);
 
 } // namespace checkpoint
