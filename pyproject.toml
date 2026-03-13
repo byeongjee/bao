@@ -29,4 +29,5 @@ markers = [
     "rockclimb: RockClimb machine-level (post-regalloc) pass tests",
     "schematic: SCHEMATIC pass tests",
     "vm_nvm: VM/NVM placement tests",
+    "unit: Pure-function unit tests (no subprocess, no device)",
 ]
