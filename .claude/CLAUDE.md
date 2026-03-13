@@ -143,7 +143,8 @@ scripts/ckpt/
 ├── device/
 │   ├── nvm.py           # Symbol resolution, hex dump parsing
 │   ├── serial.py        # UART reading
-│   └── flash.py         # flash_run_and_read() in pure Python
+│   ├── flash.py         # flash_run_and_read(), flash(), read_nvm()
+│   └── saleae.py        # Saleae Logic 2 automation for execution timing
 ├── bench/
 │   ├── config.py        # Benchmark/capacitor discovery and filtering
 │   ├── runner.py        # Shared benchmark matrix loop + CSV output
@@ -175,7 +176,7 @@ passes/
 │   └── schematic/     # SCHEMATIC pass pipeline components
 ├── bb-debuginfo/      # Separate LLVM pass: assigns BB indices as DWARF line numbers
 ├── bb-energy-analyzer/ # Standalone tool: computes per-BB energy from MSP430 assembly
-└── runtime/           # C/assembly runtime stubs for instrumented outputs
+└── runtime/           # C/assembly runtime stubs (benchmark.h, debug counters)
 ```
 
 ### MILP Pass Data Flow
@@ -282,3 +283,4 @@ Sample configs are in `benchmarks/` and `tests/`.
 - **click>=8.1** (CLI framework, installed with `uv pip install -e .`)
 - **pyserial>=3.5** (device UART communication)
 - **matplotlib, numpy** (optional, for plotting: `uv pip install -e ".[plot]"`)
+- **logic2-automation** (optional, for Saleae timing: `uv sync --extra saleae`)
