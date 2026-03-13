@@ -37,11 +37,6 @@ static cl::opt<std::string> RockClimbMachineEnergyDataOpt(
     "rockclimb-energy-data", cl::desc("Pre-computed per-BB energy JSON (from bb-energy-analyzer)"),
     cl::value_desc("filename"), cl::init(""));
 
-static cl::opt<bool>
-    RockClimbMachineDumpEnergyKeysOpt("rockclimb-dump-energy-keys",
-                                      cl::desc("Print all required energy parameter keys and exit"),
-                                      cl::init(false));
-
 static cl::opt<bool> AddDebugMarkersOpt("add-debug-markers",
                                         cl::desc("Emit runtime function calls for register "
                                                  "save/restore (for mock counter debugging)"),
@@ -204,41 +199,26 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
 
     MachineEnergyEstimator &estimator = *estimatorPtr;
 
-    // Dump all required energy keys if requested (only for instruction-level mode)
-    if (RockClimbMachineDumpEnergyKeysOpt) {
-        if (estimator.isPrecomputed()) {
-            errs() << "Note: --dump-energy-keys has no effect with pre-computed energy data\n";
-            return false;
-        }
-
+    // Report required/missing energy keys for MIR estimation mode
+    if (!hasPrecomputed) {
         std::set<std::string> allKeys, missingKeys;
         estimator.collectRequiredKeys(MF, allKeys, missingKeys);
 
-        errs() << "\n=== Required Energy Parameter Keys (" << MF.getName() << ") ===\n";
+        errs() << "\n--- Energy parameters for " << MF.getName() << " ---\n";
+        errs() << "  Required (" << allKeys.size() << " keys):";
+        bool first = true;
         for (const auto &key : allKeys) {
-            bool missing = missingKeys.count(key);
-            errs() << "  " << key;
-            if (missing)
-                errs() << "  [MISSING]";
-            errs() << "\n";
+            errs() << (first ? " " : ", ") << key;
+            first = false;
         }
-        errs() << "\nTotal: " << allKeys.size() << " keys, " << missingKeys.size()
-               << " missing\n\n";
-
-        if (!missingKeys.empty()) {
-            errs() << "Missing keys as JSON snippet:\n";
-            errs() << "{\n";
-            bool first = true;
-            for (const auto &key : missingKeys) {
-                if (!first)
-                    errs() << ",\n";
-                errs() << "  \"" << key << "\": 0.0";
-                first = false;
-            }
-            errs() << "\n}\n\n";
+        errs() << "\n";
+        errs() << "  Missing  (" << missingKeys.size() << " keys):";
+        first = true;
+        for (const auto &key : missingKeys) {
+            errs() << (first ? " " : ", ") << key;
+            first = false;
         }
-
-        return false;
+        errs() << "\n";
     }
 
     // Get MachineLoopInfo

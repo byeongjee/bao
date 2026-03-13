@@ -146,7 +146,7 @@ def _precomputed_pipeline(
 ) -> str:
     """Pipeline with assembly-based pre-computed BB energy.
 
-    Returns the pass output string.
+    Returns pass_output (including bb-energy-analyzer stderr).
     """
     # Step 2: Assign BB debug info
     bbinfo_ll = tmp / "bbinfo.ll"
@@ -199,12 +199,14 @@ def _precomputed_pipeline(
         step_name="bb-energy-analyzer",
     )
     bb_energy.write_text(result.stdout)
+    analyzer_stderr = result.stderr
 
     # Step 4: RockClimb machine pass with pre-computed energy
-    return _run_rockclimb_pass(
+    pass_output = _run_rockclimb_pass(
         tc, env, opts, tmp, mir_file,
         energy_flag=("-rockclimb-energy-data", str(bb_energy)),
     )
+    return analyzer_stderr + pass_output
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +222,7 @@ def _mir_estimation_pipeline(
 ) -> str:
     """Pipeline with MIR-level energy estimation (fallback).
 
-    Returns the pass output string.
+    Returns pass_output.
     """
     # Step 2: IR -> MIR
     mir_file = tmp / "pre.mir"
@@ -235,10 +237,11 @@ def _mir_estimation_pipeline(
     )
 
     # Step 3: RockClimb machine pass with MIR-level estimation
-    return _run_rockclimb_pass(
+    pass_output = _run_rockclimb_pass(
         tc, env, opts, tmp, mir_file,
         energy_flag=("-rockclimb-energy-config", str(opts.energy_config)),
     )
+    return pass_output
 
 
 # ---------------------------------------------------------------------------

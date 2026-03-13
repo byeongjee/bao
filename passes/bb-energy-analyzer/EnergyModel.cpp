@@ -58,6 +58,7 @@ bool EnergyModel::hasEnergy(const std::string &mnemonic, const std::string &addr
 
 double EnergyModel::getEnergy(const std::string &mnemonic, const std::string &addrMode) const {
     std::string key = makeKey(mnemonic, addrMode);
+    requiredKeys_.insert(key);
 
     auto it = costs_.find(key);
     if (it != costs_.end()) {
@@ -78,6 +79,7 @@ double EnergyModel::getEnergy(const std::string &mnemonic, const std::string &ad
         warned[key] = true;
     }
 
+    missingKeys_.insert(key);
     return defaultEnergy_;
 }
 
