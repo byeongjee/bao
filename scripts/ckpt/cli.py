@@ -663,11 +663,7 @@ def verify() -> None:
 
 @verify.command("rockclimb")
 @click.argument("benchmarks", nargs=-1)
-@click.option(
-    "--cap",
-    default="1uF",
-    help="Capacitor size for verification (default: 1uF).",
-)
+@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
 @click.option("--timeout", type=int, default=30, help="Serial timeout in seconds.")
 @click.option("-v", "--verbose", is_flag=True, help="Show full compile/serial output.")
 @click.option(
@@ -677,26 +673,19 @@ def verify() -> None:
     help="Override default energy config.",
 )
 @click.option(
-    "-c",
-    "--rockclimb-config",
-    type=click.Path(exists=True),
-    help="Override default RockClimb config.",
-)
-@click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
-    default="nop",
-    help="Halt mode for linked binary.",
+    default="bor",
+    help="Halt mode for linked binary (default: bor).",
 )
 @click.pass_context
 def verify_rockclimb_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
-    cap: str,
+    cap: tuple[str, ...],
     timeout: int,
     verbose: bool,
     energy_config: str | None,
-    rockclimb_config: str | None,
     halt_mode: str,
 ) -> None:
     """Verify semantic correctness of RockClimb checkpoint insertion."""
@@ -706,12 +695,11 @@ def verify_rockclimb_cmd(
         ctx.obj["env"],
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
-        cap_size=cap,
+        caps=list(cap) if cap else None,
         timeout=timeout,
         verbose=verbose,
         halt_mode=halt_mode,
         energy_config=Path(energy_config) if energy_config else None,
-        rockclimb_config=Path(rockclimb_config) if rockclimb_config else None,
     )
     if not success:
         raise SystemExit(1)
