@@ -147,11 +147,12 @@ def run_milp_benchmarks(
         else:
             energy_config = default_energy_config(env, "milp")
 
+    if not check_device_available():
+        raise ConfigError("No MSP430 device detected")
+
     from ..device.saleae import discover_saleae
 
     saleae_manager = discover_saleae()
-    if not check_device_available():
-        raise ConfigError("No MSP430 device detected")
 
     # Shared workdir for all compilations (cleaned up on exit)
     with compilation_workdir(prefix="milp_bench_") as workdir:

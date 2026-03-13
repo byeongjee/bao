@@ -33,8 +33,8 @@ from ..runner import CompilationError
 from ..toolchain import Toolchain
 from .config import CapacitorConfig
 
-_FLASH_TIMEOUT = 30   # seconds
-_CAPTURE_TIMEOUT = 60  # seconds (longer — includes device execution)
+_FLASH_TIMEOUT = 30              # seconds
+_AFTER_TRIGGER_SECONDS = 1.0     # seconds to record after falling edge
 
 
 @dataclass
@@ -78,13 +78,13 @@ def build_base_fields(
 def check_device_available() -> bool:
     """Check if an MSP430 device is connected.
 
-    Runs ``mspdebug tilib 'exit'`` with a 3-second timeout.
+    Runs ``mspdebug tilib 'exit'`` with a 10-second timeout.
     """
     try:
         result = subprocess.run(
             ["mspdebug", "tilib", "exit"],
             capture_output=True,
-            timeout=3,
+            timeout=10,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -253,7 +253,7 @@ def run_benchmark_matrix(
 
                             execution_time_us = saleae_run(
                                 tc, elf, saleae_manager,
-                                _FLASH_TIMEOUT, _CAPTURE_TIMEOUT,
+                                _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
                             )
 
                             if debug_counters and nvm_symbols:

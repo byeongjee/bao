@@ -55,27 +55,31 @@ def saleae_run(
     elf_path: Path,
     manager: object,
     flash_timeout: int,
-    capture_timeout: int,
+    after_trigger_seconds: float,
 ) -> float:
     """Flash ELF, capture GPIO waveform, return execution_time_us.
 
     Uses digital channel ``_SALEAE_CHANNEL`` at ``_SALEAE_SAMPLE_RATE`` Hz.
+    Capture triggers on the falling edge of the GPIO pin (program done)
+    and records *after_trigger_seconds* more data before stopping.
 
     Flow:
-        1. Start Saleae capture
+        1. Start Saleae capture (trigger: falling edge on GPIO channel)
         2. Flash the ELF via mspdebug (device resets and starts running)
-        3. Wait up to *capture_timeout* seconds for the falling edge
-        4. Stop capture
+        3. Saleae records until falling edge is detected
+        4. Record *after_trigger_seconds* more, then capture ends
         5. Export raw digital data, find first rising->last falling edge
         6. Return delta in microseconds
 
     Raises DeviceError if no rising edge is detected (GPIO never went
-    high) or no falling edge within *capture_timeout* (program hung).
+    high) or no falling edge (program hung — capture.wait blocks until
+    trigger fires).
     """
     from saleae.automation import (
         CaptureConfiguration,
+        DigitalTriggerCaptureMode,
+        DigitalTriggerType,
         LogicDeviceConfiguration,
-        TimedCaptureMode,
     )
 
     device_config = LogicDeviceConfiguration(
@@ -83,7 +87,11 @@ def saleae_run(
         digital_sample_rate=_SALEAE_SAMPLE_RATE,
     )
     capture_config = CaptureConfiguration(
-        capture_mode=TimedCaptureMode(capture_timeout),
+        capture_mode=DigitalTriggerCaptureMode(
+            trigger_type=DigitalTriggerType.FALLING,
+            trigger_channel_index=_SALEAE_CHANNEL,
+            after_trigger_seconds=after_trigger_seconds,
+        ),
     )
 
     capture = manager.start_capture(

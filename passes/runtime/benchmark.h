@@ -21,12 +21,15 @@
 #ifndef BENCHMARK_H
 #define BENCHMARK_H
 
+#ifdef __MSP430__
 #include <msp430.h>
+#endif
 
 /* End-of-output marker — used by all runtimes, detected by read_serial.py */
 #define DEBUG_END_MARKER "[END_OUTPUT]"
 
 /* --- GPIO timing (always on, negligible overhead) --- */
+#ifdef __MSP430__
 static inline void timing_gpio_init(void) {
     P3DIR |= BIT4;
     P3OUT &= ~BIT4;
@@ -37,6 +40,11 @@ static inline void timing_gpio_start(void) {
 static inline void timing_gpio_stop(void) {
     P3OUT &= ~BIT4;
 }
+#else
+static inline void timing_gpio_init(void) {}
+static inline void timing_gpio_start(void) {}
+static inline void timing_gpio_stop(void) {}
+#endif
 
 /* --- Benchmark entry/exit macros --- */
 #ifdef DEBUG_COUNTERS

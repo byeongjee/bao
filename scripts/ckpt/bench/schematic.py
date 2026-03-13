@@ -162,11 +162,12 @@ def run_schematic_benchmarks(
     if trace_config is None:
         trace_config = env.project_dir / "benchmarks" / "config_10uF.json"
 
+    if not check_device_available():
+        raise ConfigError("No MSP430 device detected")
+
     from ..device.saleae import discover_saleae
 
     saleae_manager = discover_saleae()
-    if not check_device_available():
-        raise ConfigError("No MSP430 device detected")
 
     # State shared between pre_benchmark and compile_fn/row_builder
     profiling_time_ms = 0

@@ -120,11 +120,12 @@ def run_rockclimb_benchmarks(
     if energy_config is None:
         energy_config = default_energy_config(env, "rockclimb")
 
+    if not check_device_available():
+        raise ConfigError("No MSP430 device detected")
+
     from ..device.saleae import discover_saleae
 
     saleae_manager = discover_saleae()
-    if not check_device_available():
-        raise ConfigError("No MSP430 device detected")
 
     with compilation_workdir(prefix="rockclimb_bench_") as workdir:
 

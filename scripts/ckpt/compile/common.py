@@ -183,6 +183,9 @@ def run_assembly_energy(
 _DEBUG_STUBS_C = """\
 void debug_init(void) {}
 void debug_exit(int result) { (void)result; }
+/* GPIO register stubs for native profiling (benchmark.h references P3DIR/P3OUT
+   via static inline functions that get baked into the LLVM IR). */
+unsigned char P3DIR, P3OUT;
 """
 
 
