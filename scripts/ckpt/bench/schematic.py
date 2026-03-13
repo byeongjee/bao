@@ -38,6 +38,7 @@ from .config import (
 from .runner import (
     BenchmarkSkipped,
     build_base_fields,
+    check_device_available,
     nvm_counter,
     run_benchmark_matrix,
 )
@@ -52,6 +53,7 @@ _CSV_HEADER: list[str] = [
     "compilation_time_ms",
     "peak_rss_kb",
     "profiling_time_ms",
+    "execution_time_us",
     "runtime_region_boundary_calls",
     "runtime_debug_save_reg_calls",
     "runtime_debug_restore_reg_calls",
@@ -159,6 +161,12 @@ def run_schematic_benchmarks(
     # Config for trace collection phase (any capacitor works; 10uF by default)
     if trace_config is None:
         trace_config = env.project_dir / "benchmarks" / "config_10uF.json"
+
+    from ..device.saleae import discover_saleae
+
+    saleae_manager = discover_saleae()
+    if not check_device_available():
+        raise ConfigError("No MSP430 device detected")
 
     # State shared between pre_benchmark and compile_fn/row_builder
     profiling_time_ms = 0
@@ -283,4 +291,5 @@ def run_schematic_benchmarks(
             csv_header=_CSV_HEADER,
             row_builder=row_builder,
             pre_benchmark=pre_benchmark,
+            saleae_manager=saleae_manager,
         )
