@@ -87,7 +87,7 @@ def _build_row(
     profiling_time_ms: int = 0,
 ) -> dict[str, str | int | None]:
     """Build a CSV row dict from parsed statistics and NVM counters."""
-    fields = build_base_fields(stats, full_output)
+    fields = build_base_fields(stats, full_output, nvm)
     fields.update({
         "profiling_time_ms": profiling_time_ms,
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
@@ -224,7 +224,7 @@ def run_schematic_benchmarks(
 
         def compile_fn(
             bench_path: Path, cap: CapacitorConfig
-        ) -> tuple[Path, str]:
+        ) -> tuple[Path, str, Path | None]:
             bench_name = bench_path.stem
             out_dir = workdir / f"{bench_name}_{cap.label}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -249,7 +249,7 @@ def run_schematic_benchmarks(
             result: SchematicCompileResult = compile_schematic(
                 tc, env, compile_opts
             )
-            return out_dir, result.pass_output
+            return out_dir, result.pass_output, result.stats_json
 
         def row_builder(
             bench_name: str,

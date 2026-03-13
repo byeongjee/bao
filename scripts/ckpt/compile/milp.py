@@ -57,6 +57,7 @@ class MilpCompileResult:
     elf_file: Path | None
     pass_output: str
     profiling_time_ms: int
+    stats_json: Path | None
 
 
 def compile_milp(
@@ -128,6 +129,14 @@ def compile_milp(
                 tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
             )
 
+        # Copy stats JSON if available
+        stats_json: Path | None = None
+        stats_json_src = tmp / "stats.json"
+        if stats_json_src.is_file():
+            stats_json_dst = opts.output.with_suffix(".stats.json")
+            shutil.copy2(stats_json_src, stats_json_dst)
+            stats_json = stats_json_dst
+
         # Compile to MSP430 object + optional link
         # Wrap post-pass steps so pass_output is preserved on failure.
         elf_file: Path | None = None
@@ -144,6 +153,7 @@ def compile_milp(
                 elf_file = _link_milp(tc, env, opts)
         except CompilationError as exc:
             exc.pass_output = pass_output
+            exc.stats_json = stats_json
             raise
 
     return MilpCompileResult(
@@ -152,6 +162,7 @@ def compile_milp(
         elf_file=elf_file,
         pass_output=pass_output,
         profiling_time_ms=profiling_ms,
+        stats_json=stats_json,
     )
 
 
@@ -313,6 +324,7 @@ def _run_milp_pass(
         f"-bb-freq-file={bb_freq_json}",
     ]
     cmd += milp_extra_flags
+    cmd.append(f"-ckpt-stats-json={output_ll.parent / 'stats.json'}")
     cmd += ["-S", str(input_ll), "-o", str(output_ll)]
 
     result = run(cmd, step_name=pass_name)

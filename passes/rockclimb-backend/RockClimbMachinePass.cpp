@@ -15,6 +15,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "common/BlockUtils.h"
+#include "common/PassStatistics.h"
 
 #include <chrono>
 #include <fstream>
@@ -142,6 +143,37 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
     return true;
 }
 
+/// Build a CommonStats struct for RockClimb, computing edge count and timing.
+static CommonStats buildRockClimbStats(MachineFunction &MF,
+                                       std::chrono::steady_clock::time_point totalStart) {
+    const auto totalEnd = std::chrono::steady_clock::now();
+    double totalMs = std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+    unsigned edgeCount = 0;
+    for (auto &MBB : MF)
+        edgeCount += MBB.succ_size();
+    CommonStats c;
+    c.passName = "RockClimb-Machine";
+    c.functionName = MF.getName().str();
+    c.basicBlocks = MF.size();
+    c.edges = edgeCount;
+    c.compilationTimeMs = totalMs;
+    c.peakRSSKb = getPeakRSSKb();
+    return c;
+}
+
+/// Write an infeasible-result JSON sidecar for RockClimb.
+static void writeInfeasibleJSON(MachineFunction &MF,
+                                std::chrono::steady_clock::time_point totalStart,
+                                const std::string &reason) {
+    if (StatsJsonOpt.empty())
+        return;
+    auto c = buildRockClimbStats(MF, totalStart);
+    auto root = commonStatsToJSON(c);
+    root["feasible"] = false;
+    root["infeasibility_reason"] = reason;
+    writeStatsJSON(StatsJsonOpt, std::move(root));
+}
+
 char RockClimbMachinePass::ID = 0;
 
 RockClimbMachinePass::RockClimbMachinePass() : MachineFunctionPass(ID) {}
@@ -200,21 +232,21 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     MachineEnergyEstimator &estimator = *estimatorPtr;
 
     // Report required/missing energy keys for MIR estimation mode
+    std::set<std::string> requiredEnergyKeys, missingEnergyKeys;
     if (!hasPrecomputed) {
-        std::set<std::string> allKeys, missingKeys;
-        estimator.collectRequiredKeys(MF, allKeys, missingKeys);
+        estimator.collectRequiredKeys(MF, requiredEnergyKeys, missingEnergyKeys);
 
         errs() << "\n--- Energy parameters for " << MF.getName() << " ---\n";
-        errs() << "  Required (" << allKeys.size() << " keys):";
+        errs() << "  Required (" << requiredEnergyKeys.size() << " keys):";
         bool first = true;
-        for (const auto &key : allKeys) {
+        for (const auto &key : requiredEnergyKeys) {
             errs() << (first ? " " : ", ") << key;
             first = false;
         }
         errs() << "\n";
-        errs() << "  Missing  (" << missingKeys.size() << " keys):";
+        errs() << "  Missing  (" << missingEnergyKeys.size() << " keys):";
         first = true;
-        for (const auto &key : missingKeys) {
+        for (const auto &key : missingEnergyKeys) {
             errs() << (first ? " " : ", ") << key;
             first = false;
         }
@@ -233,6 +265,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
         auto prelimResult = optimizer.optimize();
         if (!prelimResult.feasible) {
             errs() << "Region partitioning failed: " << prelimResult.errorMessage << "\n";
+            writeInfeasibleJSON(MF, totalStart, prelimResult.errorMessage);
             return false;
         }
 
@@ -251,6 +284,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     MachineRockClimbResult result = optimizer.optimize();
     if (!result.feasible) {
         errs() << "Region partitioning failed: " << result.errorMessage << "\n";
+        writeInfeasibleJSON(MF, totalStart, result.errorMessage);
         return false;
     }
 
@@ -327,6 +361,31 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     errs() << "  Total instrumentation points:    " << insertedCount << "\n";
     errs() << "  Compilation time (ms):           " << totalMs << "\n";
     errs() << "  Peak RSS (KB):                   " << checkpoint::getPeakRSSKb() << "\n";
+
+    if (!StatsJsonOpt.empty()) {
+        CommonStats c;
+        c.passName = "RockClimb-Machine";
+        c.functionName = MF.getName().str();
+        c.basicBlocks = MF.size();
+        c.edges = edgeCount;
+        c.regions = result.regions.size();
+        c.regionBoundaries = result.regionBoundaries.size();
+        c.compilationTimeMs = totalMs;
+        c.peakRSSKb = getPeakRSSKb();
+        auto root = commonStatsToJSON(c);
+        root["boundary_checks"] = static_cast<int64_t>(boundaryChecks);
+        root["feasible"] = true;
+        if (!requiredEnergyKeys.empty()) {
+            json::Array reqArr, missArr;
+            for (const auto &k : requiredEnergyKeys)
+                reqArr.push_back(k);
+            for (const auto &k : missingEnergyKeys)
+                missArr.push_back(k);
+            root["required_energy_keys"] = std::move(reqArr);
+            root["missing_energy_keys"] = std::move(missArr);
+        }
+        writeStatsJSON(StatsJsonOpt, std::move(root));
+    }
 
     return insertedCount > 0; // Return true if we modified the function
 }

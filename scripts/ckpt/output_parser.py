@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -196,3 +198,36 @@ def detect_infeasibility(text: str) -> str | None:
 def has_pass_statistics(text: str) -> bool:
     """Check if the output contains pass statistics (successful compilation)."""
     return "Checkpoint Insertion Statistics" in text
+
+
+def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
+    """Load pass statistics from a pre-loaded JSON dict.
+
+    Returns (stats, feasible, infeasibility_reason).
+    """
+
+    stats = PassStatistics(
+        basic_blocks=data.get("basic_blocks"),
+        edges=data.get("edges"),
+        regions=data.get("regions"),
+        candidate_globals=data.get("candidate_globals"),
+        milp_variables=data.get("milp_variables"),
+        milp_constraints=data.get("milp_constraints"),
+        optimal_solution=data.get("optimal_solution"),
+        region_boundaries=data.get("region_boundaries"),
+        # MILP writes "boundary_commits_enabled"; maps to distributed_checkpoints
+        distributed_checkpoints=data.get("boundary_commits_enabled"),
+        solve_time_ms=round(data["solve_time_ms"]) if "solve_time_ms" in data else None,
+        compilation_time_ms=round(data["compilation_time_ms"]) if "compilation_time_ms" in data else None,
+        peak_rss_kb=data.get("peak_rss_kb"),
+        boundary_checks=data.get("boundary_checks"),
+        enabled_checkpoints=data.get("enabled_checkpoints"),
+        loop_decisions=data.get("loop_decisions"),
+        paths_analyzed=data.get("paths_analyzed"),
+        runtime_calls_inserted=data.get("runtime_calls_inserted"),
+    )
+
+    feasible = data.get("feasible", True)
+    infeasibility_reason = data.get("infeasibility_reason")
+
+    return stats, feasible, infeasibility_reason

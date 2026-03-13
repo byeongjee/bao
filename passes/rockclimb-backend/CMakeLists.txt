@@ -10,8 +10,9 @@ add_library(RockClimbMachinePass MODULE
     RockClimbMachineOptimizer.cpp
     MachineDistributedCheckpointing.cpp
     RockClimbMachineInstrumenter.cpp
-    # Reuse EnergyModel from bb-energy-analyzer
+    # Reuse shared sources
     ${CMAKE_SOURCE_DIR}/bb-energy-analyzer/EnergyModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/PassStatistics.cpp
 )
 
 set_target_properties(RockClimbMachinePass PROPERTIES
