@@ -26,7 +26,6 @@ class PassStatistics:
     compilation_time_ms: int | None = None
     peak_rss_kb: int | None = None
     profiling_time_ms: int | None = None
-    execution_time_ms: int | None = None
     boundary_checks: int | None = None
     # SCHEMATIC-specific
     enabled_checkpoints: int | None = None
@@ -50,7 +49,6 @@ _STAT_LABELS: dict[str, list[str]] = {
     "compilation_time_ms": ["Compilation time (ms)"],
     "peak_rss_kb": ["Peak RSS (KB)"],
     "profiling_time_ms": ["Profiling time (ms)"],
-    "execution_time_ms": ["Execution time (ms)"],
     "boundary_checks": ["Boundary checks"],
     "enabled_checkpoints": ["Enabled checkpoints"],
     "loop_decisions": ["Loop decisions"],

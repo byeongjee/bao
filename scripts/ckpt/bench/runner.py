@@ -462,7 +462,6 @@ def print_benchmark_summary(
     for key, name in [
         ("compilation_time_ms", "compile"),
         ("profiling_time_ms", "profiling"),
-        ("execution_time_ms", "execution"),
     ]:
         raw = _fmt(key, fields)
         if raw is not None:

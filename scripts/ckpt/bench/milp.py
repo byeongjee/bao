@@ -37,7 +37,6 @@ _CSV_HEADER: list[str] = [
     "compilation_time_ms",
     "peak_rss_kb",
     "profiling_time_ms",
-    "execution_time_ms",
     "runtime_region_boundary_calls",
     "runtime_debug_save_vreg_calls",
     "runtime_debug_restore_vreg_calls",
@@ -78,7 +77,6 @@ def _build_row(
         optimal = "yes" if optimal == "yes" else "no"
     fields.update({
         "profiling_time_ms": stats.profiling_time_ms or 0,
-        "execution_time_ms": stats.execution_time_ms or 0,
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
         "runtime_debug_save_vreg_calls": nvm_counter(nvm, "save_vreg"),
         "runtime_debug_restore_vreg_calls": nvm_counter(nvm, "restore_vreg"),
