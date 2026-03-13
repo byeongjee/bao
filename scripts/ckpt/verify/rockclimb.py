@@ -7,11 +7,14 @@ hardware, reads NVM results, and compares them.
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from ..bench.config import (
     default_energy_config,
@@ -157,7 +160,6 @@ def verify_rockclimb(
     *,
     benchmarks: list[str] | None,
     caps: list[str] | None,
-    verbose: bool,
     halt_mode: str,
     energy_config: Path | None,
     cpu_freq: int,
@@ -176,13 +178,13 @@ def verify_rockclimb(
     """
     bench_files = discover_benchmarks(env, benchmarks)
     if not bench_files:
-        print("Error: No benchmarks to verify", file=sys.stderr)
+        logger.error("No benchmarks to verify")
         return False
 
     try:
         saleae_manager = discover_saleae()
     except DeviceError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        logger.error("Error: %s", exc)
         return False
 
     capacitors = discover_capacitors(env, "rockclimb", caps)
@@ -190,7 +192,7 @@ def verify_rockclimb(
     if energy_config is None:
         energy_config = default_energy_config(env, "rockclimb")
     if not energy_config.is_file():
-        print(f"Error: Energy config not found: {energy_config}", file=sys.stderr)
+        logger.error("Energy config not found: %s", energy_config)
         return False
 
     results: list[_BenchResult] = []
@@ -205,7 +207,7 @@ def verify_rockclimb(
 
     for idx, (bench_path, cap) in enumerate(pairs, 1):
         bench_name = bench_path.stem
-        print(f"[{idx}/{total}] {bench_name} {cap.label} ...")
+        logger.info("[%d/%d] %s %s ...", idx, total, bench_name, cap.label)
 
         result = _verify_one(
             tc, env,
@@ -215,7 +217,6 @@ def verify_rockclimb(
             cap_config=cap.config_path,
             cap_label=cap.label,
             saleae_manager=saleae_manager,
-            verbose=verbose,
             halt_mode=halt_mode,
             cpu_freq=cpu_freq,
         )
@@ -240,7 +241,6 @@ def _verify_one(
     cap_config: Path,
     cap_label: str,
     saleae_manager: object,
-    verbose: bool,
     halt_mode: str,
     cpu_freq: int,
 ) -> _BenchResult:
@@ -253,7 +253,7 @@ def _verify_one(
             )
         except (CompilationError, OSError) as exc:
             msg = f"Baseline compilation failed: {exc}"
-            print(f"  ERROR: {msg}")
+            logger.error("  %s", msg)
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
             )
@@ -265,27 +265,26 @@ def _verify_one(
             baseline_nvm = {k: str(v) for k, v in nvm_dict.items()}
         except (DeviceError, OSError) as exc:
             msg = f"Baseline flash/read failed: {exc}"
-            print(f"  ERROR: {msg}")
+            logger.error("  %s", msg)
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
             )
 
-        if verbose:
-            print(f"  [baseline nvm] {baseline_nvm}")
+        logger.debug("  [baseline nvm] %s", baseline_nvm)
 
         baseline_done = baseline_nvm.get("__nvm_done", "")
         baseline_result = baseline_nvm.get("__nvm_result", "")
 
         if baseline_done != "1":
             msg = f"Baseline did not complete (__nvm_done={baseline_done})"
-            print(f"  ERROR: {msg}")
+            logger.error("  %s", msg)
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
             )
 
         if not baseline_result:
             msg = "No RESULT from baseline"
-            print(f"  ERROR: {msg}")
+            logger.error("  %s", msg)
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
             )
@@ -312,27 +311,24 @@ def _verify_one(
             # Check for infeasibility in compile output
             infeasible = detect_infeasibility(compile_output)
             if infeasible:
-                print(f"  SKIP ({infeasible})")
+                logger.info("  SKIP (%s)", infeasible)
                 return _BenchResult(
                     bench_name, cap_label, _Status.SKIP, infeasible,
                     baseline_result=baseline_result,
                 )
             msg = "RockClimb compilation failed"
-            print(f"  ERROR: {msg}")
-            if verbose:
-                print(f"    {compile_output[:200]}")
+            logger.debug("  %s: %s", msg, compile_output[:200])
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
                 baseline_result=baseline_result,
             )
 
-        if verbose:
-            print(f"  [rockclimb compile] {compile_output[:200]}")
+        logger.debug("  [rockclimb compile] %s", compile_output[:200])
 
         # ── D: Check for infeasibility ──
         infeasible = detect_infeasibility(compile_output)
         if infeasible:
-            print(f"  SKIP ({infeasible})")
+            logger.info("  SKIP (%s)", infeasible)
             return _BenchResult(
                 bench_name, cap_label, _Status.SKIP, infeasible,
                 baseline_result=baseline_result,
@@ -341,7 +337,7 @@ def _verify_one(
         rockclimb_elf = rc_result.elf_file
         if rockclimb_elf is None or not rockclimb_elf.exists():
             msg = "RockClimb compilation produced no ELF"
-            print(f"  ERROR: {msg}")
+            logger.error("  %s", msg)
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
                 baseline_result=baseline_result,
@@ -354,28 +350,27 @@ def _verify_one(
             rockclimb_nvm = {k: str(v) for k, v in nvm_dict.items()}
         except (DeviceError, OSError) as exc:
             msg = f"RockClimb flash/read failed: {exc}"
-            print(f"  ERROR: {msg}")
+            logger.error("  %s", msg)
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
                 baseline_result=baseline_result,
             )
 
-        if verbose:
-            print(f"  [rockclimb nvm] {rockclimb_nvm}")
-            boundary = rockclimb_nvm.get("cnt_boundary", "?")
-            save = rockclimb_nvm.get("cnt_save_reg", "?")
-            restore = rockclimb_nvm.get("cnt_restore_reg", "?")
-            print(
-                f"  [rockclimb counters] boundary={boundary}"
-                f" save_reg={save} restore_reg={restore}"
-            )
+        logger.debug("  [rockclimb nvm] %s", rockclimb_nvm)
+        boundary = rockclimb_nvm.get("cnt_boundary", "?")
+        save = rockclimb_nvm.get("cnt_save_reg", "?")
+        restore = rockclimb_nvm.get("cnt_restore_reg", "?")
+        logger.debug(
+            "  [rockclimb counters] boundary=%s save_reg=%s restore_reg=%s",
+            boundary, save, restore,
+        )
 
         rc_done = rockclimb_nvm.get("__nvm_done", "")
         rc_result_val = rockclimb_nvm.get("__nvm_result", "")
 
         if rc_done != "1":
             msg = f"RockClimb did not complete (__nvm_done={rc_done})"
-            print(f"  ERROR: {msg}")
+            logger.error("  %s", msg)
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
                 baseline_result=baseline_result,
@@ -383,7 +378,7 @@ def _verify_one(
 
         if not rc_result_val:
             msg = "No RESULT from RockClimb"
-            print(f"  ERROR: {msg}")
+            logger.error("  %s", msg)
             return _BenchResult(
                 bench_name, cap_label, _Status.ERROR, msg,
                 baseline_result=baseline_result,
@@ -391,20 +386,14 @@ def _verify_one(
 
         # ── F: Compare results ──
         if baseline_result == rc_result_val:
-            print(
-                f"  PASS (baseline={baseline_result}"
-                f" rockclimb={rc_result_val})"
-            )
+            logger.info("  PASS (baseline=%s rockclimb=%s)", baseline_result, rc_result_val)
             return _BenchResult(
                 bench_name, cap_label, _Status.PASS, "",
                 baseline_result=baseline_result,
                 rockclimb_result=rc_result_val,
             )
         else:
-            print(
-                f"  FAIL (baseline={baseline_result}"
-                f" rockclimb={rc_result_val})"
-            )
+            logger.info("  FAIL (baseline=%s rockclimb=%s)", baseline_result, rc_result_val)
             return _BenchResult(
                 bench_name, cap_label, _Status.FAIL,
                 f"baseline={baseline_result} rockclimb={rc_result_val}",
@@ -427,10 +416,10 @@ def _print_summary(results: list[_BenchResult], halt_mode: str) -> None:
 
     cap_labels = sorted({r.cap_label for r in results})
 
-    print()
-    print("=== RockClimb Semantic Verification ===")
-    print(f"Halt mode: {halt_mode} | Capacitors: {', '.join(cap_labels)}")
-    print()
+    logger.info("")
+    logger.info("=== RockClimb Semantic Verification ===")
+    logger.info("Halt mode: %s | Capacitors: %s", halt_mode, ", ".join(cap_labels))
+    logger.info("")
 
     for r in results:
         cap_tag = f"[{r.cap_label}]"
@@ -450,10 +439,10 @@ def _print_summary(results: list[_BenchResult], halt_mode: str) -> None:
             line = f"  {r.name:<20s} {cap_tag:<8s} SKIP ({r.detail})"
         else:
             line = f"  {r.name:<20s} {cap_tag:<8s} ERROR ({r.detail})"
-        print(line)
+        logger.info("%s", line)
 
-    print()
-    print(
-        f"{pass_count}/{total} PASSED, {fail_count} FAILED,"
-        f" {skip_count} SKIPPED, {error_count} ERRORS"
+    logger.info("")
+    logger.info(
+        "%d/%d PASSED, %d FAILED, %d SKIPPED, %d ERRORS",
+        pass_count, total, fail_count, skip_count, error_count,
     )
