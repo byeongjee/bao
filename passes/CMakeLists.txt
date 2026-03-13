@@ -28,8 +28,20 @@ include_directories(${LLVM_INCLUDE_DIRS})
 set(GUROBI_HOME "$ENV{GUROBI_HOME}" CACHE PATH "Gurobi installation directory")
 find_path(GUROBI_INCLUDE_DIR gurobi_c++.h
     PATHS ${GUROBI_HOME}/include)
+
+# Detect Gurobi version from header to find the correct versioned library
+# (e.g., libgurobi130 for Gurobi 13.0) without hardcoding version strings.
+if(GUROBI_INCLUDE_DIR AND EXISTS "${GUROBI_INCLUDE_DIR}/gurobi_c.h")
+    file(STRINGS "${GUROBI_INCLUDE_DIR}/gurobi_c.h" _grb_major_line REGEX "^#define GRB_VERSION_MAJOR")
+    file(STRINGS "${GUROBI_INCLUDE_DIR}/gurobi_c.h" _grb_minor_line REGEX "^#define GRB_VERSION_MINOR")
+    string(REGEX MATCH "[0-9]+" _grb_major "${_grb_major_line}")
+    string(REGEX MATCH "[0-9]+" _grb_minor "${_grb_minor_line}")
+    set(_gurobi_lib_name "gurobi${_grb_major}${_grb_minor}")
+    message(STATUS "Detected Gurobi version: ${_grb_major}.${_grb_minor} (library: ${_gurobi_lib_name})")
+endif()
+
 find_library(GUROBI_LIBRARY
-    NAMES gurobi130 gurobi120 gurobi110 gurobi100 gurobi
+    NAMES ${_gurobi_lib_name} gurobi
     PATHS ${GUROBI_HOME}/lib)
 find_library(GUROBI_CXX_LIBRARY gurobi_c++
     PATHS ${GUROBI_HOME}/lib)
