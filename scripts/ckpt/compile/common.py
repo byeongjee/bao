@@ -40,8 +40,8 @@ def compile_to_ir(
         f"-O{clang_opt_level}",
         "-D__MSP430FR5994__",
         f"-I{env.project_dir / 'passes' / 'include'}",
-        f"-isystem", str(env.msp430gcc_support_path / "include"),
-        f"-isystem", str(env.msp430gcc_support_path / "msp430-elf" / "include"),
+        "-isystem", str(env.msp430gcc_support_path / "include"),
+        "-isystem", str(env.msp430gcc_support_path / "msp430-elf" / "include"),
     ]
 
     if clang_opt_level == 0:

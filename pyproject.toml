@@ -19,12 +19,6 @@ ckpt = "ckpt.cli:main"
 [tool.setuptools.packages.find]
 where = ["scripts"]
 
-[tool.ruff.lint]
-ignore = [
-    "E741",  # ambiguous variable name (l) — fix later
-    "F541",  # f-string without placeholders — fix later
-]
-
 [tool.pyright]
 reportUnusedImport = "warning"
 reportUnusedVariable = "warning"

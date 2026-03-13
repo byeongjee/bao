@@ -105,7 +105,7 @@ def _compile_baseline(
 
     # Step 4: Strip .cfi_* directives
     lines = raw_s.read_text().splitlines(keepends=True)
-    clean_s.write_text("".join(l for l in lines if not _CFI_RE.match(l)))
+    clean_s.write_text("".join(line for line in lines if not _CFI_RE.match(line)))
 
     # Step 5: Assemble
     run(

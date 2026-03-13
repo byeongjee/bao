@@ -283,7 +283,7 @@ _CFI_RE = re.compile(r"^\s*\.cfi_")
 def _strip_cfi_directives(input_s: Path, output_s: Path) -> None:
     """Strip .cfi_* directives from assembly (LLVM MSP430 backend workaround)."""
     lines = input_s.read_text().splitlines(keepends=True)
-    output_s.write_text("".join(l for l in lines if not _CFI_RE.match(l)))
+    output_s.write_text("".join(line for line in lines if not _CFI_RE.match(line)))
 
 
 # ---------------------------------------------------------------------------
