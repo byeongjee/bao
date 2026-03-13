@@ -33,6 +33,10 @@ from ..runner import CompilationError
 from ..toolchain import Toolchain
 from .config import CapacitorConfig
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 _FLASH_TIMEOUT = 30              # seconds
 _AFTER_TRIGGER_SECONDS = 1.0     # seconds to record after falling edge
 
@@ -158,7 +162,6 @@ def run_benchmark_matrix(
     *,
     nvm_symbols: list[str] | None = None,
     debug_counters: bool,
-    verbose: bool,
     csv_header: list[str],
     row_builder: RowBuilder,
     pre_benchmark: PreBenchmarkFn | None = None,
@@ -210,7 +213,7 @@ def run_benchmark_matrix(
             for cap in capacitors:
                 count += 1
                 row_name = f"{bench_name}-{cap.label}"
-                print(f"[{count}/{total}] Running {row_name} ...")
+                logger.info("[%d/%d] Running %s ...", count, total, row_name)
 
                 # ----- Compile -----
                 had_compilation_error = False
@@ -265,7 +268,7 @@ def run_benchmark_matrix(
                                 )
                                 nvm = parse_nvm_output(nvm_text)
                         except DeviceError as exc:
-                            print(f"  DEVICE ERROR: {exc}")
+                            logger.error("  DEVICE ERROR: %s", exc)
 
                 # ----- Merge compile output + NVM labels -----
                 full_output = compile_output
@@ -273,15 +276,14 @@ def run_benchmark_matrix(
                     nvm_labels = nvm_counters_to_labels(nvm)
                     full_output = f"{compile_output}\n{nvm_labels}"
 
-                if verbose:
-                    print(full_output)
+                logger.debug("Full output:\n%s", full_output)
 
                 # ----- Parse stats (prefer JSON, fall back to text) -----
                 stats: PassStatistics | None = None
                 if stats_json_data is not None:
                     stats, json_feasible, json_reason = load_stats_json(stats_json_data)
                     if not json_feasible:
-                        print(f"  INFEASIBLE ({json_reason})")
+                        logger.warning("  INFEASIBLE (%s)", json_reason)
                         row = BenchmarkRow(
                             benchmark=row_name,
                             capacitor=cap.label,
@@ -293,7 +295,7 @@ def run_benchmark_matrix(
                     # ----- Check infeasibility (text fallback) -----
                     infeasible_reason = detect_infeasibility(full_output)
                     if infeasible_reason is not None:
-                        print(f"  INFEASIBLE ({infeasible_reason})")
+                        logger.warning("  INFEASIBLE (%s)", infeasible_reason)
                         row = BenchmarkRow(
                             benchmark=row_name,
                             capacitor=cap.label,
@@ -304,7 +306,7 @@ def run_benchmark_matrix(
 
                     # ----- Check for compilation failure -----
                     if not has_pass_statistics(full_output):
-                        print("  FAILED (compilation error)")
+                        logger.error("  FAILED (compilation error)")
                         row = BenchmarkRow(
                             benchmark=row_name,
                             capacitor=cap.label,
@@ -338,16 +340,16 @@ def run_benchmark_matrix(
 
     # ----- Energy parameters summary -----
     if all_required_keys:
-        print()
-        print("--- Energy parameters ---")
-        print(f"  Required ({len(all_required_keys)} keys): {', '.join(sorted(all_required_keys))}")
-        print(f"  Missing  ({len(all_missing_keys)} keys): {', '.join(sorted(all_missing_keys))}")
+        logger.info("")
+        logger.info("--- Energy parameters ---")
+        logger.info("  Required (%d keys): %s", len(all_required_keys), ", ".join(sorted(all_required_keys)))
+        logger.info("  Missing  (%d keys): %s", len(all_missing_keys), ", ".join(sorted(all_missing_keys)))
 
     # ----- Final summary -----
-    print()
-    print("==========================================")
-    print(f"Results written to: {output_csv}")
-    print("==========================================")
+    logger.info("")
+    logger.info("==========================================")
+    logger.info("Results written to: %s", output_csv)
+    logger.info("==========================================")
 
 
 def write_csv_row(
@@ -382,7 +384,7 @@ def print_benchmark_summary(
 ) -> None:
     """Print a detailed multi-line summary for a benchmark run."""
     label = status.upper() if status != "ok" else "OK"
-    print(f"  {label}")
+    logger.info("  %s", label)
 
     def _fmt(key: str, fields: dict[str, str | int | None]) -> str | None:
         val = fields.get(key)
@@ -393,7 +395,7 @@ def print_benchmark_summary(
     def _print_group(title: str, items: list[tuple[str, str | None]]) -> None:
         parts = [f"{name} {val}" for name, val in items if val is not None]
         if parts:
-            print(f"    {title + ':':<16}{', '.join(parts)}")
+            logger.info("    %s%s", f"{title + ':':<16}", ", ".join(parts))
 
     # CFG
     _print_group("CFG", [
@@ -466,9 +468,9 @@ def print_benchmark_summary(
     # Memory
     rss = _fmt("peak_rss_kb", fields)
     if rss is not None:
-        print(f"    {'Memory:':<16}{rss} KB peak RSS")
+        logger.info("    %s%s KB peak RSS", "Memory:".ljust(16), rss)
 
     # Result
     result = fields.get("result")
     if result is not None and result != "":
-        print(f"    {'Result:':<16}{result}")
+        logger.info("    %s%s", "Result:".ljust(16), result)
