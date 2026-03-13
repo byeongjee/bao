@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from ckpt.bench.runner import build_base_fields, nvm_counter
 from ckpt.output_parser import NvmCounters, PassStatistics
 from ckpt.runner import StepResult
@@ -62,7 +60,7 @@ class TestBuildBaseFields:
             peak_rss_kb=10240,
         )
         output = "some output\nRESULT: 42\nmore"
-        fields = build_base_fields(stats, output)
+        fields = build_base_fields(stats, output, None)
         assert fields["basic_blocks"] == 24
         assert fields["edges"] == 30
         assert fields["regions"] == 3
@@ -72,7 +70,7 @@ class TestBuildBaseFields:
 
     def test_all_none_stats(self):
         stats = PassStatistics()
-        fields = build_base_fields(stats, "no result line")
+        fields = build_base_fields(stats, "no result line", None)
         assert fields["basic_blocks"] == 0
         assert fields["edges"] == 0
         assert fields["regions"] == 0
