@@ -186,6 +186,8 @@ bool SchematicStateAnalysis::isAllowedDirectCall(const llvm::CallBase &CB) const
         return true;
     if (Name == "debug_init" || Name == "debug_exit")
         return true;
+    if (Name.starts_with("timing_gpio_"))
+        return true;
     if (isWhitelistedHelperName(Name))
         return true;
 
