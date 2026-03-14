@@ -7,10 +7,12 @@ a clear error is raised if it is not installed.
 from __future__ import annotations
 
 import csv
-import sys
+import logging
 from pathlib import Path
 
 from ..errors import ConfigError
+
+logger = logging.getLogger(__name__)
 
 ALGORITHMS = {
     "milp": {
@@ -123,10 +125,7 @@ def _load_data(
         alg = ALGORITHMS[alg_key]
         filepath = csv_dir / alg["file"]
         if not filepath.exists():
-            print(
-                f"Warning: {filepath} not found, skipping {alg_key}",
-                file=sys.stderr,
-            )
+            logger.warning("%s not found, skipping %s", filepath, alg_key)
             continue
 
         rows = _read_csv(filepath)
@@ -221,10 +220,7 @@ def plot_benchmarks(
 
     if normalize:
         if normalize not in data:
-            print(
-                f"Error: baseline algorithm '{normalize}' has no data.",
-                file=sys.stderr,
-            )
+            logger.error("Baseline algorithm '%s' has no data.", normalize)
             return
         data, labels = _normalize_data(data, labels, normalize)
 
@@ -232,7 +228,7 @@ def plot_benchmarks(
     n_algorithms = len([a for a in alg_keys if a in data])
 
     if n_benchmarks == 0:
-        print("No data to plot.", file=sys.stderr)
+        logger.warning("No data to plot.")
         return
 
     _fig, ax = plt.subplots(figsize=(max(10, n_benchmarks * 1.2), 6))
@@ -293,6 +289,6 @@ def plot_benchmarks(
 
     if output_file:
         plt.savefig(str(output_file), dpi=150, bbox_inches="tight")
-        print(f"Saved to {output_file}")
+        logger.info("Saved to %s", output_file)
     else:
         plt.show()
