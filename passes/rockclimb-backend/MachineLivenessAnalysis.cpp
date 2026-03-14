@@ -9,14 +9,8 @@ using namespace llvm;
 namespace checkpoint {
 
 RegScanResult scanBlockForReg(const MachineBasicBlock *MBB, MCPhysReg reg,
-                              const TargetRegisterInfo *TRI, const MachineInstr *startAfter) {
-    bool skipping = (startAfter != nullptr);
+                              const TargetRegisterInfo *TRI) {
     for (const MachineInstr &MI : *MBB) {
-        if (skipping) {
-            if (&MI == startAfter)
-                skipping = false;
-            continue;
-        }
         bool hasUse = false;
         bool hasDef = false;
         for (const MachineOperand &MO : MI.operands()) {
@@ -40,7 +34,7 @@ RegScanResult scanBlockForReg(const MachineBasicBlock *MBB, MCPhysReg reg,
 }
 
 bool isRegLiveFromBlock(const MachineBasicBlock *startMBB, MCPhysReg reg,
-                        const TargetRegisterInfo *TRI, const MachineInstr *startAfter) {
+                        const TargetRegisterInfo *TRI) {
     SmallVector<const MachineBasicBlock *, 8> worklist;
     SmallPtrSet<const MachineBasicBlock *, 16> visited;
     worklist.push_back(startMBB);
@@ -50,9 +44,7 @@ bool isRegLiveFromBlock(const MachineBasicBlock *startMBB, MCPhysReg reg,
         if (!visited.insert(MBB).second)
             continue;
 
-        // startAfter only applies to the first block
-        const MachineInstr *skip = (MBB == startMBB) ? startAfter : nullptr;
-        RegScanResult result = scanBlockForReg(MBB, reg, TRI, skip);
+        RegScanResult result = scanBlockForReg(MBB, reg, TRI);
         if (result == RegScanResult::UsedFirst)
             return true;
         if (result == RegScanResult::DefinedFirst)

@@ -129,19 +129,14 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
             }
         }
 
-        // Step 3: Find boundary CALL in startBlock (recovery point)
-        const MachineInstr *boundaryCall = nullptr;
-        for (const MachineInstr &MI : *region.startBlock) {
-            if (MI.isCall()) {
-                boundaryCall = &MI;
-                break;
-            }
-        }
-
-        // Step 4: For each register live at the recovery point, create
+        // Step 3: For each register live at the recovery point, create
         // saves at EVERY definition in predecessor blocks.
+        // Liveness is checked from the start of the block because the
+        // boundary CALL (inserted later by the instrumenter) goes at
+        // the top — all original instructions follow it and re-execute
+        // on recovery.
         for (MCPhysReg reg : defsInPreds) {
-            if (!isRegLiveFromBlock(region.startBlock, reg, TRI, boundaryCall))
+            if (!isRegLiveFromBlock(region.startBlock, reg, TRI))
                 continue;
             findAllDefs(predBlockSet, reg, region.startBlock, checkpoints);
         }
