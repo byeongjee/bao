@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import re
-import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -298,6 +297,7 @@ def _verify_one(
                     energy_config=energy_config,
                     rockclimb_config=cap_config,
                     output=tmp / "rockclimb",
+                    pass_log_level="info",
                     precomputed_energy=True,
                     link=True,
                     debug_counters=True,
