@@ -31,6 +31,7 @@
 /* --- GPIO timing (always on, negligible overhead) --- */
 #ifdef __MSP430__
 static inline void timing_gpio_init(void) {
+    PM5CTL0 &= ~LOCKLPM5;
     P3DIR |= BIT4;
     P3OUT &= ~BIT4;
 }
