@@ -74,6 +74,7 @@ def _compile_baseline(
     env: ProjectEnv,
     input_c: Path,
     prefix: Path,
+    cpu_freq: int,
 ) -> Path:
     """Compile a baseline ELF (same LLVM pipeline, no machine pass).
 
@@ -103,6 +104,7 @@ def _compile_baseline(
         debug=False,
         debug_counters=True,
         extra_includes=[str(env.project_dir / "passes" / "runtime")],
+        extra_defines=[f"F_CPU={cpu_freq}"],
     )
 
     # Step 2: Tripcount annotation
@@ -133,7 +135,7 @@ def _compile_baseline(
     # Step 6: Compile debug counters
     compile_runtime_c(
         tc, env, env.rockclimb_debug_counters, debug_o,
-        extra_defines=["DEBUG_COUNTERS"],
+        extra_defines=["DEBUG_COUNTERS", f"F_CPU={cpu_freq}"],
     )
 
     # Step 7: Link (no boot.S, no runtime)
@@ -158,6 +160,7 @@ def verify_rockclimb(
     verbose: bool,
     halt_mode: str,
     energy_config: Path | None,
+    cpu_freq: int,
 ) -> bool:
     """Verify semantic correctness of RockClimb checkpoint insertion.
 
@@ -214,6 +217,7 @@ def verify_rockclimb(
             saleae_manager=saleae_manager,
             verbose=verbose,
             halt_mode=halt_mode,
+            cpu_freq=cpu_freq,
         )
         results.append(result)
 
@@ -238,13 +242,14 @@ def _verify_one(
     saleae_manager: object,
     verbose: bool,
     halt_mode: str,
+    cpu_freq: int,
 ) -> _BenchResult:
     """Run verification for a single benchmark."""
     with compilation_workdir(prefix=f"ckpt_verify_{bench_name}_") as tmp:
         # ── A: Compile baseline ──
         try:
             baseline_elf = _compile_baseline(
-                tc, env, bench_path, tmp / "baseline",
+                tc, env, bench_path, tmp / "baseline", cpu_freq,
             )
         except (CompilationError, OSError) as exc:
             msg = f"Baseline compilation failed: {exc}"
@@ -299,6 +304,7 @@ def _verify_one(
                     link=True,
                     debug_counters=True,
                     halt_mode=halt_mode,
+                    cpu_freq=cpu_freq,
                 ),
             )
             compile_output = rc_result.pass_output

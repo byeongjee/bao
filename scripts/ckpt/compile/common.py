@@ -409,6 +409,7 @@ def link_algorithm(
     boot_source: Path,
     runtime_source: Path,
     linker_script: Path,
+    cpu_freq: int,
     boot_defines: list[str] | None = None,
     debug_counters: bool = False,
     debug_counters_source: Path | None = None,
@@ -423,7 +424,7 @@ def link_algorithm(
     assemble_boot(tc, env, boot_source, boot_o, extra_defines=boot_defines or [])
 
     runtime_o = stem.with_suffix(".runtime.o")
-    compile_runtime_c(tc, env, runtime_source, runtime_o)
+    compile_runtime_c(tc, env, runtime_source, runtime_o, extra_defines=[f"F_CPU={cpu_freq}"])
 
     link_objs = [main_object, boot_o, runtime_o]
 
@@ -431,7 +432,7 @@ def link_algorithm(
         debug_o = stem.with_suffix(".debug_counters.o")
         compile_runtime_c(
             tc, env, debug_counters_source, debug_o,
-            extra_defines=["DEBUG_COUNTERS"],
+            extra_defines=["DEBUG_COUNTERS", f"F_CPU={cpu_freq}"],
         )
         link_objs.append(debug_o)
 

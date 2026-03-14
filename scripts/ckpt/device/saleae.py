@@ -97,6 +97,7 @@ def saleae_run(
             trigger_type=DigitalTriggerType.PULSE_HIGH,
             trigger_channel_index=_SALEAE_CHANNEL,
             min_pulse_width_seconds=0.001,  # 1 ms — ignores 10 us start pulse
+            max_pulse_width_seconds=2,
             after_trigger_seconds=after_trigger_seconds,
         ),
     )

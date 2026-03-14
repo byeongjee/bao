@@ -34,6 +34,7 @@ class RockClimbCompileOptions:
     link: bool
     debug_counters: bool
     halt_mode: str
+    cpu_freq: int
     clang_opt_level: int = 2
     linker_script: Path | None = None
 
@@ -78,7 +79,7 @@ def compile_rockclimb(
 
         # Step 1: C -> LLVM IR
         raw_ll = tmp / "raw.ll"
-        clang_defines: list[str] = []
+        clang_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
         if opts.debug_counters:
             clang_defines.append("DEBUG_COUNTERS")
 
@@ -326,7 +327,7 @@ def _link_rockclimb(
         step_name="gcc-assemble",
     )
 
-    boot_defines: list[str] = []
+    boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
     if opts.halt_mode == "bor":
         boot_defines.append("ROCKCLIMB_HALT_BOR")
     elif opts.halt_mode == "lpm4":
@@ -342,4 +343,5 @@ def _link_rockclimb(
         boot_defines=boot_defines,
         debug_counters=opts.debug_counters,
         debug_counters_source=env.rockclimb_debug_counters,
+        cpu_freq=opts.cpu_freq,
     )

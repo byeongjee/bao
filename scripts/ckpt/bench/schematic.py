@@ -120,6 +120,7 @@ def run_schematic_benchmarks(
     energy_config: Path | None = None,
     trace_config: Path | None = None,
     estimator_mode: str,
+    cpu_freq: int,
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -198,6 +199,7 @@ def run_schematic_benchmarks(
                     link=False,
                     debug_counters=False,
                     halt_mode=halt_mode,
+                    cpu_freq=cpu_freq,
                     clang_opt_level=0,
                     extra_includes=[str(env.project_dir / "passes" / "runtime")],
                 )
@@ -258,6 +260,7 @@ def run_schematic_benchmarks(
                 link=True,
                 debug_counters=debug_counters,
                 halt_mode=halt_mode,
+                cpu_freq=cpu_freq,
                 clang_opt_level=0,
                 extra_includes=[str(env.project_dir / "passes" / "runtime")],
                 trace_file=trace_json,

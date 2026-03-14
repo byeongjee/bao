@@ -106,6 +106,7 @@ def run_milp_benchmarks(
     verbose: bool,
     estimator_mode: str,
     energy_config: Path | None = None,
+    cpu_freq: int,
 ) -> None:
     """Run MILP checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -176,6 +177,7 @@ def run_milp_benchmarks(
                 link=True,
                 halt_mode=halt_mode,
                 debug_counters=debug_counters,
+                cpu_freq=cpu_freq,
             )
 
             result: MilpCompileResult = compile_milp(tc, env, opts)

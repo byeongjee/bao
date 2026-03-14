@@ -98,6 +98,12 @@ def compile() -> None:
 @click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
 @click.pass_context
 def compile_milp_cmd(
     ctx: click.Context,
@@ -115,12 +121,14 @@ def compile_milp_cmd(
     opt_level: int,
     clang_opt_level: int,
     extra_includes: tuple[str, ...],
+    cpu_freq: str,
 ) -> None:
     """Run the MILP checkpoint insertion compilation pipeline."""
     from .compile.milp import MilpCompileOptions, compile_milp
 
     input_path = Path(input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
+    cpu_freq_hz = int(cpu_freq) * 1_000_000
 
     result = compile_milp(
         ctx.obj["tc"],
@@ -140,6 +148,7 @@ def compile_milp_cmd(
             halt_mode=halt_mode,
             debug_counters=debug_counters,
             estimator_mode=estimator_mode,
+            cpu_freq=cpu_freq_hz,
         ),
     )
 
@@ -171,6 +180,12 @@ def compile_milp_cmd(
     is_flag=True,
     help="Use MIR-level estimation instead of assembly-based.",
 )
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
 @click.pass_context
 def compile_rockclimb_cmd(
     ctx: click.Context,
@@ -184,12 +199,14 @@ def compile_rockclimb_cmd(
     halt_mode: str,
     clang_opt_level: int,
     no_precomputed_energy: bool,
+    cpu_freq: str,
 ) -> None:
     """Run the RockClimb machine-level compilation pipeline."""
     from .compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 
     input_path = Path(input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
+    cpu_freq_hz = int(cpu_freq) * 1_000_000
 
     result = compile_rockclimb(
         ctx.obj["tc"],
@@ -205,6 +222,7 @@ def compile_rockclimb_cmd(
             link=link,
             debug_counters=debug_counters,
             halt_mode=halt_mode,
+            cpu_freq=cpu_freq_hz,
         ),
     )
 
@@ -244,6 +262,12 @@ def compile_rockclimb_cmd(
     default="assembly",
     help="Energy estimator mode.",
 )
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
 @click.pass_context
 def compile_schematic_cmd(
     ctx: click.Context,
@@ -263,12 +287,14 @@ def compile_schematic_cmd(
     clang_opt_level: int,
     extra_includes: tuple[str, ...],
     estimator_mode: str,
+    cpu_freq: str,
 ) -> None:
     """Run the SCHEMATIC trace-based compilation pipeline."""
     from .compile.schematic import SchematicCompileOptions, compile_schematic
 
     input_path = Path(input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
+    cpu_freq_hz = int(cpu_freq) * 1_000_000
 
     if not trace_only and schematic_config is None:
         raise click.UsageError(
@@ -291,6 +317,7 @@ def compile_schematic_cmd(
             link=link,
             debug_counters=debug_counters,
             halt_mode=halt_mode,
+            cpu_freq=cpu_freq_hz,
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
             extra_includes=list(extra_includes),
@@ -343,6 +370,12 @@ def compile_schematic_cmd(
     default="assembly",
     help="Energy estimator mode (MILP and SCHEMATIC).",
 )
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
 @click.pass_context
 def compile_run_cmd(
     ctx: click.Context,
@@ -363,6 +396,7 @@ def compile_run_cmd(
     compile_only: bool,
     halt_mode: str,
     estimator_mode: str,
+    cpu_freq: str,
 ) -> None:
     """Compile with checkpoint insertion and optionally flash.
 
@@ -373,6 +407,7 @@ def compile_run_cmd(
     output_path = Path(output) if output else Path("build") / input_path.stem
     tc = ctx.obj["tc"]
     env = ctx.obj["env"]
+    cpu_freq_hz = int(cpu_freq) * 1_000_000
 
     if mode == "milp":
         if not energy_config:
@@ -396,6 +431,7 @@ def compile_run_cmd(
                 link=True,
                 halt_mode=halt_mode,
                 debug_counters=debug_counters,
+                cpu_freq=cpu_freq_hz,
                 opt_level=opt_level,
                 clang_opt_level=clang_opt_level,
                 extra_includes=list(extra_includes),
@@ -426,6 +462,7 @@ def compile_run_cmd(
                 link=True,
                 debug_counters=debug_counters,
                 halt_mode=halt_mode,
+                cpu_freq=cpu_freq_hz,
                 clang_opt_level=clang_opt_level,
             ),
         )
@@ -457,6 +494,7 @@ def compile_run_cmd(
                 link=True,
                 debug_counters=debug_counters,
                 halt_mode=halt_mode,
+                cpu_freq=cpu_freq_hz,
                 opt_level=opt_level,
                 clang_opt_level=clang_opt_level,
                 extra_includes=list(extra_includes),
@@ -518,6 +556,12 @@ def bench() -> None:
     type=click.Path(exists=True),
     help="Override default energy config.",
 )
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
 @click.pass_context
 def bench_milp_cmd(
     ctx: click.Context,
@@ -529,6 +573,7 @@ def bench_milp_cmd(
     halt_mode: str,
     estimator_mode: str,
     energy_config: str | None,
+    cpu_freq: str,
 ) -> None:
     """Run MILP benchmarks across programs and capacitor sizes."""
     from .bench.milp import run_milp_benchmarks
@@ -544,6 +589,7 @@ def bench_milp_cmd(
         verbose=verbose,
         estimator_mode=estimator_mode,
         energy_config=Path(energy_config) if energy_config else None,
+        cpu_freq=int(cpu_freq) * 1_000_000,
     )
 
 
@@ -565,6 +611,12 @@ def bench_milp_cmd(
     type=click.Path(exists=True),
     help="Override default energy config.",
 )
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
 @click.pass_context
 def bench_rockclimb_cmd(
     ctx: click.Context,
@@ -575,6 +627,7 @@ def bench_rockclimb_cmd(
     verbose: bool,
     halt_mode: str,
     energy_config: str | None,
+    cpu_freq: str,
 ) -> None:
     """Run RockClimb benchmarks across programs and capacitor sizes."""
     from .bench.rockclimb import run_rockclimb_benchmarks
@@ -589,6 +642,7 @@ def bench_rockclimb_cmd(
         output_csv=Path(output) if output else None,
         verbose=verbose,
         energy_config=Path(energy_config) if energy_config else None,
+        cpu_freq=int(cpu_freq) * 1_000_000,
     )
 
 
@@ -621,6 +675,12 @@ def bench_rockclimb_cmd(
     default="assembly",
     help="Energy estimator mode.",
 )
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
 @click.pass_context
 def bench_schematic_cmd(
     ctx: click.Context,
@@ -633,6 +693,7 @@ def bench_schematic_cmd(
     energy_config: str | None,
     trace_config: str | None,
     estimator_mode: str,
+    cpu_freq: str,
 ) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -649,6 +710,7 @@ def bench_schematic_cmd(
         energy_config=Path(energy_config) if energy_config else None,
         trace_config=Path(trace_config) if trace_config else None,
         estimator_mode=estimator_mode,
+        cpu_freq=int(cpu_freq) * 1_000_000,
     )
 
 
@@ -680,6 +742,12 @@ def verify() -> None:
     default="bor",
     help="Halt mode for linked binary (default: bor).",
 )
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
 @click.pass_context
 def verify_rockclimb_cmd(
     ctx: click.Context,
@@ -688,6 +756,7 @@ def verify_rockclimb_cmd(
     verbose: bool,
     energy_config: str | None,
     halt_mode: str,
+    cpu_freq: str,
 ) -> None:
     """Verify semantic correctness of RockClimb checkpoint insertion."""
     from .verify.rockclimb import verify_rockclimb
@@ -700,6 +769,7 @@ def verify_rockclimb_cmd(
         verbose=verbose,
         halt_mode=halt_mode,
         energy_config=Path(energy_config) if energy_config else None,
+        cpu_freq=int(cpu_freq) * 1_000_000,
     )
     if not success:
         raise SystemExit(1)

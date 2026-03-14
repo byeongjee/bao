@@ -42,6 +42,7 @@ class SchematicCompileOptions:
     link: bool
     debug_counters: bool
     halt_mode: str
+    cpu_freq: int
     opt_level: int = 2
     clang_opt_level: int = 2
     extra_includes: list[str] = field(default_factory=list)
@@ -89,6 +90,7 @@ def compile_schematic(
             debug=opts.debug,
             debug_counters=opts.debug_counters,
             extra_includes=extra_includes,
+            extra_defines=[f"F_CPU={opts.cpu_freq}"],
         )
 
         # Tripcount annotation
@@ -305,7 +307,7 @@ def _link_schematic(
     opts: SchematicCompileOptions,
 ) -> Path:
     """Assemble and link the SCHEMATIC output with boot.S + runtime.c."""
-    boot_defines: list[str] = []
+    boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
     if opts.debug_counters:
         boot_defines.append("DEBUG_COUNTERS")
     if opts.halt_mode in ("bor", "lpm4"):
@@ -321,4 +323,5 @@ def _link_schematic(
         boot_defines=boot_defines,
         debug_counters=opts.debug_counters,
         debug_counters_source=env.schematic_debug_counters,
+        cpu_freq=opts.cpu_freq,
     )

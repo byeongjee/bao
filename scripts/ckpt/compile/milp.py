@@ -43,6 +43,7 @@ class MilpCompileOptions:
     link: bool
     halt_mode: str
     debug_counters: bool
+    cpu_freq: int
     opt_level: int = 2
     clang_opt_level: int = 2
     extra_includes: list[str] = field(default_factory=list)
@@ -100,6 +101,7 @@ def compile_milp(
             debug=opts.debug,
             debug_counters=opts.debug_counters,
             extra_includes=extra_includes,
+            extra_defines=[f"F_CPU={opts.cpu_freq}"],
         )
 
         # Tripcount annotation (before optimization)
@@ -341,7 +343,7 @@ def _link_milp(
     opts: MilpCompileOptions,
 ) -> Path:
     """Assemble and link the MILP output with boot.S + runtime.c."""
-    boot_defines: list[str] = []
+    boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
     if opts.halt_mode == "bor":
         boot_defines.append("MILP_HALT_BOR")
     elif opts.halt_mode == "lpm4":
@@ -359,4 +361,5 @@ def _link_milp(
         boot_defines=boot_defines,
         debug_counters=opts.debug_counters,
         debug_counters_source=env.milp_debug_counters,
+        cpu_freq=opts.cpu_freq,
     )

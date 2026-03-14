@@ -87,6 +87,7 @@ def run_rockclimb_benchmarks(
     halt_mode: str,
     verbose: bool,
     energy_config: Path | None = None,
+    cpu_freq: int,
 ) -> None:
     """Run RockClimb checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -146,6 +147,7 @@ def run_rockclimb_benchmarks(
                 link=True,
                 debug_counters=debug_counters,
                 halt_mode=halt_mode,
+                cpu_freq=cpu_freq,
             )
 
             result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)
