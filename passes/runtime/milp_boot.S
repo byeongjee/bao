@@ -56,6 +56,17 @@ _do_recovery:
     /* Unlock GPIO pins — LPM5 locks all I/O after every reset on FR5xx/6xx */
     bic.w   #0x0001, &0x0130
 
+    /* Reconfigure DCO — BOR resets clock to default ~1 MHz */
+#if F_CPU == 16000000
+    mov.b   #0xA5, &0x0161      /* CSCTL0_H = CSKEY_H */
+    mov.w   #0x0048, &0x0162    /* CSCTL1 = DCORSEL | DCOFSEL_4 = 16 MHz */
+    mov.b   #0x00, &0x0161      /* CSCTL0_H = 0 (lock) */
+#elif F_CPU == 8000000
+    mov.b   #0xA5, &0x0161
+    mov.w   #0x0006, &0x0162    /* CSCTL1 = DCOFSEL_6 = 8 MHz */
+    mov.b   #0x00, &0x0161
+#endif
+
     /* R14 holds saved PC. Clear recovery marker first to prevent
        infinite recovery loops on next reboot. */
     mov.w   #0, &__nvm_pc
@@ -85,6 +96,17 @@ _normal_boot:
 
     /* Unlock GPIO pins — LPM5 locks all I/O after every reset on FR5xx/6xx */
     bic.w   #0x0001, &0x0130
+
+    /* Configure DCO (same as recovery path) */
+#if F_CPU == 16000000
+    mov.b   #0xA5, &0x0161
+    mov.w   #0x0048, &0x0162
+    mov.b   #0x00, &0x0161
+#elif F_CPU == 8000000
+    mov.b   #0xA5, &0x0161
+    mov.w   #0x0006, &0x0162
+    mov.b   #0x00, &0x0161
+#endif
 
     mov.w   #0, &__nvm_pc
     mov.w   #0, &__nvm_sp
