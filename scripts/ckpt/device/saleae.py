@@ -20,7 +20,7 @@ from ..toolchain import Toolchain
 from .flash import flash
 
 _SALEAE_CHANNEL = 0
-_SALEAE_SAMPLE_RATE = 10_000_000  # 10 MHz
+_SALEAE_SAMPLE_RATE = 100_000_000  # 100 MHz
 
 
 def discover_saleae():  # -> Manager (type omitted to defer import)
