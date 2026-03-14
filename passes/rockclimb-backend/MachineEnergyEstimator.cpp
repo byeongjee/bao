@@ -5,6 +5,8 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "common/Logger.h"
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -24,7 +26,7 @@ std::unique_ptr<MachineEnergyEstimator>
 MachineEnergyEstimator::fromPrecomputed(const std::string &energyDataPath) {
     std::ifstream file(energyDataPath);
     if (!file.is_open()) {
-        errs() << "Error: Cannot open pre-computed energy data: " << energyDataPath << "\n";
+        PLOGE << "Error: Cannot open pre-computed energy data: " << energyDataPath;
         return nullptr;
     }
 
@@ -33,7 +35,7 @@ MachineEnergyEstimator::fromPrecomputed(const std::string &energyDataPath) {
 
     nlohmann::json data = nlohmann::json::parse(buf.str(), nullptr, false);
     if (data.is_discarded()) {
-        errs() << "Error: JSON parse error in energy data: " << energyDataPath << "\n";
+        PLOGE << "Error: JSON parse error in energy data: " << energyDataPath;
         return nullptr;
     }
 
@@ -41,7 +43,7 @@ MachineEnergyEstimator::fromPrecomputed(const std::string &energyDataPath) {
     estimator->usePrecomputed_ = true;
 
     if (!data.contains("functions") || !data["functions"].is_object()) {
-        errs() << "Error: Energy data missing 'functions' object\n";
+        PLOGE << "Error: Energy data missing 'functions' object";
         return nullptr;
     }
 
@@ -55,8 +57,8 @@ MachineEnergyEstimator::fromPrecomputed(const std::string &energyDataPath) {
         }
     }
 
-    errs() << "Loaded pre-computed BB energy for " << estimator->precomputedEnergy_.size()
-           << " function(s) from " << energyDataPath << "\n";
+    PLOGI << "Loaded pre-computed BB energy for " << estimator->precomputedEnergy_.size()
+          << " function(s) from " << energyDataPath;
     return estimator;
 }
 

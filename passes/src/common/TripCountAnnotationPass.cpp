@@ -1,17 +1,18 @@
 #include "common/TripCountAnnotationPass.h"
+#include "common/Logger.h"
 #include "common/LoopTripCount.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/Support/raw_ostream.h"
-
 #include <map>
 
 namespace checkpoint {
 
 llvm::PreservedAnalyses TripCountAnnotationPass::run(llvm::Function &F,
                                                      llvm::FunctionAnalysisManager &AM) {
+    checkpoint::initLogging();
+
     if (F.isDeclaration())
         return llvm::PreservedAnalyses::all();
 
@@ -38,9 +39,8 @@ llvm::PreservedAnalyses TripCountAnnotationPass::run(llvm::Function &F,
 
             auto *Arg = llvm::dyn_cast<llvm::ConstantInt>(CI->getArgOperand(0));
             if (!Arg) {
-                llvm::errs() << "Warning: __loop_tripcount argument is not a "
-                                "constant in block "
-                             << BB.getName() << "\n";
+                PLOGW << "Warning: __loop_tripcount argument is not a constant in block "
+                      << BB.getName();
                 continue;
             }
 
@@ -48,9 +48,8 @@ llvm::PreservedAnalyses TripCountAnnotationPass::run(llvm::Function &F,
 
             llvm::Loop *L = LI.getLoopFor(&BB);
             if (!L) {
-                llvm::errs() << "Warning: __loop_tripcount call not inside a "
-                                "loop in block "
-                             << BB.getName() << "\n";
+                PLOGW << "Warning: __loop_tripcount call not inside a loop in block "
+                      << BB.getName();
                 continue;
             }
 
@@ -92,9 +91,9 @@ llvm::PreservedAnalyses TripCountAnnotationPass::run(llvm::Function &F,
         while (!worklist.empty()) {
             llvm::Loop *Current = worklist.pop_back_val();
             if (!getMarkerTripCount(Current)) {
-                llvm::errs() << "Error: loop in " << F.getName() << " at block '"
-                             << Current->getHeader()->getName()
-                             << "' is missing a __loop_tripcount annotation\n";
+                PLOGE << "Error: loop in " << F.getName() << " at block '"
+                      << Current->getHeader()->getName()
+                      << "' is missing a __loop_tripcount annotation";
                 missingAnnotation = true;
             }
             for (llvm::Loop *Sub : *Current)

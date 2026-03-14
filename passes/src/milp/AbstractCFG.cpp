@@ -2,6 +2,7 @@
 
 #include "common/BlockUtils.h"
 #include "common/CFGAnalysis.h"
+#include "common/Logger.h"
 #include "common/LoopTripCount.h"
 #include "common/LoopUtils.h"
 #include "milp/EnergyModel.h"
@@ -14,8 +15,6 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <functional>
@@ -31,11 +30,6 @@ using namespace llvm;
 namespace checkpoint {
 
 namespace {
-
-cl::opt<bool>
-    AbstractCFGVerboseOpt("abstract-cfg-verbose",
-                          cl::desc("Print per-loop abstract CFG summarization skip details"),
-                          cl::init(false));
 
 struct LoopAggregate {
     std::string nodeName;
@@ -438,22 +432,23 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
 
         auto skipLoop = [&](const std::string &reason, const std::string &details = "") {
             out.stats.skippedReasons[reason]++;
-            if (AbstractCFGVerboseOpt) {
-                errs() << "AbstractCFG skip " << F.getName() << "::" << loopHeaderName
-                       << " reason=" << reason;
-                if (!details.empty()) {
-                    errs() << " details=" << details;
-                }
-                errs() << "\n";
+            if (details.empty()) {
+                PLOGD << "AbstractCFG skip " << F.getName() << "::" << loopHeaderName
+                      << " reason=" << reason;
+            } else {
+                PLOGD << "AbstractCFG skip " << F.getName() << "::" << loopHeaderName
+                      << " reason=" << reason << " details=" << details;
             }
             if (isStripMined) {
                 out.stats.stripMinedLoopsSkipped++;
-                errs() << "AbstractCFG warning: strip-mined loop not summarized " << F.getName()
-                       << "::" << loopHeaderName << " reason=" << reason;
-                if (!details.empty()) {
-                    errs() << " details=" << details;
+                if (details.empty()) {
+                    PLOGW << "AbstractCFG warning: strip-mined loop not summarized " << F.getName()
+                          << "::" << loopHeaderName << " reason=" << reason;
+                } else {
+                    PLOGW << "AbstractCFG warning: strip-mined loop not summarized " << F.getName()
+                          << "::" << loopHeaderName << " reason=" << reason
+                          << " details=" << details;
                 }
-                errs() << "\n";
             }
         };
 

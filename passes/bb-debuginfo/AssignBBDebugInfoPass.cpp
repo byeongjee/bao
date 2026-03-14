@@ -8,29 +8,25 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
-#include <nlohmann/json.hpp>
 #include <fstream>
+#include <nlohmann/json.hpp>
+
+#include "common/Logger.h"
 
 using namespace llvm;
 
 namespace {
 
-static cl::opt<bool> QuietMode(
-    "assign-bb-quiet",
-    cl::desc("Suppress informational messages from assign-bb-debuginfo pass"),
-    cl::init(false));
-
-static cl::opt<std::string> MappingOutput(
-    "bb-mapping",
-    cl::desc("Output path for BB index-to-name mapping JSON"),
-    cl::init(""));
+static cl::opt<std::string> MappingOutput("bb-mapping",
+                                          cl::desc("Output path for BB index-to-name mapping JSON"),
+                                          cl::init(""));
 
 } // anonymous namespace
 
 namespace bbdebuginfo {
 
-PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
-                                              ModuleAnalysisManager &AM) {
+PreservedAnalyses AssignBBDebugInfoPass::run(Module &M, ModuleAnalysisManager &AM) {
+    checkpoint::initLogging();
     LLVMContext &Ctx = M.getContext();
 
     // Check if there are any functions with bodies to process
@@ -43,9 +39,7 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
     }
 
     if (!hasFunctions) {
-        if (!QuietMode) {
-            errs() << "Warning: Module has no function definitions to label\n";
-        }
+        PLOGW << "Warning: Module has no function definitions to label";
         return PreservedAnalyses::all();
     }
 
@@ -70,20 +64,18 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
 
     // Create a compile unit
     // Using DW_LANG_C since it's a simple, well-supported language
-    DICompileUnit *CU = DIB.createCompileUnit(
-        dwarf::DW_LANG_C,
-        File,
-        "bb-debuginfo-pass",  // Producer
-        false,                // isOptimized
-        "",                   // Flags
-        0                     // Runtime version
+    DICompileUnit *CU = DIB.createCompileUnit(dwarf::DW_LANG_C, File,
+                                              "bb-debuginfo-pass", // Producer
+                                              false,               // isOptimized
+                                              "",                  // Flags
+                                              0                    // Runtime version
     );
 
     // Create a simple void function type for all functions
     // We don't need accurate types for BB labeling
-    DISubroutineType *FnTy = DIB.createSubroutineType(
-        DIB.getOrCreateTypeArray({})  // No parameters, no return type info
-    );
+    DISubroutineType *FnTy =
+        DIB.createSubroutineType(DIB.getOrCreateTypeArray({}) // No parameters, no return type info
+        );
 
     // Process each function
     unsigned totalFunctions = 0;
@@ -102,16 +94,15 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
         // Create a fresh DISubprogram for this function
         // Line 0 and ScopeLine 0 mean "unmapped" - no source location
         // This prevents LLC from generating stray source line numbers
-        DISubprogram *SP = DIB.createFunction(
-            File,                    // Scope (use file as scope)
-            F.getName(),             // Name
-            F.getName(),             // Linkage name (same as name)
-            File,                    // File
-            0,                       // Line number (0 = unmapped)
-            FnTy,                    // Type
-            0,                       // Scope line (0 = unmapped)
-            DINode::FlagZero,        // Flags
-            DISubprogram::SPFlagDefinition  // SP flags
+        DISubprogram *SP = DIB.createFunction(File,             // Scope (use file as scope)
+                                              F.getName(),      // Name
+                                              F.getName(),      // Linkage name (same as name)
+                                              File,             // File
+                                              0,                // Line number (0 = unmapped)
+                                              FnTy,             // Type
+                                              0,                // Scope line (0 = unmapped)
+                                              DINode::FlagZero, // Flags
+                                              DISubprogram::SPFlagDefinition // SP flags
         );
 
         F.setSubprogram(SP);
@@ -127,9 +118,9 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
         for (BasicBlock &BB : F) {
             // Create unique debug location: line = BBIndex, column = 0
             DILocation *Loc = DILocation::get(Ctx,
-                                               /*Line=*/BBIndex,
-                                               /*Column=*/0,
-                                               /*Scope=*/SP);
+                                              /*Line=*/BBIndex,
+                                              /*Column=*/0,
+                                              /*Scope=*/SP);
             DebugLoc DL(Loc);
 
             // Store BB name mapping
@@ -160,14 +151,12 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
             }
 
             // Diagnostic for corner cases
-            if (!QuietMode) {
-                if (BB.empty()) {
-                    errs() << "Note: BB " << BBIndex << " in '" << F.getName()
-                           << "' is empty (no instructions to label)\n";
-                } else if (!hasNonPHI) {
-                    errs() << "Note: BB " << BBIndex << " in '" << F.getName()
-                           << "' has only PHI nodes (no labelable instructions)\n";
-                }
+            if (BB.empty()) {
+                PLOGD << "Note: BB " << BBIndex << " in '" << F.getName()
+                      << "' is empty (no instructions to label)";
+            } else if (!hasNonPHI) {
+                PLOGD << "Note: BB " << BBIndex << " in '" << F.getName()
+                      << "' has only PHI nodes (no labelable instructions)";
             }
 
             funcLabeled += labeledInBB;
@@ -175,10 +164,8 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
             BBCount++;
         }
 
-        if (!QuietMode) {
-            errs() << "Labeled " << funcLabeled << " instructions across "
-                   << BBCount << " basic blocks in '" << F.getName() << "'\n";
-        }
+        PLOGI << "Labeled " << funcLabeled << " instructions across " << BBCount
+              << " basic blocks in '" << F.getName() << "'";
 
         // Store function mapping
         bbMapping[F.getName().str()] = funcMapping;
@@ -197,22 +184,17 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
     M.addModuleFlag(Module::Max, "Dwarf Version", 4);
     M.addModuleFlag(Module::Max, "Debug Info Version", 3);
 
-    if (!QuietMode) {
-        errs() << "Total: " << totalFunctions << " functions, "
-               << totalBBs << " basic blocks, "
-               << totalInstructions << " instructions labeled\n";
-    }
+    PLOGI << "Total: " << totalFunctions << " functions, " << totalBBs << " basic blocks, "
+          << totalInstructions << " instructions labeled";
 
     // Write BB mapping to file if requested
     if (!MappingOutput.empty()) {
         std::ofstream outFile(MappingOutput.getValue());
         if (outFile.is_open()) {
             outFile << bbMapping.dump(2) << "\n";
-            if (!QuietMode) {
-                errs() << "Wrote BB mapping to " << MappingOutput << "\n";
-            }
+            PLOGI << "Wrote BB mapping to " << MappingOutput;
         } else {
-            errs() << "Warning: Could not write BB mapping to " << MappingOutput << "\n";
+            PLOGW << "Warning: Could not write BB mapping to " << MappingOutput;
         }
     }
 
@@ -223,22 +205,15 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M,
 } // namespace bbdebuginfo
 
 // Plugin registration for new pass manager
-extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
-llvmGetPassPluginInfo() {
-    return {
-        LLVM_PLUGIN_API_VERSION,
-        "BBDebugInfoPass",
-        LLVM_VERSION_STRING,
-        [](PassBuilder &PB) {
-            PB.registerPipelineParsingCallback(
-                [](StringRef Name, ModulePassManager &MPM,
-                   ArrayRef<PassBuilder::PipelineElement>) {
+extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
+    return {LLVM_PLUGIN_API_VERSION, "BBDebugInfoPass", LLVM_VERSION_STRING, [](PassBuilder &PB) {
+                PB.registerPipelineParsingCallback([](StringRef Name, ModulePassManager &MPM,
+                                                      ArrayRef<PassBuilder::PipelineElement>) {
                     if (Name == "assign-bb-debuginfo") {
                         MPM.addPass(bbdebuginfo::AssignBBDebugInfoPass());
                         return true;
                     }
                     return false;
                 });
-        }
-    };
+            }};
 }

@@ -1,4 +1,5 @@
 #include "schematic/LoopAnalyzer.h"
+#include "common/Logger.h"
 #include "common/LoopTripCount.h"
 #include "schematic/IntervalAllocator.h"
 #include "schematic/RCGSolver.h"
@@ -6,7 +7,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/CFG.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <cmath>
 #include <set>
@@ -138,8 +138,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // 1. Get max trip count.
     auto tcOpt = getMaxTripCount(L);
     if (!tcOpt) {
-        llvm::errs() << "SCHEMATIC: loop at " << header->getName()
-                     << " has no trip count annotation — cannot analyze\n";
+        PLOGE << "SCHEMATIC: loop at " << header->getName()
+              << " has no trip count annotation — cannot analyze";
         return false;
     }
     uint64_t maxTripCount = *tcOpt;
@@ -163,8 +163,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         bodyPaths = enumerateLoopPathsWithoutBackEdges(L);
 
     if (bodyPaths.empty()) {
-        llvm::errs() << "SCHEMATIC: loop at " << header->getName()
-                     << " has no analyzable body paths\n";
+        PLOGE << "SCHEMATIC: loop at " << header->getName() << " has no analyzable body paths";
         return false;
     }
 
@@ -183,8 +182,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                          solution.decidedPlacements, startBound, endBound, tracker_);
         RCGResult result = solver.solve();
         if (!result.feasible) {
-            llvm::errs() << "SCHEMATIC infeasible: energy capacity too small for loop at '"
-                         << header->getName() << "': " << result.errorMessage << "\n";
+            PLOGE << "SCHEMATIC infeasible: energy capacity too small for loop at '"
+                  << header->getName() << "': " << result.errorMessage;
             return false;
         }
 

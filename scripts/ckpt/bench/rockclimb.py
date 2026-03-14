@@ -139,6 +139,7 @@ def run_rockclimb_benchmarks(
                 energy_config=energy_config,
                 rockclimb_config=cap.config_path,
                 output=out_dir / bench_name,
+                pass_log_level="info",
                 precomputed_energy=True,
                 link=True,
                 debug_counters=debug_counters,

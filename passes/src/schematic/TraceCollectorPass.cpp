@@ -1,5 +1,6 @@
 #include "schematic/TraceCollectorPass.h"
 #include "common/BBNaming.h"
+#include "common/Logger.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -12,7 +13,6 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <string>
 #include <vector>
@@ -111,6 +111,7 @@ static Constant *createStringArrayArray(Module &M,
 // ---------------------------------------------------------------------------
 
 PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &AM) {
+    initLogging();
     // Skip declarations
     if (F.isDeclaration())
         return PreservedAnalyses::all();
@@ -171,8 +172,8 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
             BasicBlock *latch = L->getLoopLatch();
 
             if (!preheader || !latch) {
-                errs() << "TraceCollectorPass: skipping loop without "
-                       << "preheader/latch at " << header->getName() << "\n";
+                PLOGW << "TraceCollectorPass: skipping loop without "
+                      << "preheader/latch at " << header->getName();
                 continue;
             }
 
@@ -379,8 +380,8 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
         }
     }
 
-    errs() << "TraceCollectorPass: instrumented " << funcName << " (" << bbCount << " BBs, "
-           << loopCount << " loops)\n";
+    PLOGI << "TraceCollectorPass: instrumented " << funcName << " (" << bbCount << " BBs, "
+          << loopCount << " loops)";
 
     return PreservedAnalyses::none();
 }

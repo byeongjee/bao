@@ -1,6 +1,6 @@
 #include "schematic/TraceLoader.h"
 
-#include "llvm/Support/raw_ostream.h"
+#include "common/Logger.h"
 
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -22,20 +22,20 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
     // Read and parse JSON
     std::ifstream ifs(traceFilePath);
     if (!ifs.is_open()) {
-        errs() << "TraceLoader: cannot open " << traceFilePath << "\n";
+        PLOGE << "TraceLoader: cannot open " << traceFilePath;
         return std::nullopt;
     }
 
     json root = json::parse(ifs, /*cb=*/nullptr, /*allow_exceptions=*/false);
     if (root.is_discarded()) {
-        errs() << "TraceLoader: JSON parse error in " << traceFilePath << "\n";
+        PLOGE << "TraceLoader: JSON parse error in " << traceFilePath;
         return std::nullopt;
     }
 
     // Look up function name
     std::string funcName = F_.getName().str();
     if (!root.contains(funcName)) {
-        errs() << "TraceLoader: function '" << funcName << "' not found in trace file\n";
+        PLOGE << "TraceLoader: function '" << funcName << "' not found in trace file";
         return std::nullopt;
     }
 
@@ -60,8 +60,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                 std::string name = bbName.get<std::string>();
                 auto it = nameToBlock_.find(StringRef(name));
                 if (it == nameToBlock_.end()) {
-                    errs() << "TraceLoader: warning: BB '" << name << "' not found in " << funcName
-                           << ", skipping trace\n";
+                    PLOGW << "TraceLoader: BB '" << name << "' not found in " << funcName
+                          << ", skipping trace";
                     valid = false;
                     break;
                 }
@@ -88,8 +88,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
             // Resolve header BB
             auto headerIt = nameToBlock_.find(StringRef(headerName));
             if (headerIt == nameToBlock_.end()) {
-                errs() << "TraceLoader: warning: loop header '" << headerName
-                       << "' not found, skipping loop\n";
+                PLOGW << "TraceLoader: loop header '" << headerName << "' not found, skipping loop";
                 continue;
             }
 
@@ -108,8 +107,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
             }
 
             if (!llt.loop) {
-                errs() << "TraceLoader: warning: no Loop* for header '" << headerName
-                       << "', skipping\n";
+                PLOGW << "TraceLoader: no Loop* for header '" << headerName << "', skipping";
                 continue;
             }
 
@@ -164,8 +162,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                         std::string name = bbName.get<std::string>();
                         auto it = nameToBlock_.find(StringRef(name));
                         if (it == nameToBlock_.end()) {
-                            errs() << "TraceLoader: warning: BB '" << name
-                                   << "' in loop trace not found, skipping\n";
+                            PLOGW << "TraceLoader: BB '" << name
+                                  << "' in loop trace not found, skipping";
                             valid = false;
                             break;
                         }
@@ -189,8 +187,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
         }
     }
 
-    errs() << "TraceLoader: loaded " << result.functionPaths.size() << " function traces, "
-           << result.loopTraces.size() << " loop traces for " << funcName << "\n";
+    PLOGI << "TraceLoader: loaded " << result.functionPaths.size() << " function traces, "
+          << result.loopTraces.size() << " loop traces for " << funcName;
 
     return result;
 }

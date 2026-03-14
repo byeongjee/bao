@@ -7,6 +7,8 @@
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "common/Logger.h"
+
 using namespace llvm;
 
 namespace checkpoint {
@@ -25,8 +27,8 @@ bool RockClimbMachineInstrumenter::verifyConstants() const {
     auto checkOpcode = [&](unsigned opcode, const char *expected) {
         StringRef name = TII_->getName(opcode);
         if (name != expected) {
-            errs() << "RockClimbMachineInstrumenter: opcode " << opcode << " is '" << name
-                   << "', expected '" << expected << "'\n";
+            PLOGD << "RockClimbMachineInstrumenter: opcode " << opcode << " is '" << name
+                  << "', expected '" << expected << "'";
             ok = false;
         }
     };
@@ -131,8 +133,8 @@ RockClimbMachineInstrumenter::instrument(const std::vector<MachineBasicBlock *> 
                                          bool enableDistributedCkpt) {
 
     if (!verifyConstants()) {
-        errs() << "WARNING: MSP430 opcode/register constants mismatch. "
-               << "Instrumentation may produce incorrect code.\n";
+        PLOGW << "WARNING: MSP430 opcode/register constants mismatch. "
+              << "Instrumentation may produce incorrect code.";
     }
 
     unsigned count = 0;

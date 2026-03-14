@@ -1,6 +1,8 @@
 #include "common/BlockSplitter.h"
+#include "common/Logger.h"
 
 #include "llvm/IR/Instructions.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace checkpoint {
 
@@ -72,10 +74,9 @@ bool splitAllOversizedBlocks(llvm::Function &F, double threshold, EnergyEstimato
                 llvm::BasicBlock *newBB = splitOversizedBlock(&BB, threshold, estimator);
                 if (!newBB) {
                     // Unsplittable block exceeds capacity
-                    llvm::errs() << "Unsplittable block '" << BB.getName() << "' in function '"
-                                 << F.getName()
-                                 << "' exceeds split threshold (energy=" << blockEnergy
-                                 << ", threshold=" << threshold << ")\n";
+                    PLOGW << "Unsplittable block '" << BB.getName() << "' in function '"
+                          << F.getName() << "' exceeds split threshold (energy=" << blockEnergy
+                          << ", threshold=" << threshold << ")";
                     double maxInstCost = 0.0;
                     const llvm::Instruction *maxInst = nullptr;
                     for (const llvm::Instruction &I : BB) {
@@ -88,9 +89,11 @@ bool splitAllOversizedBlocks(llvm::Function &F, double threshold, EnergyEstimato
                         }
                     }
                     if (maxInst) {
-                        llvm::errs() << "  Max instruction cost: " << maxInstCost << " | inst: ";
-                        maxInst->print(llvm::errs());
-                        llvm::errs() << "\n";
+                        std::string instStr;
+                        llvm::raw_string_ostream rso(instStr);
+                        maxInst->print(rso);
+                        PLOGD << "  Max instruction cost: " << maxInstCost
+                              << " | inst: " << instStr;
                     }
                     return false;
                 }

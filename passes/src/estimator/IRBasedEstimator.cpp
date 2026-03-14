@@ -1,7 +1,7 @@
 #include "estimator/IRBasedEstimator.h"
+#include "common/Logger.h"
 
 #include "llvm/IR/Instructions.h"
-#include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
 #include <fstream>
@@ -20,19 +20,19 @@ std::unique_ptr<IRBasedEstimator> IRBasedEstimator::create(const std::string &co
 bool IRBasedEstimator::loadConfig(const std::string &path) {
     std::ifstream file(path);
     if (!file.is_open()) {
-        llvm::errs() << "Error: Cannot open energy config file: " << path << "\n";
+        PLOGE << "Error: Cannot open energy config file: " << path;
         return false;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::errs() << "Error: JSON parse error in: " << path << "\n";
+        PLOGE << "Error: JSON parse error in: " << path;
         return false;
     }
 
     // Validate required fields
     if (!config.contains("energy_parameters")) {
-        llvm::errs() << "Error: Missing 'energy_parameters' in config: " << path << "\n";
+        PLOGE << "Error: Missing 'energy_parameters' in config: " << path;
         return false;
     }
 
@@ -40,7 +40,7 @@ bool IRBasedEstimator::loadConfig(const std::string &path) {
 
     // Load instruction costs (required)
     if (!params.contains("instruction_costs")) {
-        llvm::errs() << "Error: Missing 'instruction_costs' in config: " << path << "\n";
+        PLOGE << "Error: Missing 'instruction_costs' in config: " << path;
         return false;
     }
 
@@ -64,8 +64,7 @@ bool IRBasedEstimator::loadConfig(const std::string &path) {
 
     for (const auto &cat : requiredCategories) {
         if (!costs.contains(cat)) {
-            llvm::errs() << "Error: Missing instruction cost category '" << cat
-                         << "' in config: " << path << "\n";
+            PLOGE << "Error: Missing instruction cost category '" << cat << "' in config: " << path;
             return false;
         }
         instructionCosts_[cat] = costs[cat].get<double>();

@@ -5,6 +5,8 @@
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "common/Logger.h"
+
 #include <cstdlib>
 #include <regex>
 #include <sstream>
@@ -50,38 +52,35 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
     }
 
     if (objdumpPath.empty()) {
-        errs() << "error: msp430-elf-objdump not found. Set MSP430_GCC_DIR environment variable.\n";
+        PLOGE << "error: msp430-elf-objdump not found. Set MSP430_GCC_DIR environment variable.";
         return result;
     }
 
-    errs() << "Using objdump: " << objdumpPath << "\n";
+    PLOGI << "Using objdump: " << objdumpPath;
 
     // Create temporary file for objdump output
     SmallString<128> tempPath;
     std::error_code ec = sys::fs::createTemporaryFile("objdump", "txt", tempPath);
     if (ec) {
-        errs() << "error: failed to create temp file: " << ec.message() << "\n";
+        PLOGE << "error: failed to create temp file: " << ec.message();
         return result;
     }
 
     // Run objdump -d <elfPath>
     StringRef args[] = {objdumpPath, "-d", elfPath};
-    std::optional<StringRef> redirects[] = {std::nullopt, StringRef(tempPath),
-                                             std::nullopt};
+    std::optional<StringRef> redirects[] = {std::nullopt, StringRef(tempPath), std::nullopt};
 
     int rc = sys::ExecuteAndWait(objdumpPath, args, std::nullopt, redirects);
     if (rc != 0) {
-        errs() << "error: objdump failed with exit code " << rc << "\n";
+        PLOGE << "error: objdump failed with exit code " << rc;
         sys::fs::remove(tempPath);
         return result;
     }
 
     // Read objdump output
-    ErrorOr<std::unique_ptr<MemoryBuffer>> bufOrErr =
-        MemoryBuffer::getFile(tempPath);
+    ErrorOr<std::unique_ptr<MemoryBuffer>> bufOrErr = MemoryBuffer::getFile(tempPath);
     if (!bufOrErr) {
-        errs() << "error: failed to read objdump output: "
-               << bufOrErr.getError().message() << "\n";
+        PLOGE << "error: failed to read objdump output: " << bufOrErr.getError().message();
         sys::fs::remove(tempPath);
         return result;
     }
@@ -120,15 +119,14 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
 
             // Parse mnemonic (convert to lowercase)
             instr.mnemonic = match[3].str();
-            std::transform(instr.mnemonic.begin(), instr.mnemonic.end(),
-                           instr.mnemonic.begin(),
+            std::transform(instr.mnemonic.begin(), instr.mnemonic.end(), instr.mnemonic.begin(),
                            [](unsigned char c) { return std::tolower(c); });
 
             // Skip padding/data bytes that objdump displays as hex values
             // (e.g., "00", "ff", etc. are not valid MSP430 mnemonics)
-            bool isHexOnly = !instr.mnemonic.empty() &&
-                std::all_of(instr.mnemonic.begin(), instr.mnemonic.end(),
-                            [](char c) { return std::isxdigit(c); });
+            bool isHexOnly =
+                !instr.mnemonic.empty() && std::all_of(instr.mnemonic.begin(), instr.mnemonic.end(),
+                                                       [](char c) { return std::isxdigit(c); });
             if (isHexOnly) {
                 continue;
             }
@@ -149,7 +147,7 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
         }
     }
 
-    errs() << "Disassembled " << result.size() << " instructions\n";
+    PLOGI << "Disassembled " << result.size() << " instructions";
     return result;
 }
 

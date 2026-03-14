@@ -29,6 +29,7 @@ class RockClimbCompileOptions:
     energy_config: Path
     rockclimb_config: Path
     output: Path
+    pass_log_level: str
     precomputed_energy: bool
     link: bool
     debug_counters: bool
@@ -277,6 +278,7 @@ def _run_rockclimb_pass(
         "-run-pass=rockclimb",
         f"-rockclimb-config={opts.rockclimb_config}",
         energy_flag[0] + "=" + energy_flag[1],
+        f"-ckpt-log-level={opts.pass_log_level}",
         f"-ckpt-stats-json={instrumented_mir.parent / 'stats.json'}",
         str(mir_file),
         "-o", str(instrumented_mir),

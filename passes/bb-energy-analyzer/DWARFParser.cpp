@@ -11,6 +11,8 @@
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "common/Logger.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <regex>
@@ -55,7 +57,7 @@ std::vector<LineEntry> parseLineTableWithObjdump(const std::string &objectPath) 
 
     std::string objdumpPath = findObjdump();
     if (objdumpPath.empty()) {
-        errs() << "warning: msp430-elf-objdump not found, line table parsing may be inaccurate\n";
+        PLOGW << "warning: msp430-elf-objdump not found, line table parsing may be inaccurate";
         return entries;
     }
 
@@ -63,7 +65,7 @@ std::vector<LineEntry> parseLineTableWithObjdump(const std::string &objectPath) 
     SmallString<128> tempPath;
     std::error_code ec = sys::fs::createTemporaryFile("dwarf", "txt", tempPath);
     if (ec) {
-        errs() << "error: failed to create temp file: " << ec.message() << "\n";
+        PLOGE << "error: failed to create temp file: " << ec.message();
         return entries;
     }
 
@@ -73,7 +75,7 @@ std::vector<LineEntry> parseLineTableWithObjdump(const std::string &objectPath) 
 
     int rc = sys::ExecuteAndWait(objdumpPath, args, std::nullopt, redirects);
     if (rc != 0) {
-        errs() << "error: objdump --dwarf=decodedline failed\n";
+        PLOGE << "error: objdump --dwarf=decodedline failed";
         sys::fs::remove(tempPath);
         return entries;
     }
@@ -208,27 +210,29 @@ std::map<std::string, FunctionBBMap> DWARFParser::parse(const std::string &objec
     std::map<std::string, FunctionBBMap> result;
 
     // Get line table entries using objdump (bypasses LLVM's MSP430 relocation issues)
-    errs() << "Parsing line table with objdump...\n";
+    PLOGI << "Parsing line table with objdump...";
     std::vector<LineEntry> lineEntries = parseLineTableWithObjdump(objectPath);
 
     if (lineEntries.empty()) {
-        errs() << "warning: no line table entries found\n";
+        PLOGW << "warning: no line table entries found";
         // Fall back to LLVM parser
-        errs() << "Attempting LLVM DWARF parser (may have warnings)...\n";
+        PLOGI << "Attempting LLVM DWARF parser (may have warnings)...";
     }
 
     // Get function ranges from disassembly
-    errs() << "Parsing function ranges...\n";
+    PLOGI << "Parsing function ranges...";
     std::vector<FuncRange> functions = parseFunctionRanges(objectPath);
 
     if (functions.empty()) {
-        errs() << "warning: no functions found\n";
+        PLOGW << "warning: no functions found";
         return result;
     }
 
     for (const auto &func : functions) {
-        errs() << "Found function '" << func.name << "' at "
-               << format_hex(func.start, 6) << " - " << format_hex(func.end, 6) << "\n";
+        std::string startHex, endHex;
+        llvm::raw_string_ostream(startHex) << format_hex(func.start, 6);
+        llvm::raw_string_ostream(endHex) << format_hex(func.end, 6);
+        PLOGD << "Found function '" << func.name << "' at " << startHex << " - " << endHex;
     }
 
     // Sort line entries by address
@@ -249,7 +253,7 @@ std::map<std::string, FunctionBBMap> DWARFParser::parse(const std::string &objec
         }
 
         if (funcLines.empty()) {
-            errs() << "warning: function '" << func.name << "' has no line entries\n";
+            PLOGW << "warning: function '" << func.name << "' has no line entries";
             continue;
         }
 
@@ -288,8 +292,8 @@ std::map<std::string, FunctionBBMap> DWARFParser::parse(const std::string &objec
         }
 
         result[func.name] = funcMap;
-        errs() << "Parsed function '" << func.name << "' with "
-               << funcMap.bbToAddresses.size() << " basic blocks\n";
+        PLOGD << "Parsed function '" << func.name << "' with " << funcMap.bbToAddresses.size()
+              << " basic blocks";
     }
 
     return result;

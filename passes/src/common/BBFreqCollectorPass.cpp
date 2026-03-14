@@ -1,5 +1,6 @@
 #include "common/BBFreqCollectorPass.h"
 #include "common/BBNaming.h"
+#include "common/Logger.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -8,7 +9,6 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <string>
 #include <vector>
@@ -58,6 +58,8 @@ static Constant *createStringArray(Module &M, const std::vector<std::string> &st
 // ---------------------------------------------------------------------------
 
 PreservedAnalyses BBFreqCollectorPass::run(Function &F, FunctionAnalysisManager &AM) {
+    checkpoint::initLogging();
+
     if (F.isDeclaration())
         return PreservedAnalyses::all();
 
@@ -187,7 +189,7 @@ PreservedAnalyses BBFreqCollectorPass::run(Function &F, FunctionAnalysisManager 
         }
     }
 
-    errs() << "BBFreqCollectorPass: instrumented " << F.getName() << " (" << bbCount << " BBs)\n";
+    PLOGI << "BBFreqCollectorPass: instrumented " << F.getName() << " (" << bbCount << " BBs)";
 
     return PreservedAnalyses::none();
 }

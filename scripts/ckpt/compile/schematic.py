@@ -35,6 +35,7 @@ class SchematicCompileOptions:
     schematic_config: Path | None  # None when trace_only
     output: Path
     estimator_mode: str
+    pass_log_level: str
     debug: bool
     trace_only: bool
     link: bool
@@ -211,6 +212,7 @@ def _collect_or_reuse_trace(
             f"-load-pass-plugin={env.pass_lib}",
             "-passes=trace-collect",
             f"-energy-config={opts.energy_config}",
+            f"-ckpt-log-level={opts.pass_log_level}",
             "-S", str(schematic_input_ll),
             "-o", str(trace_inst_ll),
         ],
@@ -285,6 +287,7 @@ def _run_schematic_pass(
         f"-energy-config={cfg}",
         f"-schematic-config={opts.schematic_config}",
         f"-schematic-trace={trace_json}",
+        f"-ckpt-log-level={opts.pass_log_level}",
     ]
     if opts.debug_counters:
         cmd.append("-add-debug-markers")

@@ -14,6 +14,7 @@ add_library(RockClimbMachinePass MODULE
     # Reuse shared sources
     ${CMAKE_SOURCE_DIR}/bb-energy-analyzer/EnergyModel.cpp
     ${CMAKE_SOURCE_DIR}/src/common/PassStatistics.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
 )
 
 set_target_properties(RockClimbMachinePass PROPERTIES
@@ -48,4 +49,5 @@ endif()
 
 target_link_libraries(RockClimbMachinePass PRIVATE
     nlohmann_json::nlohmann_json
+    plog::plog
 )
