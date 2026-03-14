@@ -109,14 +109,32 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
         // or from the region's own start block (loop back-edge).
         // Uses instruction-scan BFS (isRegLiveFromBlock) instead of
         // MBB->isLiveIn() which is unreliable after register allocation.
+        //
+        // For the start block, scan from the recovery point (after the
+        // boundary CALL), not from the block entry.  The boundary CALL
+        // has implicit defs for caller-saved registers, but these don't
+        // apply during BOR recovery (boot.S restores them from NVM).
+        const MachineInstr *boundaryCall = nullptr;
+        for (const MachineInstr &MI : *region.startBlock) {
+            if (MI.isCall()) {
+                boundaryCall = &MI;
+                break;
+            }
+        }
+
         SmallSet<MCPhysReg, 16> liveOutRegs;
         for (MachineBasicBlock *MBB : region.blocks) {
             for (MachineBasicBlock *succ : MBB->successors()) {
                 if (regionBlockSet.count(succ) && succ != region.startBlock)
                     continue;
 
+                // When checking the start block, skip past the boundary
+                // CALL so its implicit register defs don't poison liveness.
+                const MachineInstr *skipAfter =
+                    (succ == region.startBlock) ? boundaryCall : nullptr;
+
                 for (MCPhysReg reg : defsInRegion) {
-                    if (isRegLiveFromBlock(succ, reg, TRI))
+                    if (isRegLiveFromBlock(succ, reg, TRI, skipAfter))
                         liveOutRegs.insert(reg);
                 }
             }
