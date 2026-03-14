@@ -25,6 +25,8 @@ from ..compile.common import (
     compile_to_ir,
 )
 from ..compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
+from ..device.flash import read_nvm
+from ..device.saleae import discover_saleae, saleae_run
 from ..env import ProjectEnv
 from ..output_parser import detect_infeasibility
 from ..errors import DeviceError
@@ -33,6 +35,8 @@ from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 
 _CFI_RE = re.compile(r"^\s*\.cfi_")
+_FLASH_TIMEOUT = 30
+_AFTER_TRIGGER_SECONDS = 1.0
 
 # NVM symbols read from the device for both baseline and RockClimb binaries.
 _NVM_SYMBOLS = [
@@ -142,18 +146,6 @@ def _compile_baseline(
 
 
 # ---------------------------------------------------------------------------
-# NVM reading helpers
-# ---------------------------------------------------------------------------
-
-def _read_nvm(tc: Toolchain, elf: Path, symbols: list[str], timeout: int) -> dict[str, str]:
-    """Flash, run, and read NVM symbols. Returns key=value dict."""
-    from ..device.flash import flash_run_and_read
-
-    nvm_dict = flash_run_and_read(tc, elf, timeout, symbols)
-    return {k: str(v) for k, v in nvm_dict.items()}
-
-
-# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -163,7 +155,6 @@ def verify_rockclimb(
     *,
     benchmarks: list[str] | None,
     caps: list[str] | None,
-    timeout: int,
     verbose: bool,
     halt_mode: str,
     energy_config: Path | None,
@@ -183,6 +174,12 @@ def verify_rockclimb(
     bench_files = discover_benchmarks(env, benchmarks)
     if not bench_files:
         print("Error: No benchmarks to verify", file=sys.stderr)
+        return False
+
+    try:
+        saleae_manager = discover_saleae()
+    except DeviceError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return False
 
     capacitors = discover_capacitors(env, "rockclimb", caps)
@@ -214,7 +211,7 @@ def verify_rockclimb(
             energy_config=energy_config,
             cap_config=cap.config_path,
             cap_label=cap.label,
-            timeout=timeout,
+            saleae_manager=saleae_manager,
             verbose=verbose,
             halt_mode=halt_mode,
         )
@@ -238,7 +235,7 @@ def _verify_one(
     energy_config: Path,
     cap_config: Path,
     cap_label: str,
-    timeout: int,
+    saleae_manager: object,
     verbose: bool,
     halt_mode: str,
 ) -> _BenchResult:
@@ -258,7 +255,9 @@ def _verify_one(
 
         # ── B: Flash + read baseline ──
         try:
-            baseline_nvm = _read_nvm(tc, baseline_elf, _NVM_SYMBOLS, timeout)
+            saleae_run(tc, baseline_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
+            nvm_dict = read_nvm(tc, baseline_elf, _FLASH_TIMEOUT, _NVM_SYMBOLS)
+            baseline_nvm = {k: str(v) for k, v in nvm_dict.items()}
         except (DeviceError, OSError) as exc:
             msg = f"Baseline flash/read failed: {exc}"
             print(f"  ERROR: {msg}")
@@ -345,7 +344,9 @@ def _verify_one(
 
         # ── E: Flash + read RockClimb ──
         try:
-            rockclimb_nvm = _read_nvm(tc, rockclimb_elf, _NVM_SYMBOLS, timeout)
+            saleae_run(tc, rockclimb_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
+            nvm_dict = read_nvm(tc, rockclimb_elf, _FLASH_TIMEOUT, _NVM_SYMBOLS)
+            rockclimb_nvm = {k: str(v) for k, v in nvm_dict.items()}
         except (DeviceError, OSError) as exc:
             msg = f"RockClimb flash/read failed: {exc}"
             print(f"  ERROR: {msg}")

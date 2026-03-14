@@ -664,7 +664,6 @@ def verify() -> None:
 @verify.command("rockclimb")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--timeout", type=int, default=30, help="Serial timeout in seconds.")
 @click.option("-v", "--verbose", is_flag=True, help="Show full compile/serial output.")
 @click.option(
     "-e",
@@ -683,7 +682,6 @@ def verify_rockclimb_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
-    timeout: int,
     verbose: bool,
     energy_config: str | None,
     halt_mode: str,
@@ -696,7 +694,6 @@ def verify_rockclimb_cmd(
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
-        timeout=timeout,
         verbose=verbose,
         halt_mode=halt_mode,
         energy_config=Path(energy_config) if energy_config else None,
