@@ -4,6 +4,5 @@
   "reg_restore_energy": 2.0,
   "rockclimb": {
     "distributed_checkpointing": true
-  },
-  "add_debug_markers": false
+  }
 }

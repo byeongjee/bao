@@ -535,7 +535,7 @@ def bench() -> None:
 @bench.command("milp")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
+@click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
 @click.option(
@@ -596,7 +596,7 @@ def bench_milp_cmd(
 @bench.command("rockclimb")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
+@click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
 @click.option(
@@ -649,7 +649,7 @@ def bench_rockclimb_cmd(
 @bench.command("schematic")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
+@click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output.")
 @click.option(

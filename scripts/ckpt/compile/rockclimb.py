@@ -282,6 +282,8 @@ def _run_rockclimb_pass(
         str(mir_file),
         "-o", str(instrumented_mir),
     ]
+    if opts.debug_counters:
+        cmd.insert(-2, "-add-debug-markers")
 
     # In non-verbose mode the bash script suppresses stderr (2>/dev/null).
     # We always capture; the caller can choose whether to display.
