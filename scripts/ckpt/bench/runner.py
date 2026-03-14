@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import json as _json
+import logging
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -32,8 +33,6 @@ from ..errors import DeviceError
 from ..runner import CompilationError
 from ..toolchain import Toolchain
 from .config import CapacitorConfig
-
-import logging
 
 logger = logging.getLogger(__name__)
 

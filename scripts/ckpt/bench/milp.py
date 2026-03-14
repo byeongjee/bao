@@ -168,7 +168,7 @@ def run_milp_benchmarks(
                 milp_config=cap.config_path,
                 output=out_dir / bench_name,
                 estimator_mode=estimator_mode,
-                pass_verbose=True,
+                pass_verbose=True,  # always enable LLVM verbose flags for stats parsing
                 debug=False,
                 link=True,
                 halt_mode=halt_mode,

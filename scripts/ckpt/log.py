@@ -21,8 +21,9 @@ class _Formatter(logging.Formatter):
 def setup_logging(level_name: str) -> None:
     """Configure the ckpt root logger. Called once from CLI entry point."""
     level = getattr(logging, level_name.upper())
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(_Formatter())
     root = logging.getLogger("ckpt")
     root.setLevel(level)
-    root.addHandler(handler)
+    if not root.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(_Formatter())
+        root.addHandler(handler)

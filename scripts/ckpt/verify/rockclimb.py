@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from ..bench.config import (
     default_energy_config,
     discover_benchmarks,
@@ -36,6 +34,8 @@ from ..errors import DeviceError
 from ..runner import CompilationError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
+
+logger = logging.getLogger(__name__)
 
 _CFI_RE = re.compile(r"^\s*\.cfi_")
 _FLASH_TIMEOUT = 30
