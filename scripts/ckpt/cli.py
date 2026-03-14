@@ -88,7 +88,6 @@ def compile() -> None:
 @click.option("--verbose", is_flag=True, help="Show detailed pass output.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
-@click.option("--add-debug-markers", is_flag=True, help="Add debug markers.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -116,7 +115,6 @@ def compile_milp_cmd(
     verbose: bool,
     debug: bool,
     debug_counters: bool,
-    add_debug_markers: bool,
     halt_mode: str,
     opt_level: int,
     clang_opt_level: int,
@@ -143,7 +141,6 @@ def compile_milp_cmd(
             extra_includes=list(extra_includes),
             verbose=verbose,
             debug=debug,
-            add_debug_markers=add_debug_markers,
             link=link,
             halt_mode=halt_mode,
             debug_counters=debug_counters,
@@ -242,7 +239,6 @@ def compile_rockclimb_cmd(
 @click.option("--verbose", is_flag=True, help="Show detailed pass output.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
 @click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
-@click.option("--add-debug-markers", is_flag=True, help="Add debug markers.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -279,7 +275,6 @@ def compile_schematic_cmd(
     verbose: bool,
     debug: bool,
     debug_counters: bool,
-    add_debug_markers: bool,
     halt_mode: str,
     trace_file: str | None,
     trace_only: bool,
@@ -312,7 +307,6 @@ def compile_schematic_cmd(
             estimator_mode=estimator_mode,
             verbose=verbose,
             debug=debug,
-            add_debug_markers=add_debug_markers,
             trace_only=trace_only,
             link=link,
             debug_counters=debug_counters,
@@ -427,7 +421,6 @@ def compile_run_cmd(
                 estimator_mode=estimator_mode,
                 verbose=verbose,
                 debug=debug,
-                add_debug_markers=False,
                 link=True,
                 halt_mode=halt_mode,
                 debug_counters=debug_counters,
@@ -489,7 +482,6 @@ def compile_run_cmd(
                 estimator_mode=estimator_mode,
                 verbose=verbose,
                 debug=debug,
-                add_debug_markers=False,
                 trace_only=False,
                 link=True,
                 debug_counters=debug_counters,

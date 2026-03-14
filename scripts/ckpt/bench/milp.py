@@ -173,7 +173,6 @@ def run_milp_benchmarks(
                 estimator_mode=estimator_mode,
                 verbose=True,
                 debug=False,
-                add_debug_markers=True,
                 link=True,
                 halt_mode=halt_mode,
                 debug_counters=debug_counters,

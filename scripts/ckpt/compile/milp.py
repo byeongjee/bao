@@ -39,7 +39,6 @@ class MilpCompileOptions:
     estimator_mode: str
     verbose: bool
     debug: bool
-    add_debug_markers: bool
     link: bool
     halt_mode: str
     debug_counters: bool
@@ -117,7 +116,7 @@ def compile_milp(
 
         # Build extra flags for MILP passes
         milp_extra_flags: list[str] = []
-        if opts.add_debug_markers:
+        if opts.debug_counters:
             milp_extra_flags.append("-add-debug-markers")
         if opts.verbose:
             milp_extra_flags += ["-loop-strip-mining-verbose", "-abstract-cfg-verbose"]

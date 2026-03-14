@@ -37,7 +37,6 @@ class SchematicCompileOptions:
     estimator_mode: str
     verbose: bool
     debug: bool
-    add_debug_markers: bool
     trace_only: bool
     link: bool
     debug_counters: bool
@@ -288,7 +287,7 @@ def _run_schematic_pass(
         f"-schematic-config={opts.schematic_config}",
         f"-schematic-trace={trace_json}",
     ]
-    if opts.add_debug_markers:
+    if opts.debug_counters:
         cmd.append("-add-debug-markers")
     cmd.append(f"-ckpt-stats-json={tmp / 'stats.json'}")
     cmd += ["-S", str(input_ll), "-o", str(tmp / "ckpt.ll")]

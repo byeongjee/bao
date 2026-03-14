@@ -5,7 +5,7 @@ SCHEMATIC uses a two-phase approach per benchmark:
 1. **Trace collection** -- run once per benchmark with ``--trace-only``
    and ``-Oc 0`` using a dummy (10uF) config.
 2. **Per-capacitor compilation** -- compile with ``--trace <collected_trace>``
-   ``--link`` ``--add-debug-markers`` for each capacitor size.
+   ``--link`` for each capacitor size.
 
 Optionally flashes to an MSP430 device and writes a CSV summary.
 """
@@ -194,7 +194,6 @@ def run_schematic_benchmarks(
                     estimator_mode=estimator_mode,
                     verbose=verbose,
                     debug=False,
-                    add_debug_markers=False,
                     trace_only=True,
                     link=False,
                     debug_counters=False,
@@ -255,7 +254,6 @@ def run_schematic_benchmarks(
                 estimator_mode=estimator_mode,
                 verbose=verbose,
                 debug=False,
-                add_debug_markers=True,
                 trace_only=False,
                 link=True,
                 debug_counters=debug_counters,
