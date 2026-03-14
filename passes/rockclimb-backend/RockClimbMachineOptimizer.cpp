@@ -42,7 +42,7 @@ RockClimbMachineOptimizer::RockClimbMachineOptimizer(MachineFunction &MF, Machin
     }
 
     identifyLoopHeaders();
-    identifyCallSiteBlocks();
+    identifyPostCallBlocks();
     computeTopologicalOrder();
 }
 
@@ -65,11 +65,13 @@ void RockClimbMachineOptimizer::identifyLoopHeaders() {
     }
 }
 
-void RockClimbMachineOptimizer::identifyCallSiteBlocks() {
-    callSiteBlocks_.clear();
+void RockClimbMachineOptimizer::identifyPostCallBlocks() {
+    postCallBlocks_.clear();
     for (MachineBasicBlock &MBB : MF_) {
-        if (blockHasMachineCallSite(MBB))
-            callSiteBlocks_.insert(&MBB);
+        if (blockHasMachineCallSite(MBB)) {
+            for (MachineBasicBlock *succ : MBB.successors())
+                postCallBlocks_.insert(succ);
+        }
     }
 }
 
@@ -142,7 +144,7 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
 
         // Mandatory boundaries: loop headers and call sites
         if (MBB != entryMBB) {
-            if (loopHeaders_.count(MBB) || callSiteBlocks_.count(MBB))
+            if (loopHeaders_.count(MBB) || postCallBlocks_.count(MBB))
                 boundarySet.insert(MBB);
         }
 

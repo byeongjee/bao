@@ -53,14 +53,14 @@ class RockClimbMachineOptimizer {
     /// Loop headers (mandatory region boundaries)
     llvm::SmallPtrSet<llvm::MachineBasicBlock *, 16> loopHeaders_;
 
-    /// Blocks containing function calls (mandatory boundaries)
-    llvm::SmallPtrSet<llvm::MachineBasicBlock *, 16> callSiteBlocks_;
+    /// Successors of blocks containing function calls (mandatory boundaries)
+    llvm::SmallPtrSet<llvm::MachineBasicBlock *, 16> postCallBlocks_;
 
     /// Blocks in reverse post-order
     std::vector<llvm::MachineBasicBlock *> topoOrder_;
 
     void identifyLoopHeaders();
-    void identifyCallSiteBlocks();
+    void identifyPostCallBlocks();
     void computeTopologicalOrder();
     double getBlockCost(llvm::MachineBasicBlock *MBB) const;
 
