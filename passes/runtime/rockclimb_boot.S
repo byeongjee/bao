@@ -54,6 +54,9 @@ _do_recovery:
 
     /* Reconfigure DCO — BOR resets clock to default ~1 MHz.
        F_CPU is passed as a -D define from the build system. */
+#if F_CPU > 8000000
+    mov.w   #0xA510, &0x0140    /* FRCTL0: 1 FRAM wait state (required >8 MHz) */
+#endif
 #if F_CPU == 16000000
     mov.b   #0xA5, &0x0161      /* CSCTL0_H = CSKEY_H */
     mov.w   #0x0048, &0x0162    /* CSCTL1 = DCORSEL | DCOFSEL_4 = 16 MHz */
@@ -63,7 +66,6 @@ _do_recovery:
     mov.w   #0x0006, &0x0162    /* CSCTL1 = DCOFSEL_6 = 8 MHz */
     mov.b   #0x00, &0x0161
 #endif
-    /* F_CPU == 1000000: default after BOR, no config needed */
 
     /* R14 holds saved PC. Clear recovery marker first to prevent
        infinite recovery loops on next reboot. */
@@ -110,7 +112,10 @@ _normal_boot:
     /* Unlock GPIO pins — LPM5 locks all I/O after every reset on FR5xx/6xx */
     bic.w   #0x0001, &0x0130
 
-    /* Configure DCO (same as recovery path) */
+    /* Configure FRAM wait states + DCO (same as recovery path) */
+#if F_CPU > 8000000
+    mov.w   #0xA510, &0x0140
+#endif
 #if F_CPU == 16000000
     mov.b   #0xA5, &0x0161
     mov.w   #0x0048, &0x0162

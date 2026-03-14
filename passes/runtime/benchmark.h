@@ -60,6 +60,11 @@ __attribute__((noinline)) static void _timing_delay_cycles(unsigned long cycles)
 __attribute__((noinline, used)) static void timing_gpio_init(void) {
     PM5CTL0 &= ~LOCKLPM5;
 
+    /* FRAM wait states: 1 wait state required above 8 MHz */
+#if F_CPU > 8000000UL
+    FRCTL0 = FRCTLPW | NWAITS_1;
+#endif
+
     /* Configure DCO to F_CPU */
     CSCTL0_H = CSKEY_H;
 #if F_CPU == 16000000UL
