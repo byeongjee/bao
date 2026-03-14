@@ -77,7 +77,7 @@ def main(ctx: click.Context, log_level: str) -> None:
     ctx.ensure_object(dict)
     ctx.obj["env"] = env
     ctx.obj["tc"] = tc
-    ctx.obj["pass_verbose"] = log_level.upper() == "DEBUG"
+    ctx.obj["log_level"] = log_level.lower()
 
 
 # =========================================================================
@@ -153,7 +153,7 @@ def compile_milp_cmd(
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
             extra_includes=list(extra_includes),
-            pass_verbose=ctx.obj["pass_verbose"],
+            pass_log_level=ctx.obj["log_level"],
             debug=debug,
             link=link,
             halt_mode=halt_mode,
@@ -423,7 +423,7 @@ def compile_run_cmd(
                 milp_config=Path(milp_config),
                 output=output_path,
                 estimator_mode=estimator_mode,
-                pass_verbose=ctx.obj["pass_verbose"],
+                pass_log_level=ctx.obj["log_level"],
                 debug=debug,
                 link=True,
                 halt_mode=halt_mode,
@@ -708,7 +708,6 @@ def verify() -> None:
 @verify.command("rockclimb")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("-v", "--verbose", is_flag=True, help="Show full compile/serial output.")
 @click.option(
     "-e",
     "--energy-config",
@@ -735,7 +734,6 @@ def verify_rockclimb_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
-    verbose: bool,
     energy_config: str | None,
     halt_mode: str,
     cpu_freq: str,
@@ -748,7 +746,6 @@ def verify_rockclimb_cmd(
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
-        verbose=verbose,
         halt_mode=halt_mode,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
