@@ -209,6 +209,18 @@ int test_liveout(int a, int b) {
 }
 """
 
+LOOP_BACKEDGE_LIVEOUT = """\
+int test_backedge(int *arr, int n) {
+    int sum = 0;
+    int *p = arr;
+    for (int i = 0; i < n; i++) {
+        sum += *p;
+        p++;
+    }
+    return sum;
+}
+"""
+
 
 def _write_src(tmp_path: Path, code: str) -> Path:
     src = tmp_path / "test.c"
@@ -284,6 +296,18 @@ class TestMachinePassDistributedCkpt:
         saves = count_mir_reg_saves(result.output_mir)
         # Functions with live-out registers should have save points
         assert saves >= 0  # May be 0 if no cross-region liveness
+
+    def test_loop_backedge_register_saves(self, run_rockclimb_machine, tmp_path):
+        """Registers modified in a loop body and used via back-edge must be saved."""
+        src = _write_src(tmp_path, LOOP_BACKEDGE_LIVEOUT)
+        result = run_rockclimb_machine(
+            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+        )
+        assert result.exit_code == 0
+        saves = count_mir_reg_saves(result.output_mir)
+        assert saves >= 2, (
+            f"Expected >=2 register saves for loop back-edge liveness, got {saves}"
+        )
 
     def test_register_saves_in_assembly(self, run_rockclimb_machine, tmp_path):
         src = _write_src(tmp_path, MULTI_LIVEOUT)
