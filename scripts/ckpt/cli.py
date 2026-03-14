@@ -671,6 +671,9 @@ def verify() -> None:
     type=click.Path(exists=True),
     help="Override default energy config.",
 )
+# bor is required: verify tests correctness under resets (intermittent computing).
+# Do NOT change to nop — the whole point is to exercise the checkpoint/restore
+# boot path triggered by BOR.
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),

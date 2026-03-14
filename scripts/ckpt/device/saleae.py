@@ -60,19 +60,25 @@ def saleae_run(
     """Flash ELF, capture GPIO waveform, return execution_time_us.
 
     Uses digital channel ``_SALEAE_CHANNEL`` at ``_SALEAE_SAMPLE_RATE`` Hz.
-    Capture triggers on the falling edge of the GPIO pin (program done)
-    and records *after_trigger_seconds* more data before stopping.
+    GPIO uses pulse-based signalling (BOR-safe):
+    - Start pulse: ~10 us positive pulse (below trigger threshold)
+    - Stop pulse:  ~5 ms positive pulse (above trigger threshold)
+
+    Capture triggers on ``PULSE_HIGH`` with ``min_pulse_width = 1 ms``,
+    so only the stop pulse fires the trigger.
 
     Flow:
-        1. Start Saleae capture (trigger: falling edge on GPIO channel)
+        1. Start Saleae capture (trigger: PULSE_HIGH, min 1 ms)
         2. Flash the ELF via mspdebug (device resets and starts running)
-        3. Saleae records until falling edge is detected
-        4. Record *after_trigger_seconds* more, then capture ends
-        5. Export raw digital data, find first rising->last falling edge
-        6. Return delta in microseconds
+        3. Start pulse (~10 us) is captured but does not trigger
+        4. Program runs (GPIO LOW — BOR resets are invisible)
+        5. Stop pulse (~5 ms) fires the trigger
+        6. Record *after_trigger_seconds* more, then capture ends
+        7. Export raw digital data, measure first falling → last rising
+        8. Return delta in microseconds
 
-    Raises DeviceError if no rising edge is detected (GPIO never went
-    high) or no falling edge (program hung — capture.wait blocks until
+    Raises DeviceError if no edges are detected (GPIO never pulsed)
+    or no stop pulse (program hung — capture.wait blocks until
     trigger fires).
     """
     from saleae.automation import (
@@ -88,8 +94,9 @@ def saleae_run(
     )
     capture_config = CaptureConfiguration(
         capture_mode=DigitalTriggerCaptureMode(
-            trigger_type=DigitalTriggerType.FALLING,
+            trigger_type=DigitalTriggerType.PULSE_HIGH,
             trigger_channel_index=_SALEAE_CHANNEL,
+            min_pulse_width_seconds=0.001,  # 1 ms — ignores 10 us start pulse
             after_trigger_seconds=after_trigger_seconds,
         ),
     )
@@ -119,13 +126,15 @@ def _extract_timing(csv_path: Path) -> float:
     """Parse Saleae digital CSV export to find execution time.
 
     The CSV has columns like ``Time [s], Channel 0``.
-    Finds the first rising edge and last falling edge on the channel.
-    Returns the delta in microseconds.
+    GPIO uses pulse-based signalling (UP→DOWN at start and stop),
+    so execution time is measured as:
+        first falling edge (end of start pulse) →
+        last rising edge (beginning of stop pulse).
 
     Raises DeviceError if edges are missing.
     """
-    first_rising: float | None = None
-    last_falling: float | None = None
+    first_falling: float | None = None
+    last_rising: float | None = None
     prev_val: int | None = None
 
     with open(csv_path) as f:
@@ -138,24 +147,24 @@ def _extract_timing(csv_path: Path) -> float:
             value = int(parts[1])
 
             if prev_val is not None:
-                if prev_val == 0 and value == 1 and first_rising is None:
-                    first_rising = timestamp
-                elif prev_val == 1 and value == 0:
-                    last_falling = timestamp
+                if prev_val == 1 and value == 0 and first_falling is None:
+                    first_falling = timestamp
+                elif prev_val == 0 and value == 1:
+                    last_rising = timestamp
 
             prev_val = value
 
-    if first_rising is None:
-        raise DeviceError(
-            "No rising edge detected on Saleae channel "
-            f"{_SALEAE_CHANNEL}. GPIO never went high -- "
-            "check that the benchmark was compiled with benchmark.h"
-        )
-    if last_falling is None:
+    if first_falling is None:
         raise DeviceError(
             "No falling edge detected on Saleae channel "
+            f"{_SALEAE_CHANNEL}. GPIO never pulsed -- "
+            "check that the benchmark was compiled with benchmark.h"
+        )
+    if last_rising is None:
+        raise DeviceError(
+            "No rising edge after start pulse on Saleae channel "
             f"{_SALEAE_CHANNEL}. Program may have hung or "
             "capture timeout was too short."
         )
 
-    return (last_falling - first_rising) * 1_000_000  # seconds -> us
+    return (last_rising - first_falling) * 1_000_000  # seconds -> us
