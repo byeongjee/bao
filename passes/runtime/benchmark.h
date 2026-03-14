@@ -28,17 +28,51 @@
 /* End-of-output marker — used by all runtimes, detected by read_serial.py */
 #define DEBUG_END_MARKER "[END_OUTPUT]"
 
-/* --- GPIO timing (always on, negligible overhead) --- */
+/* --- GPIO timing (pulse-based, BOR-safe) ---
+ *
+ * Start and stop each emit a positive pulse on P3.4.  GPIO is LOW
+ * during execution, so BOR resets (which reset port registers to LOW)
+ * are invisible to the Saleae capture.
+ *
+ * The Saleae triggers on PULSE_HIGH with min_pulse_width = 1 ms.
+ * Start pulse is ~10 us (below threshold — ignored by trigger).
+ * Stop pulse is ~5 ms   (above threshold — fires the trigger).
+ *
+ * Execution time is measured in post-processing as:
+ *   first falling edge (end of start pulse) →
+ *   last rising edge (beginning of stop pulse).
+ */
 #ifdef __MSP430__
-static inline void timing_gpio_init(void) {
+#ifndef F_CPU
+#define F_CPU 1000000UL
+#endif
+
+/* Portable volatile delay — works with both clang and msp430-elf-gcc.
+ * ~4 cycles per iteration on MSP430.
+ * noinline: must not be inlined into main() where RockClimb would
+ * instrument the delay loop with region boundaries. */
+__attribute__((noinline)) static void _timing_delay_cycles(unsigned long cycles) {
+    volatile unsigned long n = cycles / 4;
+    while (n--)
+        __asm__ volatile("");
+}
+
+__attribute__((noinline, used)) static void timing_gpio_init(void) {
     PM5CTL0 &= ~LOCKLPM5;
     P3DIR |= BIT4;
     P3OUT &= ~BIT4;
 }
-static inline void timing_gpio_start(void) {
+__attribute__((noinline, used)) static void timing_gpio_start(void) {
+    P3DIR |= BIT4; /* Ensure output mode (BOR resets P3DIR) */
     P3OUT |= BIT4;
+    _timing_delay_cycles(F_CPU / 100000UL); /* 10 us */
+    P3OUT &= ~BIT4;
 }
-static inline void timing_gpio_stop(void) {
+__attribute__((noinline, used)) static void timing_gpio_stop(void) {
+    /* Reconfigure clock + GPIO — BOR resets both DCO and port registers */
+    timing_gpio_init();
+    P3OUT |= BIT4;
+    _timing_delay_cycles(F_CPU * 5UL / 1000UL); /* 5 ms */
     P3OUT &= ~BIT4;
 }
 #else
