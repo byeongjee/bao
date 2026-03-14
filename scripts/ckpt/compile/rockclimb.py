@@ -284,7 +284,6 @@ def _run_rockclimb_pass(
     if opts.debug_counters:
         cmd.insert(-2, "-add-debug-markers")
 
-    # In non-verbose mode the bash script suppresses stderr (2>/dev/null).
     # We always capture; the caller can choose whether to display.
     result = run(cmd, step_name="rockclimb-pass")
     return result.output

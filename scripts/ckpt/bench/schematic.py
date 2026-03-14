@@ -15,8 +15,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from ..compile.schematic import (
     SchematicCompileOptions,
     SchematicCompileResult,
@@ -45,6 +43,8 @@ from .runner import (
     nvm_counter,
     run_benchmark_matrix,
 )
+
+logger = logging.getLogger(__name__)
 
 _CSV_HEADER: list[str] = [
     "benchmark",

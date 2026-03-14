@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import time
 from dataclasses import dataclass
@@ -16,8 +17,6 @@ from .errors import (  # noqa: F401
     InfeasibleError,
     ToolError,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 
