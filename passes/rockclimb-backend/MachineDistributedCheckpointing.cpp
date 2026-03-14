@@ -51,31 +51,30 @@ unsigned MachineDistributedCheckpointing::assignRegId(MCPhysReg reg) {
     return id;
 }
 
-SmallPtrSet<MachineBasicBlock *, 8>
-MachineDistributedCheckpointing::makeRegionBlockSet(const MachineRegionInfo &region) const {
-    SmallPtrSet<MachineBasicBlock *, 8> blockSet;
-    for (MachineBasicBlock *MBB : region.blocks)
-        blockSet.insert(MBB);
-    return blockSet;
-}
-
-MachineInstr *MachineDistributedCheckpointing::findLastDef(const MachineRegionInfo &region,
-                                                           MCPhysReg reg) const {
+void MachineDistributedCheckpointing::findAllDefs(
+    const SmallPtrSetImpl<const MachineBasicBlock *> &predBlockSet, MCPhysReg reg,
+    MachineBasicBlock *regionStart, std::vector<MachineCheckpointPoint> &checkpoints) {
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
-    MachineInstr *lastDef = nullptr;
-
-    for (MachineBasicBlock *MBB : region.blocks) {
-        for (MachineInstr &MI : *MBB) {
+    for (const MachineBasicBlock &MBB : MF_) {
+        if (!predBlockSet.count(&MBB))
+            continue;
+        for (const MachineInstr &MI : MBB) {
+            if (MI.isTerminator())
+                continue;
             for (const MachineOperand &MO : MI.operands()) {
-                if (MO.isReg() && MO.isDef() && !MO.isDead() && MO.getReg().isPhysical()) {
-                    if (TRI->regsOverlap(MO.getReg(), reg))
-                        lastDef = &MI;
+                if (MO.isReg() && MO.isDef() && !MO.isDead() && MO.getReg().isPhysical() &&
+                    TRI->regsOverlap(MO.getReg(), reg)) {
+                    MachineCheckpointPoint ckpt;
+                    ckpt.afterInst = const_cast<MachineInstr *>(&MI);
+                    ckpt.reg = reg;
+                    ckpt.regId = assignRegId(reg);
+                    ckpt.regionStart = regionStart;
+                    checkpoints.push_back(ckpt);
+                    break; // one save per instruction
                 }
             }
         }
     }
-
-    return lastDef;
 }
 
 std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
@@ -83,37 +82,49 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
     const MachineRegisterInfo &MRI = MF_.getRegInfo();
 
-    for (const MachineRegionInfo &region : regions_) {
-        auto regionBlockSet = makeRegionBlockSet(region);
+    // Build set of all boundary start blocks
+    SmallPtrSet<const MachineBasicBlock *, 16> boundarySet;
+    for (const MachineRegionInfo &region : regions_)
+        boundarySet.insert(region.startBlock);
 
-        // Step 1: Collect all physical registers DEFINED in this region
-        // Use SmallSet instead of SmallPtrSet (MCPhysReg is a scalar, not pointer)
-        SmallSet<MCPhysReg, 16> defsInRegion;
-        for (MachineBasicBlock *MBB : region.blocks) {
-            for (MachineInstr &MI : *MBB) {
+    for (const MachineRegionInfo &region : regions_) {
+        // Step 1: Backward walk — collect blocks that can reach this
+        // boundary without passing through another boundary.
+        SmallPtrSet<const MachineBasicBlock *, 16> predBlockSet;
+        {
+            SmallVector<MachineBasicBlock *, 16> worklist;
+            for (MachineBasicBlock *pred : region.startBlock->predecessors())
+                worklist.push_back(pred);
+
+            while (!worklist.empty()) {
+                MachineBasicBlock *MBB = worklist.pop_back_val();
+                if (!predBlockSet.insert(MBB).second)
+                    continue;
+                if (boundarySet.count(MBB))
+                    continue; // include but don't walk past
+                for (MachineBasicBlock *pred : MBB->predecessors())
+                    worklist.push_back(pred);
+            }
+        }
+
+        // Step 2: Collect all physical registers defined in predecessor blocks
+        SmallSet<MCPhysReg, 16> defsInPreds;
+        for (const MachineBasicBlock &MBB : MF_) {
+            if (!predBlockSet.count(&MBB))
+                continue;
+            for (const MachineInstr &MI : MBB) {
                 for (const MachineOperand &MO : MI.operands()) {
                     if (!MO.isReg() || !MO.isDef() || !MO.getReg().isPhysical())
                         continue;
                     MCPhysReg reg = MO.getReg().asMCReg();
-                    // Skip reserved registers (PC, SP, SR, CG)
                     if (MRI.isReserved(reg))
                         continue;
-                    defsInRegion.insert(reg);
+                    defsInPreds.insert(reg);
                 }
             }
         }
 
-        // Step 2: Find registers that are LIVE-OUT of the region.
-        // A register is live-out if it's defined in the region and live
-        // starting from a successor block outside the region (exit edge)
-        // or from the region's own start block (loop back-edge).
-        // Uses instruction-scan BFS (isRegLiveFromBlock) instead of
-        // MBB->isLiveIn() which is unreliable after register allocation.
-        //
-        // For the start block, scan from the recovery point (after the
-        // boundary CALL), not from the block entry.  The boundary CALL
-        // has implicit defs for caller-saved registers, but these don't
-        // apply during BOR recovery (boot.S restores them from NVM).
+        // Step 3: Find boundary CALL in startBlock (recovery point)
         const MachineInstr *boundaryCall = nullptr;
         for (const MachineInstr &MI : *region.startBlock) {
             if (MI.isCall()) {
@@ -122,41 +133,12 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
             }
         }
 
-        SmallSet<MCPhysReg, 16> liveOutRegs;
-        for (MachineBasicBlock *MBB : region.blocks) {
-            for (MachineBasicBlock *succ : MBB->successors()) {
-                if (regionBlockSet.count(succ) && succ != region.startBlock)
-                    continue;
-
-                // When checking the start block, skip past the boundary
-                // CALL so its implicit register defs don't poison liveness.
-                const MachineInstr *skipAfter =
-                    (succ == region.startBlock) ? boundaryCall : nullptr;
-
-                for (MCPhysReg reg : defsInRegion) {
-                    if (isRegLiveFromBlock(succ, reg, TRI, skipAfter))
-                        liveOutRegs.insert(reg);
-                }
-            }
-        }
-
-        // Step 3: For each live-out register, find last def and create
-        // checkpoint point
-        for (MCPhysReg reg : liveOutRegs) {
-            MachineInstr *lastDef = findLastDef(region, reg);
-            if (!lastDef)
+        // Step 4: For each register live at the recovery point, create
+        // saves at EVERY definition in predecessor blocks.
+        for (MCPhysReg reg : defsInPreds) {
+            if (!isRegLiveFromBlock(region.startBlock, reg, TRI, boundaryCall))
                 continue;
-
-            // Skip if the last def is a terminator (can't insert after it)
-            if (lastDef->isTerminator())
-                continue;
-
-            MachineCheckpointPoint ckpt;
-            ckpt.afterInst = lastDef;
-            ckpt.reg = reg;
-            ckpt.regId = assignRegId(reg);
-            ckpt.regionStart = region.startBlock;
-            checkpoints.push_back(ckpt);
+            findAllDefs(predBlockSet, reg, region.startBlock, checkpoints);
         }
     }
 

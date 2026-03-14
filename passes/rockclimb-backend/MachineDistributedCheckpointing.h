@@ -20,10 +20,11 @@ struct MachineCheckpointPoint {
 
 /// Distributed checkpointing on physical registers after register allocation.
 ///
-/// For each region, identifies physical registers that are:
-///   1. Defined within the region
-///   2. Live-out of the region (used in subsequent regions)
-/// Then places a checkpoint at the last definition point within the region.
+/// For each region boundary, computes the set of blocks that can reach
+/// the boundary without passing through another boundary (backward
+/// reachability).  Then saves each register at EVERY definition site
+/// in those predecessor blocks, so that diamond control flow is handled
+/// correctly — the last save to execute overwrites the NVM slot.
 ///
 /// Only checkpoints callee-saved (R4-R10) and argument/return registers (R11-R15).
 /// Skips reserved registers: PC (R0), SP (R1), SR (R2), CG (R3).
@@ -50,12 +51,10 @@ class MachineDistributedCheckpointing {
     /// Check if a physical register should be checkpointed
     static bool isCheckpointableReg(llvm::MCPhysReg reg);
 
-    /// Collect physical registers defined in a region
-    llvm::SmallPtrSet<llvm::MachineBasicBlock *, 8>
-    makeRegionBlockSet(const MachineRegionInfo &region) const;
-
-    /// Find the last instruction in the region that defines the given register
-    llvm::MachineInstr *findLastDef(const MachineRegionInfo &region, llvm::MCPhysReg reg) const;
+    /// Create checkpoint points at every definition of `reg` in `predBlockSet`.
+    void findAllDefs(const llvm::SmallPtrSetImpl<const llvm::MachineBasicBlock *> &predBlockSet,
+                     llvm::MCPhysReg reg, llvm::MachineBasicBlock *regionStart,
+                     std::vector<MachineCheckpointPoint> &checkpoints);
 };
 
 } // namespace checkpoint
