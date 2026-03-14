@@ -49,6 +49,9 @@ _do_recovery:
     /* Disable watchdog — reboot resets WDT to active state */
     mov.w   #0x5A80, &0x015C
 
+    /* Unlock GPIO pins — LPM5 locks all I/O after every reset on FR5xx/6xx */
+    bic.w   #0x0001, &0x0130
+
     /* R14 holds saved PC. Clear recovery marker first to prevent
        infinite recovery loops on next reboot. */
     mov.w   #0, &__nvm_pc
@@ -90,6 +93,9 @@ _normal_boot:
 
     /* Disable watchdog timer (WDTCTL = WDTPW | WDTHOLD) */
     mov.w   #0x5A80, &0x015C
+
+    /* Unlock GPIO pins — LPM5 locks all I/O after every reset on FR5xx/6xx */
+    bic.w   #0x0001, &0x0130
 
     mov.w   #0, &__nvm_pc
     mov.w   #0, &__nvm_sp
