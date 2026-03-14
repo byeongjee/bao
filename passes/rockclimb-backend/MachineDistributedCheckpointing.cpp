@@ -1,5 +1,6 @@
 #include "MachineDistributedCheckpointing.h"
 #include "MSP430Opcodes.h"
+#include "MachineLivenessAnalysis.h"
 
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -77,16 +78,6 @@ MachineInstr *MachineDistributedCheckpointing::findLastDef(const MachineRegionIn
     return lastDef;
 }
 
-/// Check if any alias of reg is live-in to the given block
-static bool isRegOrAliasLiveIn(const MachineBasicBlock *MBB, MCPhysReg reg,
-                               const TargetRegisterInfo *TRI) {
-    for (MCRegAliasIterator AI(reg, TRI, /*IncludeSelf=*/true); AI.isValid(); ++AI) {
-        if (MBB->isLiveIn(*AI))
-            return true;
-    }
-    return false;
-}
-
 std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
     std::vector<MachineCheckpointPoint> checkpoints;
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
@@ -113,26 +104,19 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
         }
 
         // Step 2: Find registers that are LIVE-OUT of the region.
-        // A register is live-out if it's defined in the region and
-        // live-in to a successor block outside the region, OR live-in
-        // to the region's own start block via a loop back-edge.
+        // A register is live-out if it's defined in the region and live
+        // starting from a successor block outside the region (exit edge)
+        // or from the region's own start block (loop back-edge).
+        // Uses instruction-scan BFS (isRegLiveFromBlock) instead of
+        // MBB->isLiveIn() which is unreliable after register allocation.
         SmallSet<MCPhysReg, 16> liveOutRegs;
         for (MachineBasicBlock *MBB : region.blocks) {
             for (MachineBasicBlock *succ : MBB->successors()) {
-                // Skip intra-region successors, but NOT the region's
-                // start block — a back-edge to the start block means
-                // the register is live across BOR recovery.
-                //
-                // Potential gap: if a region contained a non-start-block
-                // back-edge target (e.g., irreducible control flow), that
-                // edge would still be skipped.  RockClimb forces loop
-                // headers as mandatory region boundaries, so inner loops
-                // start their own regions and this shouldn't arise.
                 if (regionBlockSet.count(succ) && succ != region.startBlock)
                     continue;
 
                 for (MCPhysReg reg : defsInRegion) {
-                    if (isRegOrAliasLiveIn(succ, reg, TRI))
+                    if (isRegLiveFromBlock(succ, reg, TRI))
                         liveOutRegs.insert(reg);
                 }
             }
