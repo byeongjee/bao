@@ -145,6 +145,7 @@ __region_boundary:
     add.w   #1, &cnt_boundary
 #endif
 
+#ifdef HALT_MODE
     /* Phase 2: Save return address as recovery PC.
        0(SP) holds the return address pushed by CALL. */
     mov.w   0(SP), &__nvm_pc
@@ -153,14 +154,18 @@ __region_boundary:
     mov.w   SP, &__nvm_sp
     add.w   #2, &__nvm_sp
 
-#ifdef HALT_MODE
     /* Halt — enter LPM4 (bits 4-7 of SR = CPUOFF+OSCOFF+SCG0+SCG1).
        System will reboot when energy is available. */
     bis.w   #0xF0, SR
     nop
+    /* If we wake from LPM4 (e.g., by an interrupt), fall through to ret */
+#else
+    /* Debug/nop mode: no PC/SP save, no halt. Saving __nvm_pc here would
+       leave a non-zero value in FRAM that triggers a spurious recovery on
+       the next boot if the flash programmer doesn't reprogram the .nvm
+       segment (FRAM retains data across power cycles and reflashes). */
 #endif
 
-    /* If we wake from LPM4 (e.g., by an interrupt), just return */
     ret
 
     .size   __region_boundary, .-__region_boundary

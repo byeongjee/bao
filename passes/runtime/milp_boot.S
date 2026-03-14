@@ -107,6 +107,11 @@ _normal_boot:
     .type   __region_boundary, @function
 
 __region_boundary:
+#ifdef DEBUG_COUNTERS
+    add.w   #1, &cnt_boundary
+#endif
+
+#if defined(MILP_HALT_BOR) || defined(MILP_HALT_LPM4)
     /* Save return address as recovery PC.
        0(SP) holds the return address pushed by CALL. */
     mov.w   0(SP), &__nvm_pc
@@ -115,10 +120,6 @@ __region_boundary:
     mov.w   SP, &__nvm_sp
     add.w   #2, &__nvm_sp
 
-#ifdef DEBUG_COUNTERS
-    add.w   #1, &cnt_boundary
-#endif
-
 #if defined(MILP_HALT_BOR)
     /* Software BOR: PMMCTL0 = PMMPW (0xA500) | PMMSWBOR (0x0004).
        CPU resets immediately, FRAM survives. On reboot, _milp_boot
@@ -126,7 +127,7 @@ __region_boundary:
     mov.w   #0xA504, &0x0120
     /* Unreachable — CPU resets before next instruction */
 
-#elif defined(MILP_HALT_LPM4)
+#else /* MILP_HALT_LPM4 */
     /* Enter LPM4 deep sleep (CPUOFF+OSCOFF+SCG0+SCG1 = bits 4-7 of SR).
        System powers off. On energy harvest, reset vector fires and
        _milp_boot recovers from NVM state. */
@@ -134,8 +135,13 @@ __region_boundary:
     nop
     /* If woken by interrupt (not full reboot), fall through to ret */
 
+#endif /* BOR vs LPM4 */
+
 #else
-    /* Debug mode: no halt, just return. GDB-compatible. */
+    /* Debug/nop mode: no state save, no halt. Saving __nvm_pc here would
+       leave a non-zero value in FRAM that triggers a spurious recovery on
+       the next boot if the flash programmer doesn't reprogram the .nvm
+       segment (FRAM retains data across power cycles and reflashes). */
 #endif
 
     ret
