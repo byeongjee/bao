@@ -7,8 +7,11 @@ logs for loop strip-mining K values and writes per-loop CSV output.
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 CAPACITY_MAP = {
     "1uF": 4860.0,
@@ -179,4 +182,4 @@ def write_strip_mining_csv(runs: list[dict], output_path: Path) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"Wrote {len(rows)} rows to {output_path}")
+    logger.info("Wrote %d rows to %s", len(rows), output_path)
