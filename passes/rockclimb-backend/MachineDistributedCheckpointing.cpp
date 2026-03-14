@@ -114,11 +114,21 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
 
         // Step 2: Find registers that are LIVE-OUT of the region.
         // A register is live-out if it's defined in the region and
-        // live-in to a successor block outside the region.
+        // live-in to a successor block outside the region, OR live-in
+        // to the region's own start block via a loop back-edge.
         SmallSet<MCPhysReg, 16> liveOutRegs;
         for (MachineBasicBlock *MBB : region.blocks) {
             for (MachineBasicBlock *succ : MBB->successors()) {
-                if (regionBlockSet.count(succ))
+                // Skip intra-region successors, but NOT the region's
+                // start block — a back-edge to the start block means
+                // the register is live across BOR recovery.
+                //
+                // Potential gap: if a region contained a non-start-block
+                // back-edge target (e.g., irreducible control flow), that
+                // edge would still be skipped.  RockClimb forces loop
+                // headers as mandatory region boundaries, so inner loops
+                // start their own regions and this shouldn't arise.
+                if (regionBlockSet.count(succ) && succ != region.startBlock)
                     continue;
 
                 for (MCPhysReg reg : defsInRegion) {
