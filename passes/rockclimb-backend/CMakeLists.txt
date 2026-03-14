@@ -9,6 +9,7 @@ add_library(RockClimbMachinePass MODULE
     MachineEnergyEstimator.cpp
     RockClimbMachineOptimizer.cpp
     MachineDistributedCheckpointing.cpp
+    MachineLivenessAnalysis.cpp
     RockClimbMachineInstrumenter.cpp
     # Reuse shared sources
     ${CMAKE_SOURCE_DIR}/bb-energy-analyzer/EnergyModel.cpp
