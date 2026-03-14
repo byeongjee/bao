@@ -15,6 +15,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "common/BlockUtils.h"
+#include "common/Logger.h"
 #include "common/PassStatistics.h"
 
 #include <chrono>
@@ -62,7 +63,7 @@ struct MachineRockClimbParams {
 static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbParams &params) {
     std::ifstream file(configPath.str());
     if (!file.is_open()) {
-        errs() << "Error: Cannot open RockClimb machine config: " << configPath << "\n";
+        PLOGE << "Error: Cannot open RockClimb machine config: " << configPath;
         return false;
     }
 
@@ -73,13 +74,13 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
     Expected<json::Value> parsed = json::parse(content);
     if (!parsed) {
         consumeError(parsed.takeError());
-        errs() << "Error: JSON parse error in config: " << configPath << "\n";
+        PLOGE << "Error: JSON parse error in config: " << configPath;
         return false;
     }
 
     json::Object *root = parsed->getAsObject();
     if (!root) {
-        errs() << "Error: Config is not a JSON object: " << configPath << "\n";
+        PLOGE << "Error: Config is not a JSON object: " << configPath;
         return false;
     }
 
@@ -88,7 +89,7 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
     if (!capacity) {
         auto E_input = root->getNumber("E_input");
         if (!E_input) {
-            errs() << "Error: Missing 'capacity' in config\n";
+            PLOGE << "Error: Missing 'capacity' in config";
             return false;
         }
         capacity = E_input;
@@ -96,13 +97,13 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
 
     auto N_reg = root->getInteger("N_reg");
     if (!N_reg) {
-        errs() << "Error: Missing 'N_reg' in config\n";
+        PLOGE << "Error: Missing 'N_reg' in config";
         return false;
     }
 
     auto reg_restore_energy = root->getNumber("reg_restore_energy");
     if (!reg_restore_energy) {
-        errs() << "Error: Missing 'reg_restore_energy' in config\n";
+        PLOGE << "Error: Missing 'reg_restore_energy' in config";
         return false;
     }
 
@@ -192,6 +193,7 @@ static bool isRuntimeFunction(StringRef name) {
 }
 
 bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
+    checkpoint::initLogging();
     const auto totalStart = std::chrono::steady_clock::now();
 
     if (isRuntimeFunction(MF.getName()))
@@ -199,13 +201,13 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
 
     // Validate config paths
     if (RockClimbMachineConfigOpt.empty()) {
-        errs() << "Error: -rockclimb-config not specified\n";
+        PLOGE << "Error: -rockclimb-config not specified";
         return false;
     }
     bool hasPrecomputed = !RockClimbMachineEnergyDataOpt.empty();
     if (!hasPrecomputed && RockClimbMachineEnergyConfigOpt.empty()) {
-        errs() << "Error: Either -rockclimb-energy-data or "
-                  "-rockclimb-energy-config must be specified\n";
+        PLOGE << "Error: Either -rockclimb-energy-data or "
+                 "-rockclimb-energy-config must be specified";
         return false;
     }
 
@@ -216,16 +218,15 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
 
     double E_safe = params.calculateESafe();
 
-    errs() << "=== RockClimb Machine Pass on " << MF.getName() << " ===\n";
-    errs() << "  Capacity: " << params.capacity << "\n";
-    errs() << "  E_safe: " << E_safe << "\n";
-    errs() << "  N_reg: " << params.N_reg << "\n";
-    errs() << "  Distributed checkpointing: "
-           << (params.distributedCheckpointing ? "enabled" : "disabled") << "\n";
-    errs() << "  Energy estimation: "
-           << (hasPrecomputed ? "pre-computed (bb-energy-analyzer)" : "MIR instruction-level")
-           << "\n";
-    errs() << "  Basic blocks: " << MF.size() << "\n";
+    PLOGI << "=== RockClimb Machine Pass on " << MF.getName() << " ===";
+    PLOGI << "  Capacity: " << params.capacity;
+    PLOGI << "  E_safe: " << E_safe;
+    PLOGI << "  N_reg: " << params.N_reg;
+    PLOGI << "  Distributed checkpointing: "
+          << (params.distributedCheckpointing ? "enabled" : "disabled");
+    PLOGI << "  Energy estimation: "
+          << (hasPrecomputed ? "pre-computed (bb-energy-analyzer)" : "MIR instruction-level");
+    PLOGI << "  Basic blocks: " << MF.size();
 
     // Create energy estimator
     std::unique_ptr<MachineEnergyEstimator> estimatorOwned;
@@ -235,7 +236,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
         estimatorOwned =
             MachineEnergyEstimator::fromPrecomputed(RockClimbMachineEnergyDataOpt.getValue());
         if (!estimatorOwned) {
-            errs() << "Error: Failed to load pre-computed energy data\n";
+            PLOGE << "Error: Failed to load pre-computed energy data";
             return false;
         }
         estimatorPtr = estimatorOwned.get();
@@ -252,21 +253,25 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     if (!hasPrecomputed) {
         estimator.collectRequiredKeys(MF, requiredEnergyKeys, missingEnergyKeys);
 
-        errs() << "\n--- Energy parameters for " << MF.getName() << " ---\n";
-        errs() << "  Required (" << requiredEnergyKeys.size() << " keys):";
-        bool first = true;
-        for (const auto &key : requiredEnergyKeys) {
-            errs() << (first ? " " : ", ") << key;
-            first = false;
+        {
+            std::string reqList;
+            bool first = true;
+            for (const auto &key : requiredEnergyKeys) {
+                reqList += (first ? " " : ", ") + key;
+                first = false;
+            }
+            PLOGI << "--- Energy parameters for " << MF.getName() << " ---";
+            PLOGI << "  Required (" << requiredEnergyKeys.size() << " keys):" << reqList;
         }
-        errs() << "\n";
-        errs() << "  Missing  (" << missingEnergyKeys.size() << " keys):";
-        first = true;
-        for (const auto &key : missingEnergyKeys) {
-            errs() << (first ? " " : ", ") << key;
-            first = false;
+        {
+            std::string missList;
+            bool first = true;
+            for (const auto &key : missingEnergyKeys) {
+                missList += (first ? " " : ", ") + key;
+                first = false;
+            }
+            PLOGI << "  Missing  (" << missingEnergyKeys.size() << " keys):" << missList;
         }
-        errs() << "\n";
     }
 
     // Get MachineLoopInfo
@@ -280,7 +285,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     if (params.checkpoint_store_energy > 0 && params.distributedCheckpointing) {
         auto prelimResult = optimizer.optimize();
         if (!prelimResult.feasible) {
-            errs() << "Region partitioning failed: " << prelimResult.errorMessage << "\n";
+            PLOGE << "Region partitioning failed: " << prelimResult.errorMessage;
             writeInfeasibleJSON(MF, totalStart, prelimResult.errorMessage);
             return false;
         }
@@ -299,7 +304,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
 
     MachineRockClimbResult result = optimizer.optimize();
     if (!result.feasible) {
-        errs() << "Region partitioning failed: " << result.errorMessage << "\n";
+        PLOGE << "Region partitioning failed: " << result.errorMessage;
         writeInfeasibleJSON(MF, totalStart, result.errorMessage);
         return false;
     }
@@ -360,23 +365,23 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
         edgeCount += MBB.succ_size();
 
     // Print statistics
-    errs() << "\n=== Checkpoint Insertion Statistics ===\n";
-    errs() << "  Pass:                            RockClimb-Machine\n";
-    errs() << "  Function:                        " << MF.getName() << "\n";
-    errs() << "  Basic blocks:                    " << MF.size() << "\n";
-    errs() << "  Edges:                           " << edgeCount << "\n";
-    errs() << "  Regions:                         " << result.regions.size() << "\n";
-    errs() << "  Region boundaries:               " << result.regionBoundaries.size() << "\n";
-    errs() << "  --- RockClimb-Machine-specific ---\n";
     // Boundary checks = boundaries - 1 (entry block skipped)
     unsigned boundaryChecks = result.regionBoundaries.empty()
                                   ? 0
                                   : static_cast<unsigned>(result.regionBoundaries.size()) - 1;
-    errs() << "  Boundary checks:                 " << boundaryChecks << "\n";
-    errs() << "  Register checkpoints:            " << checkpointPoints.size() << "\n";
-    errs() << "  Total instrumentation points:    " << insertedCount << "\n";
-    errs() << "  Compilation time (ms):           " << totalMs << "\n";
-    errs() << "  Peak RSS (KB):                   " << checkpoint::getPeakRSSKb() << "\n";
+    PLOGI << "=== Checkpoint Insertion Statistics ===";
+    PLOGI << "  Pass:                            RockClimb-Machine";
+    PLOGI << "  Function:                        " << MF.getName();
+    PLOGI << "  Basic blocks:                    " << MF.size();
+    PLOGI << "  Edges:                           " << edgeCount;
+    PLOGI << "  Regions:                         " << result.regions.size();
+    PLOGI << "  Region boundaries:               " << result.regionBoundaries.size();
+    PLOGI << "  --- RockClimb-Machine-specific ---";
+    PLOGI << "  Boundary checks:                 " << boundaryChecks;
+    PLOGI << "  Register checkpoints:            " << checkpointPoints.size();
+    PLOGI << "  Total instrumentation points:    " << insertedCount;
+    PLOGI << "  Compilation time (ms):           " << totalMs;
+    PLOGI << "  Peak RSS (KB):                   " << checkpoint::getPeakRSSKb();
 
     if (!StatsJsonOpt.empty()) {
         CommonStats c;

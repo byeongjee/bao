@@ -1,7 +1,6 @@
 #include "estimator/AssemblyBasedEstimator.h"
 #include "common/BlockUtils.h"
-
-#include "llvm/Support/raw_ostream.h"
+#include "common/Logger.h"
 
 #define JSON_NOEXCEPTION
 #include <fstream>
@@ -21,19 +20,19 @@ AssemblyBasedEstimator::create(const std::string &configPath) {
 bool AssemblyBasedEstimator::loadConfig(const std::string &configPath) {
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        llvm::errs() << "Error: Cannot open config file: " << configPath << "\n";
+        PLOGE << "Error: Cannot open config file: " << configPath;
         return false;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::errs() << "Error: JSON parse error in: " << configPath << "\n";
+        PLOGE << "Error: JSON parse error in: " << configPath;
         return false;
     }
 
     // Validate required fields
     if (!config.contains("energy_parameters")) {
-        llvm::errs() << "Error: Missing 'energy_parameters' in config: " << configPath << "\n";
+        PLOGE << "Error: Missing 'energy_parameters' in config: " << configPath;
         return false;
     }
 
@@ -41,13 +40,13 @@ bool AssemblyBasedEstimator::loadConfig(const std::string &configPath) {
 
     // Load energy data path (required)
     if (!params.contains("energy_data_path")) {
-        llvm::errs() << "Error: Missing 'energy_data_path' in config: " << configPath << "\n";
+        PLOGE << "Error: Missing 'energy_data_path' in config: " << configPath;
         return false;
     }
     std::string energyDataPath = params["energy_data_path"].get<std::string>();
 
     if (energyDataPath.empty()) {
-        llvm::errs() << "Error: 'energy_data_path' is empty in config: " << configPath << "\n";
+        PLOGE << "Error: 'energy_data_path' is empty in config: " << configPath;
         return false;
     }
 
@@ -57,26 +56,25 @@ bool AssemblyBasedEstimator::loadConfig(const std::string &configPath) {
 bool AssemblyBasedEstimator::loadEnergyData(const std::string &energyDataPath) {
     std::ifstream file(energyDataPath);
     if (!file.is_open()) {
-        llvm::errs() << "Error: Cannot open energy data file: " << energyDataPath << "\n";
+        PLOGE << "Error: Cannot open energy data file: " << energyDataPath;
         return false;
     }
 
     nlohmann::json data = nlohmann::json::parse(file, nullptr, false);
     if (data.is_discarded()) {
-        llvm::errs() << "Error: JSON parse error in: " << energyDataPath << "\n";
+        PLOGE << "Error: JSON parse error in: " << energyDataPath;
         return false;
     }
 
     // Parse functions
     if (!data.contains("functions")) {
-        llvm::errs() << "Error: Missing 'functions' in energy data: " << energyDataPath << "\n";
+        PLOGE << "Error: Missing 'functions' in energy data: " << energyDataPath;
         return false;
     }
 
     for (auto &[funcName, funcData] : data["functions"].items()) {
         if (!funcData.contains("bb_energy")) {
-            llvm::errs() << "Warning: Function '" << funcName
-                         << "' has no bb_energy data, skipping\n";
+            PLOGW << "Warning: Function '" << funcName << "' has no bb_energy data, skipping";
             continue;
         }
 
@@ -92,7 +90,7 @@ bool AssemblyBasedEstimator::loadEnergyData(const std::string &energyDataPath) {
     }
 
     if (functionEnergy_.empty()) {
-        llvm::errs() << "Warning: No function energy data loaded from: " << energyDataPath << "\n";
+        PLOGW << "Warning: No function energy data loaded from: " << energyDataPath;
     }
 
     return true;
@@ -110,7 +108,7 @@ void AssemblyBasedEstimator::prepareForFunction(const llvm::Function &F) {
     functionFound_ = (it != functionEnergy_.end());
 
     if (!functionFound_) {
-        llvm::errs() << "Warning: Function '" << currentFuncName_ << "' not found in energy data\n";
+        PLOGW << "Warning: Function '" << currentFuncName_ << "' not found in energy data";
     }
 }
 
@@ -142,8 +140,8 @@ EnergyEstimate AssemblyBasedEstimator::estimate(const llvm::BasicBlock &BB) {
     }
 
     // BB not found in energy data - likely no assembly code for this BB
-    llvm::errs() << "Warning: BB '" << bbName << "' in function '" << currentFuncName_
-                 << "' not found in energy data\n";
+    PLOGW << "Warning: BB '" << bbName << "' in function '" << currentFuncName_
+          << "' not found in energy data";
     return EnergyEstimate{0.0, "assembly-missing-bb"};
 }
 

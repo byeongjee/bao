@@ -1,5 +1,7 @@
 #include "milp/EnergyModel.h"
 
+#include "common/Logger.h"
+
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
@@ -157,13 +159,13 @@ void EnergyModel::computeSaveRestoreCosts() {
 std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configPath) {
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        llvm::errs() << "Error: Cannot open MILP config file: " << configPath << "\n";
+        PLOGE << "Error: Cannot open MILP config file: " << configPath;
         return std::nullopt;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::errs() << "Error: JSON parse error in MILP config: " << configPath << "\n";
+        PLOGE << "Error: JSON parse error in MILP config: " << configPath;
         return std::nullopt;
     }
 
@@ -179,14 +181,14 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
 
     for (const auto &field : requiredDouble) {
         if (!config.contains(field)) {
-            llvm::errs() << "Error: Missing required field '" << field
-                         << "' in MILP config: " << configPath << "\n";
+            PLOGE << "Error: Missing required field '" << field
+                  << "' in MILP config: " << configPath;
             return std::nullopt;
         }
     }
     if (!config.contains("vm_capacity_bytes")) {
-        llvm::errs() << "Error: Missing required field 'vm_capacity_bytes'"
-                     << " in MILP config: " << configPath << "\n";
+        PLOGE << "Error: Missing required field 'vm_capacity_bytes'"
+              << " in MILP config: " << configPath;
         return std::nullopt;
     }
 
@@ -219,8 +221,8 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
         for (const auto *src : {&milpSection, &config}) {
             if (src->contains(key)) {
                 if (!(*src)[key].is_boolean()) {
-                    llvm::errs() << "Error: Field '" << key << "' must be boolean"
-                                 << " in MILP config: " << configPath << "\n";
+                    PLOGE << "Error: Field '" << key << "' must be boolean"
+                          << " in MILP config: " << configPath;
                     return false;
                 }
                 out = (*src)[key].get<bool>();

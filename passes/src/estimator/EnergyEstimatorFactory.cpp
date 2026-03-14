@@ -1,8 +1,7 @@
 #include "estimator/EnergyEstimatorFactory.h"
+#include "common/Logger.h"
 #include "estimator/AssemblyBasedEstimator.h"
 #include "estimator/IRBasedEstimator.h"
-
-#include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
 #include <fstream>
@@ -39,20 +38,20 @@ EnergyEstimatorPtr EnergyEstimatorFactory::createFromConfig(const std::string &c
     // Read config to determine estimator type
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        llvm::errs() << "Error: Cannot open energy config file: " << configPath << "\n";
+        PLOGE << "Error: Cannot open energy config file: " << configPath;
         return nullptr;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::errs() << "Error: JSON parse error in: " << configPath << "\n";
+        PLOGE << "Error: JSON parse error in: " << configPath;
         return nullptr;
     }
 
     // Get estimator type (required field)
     if (!config.contains("estimator_type")) {
-        llvm::errs() << "Error: Missing required 'estimator_type' field in config: " << configPath
-                     << "\nValid types: ir, assembly\n";
+        PLOGE << "Error: Missing required 'estimator_type' field in config: " << configPath
+              << " Valid types: ir, assembly";
         return nullptr;
     }
     std::string estimatorType = config["estimator_type"].get<std::string>();
@@ -60,8 +59,8 @@ EnergyEstimatorPtr EnergyEstimatorFactory::createFromConfig(const std::string &c
     // Create the estimator
     auto estimator = create(estimatorType, configPath);
     if (!estimator) {
-        llvm::errs() << "Error: Unknown or failed estimator type '" << estimatorType
-                     << "' in config: " << configPath << "\n";
+        PLOGE << "Error: Unknown or failed estimator type '" << estimatorType
+              << "' in config: " << configPath;
         return nullptr;
     }
 

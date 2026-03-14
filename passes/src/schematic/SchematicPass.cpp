@@ -1,6 +1,7 @@
 #include "schematic/SchematicPass.h"
 
 #include "common/BlockUtils.h"
+#include "common/Logger.h"
 #include "common/PassStatistics.h"
 #include "milp/CheckpointContext.h"
 #include "schematic/IntervalAllocator.h"
@@ -37,6 +38,7 @@ extern cl::opt<bool> AddDebugMarkersOpt;
 namespace checkpoint {
 
 PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
+    initLogging();
     const auto totalStart = std::chrono::steady_clock::now();
 
     // Step 1: Obtain LLVM analyses.
@@ -48,7 +50,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(), "schematic pass");
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip())
-            errs() << ctxResult.errorMessage;
+            PLOGE << ctxResult.errorMessage;
         return PreservedAnalyses::all();
     }
     auto &ctx = *ctxResult.context;
@@ -56,8 +58,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     // Step 3: Parse SCHEMATIC params.
     auto paramsOpt = parseSchematicParams(SchematicConfigOpt.getValue());
     if (!paramsOpt) {
-        errs() << "Error: Failed to parse SCHEMATIC config: " << SchematicConfigOpt.getValue()
-               << "\n";
+        PLOGE << "Error: Failed to parse SCHEMATIC config: " << SchematicConfigOpt.getValue();
         return PreservedAnalyses::all();
     }
     SchematicParams params = *paramsOpt;
@@ -82,8 +83,8 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     SchematicStateAnalysis state(F, AA, *ctx.cfg);
     if (state.hasAnalysisErrors()) {
         state.printAnalysisErrors(errs());
-        errs() << "Skipping SCHEMATIC instrumentation for function " << F.getName()
-               << " due to unresolved memory/call effects.\n";
+        PLOGE << "Skipping SCHEMATIC instrumentation for function " << F.getName()
+              << " due to unresolved memory/call effects.";
         return PreservedAnalyses::all();
     }
 
@@ -96,7 +97,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         TraceLoader loader(F, LI);
         loadedTraces = loader.load(SchematicTraceOpt.getValue());
         if (loadedTraces)
-            errs() << "SCHEMATIC: loaded traces for " << F.getName() << "\n";
+            PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
     }
 
     // Step 7: Loop analysis.
@@ -105,13 +106,13 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         loopAnalyzer.setLoadedLoopTraces(loadedTraces->loopTraces);
 
     if (!loopAnalyzer.analyzeLoops(solution)) {
-        errs() << "SCHEMATIC: loop analysis failed for " << F.getName() << " — aborting\n";
+        PLOGE << "SCHEMATIC: loop analysis failed for " << F.getName() << " — aborting";
         return PreservedAnalyses::all();
     }
 
     // Step 8: Get paths from traces (required).
     if (!loadedTraces || loadedTraces->functionPaths.empty()) {
-        errs() << "SCHEMATIC: no traces loaded for " << F.getName() << " — traces are required\n";
+        PLOGE << "SCHEMATIC: no traces loaded for " << F.getName() << " — traces are required";
         return PreservedAnalyses::all();
     }
     std::vector<EnumeratedPath> paths = loadedTraces->functionPaths;
@@ -372,9 +373,9 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             RCGResult result = solver.solve();
 
             if (!result.feasible) {
-                errs() << "SCHEMATIC infeasible: energy capacity too small for function '"
-                       << F.getName() << "', path #" << solution.pathsAnalyzed << ": "
-                       << result.errorMessage << "\n";
+                PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '"
+                      << F.getName() << "', path #" << solution.pathsAnalyzed << ": "
+                      << result.errorMessage;
                 if (!StatsJsonOpt.empty()) {
                     const auto totalEnd = std::chrono::steady_clock::now();
                     double totalMs =
@@ -476,9 +477,8 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         RCGResult result = solver.solve();
 
         if (!result.feasible) {
-            errs() << "SCHEMATIC infeasible: energy capacity too small for function '"
-                   << F.getName() << "', uncovered block '" << BB->getName()
-                   << "': " << result.errorMessage << "\n";
+            PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '" << F.getName()
+                  << "', uncovered block '" << BB->getName() << "': " << result.errorMessage;
             if (!StatsJsonOpt.empty()) {
                 const auto totalEnd = std::chrono::steady_clock::now();
                 double totalMs =
@@ -595,17 +595,17 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         common.runtimeCallsInserted = inserted;
         common.compilationTimeMs = totalExecutionTimeMs;
         common.peakRSSKb = getPeakRSSKb();
-        printCommonStats(errs(), common);
+        printCommonStats(common);
     }
 
-    errs() << "  --- SCHEMATIC-specific ---\n";
-    errs() << "  Paths analyzed:                  " << solution.pathsAnalyzed << "\n";
-    errs() << "  Enabled checkpoints:             " << solution.enabledCheckpoints.size() << "\n";
-    errs() << "  Loop decisions:                  " << solution.loopDecisions.size() << "\n";
-    errs() << "  Boundary calls inserted:         " << instrumenter.boundaryCalls() << "\n";
-    errs() << "  Store mem calls inserted:        " << instrumenter.storeMemCalls() << "\n";
-    errs() << "  Restore mem calls inserted:      " << instrumenter.restoreMemCalls() << "\n";
-    errs() << "  Trace-guided:                    yes\n";
+    PLOGI << "  --- SCHEMATIC-specific ---";
+    PLOGI << "  Paths analyzed:                  " << solution.pathsAnalyzed;
+    PLOGI << "  Enabled checkpoints:             " << solution.enabledCheckpoints.size();
+    PLOGI << "  Loop decisions:                  " << solution.loopDecisions.size();
+    PLOGI << "  Boundary calls inserted:         " << instrumenter.boundaryCalls();
+    PLOGI << "  Store mem calls inserted:        " << instrumenter.storeMemCalls();
+    PLOGI << "  Restore mem calls inserted:      " << instrumenter.restoreMemCalls();
+    PLOGI << "  Trace-guided:                    yes";
 
     if (!StatsJsonOpt.empty()) {
         CommonStats c;

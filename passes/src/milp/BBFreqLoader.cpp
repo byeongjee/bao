@@ -1,5 +1,7 @@
 #include "milp/BBFreqLoader.h"
 
+#include "common/Logger.h"
+
 #include "llvm/Support/raw_ostream.h"
 
 #define JSON_NOEXCEPTION
@@ -11,26 +13,25 @@ namespace checkpoint {
 std::optional<BBFreqLoader> BBFreqLoader::load(const std::string &jsonPath, llvm::Function &F) {
     std::ifstream file(jsonPath);
     if (!file.is_open()) {
-        llvm::errs() << "BBFreqLoader: cannot open file: " << jsonPath << "\n";
+        PLOGE << "BBFreqLoader: cannot open file: " << jsonPath;
         return std::nullopt;
     }
 
     nlohmann::json root = nlohmann::json::parse(file, nullptr, false);
     if (root.is_discarded()) {
-        llvm::errs() << "BBFreqLoader: JSON parse error in: " << jsonPath << "\n";
+        PLOGE << "BBFreqLoader: JSON parse error in: " << jsonPath;
         return std::nullopt;
     }
 
     std::string funcName = F.getName().str();
     if (!root.contains(funcName)) {
-        llvm::errs() << "BBFreqLoader: function '" << funcName << "' not found in " << jsonPath
-                     << "\n";
+        PLOGE << "BBFreqLoader: function '" << funcName << "' not found in " << jsonPath;
         return std::nullopt;
     }
 
     const auto &funcObj = root[funcName];
     if (!funcObj.is_object()) {
-        llvm::errs() << "BBFreqLoader: expected object for function '" << funcName << "'\n";
+        PLOGE << "BBFreqLoader: expected object for function '" << funcName << "'";
         return std::nullopt;
     }
 
@@ -45,16 +46,16 @@ std::optional<BBFreqLoader> BBFreqLoader::load(const std::string &jsonPath, llvm
     for (auto it = funcObj.begin(); it != funcObj.end(); ++it) {
         std::string bbName = it.key();
         if (!it.value().is_number()) {
-            llvm::errs() << "BBFreqLoader: non-numeric count for BB '" << bbName
-                         << "' in function '" << funcName << "'\n";
+            PLOGE << "BBFreqLoader: non-numeric count for BB '" << bbName << "' in function '"
+                  << funcName << "'";
             return std::nullopt;
         }
         uint64_t count = it.value().get<uint64_t>();
 
         auto mapIt = nameMap.find(llvm::StringRef(bbName));
         if (mapIt == nameMap.end()) {
-            llvm::errs() << "BBFreqLoader: BB '" << bbName << "' not found in function '"
-                         << funcName << "'\n";
+            PLOGE << "BBFreqLoader: BB '" << bbName << "' not found in function '" << funcName
+                  << "'";
             return std::nullopt;
         }
 

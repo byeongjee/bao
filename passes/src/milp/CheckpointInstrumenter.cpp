@@ -1,5 +1,6 @@
 #include "milp/CheckpointInstrumenter.h"
 #include "common/BlockUtils.h"
+#include "common/Logger.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/IRBuilder.h"
@@ -211,8 +212,8 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
     for (NodeId node : solution.regionStarts) {
         llvm::BasicBlock *BB = cfg.getNodeMap().getConcreteBlock(node);
         if (!BB || BB->getParent() != &F) {
-            llvm::errs() << "CheckpointInstrumenter: unresolved region-start node "
-                         << cfg.getNodeName(node) << "\n";
+            PLOGW << "CheckpointInstrumenter: unresolved region-start node "
+                  << cfg.getNodeName(node);
             continue;
         }
         nodesByBlock[BB].push_back(node);

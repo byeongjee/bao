@@ -1,5 +1,7 @@
 #include "milp/CheckpointOptimizer.h"
 
+#include "common/Logger.h"
+
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/Debug.h"
@@ -101,7 +103,7 @@ std::vector<NodeId> CheckpointOptimizer::getInfeasibleBlocks() const {
 bool CheckpointOptimizer::solve() {
     auto infeasible = getInfeasibleBlocks();
     if (!infeasible.empty()) {
-        llvm::errs() << "Error: Blocks exceed capacity\n";
+        PLOGE << "Error: Blocks exceed capacity";
         return false;
     }
 
@@ -119,16 +121,16 @@ bool CheckpointOptimizer::solve() {
     }
 
     int solCount = model_.get(GRB_IntAttr_SolCount);
-    llvm::errs() << "Optimization did not prove optimality"
-                 << " (Gurobi status=" << status << ", solutions found=" << solCount << ")\n";
+    PLOGE << "Optimization did not prove optimality"
+          << " (Gurobi status=" << status << ", solutions found=" << solCount << ")";
 
     if (status == GRB_INFEASIBLE) {
-        llvm::errs() << "Optimization infeasible; computing IIS diagnostics...\n";
+        PLOGE << "Optimization infeasible; computing IIS diagnostics...";
         model_.computeIIS();
         model_.write("milp_infeasible.lp");
         model_.write("milp_infeasible.ilp");
-        llvm::errs() << "  Wrote model: milp_infeasible.lp\n";
-        llvm::errs() << "  Wrote IIS:   milp_infeasible.ilp\n";
+        PLOGD << "  Wrote model: milp_infeasible.lp";
+        PLOGD << "  Wrote IIS:   milp_infeasible.ilp";
 
         auto constrs = model_.getConstrs();
         int numConstrs = model_.get(GRB_IntAttr_NumConstrs);
@@ -136,10 +138,10 @@ bool CheckpointOptimizer::solve() {
         for (int i = 0; i < numConstrs; i++) {
             if (!constrs[i].get(GRB_IntAttr_IISConstr))
                 continue;
-            llvm::errs() << "  IIS constr: " << constrs[i].get(GRB_StringAttr_ConstrName) << "\n";
+            PLOGD << "  IIS constr: " << constrs[i].get(GRB_StringAttr_ConstrName);
             printedConstrs++;
             if (printedConstrs >= 200) {
-                llvm::errs() << "  IIS constr: ... truncated at 200 entries\n";
+                PLOGD << "  IIS constr: ... truncated at 200 entries";
                 break;
             }
         }
@@ -150,12 +152,12 @@ bool CheckpointOptimizer::solve() {
         for (int i = 0; i < numVars; i++) {
             if (!vars[i].get(GRB_IntAttr_IISLB) && !vars[i].get(GRB_IntAttr_IISUB))
                 continue;
-            llvm::errs() << "  IIS var bound: " << vars[i].get(GRB_StringAttr_VarName)
-                         << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
-                         << " UB=" << vars[i].get(GRB_IntAttr_IISUB) << "\n";
+            PLOGD << "  IIS var bound: " << vars[i].get(GRB_StringAttr_VarName)
+                  << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
+                  << " UB=" << vars[i].get(GRB_IntAttr_IISUB);
             printedVarBounds++;
             if (printedVarBounds >= 200) {
-                llvm::errs() << "  IIS var bound: ... truncated at 200 entries\n";
+                PLOGD << "  IIS var bound: ... truncated at 200 entries";
                 break;
             }
         }
@@ -163,7 +165,7 @@ bool CheckpointOptimizer::solve() {
 
     if (acceptFeasible_ && solCount > 0) {
         double gap = model_.get(GRB_DoubleAttr_MIPGap);
-        llvm::errs() << "Accepting feasible solution (MIP gap=" << gap << ")\n";
+        PLOGW << "Accepting feasible solution (MIP gap=" << gap << ")";
         extractSolution();
         solution_.solverStatus = SolverStatus::Feasible;
         solution_.mipGap = gap;

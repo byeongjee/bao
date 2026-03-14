@@ -1,6 +1,6 @@
 #include "schematic/SchematicParams.h"
 
-#include "llvm/Support/raw_ostream.h"
+#include "common/Logger.h"
 
 #include <nlohmann/json.hpp>
 
@@ -11,13 +11,13 @@ namespace checkpoint {
 std::optional<SchematicParams> parseSchematicParams(const std::string &configPath) {
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        llvm::errs() << "Error: Cannot open SCHEMATIC config file: " << configPath << "\n";
+        PLOGE << "Error: Cannot open SCHEMATIC config file: " << configPath;
         return std::nullopt;
     }
 
     nlohmann::json config = nlohmann::json::parse(file, nullptr, false);
     if (config.is_discarded()) {
-        llvm::errs() << "Error: JSON parse error in SCHEMATIC config: " << configPath << "\n";
+        PLOGE << "Error: JSON parse error in SCHEMATIC config: " << configPath;
         return std::nullopt;
     }
 
@@ -33,8 +33,8 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
 
     for (const auto &field : requiredDouble) {
         if (!config.contains(field)) {
-            llvm::errs() << "Error: Missing required field '" << field
-                         << "' in SCHEMATIC config: " << configPath << "\n";
+            PLOGE << "Error: Missing required field '" << field
+                  << "' in SCHEMATIC config: " << configPath;
             return std::nullopt;
         }
     }
@@ -42,8 +42,8 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     const std::vector<std::string> requiredUnsigned = {"N_reg", "vm_capacity_bytes"};
     for (const auto &field : requiredUnsigned) {
         if (!config.contains(field)) {
-            llvm::errs() << "Error: Missing required field '" << field
-                         << "' in SCHEMATIC config: " << configPath << "\n";
+            PLOGE << "Error: Missing required field '" << field
+                  << "' in SCHEMATIC config: " << configPath;
             return std::nullopt;
         }
     }
@@ -72,8 +72,8 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     } else if (config.contains("max_paths")) {
         params.maxPaths = config["max_paths"].get<unsigned>();
     } else {
-        llvm::errs() << "Error: Missing required field 'max_paths'"
-                     << " in SCHEMATIC config: " << configPath << "\n";
+        PLOGE << "Error: Missing required field 'max_paths'"
+              << " in SCHEMATIC config: " << configPath;
         return std::nullopt;
     }
 
@@ -82,8 +82,8 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
         for (const auto *src : {&schSection, &config}) {
             if (src->contains(key)) {
                 if (!(*src)[key].is_boolean()) {
-                    llvm::errs() << "Error: Field '" << key << "' must be boolean"
-                                 << " in SCHEMATIC config: " << configPath << "\n";
+                    PLOGE << "Error: Field '" << key << "' must be boolean"
+                          << " in SCHEMATIC config: " << configPath;
                     return std::nullopt;
                 }
                 return (*src)[key].get<bool>();

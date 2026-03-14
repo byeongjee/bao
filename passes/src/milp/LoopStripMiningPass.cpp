@@ -1,6 +1,7 @@
 #include "milp/LoopStripMiningPass.h"
 
 #include "common/BlockUtils.h"
+#include "common/Logger.h"
 #include "common/LoopTripCount.h"
 #include "common/LoopUtils.h"
 #include "estimator/EnergyEstimatorFactory.h"
@@ -51,10 +52,6 @@ extern cl::opt<std::string> MILPConfigOpt;
 extern cl::opt<bool> LoopStripMiningEnabledOpt;
 
 namespace {
-
-static cl::opt<bool> LoopStripMiningVerboseOpt("loop-strip-mining-verbose",
-                                               cl::desc("Print per-loop strip-mining decisions"),
-                                               cl::init(false));
 
 struct LoopRewritePlan {
     Loop *L = nullptr;
@@ -296,16 +293,16 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE
     }
 
     if (backedgeCount.getActiveBits() > 64) {
-        errs() << "LoopStripMiningPass warning: backedge count for loop " << loopId
-               << " exceeds 64 bits; skipping loop\n";
+        PLOGW << "LoopStripMiningPass warning: backedge count for loop " << loopId
+              << " exceeds 64 bits; skipping loop";
         return std::nullopt;
     }
 
     uint64_t backedgeValue = backedgeCount.getZExtValue();
     bool exitAtLatch = (ExitingBlock == L->getLoopLatch());
     if (exitAtLatch && backedgeValue == std::numeric_limits<uint64_t>::max()) {
-        errs() << "LoopStripMiningPass warning: backedge count for loop " << loopId
-               << " cannot be incremented safely; skipping loop\n";
+        PLOGW << "LoopStripMiningPass warning: backedge count for loop " << loopId
+              << " cannot be incremented safely; skipping loop";
         return std::nullopt;
     }
 
@@ -659,18 +656,18 @@ static void selectInNest(Loop *L, ScalarEvolution &SE,
         return;
     }
 
-    if (LoopStripMiningVerboseOpt) {
+    {
         BasicBlock *Header = L->getHeader();
         const Function *F = Header ? Header->getParent() : nullptr;
         std::string headerName =
             (Header && F) ? checkpoint::getBlockName(*Header, *F) : "<unknown>";
         std::string funcName = F ? F->getName().str() : "<unknown>";
-        errs() << "LoopStripMiningPass: skip " << funcName << "::" << headerName
-               << " reason=" << pr.skipReason;
+        std::string msg = "LoopStripMiningPass: skip " + funcName + "::" + headerName +
+                          " reason=" + pr.skipReason;
         if (!pr.skipDetail.empty()) {
-            errs() << " " << pr.skipDetail;
+            msg += " " + pr.skipDetail;
         }
-        errs() << "\n";
+        PLOGD << msg;
     }
 
     if (pr.skipReason == "k-covers-entire-loop") {
@@ -1062,31 +1059,30 @@ static bool chunkLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution
 }
 
 static void printSummary(const Function &F, const LoopStripMiningStats &stats) {
-    errs() << "=== Loop Strip-Mining: " << F.getName() << " ===\n";
-    errs() << "  Loops considered:                " << stats.loopsSeen << "\n";
-    errs() << "  Eligible loops:                  " << stats.loopsEligible << "\n";
-    errs() << "  Rewritten loops:                 " << stats.loopsRewritten << "\n";
-    errs() << "    Strip-mined:                   " << (stats.loopsRewritten - stats.loopsChunked)
-           << "\n";
-    errs() << "    Chunked:                       " << stats.loopsChunked << "\n";
+    PLOGI << "=== Loop Strip-Mining: " << F.getName() << " ===";
+    PLOGI << "  Loops considered:                " << stats.loopsSeen;
+    PLOGI << "  Eligible loops:                  " << stats.loopsEligible;
+    PLOGI << "  Rewritten loops:                 " << stats.loopsRewritten;
+    PLOGI << "    Strip-mined:                   " << (stats.loopsRewritten - stats.loopsChunked);
+    PLOGI << "    Chunked:                       " << stats.loopsChunked;
 
     unsigned skippedTotal = 0;
     for (const auto &entry : stats.skippedReasons) {
         skippedTotal += entry.second;
     }
-    errs() << "  Skipped loops:                   " << skippedTotal << "\n";
+    PLOGI << "  Skipped loops:                   " << skippedTotal;
 
     if (!stats.skippedReasons.empty()) {
-        errs() << "  Skipped reason histogram:\n";
+        PLOGI << "  Skipped reason histogram:";
         for (const auto &entry : stats.skippedReasons) {
-            errs() << "    - " << entry.first << ": " << entry.second << "\n";
+            PLOGI << "    - " << entry.first << ": " << entry.second;
         }
     }
 
     if (!stats.chosenKByHeader.empty()) {
-        errs() << "  Chosen K values:\n";
+        PLOGI << "  Chosen K values:";
         for (const auto &[header, k] : stats.chosenKByHeader) {
-            errs() << "    - " << header << ": K=" << k << "\n";
+            PLOGI << "    - " << header << ": K=" << k;
         }
     }
 }
@@ -1096,21 +1092,23 @@ static void printSummary(const Function &F, const LoopStripMiningStats &stats) {
 namespace checkpoint {
 
 PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager &AM) {
+    checkpoint::initLogging();
+
     if (F.isDeclaration()) {
         return PreservedAnalyses::all();
     }
 
     if (MILPConfigOpt.getValue().empty()) {
         if (LoopStripMiningEnabledOpt) {
-            errs() << "LoopStripMiningPass: missing -milp-config; skipping " << F.getName() << "\n";
+            PLOGE << "LoopStripMiningPass: missing -milp-config; skipping " << F.getName();
         }
         return PreservedAnalyses::all();
     }
 
     auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
     if (!milpParamsOpt) {
-        errs() << "LoopStripMiningPass: failed to parse MILP config for " << F.getName()
-               << "; skipping\n";
+        PLOGE << "LoopStripMiningPass: failed to parse MILP config for " << F.getName()
+              << "; skipping";
         return PreservedAnalyses::all();
     }
     bool loopStripMiningEnabled =
@@ -1120,7 +1118,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     }
 
     if (EnergyConfigOpt.getValue().empty()) {
-        errs() << "LoopStripMiningPass: missing -energy-config; skipping " << F.getName() << "\n";
+        PLOGE << "LoopStripMiningPass: missing -energy-config; skipping " << F.getName();
         return PreservedAnalyses::all();
     }
 
@@ -1128,8 +1126,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     std::unique_ptr<EnergyEstimator> estimator =
         factory.createFromConfig(EnergyConfigOpt.getValue());
     if (!estimator) {
-        errs() << "LoopStripMiningPass: failed to create estimator for " << F.getName()
-               << "; skipping\n";
+        PLOGE << "LoopStripMiningPass: failed to create estimator for " << F.getName()
+              << "; skipping";
         return PreservedAnalyses::all();
     }
     estimator->prepareForFunction(F);
@@ -1150,8 +1148,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     checkpoint::StateAnalysis state(F, AA, cfg);
     if (state.hasAnalysisErrors()) {
         state.printAnalysisErrors(errs());
-        errs() << "LoopStripMiningPass: skipping " << F.getName()
-               << " due to unresolved memory/call effects.\n";
+        PLOGW << "LoopStripMiningPass: skipping " << F.getName()
+              << " due to unresolved memory/call effects.";
         return PreservedAnalyses::all();
     }
 
@@ -1189,10 +1187,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
                                          : stripMineLoop(plan, LI, SE, DT, AC, AA, TTI);
         if (!rewritten) {
             stats.skippedReasons["rewrite-utility-failed"]++;
-            if (LoopStripMiningVerboseOpt) {
-                errs() << "LoopStripMiningPass: rewrite failed " << F.getName()
-                       << "::" << headerName << " K=" << plan.K << "\n";
-            }
+            PLOGW << "LoopStripMiningPass: rewrite failed " << F.getName() << "::" << headerName
+                  << " K=" << plan.K;
             continue;
         }
 
@@ -1204,11 +1200,9 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
             checkpoint::StateAnalysis postState(F, AA, postCfg);
             const checkpoint::StateAnalysis *reclampState = &state;
             if (postState.hasAnalysisErrors()) {
-                if (LoopStripMiningVerboseOpt) {
-                    errs() << "LoopStripMiningPass: post-chunk state analysis "
-                           << "failed for re-clamp in " << F.getName()
-                           << "; using pre-rewrite state margins\n";
-                }
+                PLOGW << "LoopStripMiningPass: post-chunk state analysis "
+                      << "failed for re-clamp in " << F.getName()
+                      << "; using pre-rewrite state margins";
             } else {
                 reclampState = &postState;
             }
@@ -1216,31 +1210,24 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
                 recomputeChunkKWithOverhead(L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
             if (!reclamp.ok) {
                 stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
-                if (LoopStripMiningVerboseOpt) {
-                    errs() << "LoopStripMiningPass: chunk K re-clamp unavailable " << F.getName()
-                           << "::" << headerName << " reason=" << reclamp.error
-                           << " original-K=" << plan.K << "\n";
-                }
+                PLOGW << "LoopStripMiningPass: chunk K re-clamp unavailable " << F.getName()
+                      << "::" << headerName << " reason=" << reclamp.error
+                      << " original-K=" << plan.K;
             } else {
                 plan.iterEnergy = reclamp.iterEnergy;
                 uint64_t newK = std::min<uint64_t>(plan.K, reclamp.maxK);
                 if (newK != plan.K) {
                     if (!updateChunkLoopBound(L, newK)) {
                         stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
-                        if (LoopStripMiningVerboseOpt) {
-                            errs() << "LoopStripMiningPass: chunk K re-clamp update failed "
-                                   << F.getName() << "::" << headerName << " original-K=" << plan.K
-                                   << " new-K=" << newK << "\n";
-                        }
+                        PLOGW << "LoopStripMiningPass: chunk K re-clamp update failed "
+                              << F.getName() << "::" << headerName << " original-K=" << plan.K
+                              << " new-K=" << newK;
                     } else {
                         setLoopTripCountMetadata(L, newK);
                         SE.forgetLoop(L);
-                        if (LoopStripMiningVerboseOpt) {
-                            errs() << "LoopStripMiningPass: chunk K re-clamped " << F.getName()
-                                   << "::" << headerName << " original-K=" << plan.K
-                                   << " new-K=" << newK << " E_iter_wc_post=" << reclamp.iterEnergy
-                                   << "\n";
-                        }
+                        PLOGD << "LoopStripMiningPass: chunk K re-clamped " << F.getName()
+                              << "::" << headerName << " original-K=" << plan.K << " new-K=" << newK
+                              << " E_iter_wc_post=" << reclamp.iterEnergy;
                         plan.K = newK;
                     }
                 }
@@ -1252,15 +1239,13 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         if (plan.isChunking)
             stats.loopsChunked++;
         stats.chosenKByHeader.emplace_back(headerName, plan.K);
-        if (LoopStripMiningVerboseOpt) {
-            errs() << "LoopStripMiningPass: " << (plan.isChunking ? "chunked " : "rewritten ")
-                   << F.getName() << "::" << headerName << " N=" << plan.N << " K=" << plan.K
-                   << " E_iter_wc=" << plan.iterEnergy << "\n";
-        }
+        PLOGD << "LoopStripMiningPass: " << (plan.isChunking ? "chunked " : "rewritten ")
+              << F.getName() << "::" << headerName << " N=" << plan.N << " K=" << plan.K
+              << " E_iter_wc=" << plan.iterEnergy;
     }
 
     if (verifyFunction(F, &errs())) {
-        errs() << "LoopStripMiningPass: verifier reported errors in " << F.getName() << "\n";
+        PLOGE << "LoopStripMiningPass: verifier reported errors in " << F.getName();
     }
 
     printSummary(F, stats);

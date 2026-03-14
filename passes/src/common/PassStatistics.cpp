@@ -1,7 +1,7 @@
 #include "common/PassStatistics.h"
+#include "common/Logger.h"
 
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Format.h"
 #include "llvm/Support/JSON.h"
 
 using namespace llvm;
@@ -11,19 +11,19 @@ cl::opt<std::string> StatsJsonOpt("ckpt-stats-json", cl::desc("Path to write pas
 
 namespace checkpoint {
 
-void printCommonStats(llvm::raw_ostream &OS, const CommonStats &stats) {
-    OS << "=== Checkpoint Insertion Statistics ===\n";
-    OS << "  Pass:                            " << stats.passName << "\n";
-    OS << "  Function:                        " << stats.functionName << "\n";
-    OS << "  Basic blocks:                    " << stats.basicBlocks << "\n";
-    OS << "  Edges:                           " << stats.edges << "\n";
-    OS << "  Candidate globals (V_elig):      " << stats.candidateGlobals << "\n";
-    OS << "  Regions:                         " << stats.regions << "\n";
-    OS << "  Region boundaries:               " << stats.regionBoundaries << "\n";
-    OS << "  Runtime calls inserted:          " << stats.runtimeCallsInserted << "\n";
-    OS << "  Compilation time (ms):           " << llvm::format("%.3f", stats.compilationTimeMs)
-       << "\n";
-    OS << "  Peak RSS (KB):                   " << stats.peakRSSKb << "\n";
+void printCommonStats(const CommonStats &stats) {
+    PLOGI << "=== Checkpoint Insertion Statistics ===";
+    PLOGI << "  Pass:                            " << stats.passName;
+    PLOGI << "  Function:                        " << stats.functionName;
+    PLOGI << "  Basic blocks:                    " << stats.basicBlocks;
+    PLOGI << "  Edges:                           " << stats.edges;
+    PLOGI << "  Candidate globals (V_elig):      " << stats.candidateGlobals;
+    PLOGI << "  Regions:                         " << stats.regions;
+    PLOGI << "  Region boundaries:               " << stats.regionBoundaries;
+    PLOGI << "  Runtime calls inserted:          " << stats.runtimeCallsInserted;
+    PLOGI << "  Compilation time (ms):           "
+          << checkpoint::fmtDouble(stats.compilationTimeMs);
+    PLOGI << "  Peak RSS (KB):                   " << stats.peakRSSKb;
 }
 
 llvm::json::Object commonStatsToJSON(const CommonStats &stats) {
@@ -45,8 +45,7 @@ bool writeStatsJSON(llvm::StringRef path, llvm::json::Object root) {
     std::error_code EC;
     llvm::raw_fd_ostream OS(path, EC);
     if (EC) {
-        llvm::errs() << "Warning: Cannot write stats JSON to " << path << ": " << EC.message()
-                     << "\n";
+        PLOGW << "Warning: Cannot write stats JSON to " << path.str() << ": " << EC.message();
         return false;
     }
     OS << llvm::json::Value(std::move(root));

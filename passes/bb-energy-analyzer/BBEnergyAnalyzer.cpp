@@ -6,6 +6,8 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "common/Logger.h"
+
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -19,12 +21,12 @@ std::map<std::string, std::map<std::string, std::string>> loadBBMapping(const st
     std::map<std::string, std::map<std::string, std::string>> result;
     std::ifstream file(path);
     if (!file.is_open()) {
-        errs() << "error: cannot open BB mapping file: " << path << "\n";
+        PLOGE << "error: cannot open BB mapping file: " << path;
         return result;
     }
     json mapping = json::parse(file, nullptr, false);
     if (mapping.is_discarded()) {
-        errs() << "error: JSON parse error in BB mapping file: " << path << "\n";
+        PLOGE << "error: JSON parse error in BB mapping file: " << path;
         return result;
     }
     for (auto &[funcName, funcMapping] : mapping.items()) {
@@ -63,11 +65,13 @@ int main(int argc, char **argv) {
         "\n"
         "Use --dump-line-map to output resolved address->BB mappings.\n");
 
+    checkpoint::initLogging();
+
     // Handle --dump-line-map mode
     if (DumpLineMap) {
         auto lineMaps = DWARFParser::parseLineMap(InputELF);
         if (lineMaps.empty()) {
-            errs() << "error: no line mappings found\n";
+            PLOGE << "error: no line mappings found";
             return 1;
         }
 
@@ -84,43 +88,43 @@ int main(int argc, char **argv) {
 
     // Energy analysis mode requires config and BB mapping
     if (EnergyParams.empty()) {
-        errs() << "error: --energy-params is required for energy analysis\n";
-        errs() << "Use --dump-line-map for line map output without energy params\n";
+        PLOGE << "error: --energy-params is required for energy analysis";
+        PLOGE << "Use --dump-line-map for line map output without energy params";
         return 1;
     }
 
     if (BBMappingFile.empty()) {
-        errs() << "error: --bb-mapping is required for energy analysis\n";
+        PLOGE << "error: --bb-mapping is required for energy analysis";
         return 1;
     }
 
     // 1. Parse DWARF to get BB->address mappings
-    errs() << "Parsing DWARF from " << InputELF << "...\n";
+    PLOGI << "Parsing DWARF from " << InputELF << "...";
     auto bbMaps = DWARFParser::parse(InputELF);
 
     if (bbMaps.empty()) {
-        errs() << "error: no basic block mappings found in '" << InputELF << "'\n";
-        errs() << "Make sure the file was compiled with debug info (-g) and\n";
-        errs() << "processed by the assign-bb-debuginfo pass.\n";
+        PLOGE << "error: no basic block mappings found in '" << InputELF << "'";
+        PLOGE << "Make sure the file was compiled with debug info (-g) and";
+        PLOGE << "processed by the assign-bb-debuginfo pass.";
         return 1;
     }
 
     // 2. Disassemble MSP430 code
-    errs() << "Disassembling MSP430 code...\n";
+    PLOGI << "Disassembling MSP430 code...";
     MSP430Disassembler disasm;
     auto instructions = disasm.disassemble(InputELF);
 
     if (instructions.empty()) {
-        errs() << "error: no instructions found in '" << InputELF << "'\n";
+        PLOGE << "error: no instructions found in '" << InputELF << "'";
         return 1;
     }
 
     // 3. Load energy model
-    errs() << "Loading energy model from " << EnergyParams << "...\n";
+    PLOGI << "Loading energy model from " << EnergyParams << "...";
     EnergyModel model(EnergyParams);
 
     // 3.5. Load BB mapping
-    errs() << "Loading BB mapping from " << BBMappingFile << "...\n";
+    PLOGI << "Loading BB mapping from " << BBMappingFile << "...";
     auto bbMapping = loadBBMapping(BBMappingFile);
     if (bbMapping.empty()) {
         return 1; // Error already printed
@@ -167,17 +171,17 @@ int main(int argc, char **argv) {
                     bbName = bbIt->second;
                 } else {
                     bbName = "bb" + std::to_string(bbIndex - 1); // fallback
-                    errs() << "warning: BB " << bbIndex << " not found in mapping for '" << funcName
-                           << "'\n";
+                    PLOGD << "warning: BB " << bbIndex << " not found in mapping for '" << funcName
+                          << "'";
                 }
             } else {
                 bbName = "bb" + std::to_string(bbIndex - 1); // fallback
-                errs() << "warning: function '" << funcName << "' not found in BB mapping\n";
+                PLOGD << "warning: function '" << funcName << "' not found in BB mapping";
             }
 
             if (instrCount == 0) {
-                errs() << "warning: BB '" << bbName << "' in '" << funcName
-                       << "' has no instructions\n";
+                PLOGD << "warning: BB '" << bbName << "' in '" << funcName
+                      << "' has no instructions";
             }
 
             funcOutput["bb_energy"][bbName] = {{"energy", bbEnergy},
@@ -207,8 +211,8 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < instructions.size(); ++i) {
         if (!instructionMapped[i]) {
             const auto &insn = instructions[i];
-            errs() << "warning: instruction at 0x" << Twine::utohexstr(insn.address) << " ("
-                   << insn.mnemonic << ") not mapped to any BB\n";
+            PLOGD << "warning: instruction at 0x" << Twine::utohexstr(insn.address) << " ("
+                  << insn.mnemonic << ") not mapped to any BB";
             unmappedCount++;
             unmappedEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
         }
@@ -229,26 +233,26 @@ int main(int argc, char **argv) {
     }
     output["missing_parameters"] = missingParams;
 
-    // Print summary to stderr (flows into pass_output for bench runners)
-    errs() << "\n--- Energy parameters ---\n";
-    errs() << "  Required (" << model.getRequiredKeys().size() << " keys):";
+    // Print summary (flows into pass_output for bench runners)
     {
+        std::string reqList;
         bool first = true;
         for (const auto &key : model.getRequiredKeys()) {
-            errs() << (first ? " " : ", ") << key;
+            reqList += (first ? " " : ", ") + key;
             first = false;
         }
+        PLOGI << "--- Energy parameters ---";
+        PLOGI << "  Required (" << model.getRequiredKeys().size() << " keys):" << reqList;
     }
-    errs() << "\n";
-    errs() << "  Missing  (" << model.getMissingKeys().size() << " keys):";
     {
+        std::string missList;
         bool first = true;
         for (const auto &key : model.getMissingKeys()) {
-            errs() << (first ? " " : ", ") << key;
+            missList += (first ? " " : ", ") + key;
             first = false;
         }
+        PLOGI << "  Missing  (" << model.getMissingKeys().size() << " keys):" << missList;
     }
-    errs() << "\n";
 
     // 5. Write output
     std::ostream *out = &std::cout;
@@ -256,7 +260,7 @@ int main(int argc, char **argv) {
     if (OutputFile != "-") {
         outFile.open(OutputFile);
         if (!outFile.is_open()) {
-            errs() << "error: failed to open output file '" << OutputFile << "'\n";
+            PLOGE << "error: failed to open output file '" << OutputFile << "'";
             return 1;
         }
         out = &outFile;
@@ -264,11 +268,11 @@ int main(int argc, char **argv) {
 
     *out << output.dump(2) << "\n";
 
-    errs() << "Done. Analyzed " << bbMaps.size() << " functions, " << instructions.size()
-           << " instructions.\n";
+    PLOGI << "Done. Analyzed " << bbMaps.size() << " functions, " << instructions.size()
+          << " instructions.";
 
     if (unmappedCount > 0) {
-        errs() << "Note: " << unmappedCount << " instructions not mapped to any basic block.\n";
+        PLOGI << "Note: " << unmappedCount << " instructions not mapped to any basic block.";
     }
 
     return 0;

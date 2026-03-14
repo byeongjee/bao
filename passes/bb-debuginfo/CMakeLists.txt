@@ -1,6 +1,7 @@
 # Standalone plugin - no Gurobi dependency
 add_library(BBDebugInfoPass MODULE
     AssignBBDebugInfoPass.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
 )
 
 set_target_properties(BBDebugInfoPass PROPERTIES
@@ -16,8 +17,13 @@ target_compile_options(BBDebugInfoPass PRIVATE
 )
 
 # Link nlohmann_json for JSON output
+target_include_directories(BBDebugInfoPass PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+
 target_link_libraries(BBDebugInfoPass PRIVATE
     nlohmann_json::nlohmann_json
+    plog::plog
 )
 
 if(APPLE)

@@ -8,6 +8,7 @@ add_executable(bb-energy-analyzer
     DWARFLineResolver.cpp
     MSP430Disassembler.cpp
     EnergyModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
 )
 
 set_target_properties(bb-energy-analyzer PROPERTIES
@@ -28,11 +29,13 @@ llvm_map_components_to_libnames(LLVM_LIBS
 target_include_directories(bb-energy-analyzer PRIVATE
     ${LLVM_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/include
 )
 
 target_link_libraries(bb-energy-analyzer PRIVATE
     ${LLVM_LIBS}
     nlohmann_json::nlohmann_json
+    plog::plog
 )
 
 # Disable RTTI to match LLVM

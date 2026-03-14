@@ -9,6 +9,7 @@
 #include "milp/StateAnalysis.h"
 
 #include "common/BlockUtils.h"
+#include "common/Logger.h"
 #include "common/PassStatistics.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -18,7 +19,6 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/Format.h"
 
 #include <chrono>
 #include <string>
@@ -55,13 +55,13 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
                                "' for function '" + F.getName() + "'",
                            /*gen_crash_diag=*/false);
     }
-    errs() << "MILP: using BB frequency file for function " << F.getName() << "\n";
+    PLOGI << "MILP: using BB frequency file for function " << F.getName();
 
     // Step 2: Create base checkpoint context (estimator + CFG)
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(), "checkpoint pass");
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip()) {
-            errs() << ctxResult.errorMessage;
+            PLOGE << ctxResult.errorMessage;
         }
         return PreservedAnalyses::all();
     }
@@ -87,15 +87,15 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     ctx.stateAnalysis = std::make_unique<StateAnalysis>(F, AA, *ctx.cfg);
     if (ctx.stateAnalysis->hasAnalysisErrors()) {
         ctx.stateAnalysis->printAnalysisErrors(errs());
-        errs() << "Skipping MILP instrumentation for function " << F.getName()
-               << " due to unresolved memory/call effects.\n";
+        PLOGW << "Skipping MILP instrumentation for function " << F.getName()
+              << " due to unresolved memory/call effects.";
         return PreservedAnalyses::all();
     }
 
     // Step 4: Parse MILP energy params and build EnergyModel (Pass C/D)
     auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
     if (!milpParamsOpt) {
-        errs() << "Error: Failed to parse MILP config: " << MILPConfigOpt.getValue() << "\n";
+        PLOGE << "Error: Failed to parse MILP config: " << MILPConfigOpt.getValue();
         return PreservedAnalyses::all();
     }
     ctx.milpParams = *milpParamsOpt;
@@ -113,11 +113,11 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
 
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
-        errs() << "Error: The following blocks exceed energy capacity:\n";
+        PLOGE << "Error: The following blocks exceed energy capacity:";
         for (NodeId block : infeasible) {
-            errs() << "  " << abstractCFG.model->getNodeName(block)
-                   << " (cost: " << abstractCFG.model->getBlockEnergyCost(block)
-                   << ", capacity: " << ctx.milpParams.capacity << ")\n";
+            PLOGE << "  " << abstractCFG.model->getNodeName(block)
+                  << " (cost: " << abstractCFG.model->getBlockEnergyCost(block)
+                  << ", capacity: " << ctx.milpParams.capacity << ")";
         }
         if (!StatsJsonOpt.empty()) {
             const auto totalEnd = std::chrono::steady_clock::now();
@@ -162,7 +162,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         double totalExecutionTimeMs =
             std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
-        errs() << "Optimization failed\n";
+        PLOGE << "Optimization failed";
 
         {
             CommonStats common;
@@ -176,34 +176,30 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             common.runtimeCallsInserted = 0;
             common.compilationTimeMs = totalExecutionTimeMs;
             common.peakRSSKb = getPeakRSSKb();
-            printCommonStats(errs(), common);
+            printCommonStats(common);
         }
 
-        errs() << "  --- MILP-specific ---\n";
-        errs() << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes << "\n";
-        errs() << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges << "\n";
-        errs() << "  Loops seen:                      " << abstractCFG.stats.loopsSeen << "\n";
-        errs() << "  Loops eligible:                  " << abstractCFG.stats.loopsEligible << "\n";
-        errs() << "  Loops summarized:                " << abstractCFG.stats.loopsSummarized
-               << "\n";
-        errs() << "  Strip-mined loops seen:          " << abstractCFG.stats.stripMinedLoopsSeen
-               << "\n";
-        errs() << "  Strip-mined loops summarized:    "
-               << abstractCFG.stats.stripMinedLoopsSummarized << "\n";
-        errs() << "  Strip-mined loops skipped:       " << abstractCFG.stats.stripMinedLoopsSkipped
-               << "\n";
-        errs() << "  Ineligible globals:              " << ineligGlobalCount << "\n";
-        errs() << "  Ineligible allocas:              " << ineligAllocaCount << "\n";
-        errs() << "  Ineligible SSA registers:        " << ineligSSACount << "\n";
-        errs() << "  MILP variables:                  " << optimizer.getNumVars() << "\n";
-        errs() << "  MILP constraints:                " << optimizer.getNumConstrs() << "\n";
-        errs() << "  Optimal solution:                no (solver failed)\n";
-        errs() << "  Solve time (ms):                 " << llvm::format("%.3f", solveTimeMs)
-               << "\n";
+        PLOGI << "  --- MILP-specific ---";
+        PLOGI << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes;
+        PLOGI << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges;
+        PLOGI << "  Loops seen:                      " << abstractCFG.stats.loopsSeen;
+        PLOGI << "  Loops eligible:                  " << abstractCFG.stats.loopsEligible;
+        PLOGI << "  Loops summarized:                " << abstractCFG.stats.loopsSummarized;
+        PLOGI << "  Strip-mined loops seen:          " << abstractCFG.stats.stripMinedLoopsSeen;
+        PLOGI << "  Strip-mined loops summarized:    "
+              << abstractCFG.stats.stripMinedLoopsSummarized;
+        PLOGI << "  Strip-mined loops skipped:       " << abstractCFG.stats.stripMinedLoopsSkipped;
+        PLOGI << "  Ineligible globals:              " << ineligGlobalCount;
+        PLOGI << "  Ineligible allocas:              " << ineligAllocaCount;
+        PLOGI << "  Ineligible SSA registers:        " << ineligSSACount;
+        PLOGI << "  MILP variables:                  " << optimizer.getNumVars();
+        PLOGI << "  MILP constraints:                " << optimizer.getNumConstrs();
+        PLOGI << "  Optimal solution:                no (solver failed)";
+        PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
         if (!abstractCFG.stats.skippedReasons.empty()) {
-            errs() << "  Abstract CFG skip reasons:\n";
+            PLOGI << "  Abstract CFG skip reasons:";
             for (const auto &[reason, count] : abstractCFG.stats.skippedReasons) {
-                errs() << "    - " << reason << ": " << count << "\n";
+                PLOGI << "    - " << reason << ": " << count;
             }
         }
 
@@ -251,7 +247,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     const auto &solution = optimizer.getSolution();
 
     if (solution.regionStarts.empty()) {
-        errs() << "No region boundaries needed for function " << F.getName() << "\n";
+        PLOGI << "No region boundaries needed for function " << F.getName();
         if (!StatsJsonOpt.empty()) {
             const auto totalEnd = std::chrono::steady_clock::now();
             double totalMs =
@@ -301,38 +297,35 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         common.runtimeCallsInserted = inserted;
         common.compilationTimeMs = totalExecutionTimeMs;
         common.peakRSSKb = getPeakRSSKb();
-        printCommonStats(errs(), common);
+        printCommonStats(common);
     }
 
-    errs() << "  --- MILP-specific ---\n";
-    errs() << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes << "\n";
-    errs() << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges << "\n";
-    errs() << "  Loops seen:                      " << abstractCFG.stats.loopsSeen << "\n";
-    errs() << "  Loops eligible:                  " << abstractCFG.stats.loopsEligible << "\n";
-    errs() << "  Loops summarized:                " << abstractCFG.stats.loopsSummarized << "\n";
-    errs() << "  Strip-mined loops seen:          " << abstractCFG.stats.stripMinedLoopsSeen
-           << "\n";
-    errs() << "  Strip-mined loops summarized:    " << abstractCFG.stats.stripMinedLoopsSummarized
-           << "\n";
-    errs() << "  Strip-mined loops skipped:       " << abstractCFG.stats.stripMinedLoopsSkipped
-           << "\n";
-    errs() << "  Ineligible globals:              " << ineligGlobalCount << "\n";
-    errs() << "  Ineligible allocas:              " << ineligAllocaCount << "\n";
-    errs() << "  Ineligible SSA registers:        " << ineligSSACount << "\n";
-    errs() << "  MILP variables:                  " << optimizer.getNumVars() << "\n";
-    errs() << "  MILP constraints:                " << optimizer.getNumConstrs() << "\n";
+    PLOGI << "  --- MILP-specific ---";
+    PLOGI << "  Basic blocks (abstract):         " << abstractCFG.stats.abstractNodes;
+    PLOGI << "  Edges (abstract):                " << abstractCFG.stats.abstractEdges;
+    PLOGI << "  Loops seen:                      " << abstractCFG.stats.loopsSeen;
+    PLOGI << "  Loops eligible:                  " << abstractCFG.stats.loopsEligible;
+    PLOGI << "  Loops summarized:                " << abstractCFG.stats.loopsSummarized;
+    PLOGI << "  Strip-mined loops seen:          " << abstractCFG.stats.stripMinedLoopsSeen;
+    PLOGI << "  Strip-mined loops summarized:    " << abstractCFG.stats.stripMinedLoopsSummarized;
+    PLOGI << "  Strip-mined loops skipped:       " << abstractCFG.stats.stripMinedLoopsSkipped;
+    PLOGI << "  Ineligible globals:              " << ineligGlobalCount;
+    PLOGI << "  Ineligible allocas:              " << ineligAllocaCount;
+    PLOGI << "  Ineligible SSA registers:        " << ineligSSACount;
+    PLOGI << "  MILP variables:                  " << optimizer.getNumVars();
+    PLOGI << "  MILP constraints:                " << optimizer.getNumConstrs();
     if (solution.solverStatus == SolverStatus::Optimal) {
-        errs() << "  Optimal solution:                yes\n";
+        PLOGI << "  Optimal solution:                yes";
     } else {
-        errs() << "  Optimal solution:                no (MIP gap: " << solution.mipGap << ")\n";
+        PLOGI << "  Optimal solution:                no (MIP gap: " << solution.mipGap << ")";
     }
-    errs() << "  Boundary commits enabled:        " << commitCount << "\n";
-    errs() << "  Boundary restores enabled:       " << restoreCount << "\n";
-    errs() << "  Solve time (ms):                 " << llvm::format("%.3f", solveTimeMs) << "\n";
+    PLOGI << "  Boundary commits enabled:        " << commitCount;
+    PLOGI << "  Boundary restores enabled:       " << restoreCount;
+    PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
     if (!abstractCFG.stats.skippedReasons.empty()) {
-        errs() << "  Abstract CFG skip reasons:\n";
+        PLOGI << "  Abstract CFG skip reasons:";
         for (const auto &[reason, count] : abstractCFG.stats.skippedReasons) {
-            errs() << "    - " << reason << ": " << count << "\n";
+            PLOGI << "    - " << reason << ": " << count;
         }
     }
 

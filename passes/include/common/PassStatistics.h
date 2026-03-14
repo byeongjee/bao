@@ -2,7 +2,6 @@
 
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/JSON.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <string>
 
@@ -28,7 +27,7 @@ struct CommonStats {
 
 /// Print the common statistics header block.
 /// Each pass calls this, then prints its own pass-specific section.
-void printCommonStats(llvm::raw_ostream &OS, const CommonStats &stats);
+void printCommonStats(const CommonStats &stats);
 
 /// Serialize common statistics to a JSON object.
 llvm::json::Object commonStatsToJSON(const CommonStats &stats);

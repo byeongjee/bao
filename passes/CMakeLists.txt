@@ -7,7 +7,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(FetchContent)
 FetchContent_Declare(json
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
-FetchContent_MakeAvailable(json)
+FetchContent_Declare(plog
+    GIT_REPOSITORY https://github.com/SergiusTheBest/plog.git
+    GIT_TAG        1.1.11)
+FetchContent_MakeAvailable(json plog)
 
 # Find LLVM
 find_package(LLVM REQUIRED CONFIG)
@@ -59,6 +62,7 @@ include_directories(
 # Build as a shared module (not using add_llvm_pass_plugin to avoid linking LLVM)
 add_library(CheckpointPass MODULE
     # Common utilities
+    src/common/Logger.cpp
     src/common/BBNaming.cpp
     src/common/BlockSplitter.cpp
     src/common/CFGAnalysis.cpp
@@ -119,6 +123,7 @@ target_link_libraries(CheckpointPass PRIVATE
     ${GUROBI_CXX_LIBRARY}
     ${GUROBI_LIBRARY}
     nlohmann_json::nlohmann_json
+    plog::plog
 )
 
 # Build BB debug info pass as separate plugin (no Gurobi dependency)

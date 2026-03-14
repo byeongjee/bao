@@ -2,6 +2,8 @@
 
 #include "llvm/Support/raw_ostream.h"
 
+#include "common/Logger.h"
+
 #include <fstream>
 #include <nlohmann/json.hpp>
 
@@ -16,7 +18,7 @@ EnergyModel::EnergyModel(const std::string &configPath) {
 
     std::ifstream file(configPath);
     if (!file.is_open()) {
-        errs() << "error: failed to open energy config file '" << configPath << "'\n";
+        PLOGE << "error: failed to open energy config file '" << configPath << "'";
         return;
     }
 
@@ -36,12 +38,10 @@ EnergyModel::EnergyModel(const std::string &configPath) {
             }
         }
 
-        errs() << "Loaded " << costs_.size() << " energy cost entries from '" << configPath
-               << "'\n";
+        PLOGI << "Loaded " << costs_.size() << " energy cost entries from '" << configPath << "'";
 
     } catch (const json::exception &e) {
-        errs() << "error: failed to parse energy config '" << configPath << "': " << e.what()
-               << "\n";
+        PLOGE << "error: failed to parse energy config '" << configPath << "': " << e.what();
     }
 }
 
@@ -74,8 +74,8 @@ double EnergyModel::getEnergy(const std::string &mnemonic, const std::string &ad
     // Emit warning for unknown instruction/mode combo
     static std::unordered_map<std::string, bool> warned;
     if (warned.find(key) == warned.end()) {
-        errs() << "warning: no energy cost for '" << key << "', using default (" << defaultEnergy_
-               << ")\n";
+        PLOGW << "warning: no energy cost for '" << key << "', using default (" << defaultEnergy_
+              << ")";
         warned[key] = true;
     }
 
