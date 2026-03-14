@@ -90,8 +90,13 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
     for (const MachineRegionInfo &region : regions_) {
         // Step 1: Backward walk — collect blocks that can reach this
         // boundary without passing through another boundary.
+        // Include the boundary's own start block: registers defined there
+        // (before the boundary CALL that will be inserted later) must also
+        // be saved, otherwise they get restored to stale values on recovery.
         SmallPtrSet<const MachineBasicBlock *, 16> predBlockSet;
         {
+            predBlockSet.insert(region.startBlock);
+
             SmallVector<MachineBasicBlock *, 16> worklist;
             for (MachineBasicBlock *pred : region.startBlock->predecessors())
                 worklist.push_back(pred);

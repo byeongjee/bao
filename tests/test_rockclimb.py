@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -221,6 +222,27 @@ int test_backedge(int *arr, int n) {
 }
 """
 
+BOUNDARY_BLOCK_DEF = """\
+// Branching loop: forces separate header/body/latch blocks so that with
+// low E_safe the latch becomes its own boundary.  The loop header (bb.5)
+// contains a MOV16rp auto-increment that defines r14 (pointer) with a
+// read-modify-write.  Without the fix, the header is not in its own
+// predBlockSet, so the r14 definition there has no save point — on
+// recovery, r14 is restored to the initial pointer value, restarting
+// the traversal from the beginning of the array.
+int boundary_block_defs(int *arr, int n) {
+    int pos_sum = 0;
+    int neg_sum = 0;
+    for (int i = 0; i < n; i++) {
+        if (arr[i] > 0)
+            pos_sum += arr[i];
+        else
+            neg_sum += arr[i];
+    }
+    return pos_sum + neg_sum;
+}
+"""
+
 
 def _write_src(tmp_path: Path, code: str) -> Path:
     src = tmp_path / "test.c"
@@ -307,6 +329,44 @@ class TestMachinePassDistributedCkpt:
         saves = count_mir_reg_saves(result.output_mir)
         assert saves >= 2, (
             f"Expected >=2 register saves for loop back-edge liveness, got {saves}"
+        )
+
+    def test_boundary_block_own_defs_saved(self, run_rockclimb_machine, tmp_path):
+        """Registers defined in a boundary block must be saved there.
+
+        With low E_safe the loop latch becomes its own boundary, so the
+        backward walk from the loop header stops at the latch and never
+        includes the header in its own predBlockSet.  The header's
+        auto-increment pointer (r14 in MOV16rp) is a read-modify-write
+        that IS live at the boundary.  Without the fix, the definition
+        has no save point — recovery restores the initial pointer.
+        """
+        low_cap_config = tmp_path / "low_cap_rockclimb.json"
+        low_cap_config.write_text(json.dumps({
+            "capacity": 12.0,
+            "N_reg": 1,
+            "reg_restore_energy": 1.0,
+            "rockclimb": {"distributed_checkpointing": True},
+        }))
+
+        src = _write_src(tmp_path, BOUNDARY_BLOCK_DEF)
+        result = run_rockclimb_machine(
+            src, ASSEMBLY_ENERGY_CONFIG, low_cap_config, tmp_path,
+        )
+        assert result.exit_code == 0, f"Pass failed:\n{result.stderr}"
+
+        # Parse checkpoint count from pass statistics.
+        # Without the fix (boundary block not in its own predBlockSet),
+        # there are 11 register checkpoints — the loop header's own
+        # definitions (r14 auto-increment) and the latch's read-modify-
+        # write definitions (r12, r15, r13) are missed.  With the fix
+        # all boundary blocks are included, raising the count to 15.
+        match = re.search(r"Register checkpoints:\s+(\d+)", result.stderr)
+        assert match, "Could not find register checkpoint count in stderr"
+        checkpoints = int(match.group(1))
+        assert checkpoints > 11, (
+            f"Expected >11 register checkpoints (boundary block defs "
+            f"should generate saves), got {checkpoints}"
         )
 
     def test_register_saves_in_assembly(self, run_rockclimb_machine, tmp_path):
