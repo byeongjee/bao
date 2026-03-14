@@ -59,6 +59,22 @@ __attribute__((noinline)) static void _timing_delay_cycles(unsigned long cycles)
 
 __attribute__((noinline, used)) static void timing_gpio_init(void) {
     PM5CTL0 &= ~LOCKLPM5;
+
+    /* Configure DCO to F_CPU */
+    CSCTL0_H = CSKEY_H;
+#if F_CPU == 16000000UL
+    CSCTL1 = DCORSEL | DCOFSEL_4; /* 16 MHz */
+#elif F_CPU == 8000000UL
+    CSCTL1 = DCOFSEL_6; /* 8 MHz */
+#elif F_CPU == 1000000UL
+    CSCTL1 = DCOFSEL_0; /* 1 MHz */
+#else
+#error "Unsupported F_CPU — use 1000000, 8000000, or 16000000"
+#endif
+    CSCTL2 = SELA__VLOCLK | SELS__DCOCLK | SELM__DCOCLK;
+    CSCTL3 = DIVA__1 | DIVS__1 | DIVM__1;
+    CSCTL0_H = 0;
+
     P3DIR |= BIT4;
     P3OUT &= ~BIT4;
 }
