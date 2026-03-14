@@ -39,19 +39,24 @@ static void uart_init(void) {
     P2SEL1 |= BIT0 | BIT1;
     P2SEL0 &= ~(BIT0 | BIT1);
 
-    /* Configure DCO to 1 MHz */
-    CSCTL0_H = CSKEY_H;
-    CSCTL1 = DCOFSEL_0; /* 1 MHz DCO */
-    CSCTL2 = SELA__VLOCLK | SELS__DCOCLK | SELM__DCOCLK;
-    CSCTL3 = DIVA__1 | DIVS__1 | DIVM__1;
-    CSCTL0_H = 0;
-
-    /* Configure eUSCI_A0 for 9600 baud, 1 MHz SMCLK */
+    /* Configure eUSCI_A0 for 9600 baud.
+     * DCO is configured by timing_gpio_init() or boot recovery.
+     * Baud rate values from TI UG Table 30-5 (oversampling). */
     UCA0CTLW0 = UCSWRST; /* Hold in reset */
     UCA0CTLW0 |= UCSSEL__SMCLK;
-    UCA0BRW = 6;                           /* 1000000 / 9600 = 104.17 */
-    UCA0MCTLW = UCOS16 | UCBRF_8 | 0x2000; /* Oversampling, see UG Table */
-    UCA0CTLW0 &= ~UCSWRST;                 /* Release reset */
+#if F_CPU == 16000000UL
+    UCA0BRW = 104;
+    UCA0MCTLW = UCOS16 | UCBRF_2 | 0xD600;
+#elif F_CPU == 8000000UL
+    UCA0BRW = 52;
+    UCA0MCTLW = UCOS16 | UCBRF_1 | 0x4900;
+#elif F_CPU == 1000000UL
+    UCA0BRW = 6;
+    UCA0MCTLW = UCOS16 | UCBRF_8 | 0x2000;
+#else
+#error "Unsupported F_CPU for UART baud rate"
+#endif
+    UCA0CTLW0 &= ~UCSWRST; /* Release reset */
 }
 
 /* Direct UART character/string output (no newlib stdio dependency) */
