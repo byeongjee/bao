@@ -36,7 +36,7 @@ extern uint16_t __nvm_pc NVM_SECTION;
 /* Saved stack pointer for recovery */
 extern uint16_t __nvm_sp NVM_SECTION;
 
-#ifdef DEBUG_COUNTERS
+#ifdef DEVICE_DEBUG
 /* NVM Debug Counters */
 extern uint16_t cnt_boundary NVM_SECTION;
 extern uint16_t cnt_save_vreg NVM_SECTION;

@@ -7,7 +7,7 @@
  *
  * __region_boundary is provided by schematic_boot.S (assembly).
  *
- * When compiled with -DDEBUG_COUNTERS, also provides:
+ * When compiled with -DDEVICE_DEBUG, also provides:
  *   - NVM debug counters (cnt_boundary, cnt_save_reg, etc.)
  *   - NVM result storage (__nvm_result, __nvm_done)
  *   - UART output for profiling
@@ -33,7 +33,7 @@ __attribute__((section(".nvm"))) uint16_t __nvm_sp = 0;
 
 /* __region_boundary is provided by schematic_boot.S */
 
-#ifdef DEBUG_COUNTERS
+#ifdef DEVICE_DEBUG
 
 #include "benchmark.h"
 #include <msp430.h>
@@ -180,4 +180,4 @@ void debug_exit(int result) {
     __bis_SR_register(LPM4_bits);
 }
 
-#endif /* DEBUG_COUNTERS */
+#endif /* DEVICE_DEBUG */

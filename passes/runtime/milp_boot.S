@@ -141,7 +141,7 @@ _normal_boot:
     .type   __region_boundary, @function
 
 __region_boundary:
-#ifdef DEBUG_COUNTERS
+#ifdef DEVICE_DEBUG
     add.w   #1, &cnt_boundary
 #endif
 

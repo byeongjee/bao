@@ -310,7 +310,7 @@ def _link_schematic(
     """Assemble and link the SCHEMATIC output with boot.S + runtime.c."""
     boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
     if opts.device_debug:
-        boot_defines.append("DEBUG_COUNTERS")
+        boot_defines.append("DEVICE_DEBUG")
     if opts.halt_mode in ("bor", "lpm4"):
         boot_defines.append("HALT_MODE")
 

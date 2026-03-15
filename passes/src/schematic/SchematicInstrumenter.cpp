@@ -204,7 +204,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
 
     // Phase 2: Call __region_boundary.
     // Assembly handles bulk register save/restore, cnt_boundary, cnt_save_reg,
-    // cnt_restore_reg internally via #ifdef DEBUG_COUNTERS.
+    // cnt_restore_reg internally via #ifdef DEVICE_DEBUG.
     builder.CreateCall(boundaryFn_);
     inserted++;
     boundaryCalls_++;

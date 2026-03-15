@@ -4,14 +4,14 @@
  * Minimal runtime for the uninstrumented baseline.
  * No checkpoint functions, no UART, no counters.
  *
- * When compiled with -DDEBUG_COUNTERS, provides:
+ * When compiled with -DDEVICE_DEBUG, provides:
  *   - NVM result/done symbols for benchmark result readback
  *   - debug_init() / debug_exit() API
  */
 
 #include <stdint.h>
 
-#ifdef DEBUG_COUNTERS
+#ifdef DEVICE_DEBUG
 
 #include "benchmark.h"
 #include <msp430.h>
@@ -38,4 +38,4 @@ void debug_exit(int result) {
     __bis_SR_register(LPM4_bits);
 }
 
-#endif /* DEBUG_COUNTERS */
+#endif /* DEVICE_DEBUG */

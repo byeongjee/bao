@@ -346,7 +346,7 @@ def _link_milp(
     elif opts.halt_mode == "lpm4":
         boot_defines.append("MILP_HALT_LPM4")
     if opts.device_debug:
-        boot_defines.append("DEBUG_COUNTERS")
+        boot_defines.append("DEVICE_DEBUG")
 
     return link_algorithm(
         tc, env,

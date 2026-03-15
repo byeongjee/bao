@@ -15,7 +15,7 @@
  *   }
  *
  * GPIO timing (P3.4 high/low) is always active.
- * Compile with -DDEBUG_COUNTERS to also enable UART output and NVM counters.
+ * Compile with -DDEVICE_DEBUG to also enable UART output and NVM counters.
  */
 
 #ifndef BENCHMARK_H
@@ -103,7 +103,7 @@ static inline void timing_gpio_stop(void) {}
 #endif
 
 /* --- Benchmark entry/exit macros --- */
-#ifdef DEBUG_COUNTERS
+#ifdef DEVICE_DEBUG
 
 void debug_init(void);
 void debug_exit(int result);
@@ -133,6 +133,6 @@ void debug_exit(int result);
         (void)(result);                                                                            \
     } while (0)
 
-#endif /* DEBUG_COUNTERS */
+#endif /* DEVICE_DEBUG */
 
 #endif /* BENCHMARK_H */

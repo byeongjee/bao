@@ -81,7 +81,7 @@ def compile_rockclimb(
         raw_ll = tmp / "raw.ll"
         clang_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
         if opts.device_debug:
-            clang_defines.append("DEBUG_COUNTERS")
+            clang_defines.append("DEVICE_DEBUG")
 
         compile_to_ir(
             tc, env, opts.input_c, raw_ll,

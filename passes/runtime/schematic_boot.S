@@ -99,7 +99,7 @@ _do_recovery:
     mov.w   &__nvm_regs+20, R14
     mov.w   &__nvm_regs+22, R15
 
-#ifdef DEBUG_COUNTERS
+#ifdef DEVICE_DEBUG
     /* Count 12 register restores */
     add.w   #12, &cnt_restore_reg
 #endif
@@ -175,7 +175,7 @@ __region_boundary:
     mov.w   R14, &__nvm_regs+20
     mov.w   R15, &__nvm_regs+22
 
-#ifdef DEBUG_COUNTERS
+#ifdef DEVICE_DEBUG
     /* Count 12 register saves */
     add.w   #12, &cnt_save_reg
     /* Count 1 boundary */

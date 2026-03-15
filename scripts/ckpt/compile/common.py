@@ -55,7 +55,7 @@ def compile_to_ir(
     if debug:
         cmd.append("-DDEBUG")
     if device_debug:
-        cmd.append("-DDEBUG_COUNTERS")
+        cmd.append("-DDEVICE_DEBUG")
 
     cmd += [str(input_c), "-o", str(output_ll)]
 
@@ -416,7 +416,7 @@ def link_algorithm(
     """Assemble boot + runtime and link with the main object into an ELF.
 
     This is the shared link step used by all three algorithm pipelines.
-    When device_debug is True, the runtime is compiled with -DDEBUG_COUNTERS
+    When device_debug is True, the runtime is compiled with -DDEVICE_DEBUG
     which enables NVM result storage, debug counters, and UART output.
     """
     stem = output_elf.with_suffix("")
@@ -426,7 +426,7 @@ def link_algorithm(
 
     runtime_defines: list[str] = [f"F_CPU={cpu_freq}"]
     if device_debug:
-        runtime_defines.append("DEBUG_COUNTERS")
+        runtime_defines.append("DEVICE_DEBUG")
 
     runtime_o = stem.with_suffix(".runtime.o")
     compile_runtime_c(tc, env, runtime_source, runtime_o, extra_defines=runtime_defines)
