@@ -410,9 +410,9 @@ def link_algorithm(
     runtime_source: Path,
     linker_script: Path,
     cpu_freq: int,
-    boot_defines: list[str] | None = None,
-    debug_counters: bool = False,
-    debug_counters_source: Path | None = None,
+    boot_defines: list[str] | None,
+    debug_counters: bool,
+    debug_counters_source: Path | None,
 ) -> Path:
     """Assemble boot + runtime and link with the main object into an ELF.
 
