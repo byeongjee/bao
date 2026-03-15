@@ -254,7 +254,7 @@ def run_benchmark_matrix(
                             from ..device.flash import read_nvm
 
                             execution_time_us = saleae_run(
-                                tc, elf, saleae_manager,
+                                elf, saleae_manager,
                                 _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
                             )
 

@@ -16,7 +16,6 @@ import tempfile
 from pathlib import Path
 
 from ..runner import DeviceError
-from ..toolchain import Toolchain
 from .flash import flash
 
 _SALEAE_CHANNEL = 0
@@ -51,7 +50,6 @@ def discover_saleae():  # -> Manager (type omitted to defer import)
 
 
 def saleae_run(
-    tc: Toolchain,
     elf_path: Path,
     manager: object,
     flash_timeout: int,
@@ -108,7 +106,7 @@ def saleae_run(
     )
 
     try:
-        flash(tc, elf_path, flash_timeout)
+        flash(elf_path, flash_timeout)
         capture.wait()
     except Exception:
         capture.stop()

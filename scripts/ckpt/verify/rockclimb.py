@@ -259,7 +259,7 @@ def _verify_one(
 
         # ── B: Flash + read baseline ──
         try:
-            saleae_run(tc, baseline_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
+            saleae_run(baseline_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
             nvm_dict = read_nvm(tc, baseline_elf, _FLASH_TIMEOUT, _NVM_SYMBOLS)
             baseline_nvm = {k: str(v) for k, v in nvm_dict.items()}
         except (DeviceError, OSError) as exc:
@@ -345,7 +345,7 @@ def _verify_one(
 
         # ── E: Flash + read RockClimb ──
         try:
-            saleae_run(tc, rockclimb_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
+            saleae_run(rockclimb_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
             nvm_dict = read_nvm(tc, rockclimb_elf, _FLASH_TIMEOUT, _NVM_SYMBOLS)
             rockclimb_nvm = {k: str(v) for k, v in nvm_dict.items()}
         except (DeviceError, OSError) as exc:

@@ -11,7 +11,6 @@ from . import nvm
 
 
 def flash(
-    tc: Toolchain,
     elf_path: Path,
     timeout: int,
 ) -> None:
