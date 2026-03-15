@@ -14,15 +14,19 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..runner import DeviceError
 from .flash import flash
+
+if TYPE_CHECKING:
+    from saleae.automation import Manager
 
 _SALEAE_CHANNEL = 0
 _SALEAE_SAMPLE_RATE = 100_000_000  # 100 MHz
 
 
-def discover_saleae():  # -> Manager (type omitted to defer import)
+def discover_saleae() -> Manager:
     """Connect to Logic 2 automation server (localhost:10430).
 
     Returns a ``saleae.automation.Manager`` instance.
@@ -51,7 +55,7 @@ def discover_saleae():  # -> Manager (type omitted to defer import)
 
 def saleae_run(
     elf_path: Path,
-    manager: object,
+    manager: Manager,
     flash_timeout: int,
     after_trigger_seconds: float,
 ) -> float:

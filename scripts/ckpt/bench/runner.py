@@ -15,7 +15,10 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from saleae.automation import Manager
 
 from ..env import ProjectEnv
 from ..output_parser import (
@@ -164,7 +167,7 @@ def run_benchmark_matrix(
     csv_header: list[str],
     row_builder: RowBuilder,
     pre_benchmark: PreBenchmarkFn | None = None,
-    saleae_manager: object,
+    saleae_manager: Manager | None,
 ) -> None:
     """Run compile + Saleae timing + optional NVM-read across benchmark x capacitor matrix.
 
@@ -253,6 +256,7 @@ def run_benchmark_matrix(
                             from ..device.saleae import saleae_run
                             from ..device.flash import read_nvm
 
+                            assert saleae_manager is not None
                             execution_time_us = saleae_run(
                                 elf, saleae_manager,
                                 _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,

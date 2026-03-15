@@ -12,6 +12,10 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from saleae.automation import Manager
 
 from ..bench.config import (
     default_energy_config,
@@ -239,7 +243,7 @@ def _verify_one(
     energy_config: Path,
     cap_config: Path,
     cap_label: str,
-    saleae_manager: object,
+    saleae_manager: Manager,
     halt_mode: str,
     cpu_freq: int,
 ) -> _BenchResult:
