@@ -38,6 +38,8 @@ enum Opcode : unsigned {
     MOV16rm = 535, // Move 16-bit memory to register: mov.w $src, $rd
     MOV16rr = 538, // Move 16-bit register to register
     MOV8rr = 549,  // Move 8-bit register to register
+    POP16r = 552,  // Pop 16-bit register from stack: mov.w @SP+, $rd
+    PUSH16r = 555, // Push 16-bit register to stack: push.w $rs
 };
 
 // Sub-register index (from MSP430GenRegisterInfoEnums.inc)

@@ -36,8 +36,27 @@ bool RockClimbMachineInstrumenter::verifyConstants() const {
     checkOpcode(msp430::CALLi, "CALLi");
     checkOpcode(msp430::MOV16mr, "MOV16mr");
     checkOpcode(msp430::ADD16mi, "ADD16mi");
+    checkOpcode(msp430::PUSH16r, "PUSH16r");
+    checkOpcode(msp430::POP16r, "POP16r");
 
     return ok;
+}
+
+void RockClimbMachineInstrumenter::emitCounterIncrement(MachineBasicBlock &MBB,
+                                                        MachineBasicBlock::iterator InsertPt,
+                                                        const DebugLoc &DL,
+                                                        GlobalVariable *counterGV, int64_t amount) {
+    // Wrap ADD16mi with PUSH SR / POP SR to preserve status flags.
+    // ADD16mi clobbers SR (V, N, Z, C), which can break conditional branches
+    // that depend on flags set by earlier instructions.
+    BuildMI(MBB, InsertPt, DL, TII_->get(msp430::PUSH16r)).addReg(msp430::SR);
+
+    BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
+        .addReg(msp430::SR)          // base = SR (absolute addressing)
+        .addGlobalAddress(counterGV) // address of counter
+        .addImm(amount);
+
+    BuildMI(MBB, InsertPt, DL, TII_->get(msp430::POP16r)).addReg(msp430::SR, RegState::Define);
 }
 
 void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
@@ -68,19 +87,13 @@ void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
 
     // Debug counter: increment cnt_boundary by 1.
     if (addDebugMarkers_ && cntBoundaryGV_) {
-        BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
-            .addReg(msp430::SR)               // base = SR (absolute addressing)
-            .addGlobalAddress(cntBoundaryGV_) // address of cnt_boundary
-            .addImm(1);
+        emitCounterIncrement(MBB, InsertPt, DL, cntBoundaryGV_, 1);
     }
 
     // Debug counter: increment cnt_restore_reg by 14 (R4-R15 + PC + SP).
     // SR and CG (R2, R3) are not restored.
     if (addDebugMarkers_ && cntRestoreGV_) {
-        BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
-            .addReg(msp430::SR)              // base = SR (absolute addressing)
-            .addGlobalAddress(cntRestoreGV_) // address of cnt_restore_reg
-            .addImm(14);                     // 14 registers restored per recovery
+        emitCounterIncrement(MBB, InsertPt, DL, cntRestoreGV_, 14);
     }
 }
 
@@ -120,10 +133,7 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
 
     // Debug counter: increment cnt_save_reg by 1.
     if (addDebugMarkers_ && cntSaveGV_) {
-        BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
-            .addReg(msp430::SR)           // base = SR (absolute addressing)
-            .addGlobalAddress(cntSaveGV_) // address of cnt_save_reg
-            .addImm(1);                   // one register saved
+        emitCounterIncrement(*MBB, InsertPt, DL, cntSaveGV_, 1);
     }
 }
 
