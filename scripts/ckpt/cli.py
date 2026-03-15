@@ -677,6 +677,116 @@ def verify_rockclimb_cmd(
         raise SystemExit(1)
 
 
+@verify.command("milp")
+@click.argument("benchmarks", nargs=-1)
+@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Override default energy config.",
+)
+# bor is required: verify tests correctness under resets (intermittent computing).
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="bor",
+    help="Halt mode for linked binary (default: bor).",
+)
+@click.option(
+    "--estimator-mode",
+    type=click.Choice(["assembly", "ir"]),
+    default="assembly",
+    help="Energy estimator mode.",
+)
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
+@click.pass_context
+def verify_milp_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    cap: tuple[str, ...],
+    energy_config: str | None,
+    halt_mode: str,
+    estimator_mode: str,
+    cpu_freq: str,
+) -> None:
+    """Verify semantic correctness of MILP checkpoint insertion."""
+    from .verify.milp import verify_milp
+
+    success = verify_milp(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=list(benchmarks) if benchmarks else None,
+        caps=list(cap) if cap else None,
+        halt_mode=halt_mode,
+        energy_config=Path(energy_config) if energy_config else None,
+        estimator_mode=estimator_mode,
+        cpu_freq=int(cpu_freq) * 1_000_000,
+    )
+    if not success:
+        raise SystemExit(1)
+
+
+@verify.command("schematic")
+@click.argument("benchmarks", nargs=-1)
+@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Override default energy config.",
+)
+# bor is required: verify tests correctness under resets (intermittent computing).
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="bor",
+    help="Halt mode for linked binary (default: bor).",
+)
+@click.option(
+    "--estimator-mode",
+    type=click.Choice(["assembly", "ir"]),
+    default="assembly",
+    help="Energy estimator mode.",
+)
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
+@click.pass_context
+def verify_schematic_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    cap: tuple[str, ...],
+    energy_config: str | None,
+    halt_mode: str,
+    estimator_mode: str,
+    cpu_freq: str,
+) -> None:
+    """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
+    from .verify.schematic import verify_schematic
+
+    success = verify_schematic(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=list(benchmarks) if benchmarks else None,
+        caps=list(cap) if cap else None,
+        halt_mode=halt_mode,
+        energy_config=Path(energy_config) if energy_config else None,
+        estimator_mode=estimator_mode,
+        cpu_freq=int(cpu_freq) * 1_000_000,
+    )
+    if not success:
+        raise SystemExit(1)
+
+
 # =========================================================================
 # analyze group
 # =========================================================================
