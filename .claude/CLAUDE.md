@@ -119,7 +119,6 @@ ckpt analyze strip-mining LOG_FILE [-o CSV]
 ckpt analyze plot       CSV_DIR [--metric M] [--algorithms A...]
 
 # Device interaction
-ckpt device read-nvm   ELF SYMBOL...
 ckpt device read-serial [--timeout N] [--end-marker M]
 ```
 

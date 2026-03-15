@@ -659,25 +659,6 @@ def device() -> None:
     """Device interaction."""
 
 
-@device.command("read-nvm")
-@click.argument("elf", type=click.Path(exists=True))
-@click.argument("symbols", nargs=-1, required=True)
-@click.pass_context
-def device_read_nvm_cmd(
-    ctx: click.Context,
-    elf: str,
-    symbols: tuple[str, ...],
-) -> None:
-    """Read NVM symbol values from a flashed device."""
-    from .device.flash import flash_run_and_read
-
-    tc = ctx.obj["tc"]
-    elf_path = Path(elf)
-
-    values = flash_run_and_read(tc, elf_path, 30, list(symbols))
-
-    for sym, val in values.items():
-        click.echo(f"{sym}={val}")
 
 
 @device.command("read-serial")
