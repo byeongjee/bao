@@ -116,6 +116,7 @@ def _link_uninstrumented(
         runtime_source=env.uninstrumented_runtime,
         linker_script=env.milp_linker,
         boot_defines=boot_defines,
-        debug_counters=False,
+        debug_counters=opts.debug_counters,
+        debug_counters_source=env.uninstrumented_debug_counters,
         cpu_freq=opts.cpu_freq,
     )

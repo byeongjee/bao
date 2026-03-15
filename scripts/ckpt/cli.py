@@ -342,7 +342,8 @@ def compile_schematic_cmd(
 @compile.command("uninstrumented")
 @click.argument("input_c", type=click.Path(exists=True))
 @click.option("-o", "--output", type=click.Path())
-@click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
+@click.option("--link/--no-link", default=True, help="Link with boot.S and runtime (default: on).")
+@click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -364,6 +365,7 @@ def compile_uninstrumented_cmd(
     input_c: str,
     output: str | None,
     link: bool,
+    debug_counters: bool,
     halt_mode: str,
     opt_level: int,
     clang_opt_level: int,
@@ -384,7 +386,7 @@ def compile_uninstrumented_cmd(
             input_c=input_path,
             output=output_path,
             halt_mode=halt_mode,
-            debug_counters=False,
+            debug_counters=debug_counters,
             cpu_freq=cpu_freq_hz,
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
