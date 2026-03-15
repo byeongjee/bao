@@ -52,8 +52,8 @@ extern uint16_t __nvm_sp NVM_SECTION;
  * Saves return address (region body start) and SP to NVM. Halt behavior
  * depends on compile-time mode (set via --halt-mode in compile_rockclimb.sh):
  *   - nop (default): returns immediately (GDB-compatible, no halt)
- *   - bor  (ROCKCLIMB_HALT_BOR):  triggers software BOR reset (FRAM survives)
- *   - lpm4 (ROCKCLIMB_HALT_LPM4): enters LPM4 deep sleep (real deployment)
+ *   - bor  (HALT_BOR):  triggers software BOR reset (FRAM survives)
+ *   - lpm4 (HALT_LPM4): enters LPM4 deep sleep (real deployment)
  *
  * On reboot (BOR or LPM4), boot.S recovers from saved NVM state.
  *

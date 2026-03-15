@@ -418,6 +418,8 @@ def link_algorithm(
     This is the shared link step used by all three algorithm pipelines.
     When device_debug is True, the runtime is compiled with -DDEVICE_DEBUG
     which enables NVM result storage, debug counters, and UART output.
+    debug_common.c is also compiled and linked to provide shared UART
+    and debug infrastructure.
     """
     stem = output_elf.with_suffix("")
 
@@ -432,6 +434,14 @@ def link_algorithm(
     compile_runtime_c(tc, env, runtime_source, runtime_o, extra_defines=runtime_defines)
 
     link_objs = [main_object, boot_o, runtime_o]
+
+    if device_debug:
+        debug_common_o = stem.with_suffix(".debug_common.o")
+        compile_runtime_c(
+            tc, env, env.debug_common_c, debug_common_o,
+            extra_defines=runtime_defines,
+        )
+        link_objs.append(debug_common_o)
 
     assemble_and_link(tc, env, link_objs, output_elf, linker_script=linker_script)
     return output_elf

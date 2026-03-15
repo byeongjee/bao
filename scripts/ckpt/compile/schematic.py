@@ -311,8 +311,10 @@ def _link_schematic(
     boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
     if opts.device_debug:
         boot_defines.append("DEVICE_DEBUG")
-    if opts.halt_mode in ("bor", "lpm4"):
-        boot_defines.append("HALT_MODE")
+    if opts.halt_mode == "bor":
+        boot_defines.append("HALT_BOR")
+    elif opts.halt_mode == "lpm4":
+        boot_defines.append("HALT_LPM4")
 
     return link_algorithm(
         tc, env,

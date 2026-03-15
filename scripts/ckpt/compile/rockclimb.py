@@ -331,9 +331,9 @@ def _link_rockclimb(
 
     boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
     if opts.halt_mode == "bor":
-        boot_defines.append("ROCKCLIMB_HALT_BOR")
+        boot_defines.append("HALT_BOR")
     elif opts.halt_mode == "lpm4":
-        boot_defines.append("ROCKCLIMB_HALT_LPM4")
+        boot_defines.append("HALT_LPM4")
 
     return link_algorithm(
         tc, env,
