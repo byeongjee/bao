@@ -344,6 +344,5 @@ def _link_rockclimb(
         linker_script=opts.linker_script or env.rockclimb_linker,
         boot_defines=boot_defines,
         device_debug=opts.device_debug,
-        device_debug_source=env.rockclimb_device_debug,
         cpu_freq=opts.cpu_freq,
     )

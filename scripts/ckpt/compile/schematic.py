@@ -323,6 +323,5 @@ def _link_schematic(
         linker_script=opts.linker_script or env.schematic_linker,
         boot_defines=boot_defines,
         device_debug=opts.device_debug,
-        device_debug_source=env.schematic_device_debug,
         cpu_freq=opts.cpu_freq,
     )

@@ -45,15 +45,14 @@ extern uint16_t __nvm_pc NVM_SECTION;
 /* Saved stack pointer for recovery */
 extern uint16_t __nvm_sp NVM_SECTION;
 
-/* ============================================================================
- * NVM Debug Counters (incremented in assembly, guarded by DEBUG_COUNTERS)
- * ============================================================================ */
-
+#ifdef DEBUG_COUNTERS
+/* NVM Debug Counters (incremented in assembly) */
 extern uint16_t cnt_boundary NVM_SECTION;
 extern uint16_t cnt_save_reg NVM_SECTION;
 extern uint16_t cnt_restore_reg NVM_SECTION;
 extern uint16_t cnt_store_mem NVM_SECTION;
 extern uint16_t cnt_restore_mem NVM_SECTION;
+#endif
 
 /* ============================================================================
  * Runtime API

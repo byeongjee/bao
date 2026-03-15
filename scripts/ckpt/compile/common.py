@@ -412,29 +412,26 @@ def link_algorithm(
     cpu_freq: int,
     boot_defines: list[str] | None,
     device_debug: bool,
-    device_debug_source: Path | None,
 ) -> Path:
     """Assemble boot + runtime and link with the main object into an ELF.
 
     This is the shared link step used by all three algorithm pipelines.
+    When device_debug is True, the runtime is compiled with -DDEBUG_COUNTERS
+    which enables NVM result storage, debug counters, and UART output.
     """
     stem = output_elf.with_suffix("")
 
     boot_o = stem.with_suffix(".boot.o")
     assemble_boot(tc, env, boot_source, boot_o, extra_defines=boot_defines or [])
 
+    runtime_defines: list[str] = [f"F_CPU={cpu_freq}"]
+    if device_debug:
+        runtime_defines.append("DEBUG_COUNTERS")
+
     runtime_o = stem.with_suffix(".runtime.o")
-    compile_runtime_c(tc, env, runtime_source, runtime_o, extra_defines=[f"F_CPU={cpu_freq}"])
+    compile_runtime_c(tc, env, runtime_source, runtime_o, extra_defines=runtime_defines)
 
     link_objs = [main_object, boot_o, runtime_o]
-
-    if device_debug and device_debug_source is not None:
-        debug_o = stem.with_suffix(".device_debug.o")
-        compile_runtime_c(
-            tc, env, device_debug_source, debug_o,
-            extra_defines=["DEBUG_COUNTERS", f"F_CPU={cpu_freq}"],
-        )
-        link_objs.append(debug_o)
 
     assemble_and_link(tc, env, link_objs, output_elf, linker_script=linker_script)
     return output_elf
