@@ -45,6 +45,9 @@ class ProjectEnv:
     schematic_linker: Path = field(init=False)
     schematic_debug_counters: Path = field(init=False)
 
+    uninstrumented_boot: Path = field(init=False)
+    uninstrumented_runtime: Path = field(init=False)
+
     bb_freq_runtime: Path = field(init=False)
 
     sysroot_flags: list[str] = field(init=False)
@@ -76,6 +79,9 @@ class ProjectEnv:
         object.__setattr__(self, "schematic_boot", rt / "schematic_boot.S")
         object.__setattr__(self, "schematic_linker", rt / "rockclimb_msp430fr5994.ld")
         object.__setattr__(self, "schematic_debug_counters", rt / "schematic_debug_counters.c")
+
+        object.__setattr__(self, "uninstrumented_boot", rt / "uninstrumented_boot.S")
+        object.__setattr__(self, "uninstrumented_runtime", rt / "uninstrumented_runtime.c")
 
         object.__setattr__(self, "bb_freq_runtime", rt / "bb_freq_runtime.c")
 

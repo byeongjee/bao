@@ -339,6 +339,66 @@ def compile_schematic_cmd(
         logger.debug("Pass output:\n%s", result.pass_output)
 
 
+@compile.command("uninstrumented")
+@click.argument("input_c", type=click.Path(exists=True))
+@click.option("-o", "--output", type=click.Path())
+@click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
+@click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
+@click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
+@click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
+@click.pass_context
+def compile_uninstrumented_cmd(
+    ctx: click.Context,
+    input_c: str,
+    output: str | None,
+    link: bool,
+    halt_mode: str,
+    opt_level: int,
+    clang_opt_level: int,
+    extra_includes: tuple[str, ...],
+    cpu_freq: str,
+) -> None:
+    """Compile without checkpoint insertion (baseline)."""
+    from .compile.uninstrumented import UninstrumentedCompileOptions, compile_uninstrumented
+
+    input_path = Path(input_c)
+    output_path = Path(output) if output else Path("build") / input_path.stem
+    cpu_freq_hz = int(cpu_freq) * 1_000_000
+
+    result = compile_uninstrumented(
+        ctx.obj["tc"],
+        ctx.obj["env"],
+        UninstrumentedCompileOptions(
+            input_c=input_path,
+            output=output_path,
+            halt_mode=halt_mode,
+            debug_counters=False,
+            cpu_freq=cpu_freq_hz,
+            opt_level=opt_level,
+            clang_opt_level=clang_opt_level,
+            link=link,
+            extra_includes=list(extra_includes),
+        ),
+    )
+
+    logger.info("Object: %s", result.object_file)
+    logger.info("Assembly: %s", result.assembly_file)
+    if result.elf_file:
+        logger.info("ELF: %s", result.elf_file)
+
+
 # =========================================================================
 # bench group
 # =========================================================================
@@ -517,6 +577,42 @@ def bench_schematic_cmd(
         energy_config=Path(energy_config) if energy_config else None,
         trace_config=Path(trace_config) if trace_config else None,
         estimator_mode=estimator_mode,
+        cpu_freq=int(cpu_freq) * 1_000_000,
+    )
+
+
+@bench.command("uninstrumented")
+@click.argument("benchmarks", nargs=-1)
+@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
+@click.pass_context
+def bench_uninstrumented_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    output: str | None,
+    halt_mode: str,
+    cpu_freq: str,
+) -> None:
+    """Run uninstrumented baselines and measure execution time."""
+    from .bench.uninstrumented import run_uninstrumented_benchmarks
+
+    run_uninstrumented_benchmarks(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=list(benchmarks) if benchmarks else None,
+        halt_mode=halt_mode,
+        output_csv=Path(output) if output else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
     )
 
