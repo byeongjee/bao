@@ -16,6 +16,7 @@ from ..compile.uninstrumented import (
 )
 from ..env import ProjectEnv
 from ..errors import ConfigError, DeviceError
+from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import discover_benchmarks
 from .runner import check_device_available
@@ -65,7 +66,8 @@ def run_uninstrumented_benchmarks(
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_csv, "w", newline="") as csvfile:
+    with compilation_workdir(prefix="uninstrumented_bench_") as workdir, \
+         open(output_csv, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(_CSV_HEADER)
 
@@ -74,7 +76,7 @@ def run_uninstrumented_benchmarks(
             bench_name = bench_path.stem
             logger.info("[%d/%d] Running %s ...", i, total, bench_name)
 
-            out_dir = output_csv.parent / "uninstrumented_build" / bench_name
+            out_dir = workdir / bench_name
             out_dir.mkdir(parents=True, exist_ok=True)
 
             # Compile
