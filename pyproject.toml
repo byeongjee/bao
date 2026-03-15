@@ -37,3 +37,8 @@ markers = [
     "vm_nvm: VM/NVM placement tests",
     "unit: Pure-function unit tests (no subprocess, no device)",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.6",
+]
