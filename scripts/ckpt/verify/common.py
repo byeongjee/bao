@@ -159,7 +159,6 @@ def _compile_baseline(
         UninstrumentedCompileOptions(
             input_c=bench_path,
             output=output,
-            halt_mode="nop",
             debug_counters=True,
             cpu_freq=cpu_freq,
             opt_level=2,

@@ -344,12 +344,6 @@ def compile_schematic_cmd(
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link/--no-link", default=True, help="Link with boot.S and runtime (default: on).")
 @click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
-@click.option(
-    "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
-    default="nop",
-    help="Halt mode for linked binary.",
-)
 @click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
@@ -366,7 +360,6 @@ def compile_uninstrumented_cmd(
     output: str | None,
     link: bool,
     debug_counters: bool,
-    halt_mode: str,
     opt_level: int,
     clang_opt_level: int,
     extra_includes: tuple[str, ...],
@@ -385,7 +378,6 @@ def compile_uninstrumented_cmd(
         UninstrumentedCompileOptions(
             input_c=input_path,
             output=output_path,
-            halt_mode=halt_mode,
             debug_counters=debug_counters,
             cpu_freq=cpu_freq_hz,
             opt_level=opt_level,
@@ -587,12 +579,6 @@ def bench_schematic_cmd(
 @click.argument("benchmarks", nargs=-1)
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option(
-    "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
-    default="nop",
-    help="Halt mode for linked binary.",
-)
-@click.option(
     "--cpu-freq",
     type=click.Choice(["1", "8", "16"]),
     default="1",
@@ -603,7 +589,6 @@ def bench_uninstrumented_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     output: str | None,
-    halt_mode: str,
     cpu_freq: str,
 ) -> None:
     """Run uninstrumented baselines and measure execution time."""
@@ -613,7 +598,6 @@ def bench_uninstrumented_cmd(
         ctx.obj["env"],
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
-        halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
     )

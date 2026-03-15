@@ -25,7 +25,6 @@ class UninstrumentedCompileOptions:
 
     input_c: Path
     output: Path
-    halt_mode: str
     debug_counters: bool
     cpu_freq: int
     opt_level: int
@@ -56,8 +55,6 @@ def compile_uninstrumented(
     No checkpoint pass, no energy estimation, no profiling.
     """
     link = opts.link
-    if opts.halt_mode in ("bor", "lpm4"):
-        link = True
     if opts.debug_counters:
         link = True
 

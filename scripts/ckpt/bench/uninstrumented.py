@@ -39,7 +39,6 @@ def run_uninstrumented_benchmarks(
     *,
     benchmarks: list[str] | None,
     output_csv: Path | None,
-    halt_mode: str,
     cpu_freq: int,
 ) -> None:
     """Compile and measure uninstrumented baselines for all benchmarks.
@@ -86,7 +85,6 @@ def run_uninstrumented_benchmarks(
                     UninstrumentedCompileOptions(
                         input_c=bench_path,
                         output=out_dir / bench_name,
-                        halt_mode=halt_mode,
                         debug_counters=False,
                         cpu_freq=cpu_freq,
                         opt_level=2,
