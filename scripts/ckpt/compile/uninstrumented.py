@@ -25,7 +25,7 @@ class UninstrumentedCompileOptions:
 
     input_c: Path
     output: Path
-    debug_counters: bool
+    device_debug: bool
     cpu_freq: int
     opt_level: int
     clang_opt_level: int
@@ -55,7 +55,7 @@ def compile_uninstrumented(
     No checkpoint pass, no energy estimation, no profiling.
     """
     link = opts.link
-    if opts.debug_counters:
+    if opts.device_debug:
         link = True
 
     opts.output.parent.mkdir(parents=True, exist_ok=True)
@@ -69,7 +69,7 @@ def compile_uninstrumented(
         tc, env, opts.input_c, input_ll,
         clang_opt_level=0,
         debug=False,
-        debug_counters=opts.debug_counters,
+        device_debug=opts.device_debug,
         extra_includes=extra_includes,
         extra_defines=[f"F_CPU={opts.cpu_freq}"],
     )
@@ -113,7 +113,7 @@ def _link_uninstrumented(
         runtime_source=env.uninstrumented_runtime,
         linker_script=env.milp_linker,
         boot_defines=boot_defines,
-        debug_counters=opts.debug_counters,
-        debug_counters_source=env.uninstrumented_debug_counters,
+        device_debug=opts.device_debug,
+        device_debug_source=env.uninstrumented_debug_counters,
         cpu_freq=opts.cpu_freq,
     )

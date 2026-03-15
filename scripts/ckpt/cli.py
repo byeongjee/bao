@@ -102,7 +102,7 @@ def compile() -> None:
     help="Energy estimator mode.",
 )
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
-@click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
+@click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -128,7 +128,7 @@ def compile_milp_cmd(
     link: bool,
     estimator_mode: str,
     debug: bool,
-    debug_counters: bool,
+    device_debug: bool,
     halt_mode: str,
     opt_level: int,
     clang_opt_level: int,
@@ -157,7 +157,7 @@ def compile_milp_cmd(
             debug=debug,
             link=link,
             halt_mode=halt_mode,
-            debug_counters=debug_counters,
+            device_debug=device_debug,
             estimator_mode=estimator_mode,
             cpu_freq=cpu_freq_hz,
         ),
@@ -176,7 +176,7 @@ def compile_milp_cmd(
 @click.option("-c", "--rockclimb-config", required=True, type=click.Path(exists=True))
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
-@click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
+@click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -203,7 +203,7 @@ def compile_rockclimb_cmd(
     rockclimb_config: str,
     output: str | None,
     link: bool,
-    debug_counters: bool,
+    device_debug: bool,
     halt_mode: str,
     clang_opt_level: int,
     no_precomputed_energy: bool,
@@ -228,7 +228,7 @@ def compile_rockclimb_cmd(
             clang_opt_level=clang_opt_level,
             precomputed_energy=not no_precomputed_energy,
             link=link,
-            debug_counters=debug_counters,
+            device_debug=device_debug,
             halt_mode=halt_mode,
             cpu_freq=cpu_freq_hz,
         ),
@@ -247,7 +247,7 @@ def compile_rockclimb_cmd(
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
-@click.option("--debug-counters", is_flag=True, help="Enable debug counters.")
+@click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4"]),
@@ -282,7 +282,7 @@ def compile_schematic_cmd(
     output: str | None,
     link: bool,
     debug: bool,
-    debug_counters: bool,
+    device_debug: bool,
     halt_mode: str,
     trace_file: str | None,
     trace_only: bool,
@@ -317,7 +317,7 @@ def compile_schematic_cmd(
             debug=debug,
             trace_only=trace_only,
             link=link,
-            debug_counters=debug_counters,
+            device_debug=device_debug,
             halt_mode=halt_mode,
             cpu_freq=cpu_freq_hz,
             opt_level=opt_level,
@@ -343,7 +343,7 @@ def compile_schematic_cmd(
 @click.argument("input_c", type=click.Path(exists=True))
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link/--no-link", default=True, help="Link with boot.S and runtime (default: on).")
-@click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
+@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
 @click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
@@ -359,7 +359,7 @@ def compile_uninstrumented_cmd(
     input_c: str,
     output: str | None,
     link: bool,
-    debug_counters: bool,
+    device_debug: bool,
     opt_level: int,
     clang_opt_level: int,
     extra_includes: tuple[str, ...],
@@ -378,7 +378,7 @@ def compile_uninstrumented_cmd(
         UninstrumentedCompileOptions(
             input_c=input_path,
             output=output_path,
-            debug_counters=debug_counters,
+            device_debug=device_debug,
             cpu_freq=cpu_freq_hz,
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
@@ -405,7 +405,7 @@ def bench() -> None:
 @bench.command("milp")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
+@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
@@ -436,7 +436,7 @@ def bench_milp_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
-    debug_counters: bool,
+    device_debug: bool,
     output: str | None,
     halt_mode: str,
     estimator_mode: str,
@@ -451,7 +451,7 @@ def bench_milp_cmd(
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
-        debug_counters=debug_counters,
+        device_debug=device_debug,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         estimator_mode=estimator_mode,
@@ -463,7 +463,7 @@ def bench_milp_cmd(
 @bench.command("rockclimb")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
+@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
@@ -488,7 +488,7 @@ def bench_rockclimb_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
-    debug_counters: bool,
+    device_debug: bool,
     output: str | None,
     halt_mode: str,
     energy_config: str | None,
@@ -502,7 +502,7 @@ def bench_rockclimb_cmd(
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
-        debug_counters=debug_counters,
+        device_debug=device_debug,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         energy_config=Path(energy_config) if energy_config else None,
@@ -513,7 +513,7 @@ def bench_rockclimb_cmd(
 @bench.command("schematic")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--debug-counters/--no-debug-counters", default=True, help="Enable debug counters (default: on).")
+@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
@@ -549,7 +549,7 @@ def bench_schematic_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
-    debug_counters: bool,
+    device_debug: bool,
     output: str | None,
     halt_mode: str,
     energy_config: str | None,
@@ -565,7 +565,7 @@ def bench_schematic_cmd(
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
-        debug_counters=debug_counters,
+        device_debug=device_debug,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         energy_config=Path(energy_config) if energy_config else None,

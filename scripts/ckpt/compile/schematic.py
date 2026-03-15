@@ -39,7 +39,7 @@ class SchematicCompileOptions:
     debug: bool
     trace_only: bool
     link: bool
-    debug_counters: bool
+    device_debug: bool
     halt_mode: str
     cpu_freq: int
     opt_level: int = 2
@@ -87,7 +87,7 @@ def compile_schematic(
             tc, env, opts.input_c, input_ll,
             clang_opt_level=0,
             debug=opts.debug,
-            debug_counters=opts.debug_counters,
+            device_debug=opts.device_debug,
             extra_includes=extra_includes,
             extra_defines=[f"F_CPU={opts.cpu_freq}"],
         )
@@ -166,7 +166,7 @@ def compile_schematic(
             shutil.copy2(out_o, opts.output.with_suffix(".o"))
             shutil.copy2(out_s, opts.output.with_suffix(".s"))
 
-            if opts.link or opts.debug_counters:
+            if opts.link or opts.device_debug:
                 elf_file = _link_schematic(tc, env, opts)
         except CompilationError as exc:
             exc.pass_output = pass_output
@@ -289,7 +289,7 @@ def _run_schematic_pass(
         f"-schematic-trace={trace_json}",
         f"-ckpt-log-level={opts.pass_log_level}",
     ]
-    if opts.debug_counters:
+    if opts.device_debug:
         cmd.append("-add-debug-markers")
     cmd.append(f"-ckpt-stats-json={tmp / 'stats.json'}")
     cmd += ["-S", str(input_ll), "-o", str(tmp / "ckpt.ll")]
@@ -309,7 +309,7 @@ def _link_schematic(
 ) -> Path:
     """Assemble and link the SCHEMATIC output with boot.S + runtime.c."""
     boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
-    if opts.debug_counters:
+    if opts.device_debug:
         boot_defines.append("DEBUG_COUNTERS")
     if opts.halt_mode in ("bor", "lpm4"):
         boot_defines.append("HALT_MODE")
@@ -322,7 +322,7 @@ def _link_schematic(
         runtime_source=env.schematic_runtime,
         linker_script=opts.linker_script or env.schematic_linker,
         boot_defines=boot_defines,
-        debug_counters=opts.debug_counters,
-        debug_counters_source=env.schematic_debug_counters,
+        device_debug=opts.device_debug,
+        device_debug_source=env.schematic_debug_counters,
         cpu_freq=opts.cpu_freq,
     )

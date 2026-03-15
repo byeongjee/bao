@@ -154,7 +154,7 @@ def run_benchmark_matrix(
     output_csv: Path,
     *,
     nvm_symbols: list[str] | None = None,
-    debug_counters: bool,
+    device_debug: bool,
     csv_header: list[str],
     row_builder: RowBuilder,
     saleae_manager: Manager | None,
@@ -165,7 +165,7 @@ def run_benchmark_matrix(
 
     1. Call *compile_fn(benchmark, capacitor)* -> ``(output_dir, pass_output)``
     2. Flash ELF and measure execution time via Saleae GPIO capture
-    3. If *debug_counters*: read NVM counters from halted device
+    3. If *device_debug*: read NVM counters from halted device
     4. Parse stats, detect infeasibility
     5. Call *row_builder* to get CSV fields, inject ``execution_time_us``
     6. Write to CSV
@@ -237,7 +237,7 @@ def run_benchmark_matrix(
                                 _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
                             )
 
-                            if debug_counters and nvm_symbols:
+                            if device_debug and nvm_symbols:
                                 nvm_dict = read_nvm(
                                     tc, elf, _FLASH_TIMEOUT, nvm_symbols,
                                 )
@@ -313,7 +313,7 @@ def run_benchmark_matrix(
                 # Print detailed summary
                 print_benchmark_summary(
                     row.status, row_fields,
-                    debug_counters=debug_counters,
+                    device_debug=device_debug,
                 )
 
     # ----- Energy parameters summary -----
@@ -358,7 +358,7 @@ def print_benchmark_summary(
     status: str,
     fields: dict[str, str | int | None],
     *,
-    debug_counters: bool,
+    device_debug: bool,
 ) -> None:
     """Print a detailed multi-line summary for a benchmark run."""
     label = status.upper() if status != "ok" else "OK"
@@ -415,8 +415,8 @@ def print_benchmark_summary(
         ("paths analyzed", _fmt("paths_analyzed", fields)),
     ])
 
-    # Runtime (debug counters — show even when 0)
-    if debug_counters:
+    # Runtime (device debug — show even when 0)
+    if device_debug:
         runtime_items: list[tuple[str, str | None]] = []
         for key, name in [
             ("runtime_region_boundary_calls", "region boundaries"),

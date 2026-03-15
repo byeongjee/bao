@@ -32,7 +32,7 @@ class RockClimbCompileOptions:
     pass_log_level: str
     precomputed_energy: bool
     link: bool
-    debug_counters: bool
+    device_debug: bool
     halt_mode: str
     cpu_freq: int
     clang_opt_level: int = 2
@@ -69,7 +69,7 @@ def compile_rockclimb(
     link = opts.link
     if opts.halt_mode in ("bor", "lpm4"):
         link = True
-    if opts.debug_counters:
+    if opts.device_debug:
         link = True
 
     opts.output.parent.mkdir(parents=True, exist_ok=True)
@@ -80,14 +80,14 @@ def compile_rockclimb(
         # Step 1: C -> LLVM IR
         raw_ll = tmp / "raw.ll"
         clang_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
-        if opts.debug_counters:
+        if opts.device_debug:
             clang_defines.append("DEBUG_COUNTERS")
 
         compile_to_ir(
             tc, env, opts.input_c, raw_ll,
             clang_opt_level=opts.clang_opt_level,
             debug=False,
-            debug_counters=opts.debug_counters,
+            device_debug=opts.device_debug,
             extra_includes=[str(env.project_dir / "passes" / "runtime")],
             extra_defines=clang_defines,
         )
@@ -283,7 +283,7 @@ def _run_rockclimb_pass(
         str(mir_file),
         "-o", str(instrumented_mir),
     ]
-    if opts.debug_counters:
+    if opts.device_debug:
         cmd.insert(-2, "-add-debug-markers")
 
     # We always capture; the caller can choose whether to display.
@@ -343,7 +343,7 @@ def _link_rockclimb(
         runtime_source=env.rockclimb_runtime,
         linker_script=opts.linker_script or env.rockclimb_linker,
         boot_defines=boot_defines,
-        debug_counters=opts.debug_counters,
-        debug_counters_source=env.rockclimb_debug_counters,
+        device_debug=opts.device_debug,
+        device_debug_source=env.rockclimb_debug_counters,
         cpu_freq=opts.cpu_freq,
     )

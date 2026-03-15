@@ -28,7 +28,7 @@ def compile_to_ir(
     *,
     clang_opt_level: int = 2,
     debug: bool,
-    debug_counters: bool,
+    device_debug: bool,
     extra_includes: list[str] | None = None,
     extra_defines: list[str] | None = None,
 ) -> StepResult:
@@ -54,7 +54,7 @@ def compile_to_ir(
 
     if debug:
         cmd.append("-DDEBUG")
-    if debug_counters:
+    if device_debug:
         cmd.append("-DDEBUG_COUNTERS")
 
     cmd += [str(input_c), "-o", str(output_ll)]
@@ -411,8 +411,8 @@ def link_algorithm(
     linker_script: Path,
     cpu_freq: int,
     boot_defines: list[str] | None,
-    debug_counters: bool,
-    debug_counters_source: Path | None,
+    device_debug: bool,
+    device_debug_source: Path | None,
 ) -> Path:
     """Assemble boot + runtime and link with the main object into an ELF.
 
@@ -428,10 +428,10 @@ def link_algorithm(
 
     link_objs = [main_object, boot_o, runtime_o]
 
-    if debug_counters and debug_counters_source is not None:
-        debug_o = stem.with_suffix(".debug_counters.o")
+    if device_debug and device_debug_source is not None:
+        debug_o = stem.with_suffix(".device_debug.o")
         compile_runtime_c(
-            tc, env, debug_counters_source, debug_o,
+            tc, env, device_debug_source, debug_o,
             extra_defines=["DEBUG_COUNTERS", f"F_CPU={cpu_freq}"],
         )
         link_objs.append(debug_o)

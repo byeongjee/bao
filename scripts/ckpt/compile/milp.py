@@ -41,7 +41,7 @@ class MilpCompileOptions:
     debug: bool
     link: bool
     halt_mode: str
-    debug_counters: bool
+    device_debug: bool
     cpu_freq: int
     opt_level: int = 2
     clang_opt_level: int = 2
@@ -83,7 +83,7 @@ def compile_milp(
     link = opts.link
     if opts.halt_mode in ("bor", "lpm4"):
         link = True
-    if opts.debug_counters:
+    if opts.device_debug:
         link = True
 
     opts.output.parent.mkdir(parents=True, exist_ok=True)
@@ -98,7 +98,7 @@ def compile_milp(
             tc, env, opts.input_c, input_ll,
             clang_opt_level=0,
             debug=opts.debug,
-            debug_counters=opts.debug_counters,
+            device_debug=opts.device_debug,
             extra_includes=extra_includes,
             extra_defines=[f"F_CPU={opts.cpu_freq}"],
         )
@@ -116,7 +116,7 @@ def compile_milp(
 
         # Build extra flags for MILP passes
         milp_extra_flags: list[str] = []
-        if opts.debug_counters:
+        if opts.device_debug:
             milp_extra_flags.append("-add-debug-markers")
         milp_extra_flags.append(f"-ckpt-log-level={opts.pass_log_level}")
 
@@ -345,7 +345,7 @@ def _link_milp(
         boot_defines.append("MILP_HALT_BOR")
     elif opts.halt_mode == "lpm4":
         boot_defines.append("MILP_HALT_LPM4")
-    if opts.debug_counters:
+    if opts.device_debug:
         boot_defines.append("DEBUG_COUNTERS")
 
     return link_algorithm(
@@ -356,7 +356,7 @@ def _link_milp(
         runtime_source=env.milp_runtime,
         linker_script=env.milp_linker,
         boot_defines=boot_defines,
-        debug_counters=opts.debug_counters,
-        debug_counters_source=env.milp_debug_counters,
+        device_debug=opts.device_debug,
+        device_debug_source=env.milp_debug_counters,
         cpu_freq=opts.cpu_freq,
     )

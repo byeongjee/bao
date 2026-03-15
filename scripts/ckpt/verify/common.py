@@ -159,7 +159,7 @@ def _compile_baseline(
         UninstrumentedCompileOptions(
             input_c=bench_path,
             output=output,
-            debug_counters=True,
+            device_debug=True,
             cpu_freq=cpu_freq,
             opt_level=2,
             clang_opt_level=2,

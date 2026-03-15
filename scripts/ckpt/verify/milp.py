@@ -57,7 +57,7 @@ def verify_milp(
                 pass_log_level="info",
                 debug=False,
                 link=True,
-                debug_counters=True,
+                device_debug=True,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
             ),

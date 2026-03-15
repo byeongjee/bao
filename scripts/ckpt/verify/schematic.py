@@ -58,7 +58,7 @@ def verify_schematic(
                 debug=False,
                 trace_only=False,
                 link=True,
-                debug_counters=True,
+                device_debug=True,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
             ),

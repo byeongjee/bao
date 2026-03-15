@@ -85,7 +85,7 @@ def run_uninstrumented_benchmarks(
                     UninstrumentedCompileOptions(
                         input_c=bench_path,
                         output=out_dir / bench_name,
-                        debug_counters=False,
+                        device_debug=False,
                         cpu_freq=cpu_freq,
                         opt_level=2,
                         clang_opt_level=2,

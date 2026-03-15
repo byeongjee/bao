@@ -101,7 +101,7 @@ def run_milp_benchmarks(
     benchmarks: list[str] | None = None,
     caps: list[str] | None = None,
     output_csv: Path | None = None,
-    debug_counters: bool,
+    device_debug: bool,
     halt_mode: str,
     estimator_mode: str,
     energy_config: Path | None = None,
@@ -122,7 +122,7 @@ def run_milp_benchmarks(
     output_csv:
         Where to write the CSV summary.  Defaults to
         ``benchmarks/milp_benchmark_summary.csv``.
-    debug_counters:
+    device_debug:
         Link the debug-counter runtime and attempt NVM readback.
     estimator_mode:
         ``"assembly"`` (default) or ``"ir"``.
@@ -172,7 +172,7 @@ def run_milp_benchmarks(
                 debug=False,
                 link=True,
                 halt_mode=halt_mode,
-                debug_counters=debug_counters,
+                device_debug=device_debug,
                 cpu_freq=cpu_freq,
             )
 
@@ -187,7 +187,7 @@ def run_milp_benchmarks(
             compile_fn,
             output_csv,
             nvm_symbols=_NVM_SYMBOLS,
-            debug_counters=debug_counters,
+            device_debug=device_debug,
             csv_header=_CSV_HEADER,
             row_builder=_build_row,
             saleae_manager=saleae_manager,

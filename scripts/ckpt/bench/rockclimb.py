@@ -83,7 +83,7 @@ def run_rockclimb_benchmarks(
     benchmarks: list[str] | None = None,
     caps: list[str] | None = None,
     output_csv: Path | None = None,
-    debug_counters: bool,
+    device_debug: bool,
     halt_mode: str,
     energy_config: Path | None = None,
     cpu_freq: int,
@@ -103,7 +103,7 @@ def run_rockclimb_benchmarks(
     output_csv:
         Where to write the CSV summary.  Defaults to
         ``benchmarks/rockclimb_benchmark_summary.csv``.
-    debug_counters:
+    device_debug:
         Link the debug-counter runtime and attempt NVM readback.
     """
     bench_paths = discover_benchmarks(env, benchmarks)
@@ -142,7 +142,7 @@ def run_rockclimb_benchmarks(
                 pass_log_level="info",
                 precomputed_energy=True,
                 link=True,
-                debug_counters=debug_counters,
+                device_debug=device_debug,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
             )
@@ -158,7 +158,7 @@ def run_rockclimb_benchmarks(
             compile_fn,
             output_csv,
             nvm_symbols=_NVM_SYMBOLS,
-            debug_counters=debug_counters,
+            device_debug=device_debug,
             csv_header=_CSV_HEADER,
             row_builder=_build_row,
             saleae_manager=saleae_manager,

@@ -53,7 +53,7 @@ def verify_rockclimb(
                 pass_log_level="info",
                 precomputed_energy=True,
                 link=True,
-                debug_counters=True,
+                device_debug=True,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
             ),

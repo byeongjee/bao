@@ -113,7 +113,7 @@ def _collect_trace(
         debug=False,
         trace_only=True,
         link=False,
-        debug_counters=False,
+        device_debug=False,
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         clang_opt_level=0,
@@ -182,7 +182,7 @@ def run_schematic_benchmarks(
     benchmarks: list[str] | None = None,
     caps: list[str] | None = None,
     output_csv: Path | None = None,
-    debug_counters: bool,
+    device_debug: bool,
     halt_mode: str,
     energy_config: Path | None = None,
     trace_config: Path | None = None,
@@ -207,7 +207,7 @@ def run_schematic_benchmarks(
     output_csv:
         Where to write the CSV summary.  Defaults to
         ``benchmarks/schematic_benchmark_summary.csv``.
-    debug_counters:
+    device_debug:
         Link the debug-counter runtime and attempt NVM readback.
     halt_mode:
         Halt mode at region boundaries (nop/bor/lpm4).
@@ -271,7 +271,7 @@ def run_schematic_benchmarks(
                 debug=False,
                 trace_only=False,
                 link=True,
-                debug_counters=debug_counters,
+                device_debug=device_debug,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
                 clang_opt_level=0,
@@ -304,7 +304,7 @@ def run_schematic_benchmarks(
             compile_fn,
             output_csv,
             nvm_symbols=_NVM_SYMBOLS,
-            debug_counters=debug_counters,
+            device_debug=device_debug,
             csv_header=_CSV_HEADER,
             row_builder=row_builder,
             saleae_manager=saleae_manager,
