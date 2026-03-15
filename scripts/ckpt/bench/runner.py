@@ -112,8 +112,6 @@ RowBuilder = Callable[
 #   (bench_path, capacitor) -> (output_dir, compile_output_text)
 CompileFn = Callable[[Path, CapacitorConfig], tuple[Path, str, Path | None]]
 
-# Type alias for the optional per-benchmark pre-hook (e.g. trace collection).
-PreBenchmarkFn = Callable[[Path], None]
 
 
 _ENERGY_PARAMS_RE = re.compile(
@@ -147,13 +145,6 @@ def extract_energy_params(text: str) -> tuple[list[str], list[str]] | None:
     return sorted(required), sorted(missing)
 
 
-class BenchmarkSkipped(Exception):
-    """Raised by pre_benchmark to skip all capacitors for a benchmark."""
-
-    def __init__(self, status: str):
-        self.status = status
-
-
 def run_benchmark_matrix(
     env: ProjectEnv,
     tc: Toolchain,
@@ -166,7 +157,6 @@ def run_benchmark_matrix(
     debug_counters: bool,
     csv_header: list[str],
     row_builder: RowBuilder,
-    pre_benchmark: PreBenchmarkFn | None = None,
     saleae_manager: Manager | None,
 ) -> None:
     """Run compile + Saleae timing + optional NVM-read across benchmark x capacitor matrix.
@@ -196,21 +186,6 @@ def run_benchmark_matrix(
 
         for bench_path in benchmarks:
             bench_name = bench_path.stem
-
-            # Per-benchmark setup (e.g. trace collection for SCHEMATIC)
-            if pre_benchmark is not None:
-                try:
-                    pre_benchmark(bench_path)
-                except BenchmarkSkipped as exc:
-                    for cap in capacitors:
-                        count += 1
-                        row = BenchmarkRow(
-                            benchmark=f"{bench_name}-{cap.label}",
-                            capacitor=cap.label,
-                            status=exc.status,
-                        )
-                        write_csv_row(writer, row, csv_header)
-                    continue
 
             for cap in capacitors:
                 count += 1

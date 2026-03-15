@@ -2,9 +2,6 @@
 
 All package-specific errors inherit from :class:`CkptError` so that
 ``cli.py`` can catch them in a single handler and map to exit codes.
-
-:class:`BenchmarkSkipped` is **not** under ``CkptError`` -- it is flow
-control used by the benchmark matrix loop, not a true error.
 """
 
 from __future__ import annotations
@@ -71,12 +68,3 @@ class InfeasibleError(CkptError):
         super().__init__(f"Infeasible: {reason}")
 
 
-class BenchmarkSkipped(Exception):
-    """Raised by pre_benchmark to skip all capacitors for a benchmark.
-
-    NOT under CkptError -- this is flow control, not an error.
-    """
-
-    def __init__(self, status: str) -> None:
-        self.status = status
-        super().__init__(status)

@@ -37,7 +37,6 @@ from .config import (
     discover_capacitors,
 )
 from .runner import (
-    BenchmarkSkipped,
     build_base_fields,
     check_device_available,
     nvm_counter,
@@ -80,6 +79,72 @@ _NVM_SYMBOLS: list[str] = [
     "cnt_store_mem",
     "cnt_restore_mem",
 ]
+
+
+def _collect_trace(
+    tc: Toolchain,
+    env: ProjectEnv,
+    bench_path: Path,
+    workdir: Path,
+    *,
+    energy_config: Path,
+    trace_config: Path,
+    estimator_mode: str,
+    halt_mode: str,
+    cpu_freq: int,
+) -> tuple[Path, int]:
+    """Collect a SCHEMATIC execution trace for one benchmark.
+
+    Returns (trace_json_path, profiling_time_ms).
+    Raises CompilationError if trace collection fails.
+    """
+    bench_name = bench_path.stem
+
+    logger.info("")
+    logger.info("--- Collecting trace for %s ---", bench_name)
+
+    trace_opts = SchematicCompileOptions(
+        input_c=bench_path,
+        energy_config=energy_config,
+        schematic_config=trace_config,
+        output=workdir / bench_name,
+        estimator_mode=estimator_mode,
+        pass_log_level="info",
+        debug=False,
+        trace_only=True,
+        link=False,
+        debug_counters=False,
+        halt_mode=halt_mode,
+        cpu_freq=cpu_freq,
+        clang_opt_level=0,
+        extra_includes=[str(env.project_dir / "passes" / "runtime")],
+    )
+    trace_result: SchematicCompileResult = compile_schematic(tc, env, trace_opts)
+
+    logger.debug("Trace output:\n%s", trace_result.pass_output)
+
+    profiling_time_ms = 0
+    raw_prof = extract_stat(trace_result.pass_output, "Profiling time (ms)")
+    if raw_prof is not None:
+        try:
+            profiling_time_ms = int(raw_prof)
+        except ValueError:
+            pass
+
+    trace_json = trace_result.trace_file
+    if trace_json is None or not trace_json.is_file():
+        raise CompilationError(
+            "trace-collect",
+            StepResult(
+                returncode=0,
+                stdout="",
+                stderr=f"Trace file not produced for {bench_name}",
+                duration_ms=0,
+            ),
+        )
+
+    logger.info("  Trace collected for %s (profiling: %dms)", bench_name, profiling_time_ms)
+    return trace_json, profiling_time_ms
 
 
 def _build_row(
@@ -170,77 +235,29 @@ def run_schematic_benchmarks(
 
     saleae_manager = discover_saleae()
 
-    # State shared between pre_benchmark and compile_fn/row_builder
-    profiling_time_ms = 0
-    trace_json: Path | None = None
+    # Trace cache: collect once per benchmark, reuse for all capacitors.
+    trace_cache: dict[str, tuple[Path, int]] = {}  # bench_name -> (trace_path, profiling_ms)
+
     with compilation_workdir(prefix="schematic_bench_") as workdir:
-
-        def pre_benchmark(bench_path: Path) -> None:
-            nonlocal profiling_time_ms, trace_json
-            bench_name = bench_path.stem
-
-            logger.info("")
-            logger.info("--- Collecting trace for %s ---", bench_name)
-
-            profiling_time_ms = 0
-            trace_json = workdir / f"{bench_name}_trace.json"
-
-            try:
-                trace_opts = SchematicCompileOptions(
-                    input_c=bench_path,
-                    energy_config=energy_config,
-                    schematic_config=trace_config,
-                    output=workdir / bench_name,
-                    estimator_mode=estimator_mode,
-                    pass_log_level="info",
-                    debug=False,
-                    trace_only=True,
-                    link=False,
-                    debug_counters=False,
-                    halt_mode=halt_mode,
-                    cpu_freq=cpu_freq,
-                    clang_opt_level=0,
-                    extra_includes=[str(env.project_dir / "passes" / "runtime")],
-                )
-                trace_result: SchematicCompileResult = compile_schematic(
-                    tc, env, trace_opts
-                )
-
-                logger.debug("Trace output:\n%s", trace_result.pass_output)
-
-                # Extract profiling time from trace output
-                raw_prof = extract_stat(trace_result.pass_output, "Profiling time (ms)")
-                if raw_prof is not None:
-                    try:
-                        profiling_time_ms = int(raw_prof)
-                    except ValueError:
-                        pass
-
-                if not trace_json.is_file():
-                    raise CompilationError(
-                        "trace-collect",
-                        StepResult(
-                            returncode=0,
-                            stdout="",
-                            stderr=f"Trace file not produced: {trace_json}",
-                            duration_ms=0,
-                        ),
-                    )
-
-                logger.info("  Trace collected for %s (profiling: %dms)", bench_name, profiling_time_ms)
-
-            except (CompilationError, OSError) as exc:
-                logger.error("  FAILED: trace collection for %s", bench_name)
-                if isinstance(exc, CompilationError) and exc.result:
-                    logger.debug("%s", exc.result.output[-500:])
-                else:
-                    logger.debug("%s", exc)
-                raise BenchmarkSkipped("TRACE_FAILED") from exc
 
         def compile_fn(
             bench_path: Path, cap: CapacitorConfig
         ) -> tuple[Path, str, Path | None]:
             bench_name = bench_path.stem
+
+            # Collect trace on first capacitor for this benchmark
+            if bench_name not in trace_cache:
+                trace_cache[bench_name] = _collect_trace(
+                    tc, env, bench_path, workdir,
+                    energy_config=energy_config,
+                    trace_config=trace_config,
+                    estimator_mode=estimator_mode,
+                    halt_mode=halt_mode,
+                    cpu_freq=cpu_freq,
+                )
+
+            trace_json, _ = trace_cache[bench_name]
+
             out_dir = workdir / f"{bench_name}_{cap.label}"
             out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -273,9 +290,10 @@ def run_schematic_benchmarks(
             nvm: NvmCounters | None,
             full_output: str,
         ) -> dict[str, str | int | None]:
+            _, profiling_ms = trace_cache.get(bench_name, (None, 0))
             return _build_row(
                 bench_name, cap_label, stats, nvm, full_output,
-                profiling_time_ms=profiling_time_ms,
+                profiling_time_ms=profiling_ms,
             )
 
         run_benchmark_matrix(
@@ -289,6 +307,5 @@ def run_schematic_benchmarks(
             debug_counters=debug_counters,
             csv_header=_CSV_HEADER,
             row_builder=row_builder,
-            pre_benchmark=pre_benchmark,
             saleae_manager=saleae_manager,
         )
