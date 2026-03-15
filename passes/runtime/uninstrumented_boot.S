@@ -1,8 +1,10 @@
 /*
  * Uninstrumented Boot Routine for MSP430
  *
- * Minimal boot: disable WDT, unlock GPIO, configure clock.
- * No checkpoint recovery logic — this is the uninstrumented baseline.
+ * Minimal boot: only disables WDT. GPIO unlock and clock configuration
+ * are deferred to timing_gpio_init() in benchmark.h so that P3.4 is
+ * driven low immediately after unlock (no floating window that would
+ * create a spurious pulse on the Saleae capture).
  *
  * Placed in .crt_0010 (before data/BSS init) to match the boot timing
  * of instrumented variants.
@@ -18,22 +20,9 @@ _uninstrumented_boot:
     /* Disable watchdog timer (WDTCTL = WDTPW | WDTHOLD) */
     mov.w   #0x5A80, &0x015C
 
-    /* Unlock GPIO pins — LPM5 locks all I/O after every reset on FR5xx/6xx */
-    bic.w   #0x0001, &0x0130
-
-    /* Configure FRAM wait states + DCO */
-#if F_CPU > 8000000
-    mov.w   #0xA510, &0x0140    /* FRCTL0: 1 FRAM wait state (required >8 MHz) */
-#endif
-#if F_CPU == 16000000
-    mov.b   #0xA5, &0x0161      /* CSCTL0_H = CSKEY_H */
-    mov.w   #0x0048, &0x0162    /* CSCTL1 = DCORSEL | DCOFSEL_4 = 16 MHz */
-    mov.b   #0x00, &0x0161      /* CSCTL0_H = 0 (lock) */
-#elif F_CPU == 8000000
-    mov.b   #0xA5, &0x0161
-    mov.w   #0x0006, &0x0162    /* CSCTL1 = DCOFSEL_6 = 8 MHz */
-    mov.b   #0x00, &0x0161
-#endif
+    /* GPIO unlock and clock config are handled by timing_gpio_init()
+       in BENCH_INIT(). Doing them here would leave P3.4 floating
+       between boot and timing_gpio_init, causing a spurious pulse. */
 
     /* Fall through to next CRT section */
 
