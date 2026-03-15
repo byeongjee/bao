@@ -118,18 +118,6 @@ static void uart_put_u16(uint16_t val) {
 }
 
 /* ============================================================================
- * Breakpoint target for host-side NVM readback.
- *
- * Called after NVM values are written. The host sets a hardware breakpoint
- * at this function's address so that mspdebug "run" returns, allowing
- * subsequent "md" commands to read NVM in the same session.
- * ============================================================================ */
-
-__attribute__((noinline, used)) void __nvm_breakpoint(void) {
-    __asm__ volatile("" ::: "memory");
-}
-
-/* ============================================================================
  * Debug API (called explicitly from benchmarks via BENCH_INIT/BENCH_EXIT)
  * ============================================================================ */
 
@@ -152,7 +140,6 @@ void debug_exit(int result) {
     /* Store result in NVM for host-side reading via mspdebug md */
     __nvm_result = (uint16_t)result;
     __nvm_done = 1;
-    __nvm_breakpoint(); /* Host sets HW breakpoint here to stop "run" */
 
     /* UART output kept for manual debugging */
     uart_init(); /* Re-init UART — may be uninitialized after BOR/LPM4 recovery */

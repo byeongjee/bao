@@ -183,8 +183,8 @@ RockClimbMachinePass::RockClimbMachinePass() : MachineFunctionPass(ID) {}
 static bool isRuntimeFunction(StringRef name) {
     static const char *const skip[] = {
         "timing_gpio_init", "timing_gpio_start", "timing_gpio_stop", "_timing_delay_cycles",
-        "debug_init",       "debug_exit",        "__nvm_breakpoint", "uart_init",
-        "uart_putc",        "uart_puts",         "uart_put_u16",
+        "debug_init",       "debug_exit",        "uart_init",        "uart_putc",
+        "uart_puts",        "uart_put_u16",
     };
     for (const char *s : skip)
         if (name == s)
