@@ -114,6 +114,6 @@ def _link_uninstrumented(
         linker_script=env.milp_linker,
         boot_defines=boot_defines,
         device_debug=opts.device_debug,
-        device_debug_source=env.uninstrumented_debug_counters,
+        device_debug_source=env.uninstrumented_device_debug,
         cpu_freq=opts.cpu_freq,
     )

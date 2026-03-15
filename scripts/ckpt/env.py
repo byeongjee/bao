@@ -30,12 +30,12 @@ class ProjectEnv:
     milp_boot: Path = field(init=False)
     milp_mock_ckpt_counter: Path = field(init=False)
     milp_linker: Path = field(init=False)
-    milp_debug_counters: Path = field(init=False)
+    milp_device_debug: Path = field(init=False)
 
     rockclimb_mock_ckpt_counter: Path = field(init=False)
     rockclimb_boot: Path = field(init=False)
     rockclimb_runtime: Path = field(init=False)
-    rockclimb_debug_counters: Path = field(init=False)
+    rockclimb_device_debug: Path = field(init=False)
     rockclimb_linker: Path = field(init=False)
 
     schematic_trace_runtime: Path = field(init=False)
@@ -43,11 +43,11 @@ class ProjectEnv:
     schematic_runtime: Path = field(init=False)
     schematic_boot: Path = field(init=False)
     schematic_linker: Path = field(init=False)
-    schematic_debug_counters: Path = field(init=False)
+    schematic_device_debug: Path = field(init=False)
 
     uninstrumented_boot: Path = field(init=False)
     uninstrumented_runtime: Path = field(init=False)
-    uninstrumented_debug_counters: Path = field(init=False)
+    uninstrumented_device_debug: Path = field(init=False)
 
     bb_freq_runtime: Path = field(init=False)
 
@@ -66,12 +66,12 @@ class ProjectEnv:
         object.__setattr__(self, "milp_boot", rt / "milp_boot.S")
         object.__setattr__(self, "milp_mock_ckpt_counter", rt / "milp_mock_ckpt_counter.c")
         object.__setattr__(self, "milp_linker", rt / "milp_msp430fr5994.ld")
-        object.__setattr__(self, "milp_debug_counters", rt / "milp_debug_counters.c")
+        object.__setattr__(self, "milp_device_debug", rt / "milp_device_debug.c")
 
         object.__setattr__(self, "rockclimb_mock_ckpt_counter", rt / "rockclimb_mock_ckpt_counter.c")
         object.__setattr__(self, "rockclimb_boot", rt / "rockclimb_boot.S")
         object.__setattr__(self, "rockclimb_runtime", rt / "rockclimb_runtime.c")
-        object.__setattr__(self, "rockclimb_debug_counters", rt / "rockclimb_debug_counters.c")
+        object.__setattr__(self, "rockclimb_device_debug", rt / "rockclimb_device_debug.c")
         object.__setattr__(self, "rockclimb_linker", rt / "rockclimb_msp430fr5994.ld")
 
         object.__setattr__(self, "schematic_trace_runtime", rt / "schematic_trace_runtime.c")
@@ -79,11 +79,11 @@ class ProjectEnv:
         object.__setattr__(self, "schematic_runtime", rt / "schematic_runtime.c")
         object.__setattr__(self, "schematic_boot", rt / "schematic_boot.S")
         object.__setattr__(self, "schematic_linker", rt / "rockclimb_msp430fr5994.ld")
-        object.__setattr__(self, "schematic_debug_counters", rt / "schematic_debug_counters.c")
+        object.__setattr__(self, "schematic_device_debug", rt / "schematic_device_debug.c")
 
         object.__setattr__(self, "uninstrumented_boot", rt / "uninstrumented_boot.S")
         object.__setattr__(self, "uninstrumented_runtime", rt / "uninstrumented_runtime.c")
-        object.__setattr__(self, "uninstrumented_debug_counters", rt / "uninstrumented_debug_counters.c")
+        object.__setattr__(self, "uninstrumented_device_debug", rt / "uninstrumented_device_debug.c")
 
         object.__setattr__(self, "bb_freq_runtime", rt / "bb_freq_runtime.c")
 
