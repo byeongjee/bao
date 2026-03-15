@@ -141,7 +141,7 @@ scripts/ckpt/
 ├── device/
 │   ├── nvm.py           # Symbol resolution, hex dump parsing
 │   ├── serial.py        # UART reading
-│   ├── flash.py         # flash_run_and_read(), flash(), read_nvm()
+│   ├── flash.py         # flash(), read_nvm()
 │   └── saleae.py        # Saleae Logic 2 automation for execution timing
 ├── bench/
 │   ├── config.py        # Benchmark/capacitor discovery and filtering
