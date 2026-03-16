@@ -95,6 +95,9 @@ void debug_init(void) {
     while (__nvm_done == 1) {
         __bis_SR_register(LPM4_bits);
     }
+    /* Configure DCO first so SMCLK is at F_CPU before UART baud rate setup.
+     * timing_gpio_init() sets DCO to F_CPU and configures the GPIO pin. */
+    timing_gpio_init();
     uart_init();
     uart_puts("BOOT\r\n");
 }
