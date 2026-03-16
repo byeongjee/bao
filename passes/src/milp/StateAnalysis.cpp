@@ -215,13 +215,10 @@ void StateAnalysis::identifyIneligibleSSAValues() {
 
     for (llvm::BasicBlock &BB : F_) {
         for (llvm::Instruction &I : BB) {
-            // Skip void, alloca (already handled), and PHI nodes at this stage
-            // (PHIs are handled via liveness).
+            // Skip void and alloca (already handled).
             if (I.getType()->isVoidTy())
                 continue;
             if (llvm::isa<llvm::AllocaInst>(&I))
-                continue;
-            if (llvm::isa<llvm::PHINode>(&I))
                 continue;
 
             // Unsized types (void, label, token, metadata) cannot be stored to

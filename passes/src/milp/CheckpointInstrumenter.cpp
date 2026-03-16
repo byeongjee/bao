@@ -377,16 +377,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 inserted++;
             }
 
-            // Step 4b: Non-PHI restores — defer to SSAUpdater.
-            // V is defined elsewhere and may have uses in blocks not dominated
-            // by BB. SSAUpdater correctly resolves which def reaches each use.
-            for (auto &rec : nonPhiCommits) {
-                llvm::Value *restoreVal = builder.CreateLoad(rec.origVal->getType(), rec.nvmBackup);
-                ssaRestoreDefs[rec.origVal].emplace_back(&BB, restoreVal);
-                if (addDebugMarkers_)
-                    emitCounterIncrement(builder, cntRestoreVregGV_);
-                inserted++;
-            }
+            // Non-PHI commits: no restore here.  The commit store writes the
+            // value to NVM; the ineligible restore path (below) handles
+            // restoration for values that are actually live-in at the
+            // boundary, using the same NVM slots via nvmBackupMap_.
         }
         // Entry node: no boundary call at program start.
 
@@ -419,14 +413,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             if (backupIt == nvmBackupMap_.end())
                 continue;
 
-            bool isLiveIn = false;
-            for (NodeId node : nodes) {
-                if (stateView.getIneligLiveIn(node).count(V)) {
-                    isLiveIn = true;
-                    break;
-                }
-            }
-            if (!isLiveIn)
+            if (!state.getIneligLiveIn(&BB).count(V))
                 continue;
 
             if (llvm::isa<llvm::AllocaInst>(V)) {

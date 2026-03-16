@@ -602,7 +602,16 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
                 agg.ineligDefVars.insert(V);
             }
             if (hasLiveIn) {
-                agg.ineligLiveIn.insert(V);
+                // SSA values have a single definition.  If that def is inside
+                // the loop, the value is loop-internal: used across blocks
+                // within the loop but not entering from outside.  Exclude it
+                // from the summary's live-in so the instrumenter doesn't emit
+                // a spurious restore that overwrites the fresh computation.
+                // Allocas/globals use read-before-store liveness, where live-in
+                // at one block and def at another are independent — keep those.
+                bool isSSA = !llvm::isa<llvm::AllocaInst>(V) && !llvm::isa<llvm::GlobalVariable>(V);
+                if (!isSSA || !hasDef)
+                    agg.ineligLiveIn.insert(V);
             }
         };
 
