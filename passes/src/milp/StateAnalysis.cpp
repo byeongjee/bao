@@ -237,7 +237,7 @@ void StateAnalysis::identifyIneligibleSSAValues() {
             bool hasCrossBlockUse = false;
             for (const llvm::User *U : I.users()) {
                 if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
-                    if (UI->getParent() != &BB) {
+                    if (llvm::isa<llvm::PHINode>(UI) || UI->getParent() != &BB) {
                         hasCrossBlockUse = true;
                         break;
                     }
