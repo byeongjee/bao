@@ -263,6 +263,18 @@ SECTIONS
     PROVIDE (__persistent_end = .);
   } > FRAM
 
+  /* MILP candidate globals section.
+     Globals identified as checkpoint candidates are placed in .fram so they
+     reside directly in FRAM (VMA = LMA, no boot-time copy needed).
+     This must appear before .data so the linker does not create an orphan
+     section that lands in RAM without initialisation. */
+  .fram :
+  {
+    . = ALIGN(2);
+    *(.fram)
+    . = ALIGN(2);
+  } > FRAM
+
   /* MILP runtime NVM storage section.
      This section holds checkpoint data that must survive power failures.
      It is explicitly placed in a dedicated NVM region at the start of FRAM
