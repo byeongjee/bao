@@ -89,10 +89,53 @@ def compile() -> None:
     """Compilation pipelines."""
 
 
+def _resolve_input(env, input_c: str) -> Path:
+    """Resolve INPUT_C as a path or benchmark name."""
+    from .bench.config import discover_benchmarks
+
+    p = Path(input_c)
+    if p.is_file():
+        return p
+
+    # Try as benchmark name
+    matches = discover_benchmarks(env, [input_c])
+    if matches:
+        return matches[0]
+
+    raise click.UsageError(
+        f"'{input_c}' is not a file and not found in benchmarks/intermittent/."
+    )
+
+
+def _resolve_algorithm_config(
+    env,
+    algorithm: str,
+    explicit_config: str | None,
+    cap: str | None,
+    option_name: str,
+) -> Path:
+    """Resolve an algorithm config from explicit path or --cap."""
+    from .bench.config import discover_capacitors
+
+    if explicit_config is not None:
+        return Path(explicit_config)
+
+    if cap is not None:
+        caps = discover_capacitors(env, algorithm, [cap])
+        return caps[0].config_path
+
+    raise click.UsageError(
+        f"Provide {option_name} or --cap."
+    )
+
+
 @compile.command("milp")
-@click.argument("input_c", type=click.Path(exists=True))
-@click.option("-e", "--energy-config", required=True, type=click.Path(exists=True))
-@click.option("-m", "--milp-config", required=True, type=click.Path(exists=True))
+@click.argument("input_c")
+@click.option("-e", "--energy-config", type=click.Path(exists=True),
+              help="Energy config (default: auto-detected by estimator mode).")
+@click.option("-m", "--milp-config", type=click.Path(exists=True),
+              help="MILP config (alternative to --cap).")
+@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option(
@@ -122,8 +165,9 @@ def compile() -> None:
 def compile_milp_cmd(
     ctx: click.Context,
     input_c: str,
-    energy_config: str,
-    milp_config: str,
+    energy_config: str | None,
+    milp_config: str | None,
+    cap: str | None,
     output: str | None,
     link: bool,
     estimator_mode: str,
@@ -135,20 +179,39 @@ def compile_milp_cmd(
     extra_includes: tuple[str, ...],
     cpu_freq: str,
 ) -> None:
-    """Run the MILP checkpoint insertion compilation pipeline."""
+    """Run the MILP checkpoint insertion compilation pipeline.
+
+    INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
+    """
+    from .bench.config import default_energy_config
     from .compile.milp import MilpCompileOptions, compile_milp
 
-    input_path = Path(input_c)
+    env = ctx.obj["env"]
+
+    input_path = _resolve_input(env, input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
+
+    milp_config_path = _resolve_algorithm_config(
+        env, "milp", milp_config, cap, "-m/--milp-config",
+    )
+
+    energy_config_path: Path
+    if energy_config is not None:
+        energy_config_path = Path(energy_config)
+    elif estimator_mode == "ir":
+        energy_config_path = env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+    else:
+        energy_config_path = default_energy_config(env, "milp")
+
     cpu_freq_hz = int(cpu_freq) * 1_000_000
 
     result = compile_milp(
         ctx.obj["tc"],
-        ctx.obj["env"],
+        env,
         MilpCompileOptions(
             input_c=input_path,
-            energy_config=Path(energy_config),
-            milp_config=Path(milp_config),
+            energy_config=energy_config_path,
+            milp_config=milp_config_path,
             output=output_path,
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
@@ -171,9 +234,12 @@ def compile_milp_cmd(
 
 
 @compile.command("rockclimb")
-@click.argument("input_c", type=click.Path(exists=True))
-@click.option("-e", "--energy-config", required=True, type=click.Path(exists=True))
-@click.option("-c", "--rockclimb-config", required=True, type=click.Path(exists=True))
+@click.argument("input_c")
+@click.option("-e", "--energy-config", type=click.Path(exists=True),
+              help="Energy config (default: auto-detected).")
+@click.option("-c", "--rockclimb-config", type=click.Path(exists=True),
+              help="RockClimb config (alternative to --cap).")
+@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
@@ -199,8 +265,9 @@ def compile_milp_cmd(
 def compile_rockclimb_cmd(
     ctx: click.Context,
     input_c: str,
-    energy_config: str,
-    rockclimb_config: str,
+    energy_config: str | None,
+    rockclimb_config: str | None,
+    cap: str | None,
     output: str | None,
     link: bool,
     device_debug: bool,
@@ -209,20 +276,37 @@ def compile_rockclimb_cmd(
     no_precomputed_energy: bool,
     cpu_freq: str,
 ) -> None:
-    """Run the RockClimb machine-level compilation pipeline."""
+    """Run the RockClimb machine-level compilation pipeline.
+
+    INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
+    """
+    from .bench.config import default_energy_config
     from .compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 
-    input_path = Path(input_c)
+    env = ctx.obj["env"]
+
+    input_path = _resolve_input(env, input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
+
+    rockclimb_config_path = _resolve_algorithm_config(
+        env, "rockclimb", rockclimb_config, cap, "-c/--rockclimb-config",
+    )
+
+    energy_config_path: Path
+    if energy_config is not None:
+        energy_config_path = Path(energy_config)
+    else:
+        energy_config_path = default_energy_config(env, "rockclimb")
+
     cpu_freq_hz = int(cpu_freq) * 1_000_000
 
     result = compile_rockclimb(
         ctx.obj["tc"],
-        ctx.obj["env"],
+        env,
         RockClimbCompileOptions(
             input_c=input_path,
-            energy_config=Path(energy_config),
-            rockclimb_config=Path(rockclimb_config),
+            energy_config=energy_config_path,
+            rockclimb_config=rockclimb_config_path,
             output=output_path,
             pass_log_level=ctx.obj["log_level"],
             clang_opt_level=clang_opt_level,
@@ -241,9 +325,12 @@ def compile_rockclimb_cmd(
 
 
 @compile.command("schematic")
-@click.argument("input_c", type=click.Path(exists=True))
-@click.option("-e", "--energy-config", required=True, type=click.Path(exists=True))
-@click.option("-s", "--schematic-config", type=click.Path(exists=True))
+@click.argument("input_c")
+@click.option("-e", "--energy-config", type=click.Path(exists=True),
+              help="Energy config (default: auto-detected by estimator mode).")
+@click.option("-s", "--schematic-config", type=click.Path(exists=True),
+              help="SCHEMATIC config (alternative to --cap).")
+@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
@@ -277,8 +364,9 @@ def compile_rockclimb_cmd(
 def compile_schematic_cmd(
     ctx: click.Context,
     input_c: str,
-    energy_config: str,
+    energy_config: str | None,
     schematic_config: str | None,
+    cap: str | None,
     output: str | None,
     link: bool,
     debug: bool,
@@ -292,25 +380,43 @@ def compile_schematic_cmd(
     estimator_mode: str,
     cpu_freq: str,
 ) -> None:
-    """Run the SCHEMATIC trace-based compilation pipeline."""
+    """Run the SCHEMATIC trace-based compilation pipeline.
+
+    INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
+    """
+    from .bench.config import default_energy_config
     from .compile.schematic import SchematicCompileOptions, compile_schematic
 
-    input_path = Path(input_c)
+    env = ctx.obj["env"]
+
+    input_path = _resolve_input(env, input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
     cpu_freq_hz = int(cpu_freq) * 1_000_000
 
-    if not trace_only and schematic_config is None:
-        raise click.UsageError(
-            "--schematic-config is required unless --trace-only is set."
+    schematic_config_path: Path | None
+    if not trace_only:
+        schematic_config_path = _resolve_algorithm_config(
+            env, "schematic", schematic_config, cap,
+            "-s/--schematic-config or --cap",
         )
+    else:
+        schematic_config_path = Path(schematic_config) if schematic_config else None
+
+    energy_config_path: Path
+    if energy_config is not None:
+        energy_config_path = Path(energy_config)
+    elif estimator_mode == "ir":
+        energy_config_path = env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+    else:
+        energy_config_path = default_energy_config(env, "schematic")
 
     result = compile_schematic(
         ctx.obj["tc"],
-        ctx.obj["env"],
+        env,
         SchematicCompileOptions(
             input_c=input_path,
-            energy_config=Path(energy_config),
-            schematic_config=Path(schematic_config) if schematic_config else None,
+            energy_config=energy_config_path,
+            schematic_config=schematic_config_path,
             output=output_path,
             estimator_mode=estimator_mode,
             pass_log_level=ctx.obj["log_level"],
@@ -340,7 +446,7 @@ def compile_schematic_cmd(
 
 
 @compile.command("uninstrumented")
-@click.argument("input_c", type=click.Path(exists=True))
+@click.argument("input_c")
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link/--no-link", default=True, help="Link with boot.S and runtime (default: on).")
 @click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
@@ -365,10 +471,13 @@ def compile_uninstrumented_cmd(
     extra_includes: tuple[str, ...],
     cpu_freq: str,
 ) -> None:
-    """Compile without checkpoint insertion (baseline)."""
+    """Compile without checkpoint insertion (baseline).
+
+    INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
+    """
     from .compile.uninstrumented import UninstrumentedCompileOptions, compile_uninstrumented
 
-    input_path = Path(input_c)
+    input_path = _resolve_input(ctx.obj["env"], input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
     cpu_freq_hz = int(cpu_freq) * 1_000_000
 
