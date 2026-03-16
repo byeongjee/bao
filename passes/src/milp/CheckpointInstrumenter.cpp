@@ -323,8 +323,27 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                         allCommitInsts.insert(commitStore);
                         phiCommits.push_back({phiIt->second, commitStore, backupIt->second});
                     } else {
-                        // Non-PHI case: V dominates BB. Store V directly.
-                        auto *commitStore = builder.CreateStore(V, backupIt->second);
+                        // Non-PHI case: resolve V's reaching definition at BB.
+                        // V may not dominate BB (e.g. at a merge point where V
+                        // was only computed on some paths).  SSAUpdater returns
+                        // V itself when V dominates BB, or inserts a PHI that
+                        // merges V with undef on non-dominating paths.  The
+                        // undef is safe: on those paths V was never computed,
+                        // so the NVM backup retains its prior valid value and
+                        // the stored undef is never read.
+                        auto *defInst = llvm::cast<llvm::Instruction>(V);
+                        llvm::SSAUpdater commitUpdater;
+                        commitUpdater.Initialize(V->getType(), "ssa.commit");
+                        commitUpdater.AddAvailableValue(defInst->getParent(), V);
+                        llvm::Value *reachingVal = commitUpdater.GetValueInMiddleOfBlock(&BB);
+
+                        // Protect any inserted PHI from the restore SSAUpdater.
+                        if (reachingVal != V) {
+                            if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(reachingVal))
+                                allCommitInsts.insert(PHI);
+                        }
+
+                        auto *commitStore = builder.CreateStore(reachingVal, backupIt->second);
                         allCommitInsts.insert(commitStore);
                         nonPhiCommits.push_back({V, backupIt->second});
                     }
