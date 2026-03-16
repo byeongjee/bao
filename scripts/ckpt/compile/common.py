@@ -8,6 +8,7 @@ scripts.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -211,7 +212,9 @@ def collect_bb_freq(
     freq_bin = workdir / "freq_run"
     bb_freq_json = workdir / "bb_freq.json"
 
-    # Strip MSP430 target triple and datalayout
+    # Strip MSP430 target triple, datalayout, ELF-only section attributes,
+    # and @llvm.compiler.used so clang can compile natively on the host
+    # (e.g., Mach-O on macOS where ".fram" sections are invalid).
     ir_text = inst_ll.read_text()
     lines: list[str] = []
     for line in ir_text.splitlines(keepends=True):
@@ -219,7 +222,12 @@ def collect_bb_freq(
             lines.append("\n")
         elif line.startswith("target datalayout = "):
             lines.append("\n")
+        elif "@llvm.compiler.used" in line or "@llvm.used" in line:
+            lines.append("\n")
         else:
+            # Remove ELF-specific section attributes (e.g., section ".fram")
+            # that are invalid on non-ELF targets like Mach-O.
+            line = re.sub(r',?\s*section\s+"[^"]+"', "", line)
             lines.append(line)
     native_ll.write_text("".join(lines))
 
