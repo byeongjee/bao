@@ -158,6 +158,18 @@ SCENARIOS = [
         "slide_milp_greedy_config.json",
         {"exit": 0, "min_prologue": 2},
     ),
+    (
+        "scenario_merge_divergence",
+        "scenario_merge_divergence.c",
+        "scenario_config.json",
+        "scenario_merge_divergence_milp_config.json",
+        {
+            "exit": 0,
+            "min_boundary": 1,
+            "has_shadow": ["g_counter"],
+            "all_access_via_shadow": ["g_counter"],
+        },
+    ),
 ]
 
 # Extract just the scenario names for pytest IDs

@@ -318,7 +318,7 @@ def has_section(ir: str, global_name: str, section: str) -> bool:
 
 def get_metric(stderr: str, label: str) -> str | None:
     """Extract 'Label: value' from stderr."""
-    m = re.search(rf'^{re.escape(label)}:\s*(.+)$', stderr, re.MULTILINE)
+    m = re.search(rf'^\s*{re.escape(label)}:\s*(.+)$', stderr, re.MULTILINE)
     return m.group(1).strip() if m else None
 
 
@@ -418,3 +418,21 @@ def check_assertions(r: PassResult, expect: dict):
         assert count >= expect["min_shadow_count"], (
             f"Expected >= {expect['min_shadow_count']} shadow globals, got {count}"
         )
+
+    if "all_access_via_shadow" in expect:
+        for name in expect["all_access_via_shadow"]:
+            shadow_name = f"__vm_shadow_{name}"
+            assert has_global(ir, shadow_name), (
+                f"Expected shadow global @{shadow_name} not found in IR "
+                f"(all_access_via_shadow requires shadow to exist)"
+            )
+            # No direct load/store to the original global should exist
+            # (only memcpy for commit/restore references the original).
+            direct_uses = re.findall(
+                rf'(?:load|store)\b[^@]*@{re.escape(name)}\b', ir
+            )
+            assert len(direct_uses) == 0, (
+                f"Expected all accesses to @{name} via shadow, but found "
+                f"{len(direct_uses)} direct load/store(s):\n"
+                + "\n".join(f"  {u.strip()}" for u in direct_uses[:5])
+            )

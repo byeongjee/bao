@@ -372,6 +372,40 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
             idx++;
         }
     }
+
+    // Merge-point consistency: at merge blocks (>1 predecessor) that become
+    // region boundaries, all predecessors must agree on placeInVm.  Without
+    // this, the commit at the boundary may overwrite FRAM with stale shadow
+    // data from a predecessor that did not use the shadow.
+    //
+    // For each merge-block M, pick one reference predecessor P_ref.
+    // For each other predecessor P_i:
+    //   placeInVm[P_i, v] - placeInVm[P_ref, v] <=  (1 - isRegionStart[M])
+    //   placeInVm[P_ref, v] - placeInVm[P_i, v] <=  (1 - isRegionStart[M])
+    //
+    // When isRegionStart[M]=1: forces P_i = P_ref (consistent).
+    // When isRegionStart[M]=0: trivially satisfied (existing constraints handle it).
+    unsigned mcIdx = 0;
+    for (NodeId block : cfg_.getBlocks()) {
+        const auto &preds = predecessors_[block];
+        if (preds.size() <= 1)
+            continue;
+        NodeId pRef = preds.front();
+        GRBVar xBlock = isRegionStart_[block];
+        for (size_t pi = 1; pi < preds.size(); ++pi) {
+            NodeId pOther = preds[pi];
+            for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+                GRBVar pvRef = placeInVm_[std::make_pair(pRef, GV)];
+                GRBVar pvOther = placeInVm_[std::make_pair(pOther, GV)];
+                std::string tag = "merge_consist_" + std::to_string(mcIdx);
+                // pvOther - pvRef <= 1 - xBlock
+                model_.addConstr(pvOther - pvRef <= 1 - xBlock, tag + "_ub");
+                // pvRef - pvOther <= 1 - xBlock
+                model_.addConstr(pvRef - pvOther <= 1 - xBlock, tag + "_lb");
+                mcIdx++;
+            }
+        }
+    }
 }
 
 // Pending-state propagation for all tracked variables (eligible + ineligible):
@@ -617,6 +651,25 @@ void CheckpointOptimizer::extractSolution() {
     }
 
     solution_.objectiveValue = model_.get(GRB_DoubleAttr_ObjVal);
+
+    // Verify merge-point placement consistency invariant: at every
+    // merge-point region boundary, all predecessors must agree on placeInVm.
+    for (NodeId block : cfg_.getBlocks()) {
+        const auto &preds = predecessors_[block];
+        if (preds.size() <= 1)
+            continue;
+        if (!solution_.regionStarts.count(block))
+            continue;
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            bool refPlaced = solution_.placeInVm[std::make_pair(preds.front(), GV)];
+            for (size_t i = 1; i < preds.size(); ++i) {
+                bool placed = solution_.placeInVm[std::make_pair(preds[i], GV)];
+                assert(placed == refPlaced &&
+                       "MILP solution has divergent placeInVm at merge-point "
+                       "region boundary — commit would corrupt FRAM");
+            }
+        }
+    }
 }
 
 } // namespace checkpoint
