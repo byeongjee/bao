@@ -38,6 +38,16 @@ namespace checkpoint {
 PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &AM) {
     const auto totalStart = std::chrono::steady_clock::now();
 
+    // Skip benchmark infrastructure functions — these are timing/debug helpers
+    // that should not be checkpointed (checkpointing a busy-wait delay loop
+    // causes massive overhead and incorrect behavior).
+    StringRef name = F.getName();
+    if (name.starts_with("timing_gpio") || name.starts_with("_timing_delay") ||
+        name.starts_with("debug_") || name.starts_with("uart_")) {
+        PLOGI << "MILP: skipping benchmark infrastructure function " << name;
+        return PreservedAnalyses::all();
+    }
+
     // Step 1: Obtain LLVM analyses
     auto &LI = AM.getResult<LoopAnalysis>(F);
     auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
