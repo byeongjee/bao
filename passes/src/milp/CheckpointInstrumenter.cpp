@@ -249,10 +249,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             // variables from StateAnalysis arrive through these PHIs. We commit
             // the PHI itself (the resolved value at the boundary) rather than
             // the original def which may not dominate this point.
-            llvm::DenseMap<llvm::Value *, llvm::PHINode *> phiMap;
+            llvm::DenseMap<llvm::Value *, llvm::SmallVector<llvm::PHINode *, 2>> phiMap;
             for (auto &PHI : BB.phis()) {
                 for (unsigned i = 0; i < PHI.getNumIncomingValues(); ++i)
-                    phiMap[PHI.getIncomingValue(i)] = &PHI;
+                    phiMap[PHI.getIncomingValue(i)].push_back(&PHI);
             }
 
             // SSA commits split into two categories:
@@ -263,7 +263,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             //   dominates this block from elsewhere; restore uses SSAUpdater
             //   (handles multi-block domination correctly).
             struct PHICommitRecord {
-                llvm::PHINode *phi;
+                llvm::SmallVector<llvm::PHINode *, 2> phis;
                 llvm::StoreInst *commitStore;
                 llvm::GlobalVariable *nvmBackup;
             };
@@ -315,8 +315,11 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     assert(backupIt != nvmBackupMap_.end() && "SSA commit requires an NVM backup");
                     auto phiIt = phiMap.find(V);
                     if (phiIt != phiMap.end()) {
-                        // PHI case: store the PHI (resolved value at boundary).
-                        auto *commitStore = builder.CreateStore(phiIt->second, backupIt->second);
+                        // PHI case: store through the first PHI (all capture
+                        // the same runtime value of V from the same predecessor).
+                        // Record all PHIs so restore rewrites uses of each one.
+                        auto *commitStore =
+                            builder.CreateStore(phiIt->second.front(), backupIt->second);
                         allCommitInsts.insert(commitStore);
                         phiCommits.push_back({phiIt->second, commitStore, backupIt->second});
                     } else {
@@ -336,16 +339,22 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             inserted++;
 
             // Step 4a: PHI restores — use replaceUsesWithIf.
-            // The PHI is defined in BB, so the restore load (also in BB, after
+            // Each PHI is defined in BB, so the restore load (also in BB, after
             // the boundary call) dominates all PHI uses. Safe to replace directly.
+            // When multiple PHIs capture the same incoming value, we emit one
+            // restore load and rewrite uses of every such PHI.
             for (auto &rec : phiCommits) {
-                llvm::Value *restoreVal = builder.CreateLoad(rec.phi->getType(), rec.nvmBackup);
+                llvm::Value *restoreVal =
+                    builder.CreateLoad(rec.phis.front()->getType(), rec.nvmBackup);
                 if (addDebugMarkers_)
                     emitCounterIncrement(builder, cntRestoreVregGV_);
 
                 llvm::StoreInst *commitStore = rec.commitStore;
-                rec.phi->replaceUsesWithIf(
-                    restoreVal, [commitStore](llvm::Use &U) { return U.getUser() != commitStore; });
+                for (llvm::PHINode *phi : rec.phis) {
+                    phi->replaceUsesWithIf(restoreVal, [commitStore](llvm::Use &U) {
+                        return U.getUser() != commitStore;
+                    });
+                }
                 inserted++;
             }
 
