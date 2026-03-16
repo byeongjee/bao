@@ -219,44 +219,63 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
         nodesByBlock[BB].push_back(node);
     }
 
-    // Accumulated across all boundary blocks for Phase 2 SSA rewriting.
+    // Accumulated across all boundary blocks for SSAUpdater-based restore
+    // rewriting (non-PHI SSA values only).
     std::map<llvm::Value *, std::vector<std::pair<llvm::BasicBlock *, llvm::Value *>>>
         ssaRestoreDefs;
+    // Track all commit-related instructions so SSAUpdater skips them.
     std::set<llvm::Instruction *> allCommitInsts;
-    // Deferred SSA commit stores: origVal → [(nvmBackup, insertBefore), ...]
-    std::map<llvm::Value *, std::vector<std::pair<llvm::GlobalVariable *, llvm::Instruction *>>>
-        pendingSSACommits;
 
-    // Phase 1: Insert commit stores, region boundaries, and restore loads
-    // at each boundary block. Accumulate SSA restore definitions for Phase 2.
     for (llvm::BasicBlock &BB : F) {
         auto itNodeVec = nodesByBlock.find(&BB);
-        if (itNodeVec == nodesByBlock.end()) {
+        if (itNodeVec == nodesByBlock.end())
             continue;
-        }
 
         const std::vector<NodeId> &nodes = itNodeVec->second;
         std::set<NodeId> nodeSet(nodes.begin(), nodes.end());
 
         llvm::BasicBlock::iterator insertIt = checkpoint::getInsertPointAfterAllocas(BB);
-        if (insertIt == BB.end()) {
+        if (insertIt == BB.end())
             continue;
-        }
 
         llvm::IRBuilder<> builder(&BB, insertIt);
 
         bool isEntryNode = nodeSet.count(entryNode) > 0;
 
-        // Track commit instructions so SSA use rewriting skips them.
-        std::set<llvm::Instruction *> commitInsts;
-
-        // For b != b0, emit boundary-end code first.
-        // Order: commit stores -> region boundary -> restores
+        // For b != b0, emit: commit stores -> region boundary -> restores
         if (!isEntryNode) {
-            // Deferred SSA commits for this boundary block.
-            std::vector<std::pair<llvm::Value *, llvm::GlobalVariable *>> ssaCommitsHere;
+            // Step 1: Build PHI map — maps incoming values to their PHI nodes.
+            // When LCSSA/strip-mining produces PHIs at boundary blocks, commit
+            // variables from StateAnalysis arrive through these PHIs. We commit
+            // the PHI itself (the resolved value at the boundary) rather than
+            // the original def which may not dominate this point.
+            llvm::DenseMap<llvm::Value *, llvm::PHINode *> phiMap;
+            for (auto &PHI : BB.phis()) {
+                for (unsigned i = 0; i < PHI.getNumIncomingValues(); ++i)
+                    phiMap[PHI.getIncomingValue(i)] = &PHI;
+            }
 
-            // Commit dirty data while the region is still active.
+            // SSA commits split into two categories:
+            // - PHI commits: committed value is a PHI in this block; restore
+            //   uses replaceUsesWithIf (PHI dominates all its uses, so the
+            //   restore load in the same block also dominates them).
+            // - Non-PHI commits: committed value is the original V which
+            //   dominates this block from elsewhere; restore uses SSAUpdater
+            //   (handles multi-block domination correctly).
+            struct PHICommitRecord {
+                llvm::PHINode *phi;
+                llvm::StoreInst *commitStore;
+                llvm::GlobalVariable *nvmBackup;
+            };
+            std::vector<PHICommitRecord> phiCommits;
+
+            struct NonPHICommitRecord {
+                llvm::Value *origVal;
+                llvm::GlobalVariable *nvmBackup;
+            };
+            std::vector<NonPHICommitRecord> nonPhiCommits;
+
+            // Step 2: Emit commit stores.
             std::set<llvm::Value *> commitVars;
             for (NodeId n : nodeSet)
                 for (llvm::Value *V : solution.getCommitVarsAt(n))
@@ -273,45 +292,72 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     auto shadowIt = shadowMap_.find(GV);
                     assert(shadowIt != shadowMap_.end() &&
                            "eligible global commit requires a VM shadow");
-                    // Eligible: copy shadow (VM/SRAM) -> original (NVM/FRAM)
                     auto *mc = builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
                                                     shadowIt->second->getAlign(), size);
-                    commitInsts.insert(mc);
+                    allCommitInsts.insert(mc);
                     if (addDebugMarkers_)
                         emitCounterIncrement(builder, cntStoreMemGV_);
                 } else if (llvm::isa<llvm::AllocaInst>(V)) {
-                    // Stack alloca -> NVM backup (memcpy)
                     llvm::Value *size =
                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
                     auto backupIt = nvmBackupMap_.find(V);
                     assert(backupIt != nvmBackupMap_.end() &&
                            "alloca commit requires an NVM backup");
-                    {
-                        auto *AI = llvm::cast<llvm::AllocaInst>(V);
-                        auto *mc =
-                            builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(), AI,
-                                                 AI->getAlign(), size);
-                        commitInsts.insert(mc);
-                    }
+                    auto *AI = llvm::cast<llvm::AllocaInst>(V);
+                    auto *mc = builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(),
+                                                    AI, AI->getAlign(), size);
+                    allCommitInsts.insert(mc);
                     if (addDebugMarkers_)
                         emitCounterIncrement(builder, cntStoreMemGV_);
                 } else {
-                    // SSA register: defer — direct store may violate dominance.
-                    // Phase 2 will use SSAUpdater to find the reaching def.
+                    // SSA value: commit through PHI if one exists.
                     auto backupIt = nvmBackupMap_.find(V);
                     assert(backupIt != nvmBackupMap_.end() && "SSA commit requires an NVM backup");
-                    ssaCommitsHere.emplace_back(V, backupIt->second);
+                    auto phiIt = phiMap.find(V);
+                    if (phiIt != phiMap.end()) {
+                        // PHI case: store the PHI (resolved value at boundary).
+                        auto *commitStore = builder.CreateStore(phiIt->second, backupIt->second);
+                        allCommitInsts.insert(commitStore);
+                        phiCommits.push_back({phiIt->second, commitStore, backupIt->second});
+                    } else {
+                        // Non-PHI case: V dominates BB. Store V directly.
+                        auto *commitStore = builder.CreateStore(V, backupIt->second);
+                        allCommitInsts.insert(commitStore);
+                        nonPhiCommits.push_back({V, backupIt->second});
+                    }
+                    if (addDebugMarkers_)
+                        emitCounterIncrement(builder, cntSaveVregGV_);
                 }
                 inserted++;
             }
 
-            // Insert region boundary (replaces old epilogue + prologue pair).
-            auto *boundaryCall = builder.CreateCall(boundaryFn_);
+            // Step 3: Emit boundary call.
+            builder.CreateCall(boundaryFn_);
             inserted++;
 
-            // Transfer deferred SSA commits with the boundary call as insertion point.
-            for (auto &[origVal, nvmBackup] : ssaCommitsHere) {
-                pendingSSACommits[origVal].emplace_back(nvmBackup, boundaryCall);
+            // Step 4a: PHI restores — use replaceUsesWithIf.
+            // The PHI is defined in BB, so the restore load (also in BB, after
+            // the boundary call) dominates all PHI uses. Safe to replace directly.
+            for (auto &rec : phiCommits) {
+                llvm::Value *restoreVal = builder.CreateLoad(rec.phi->getType(), rec.nvmBackup);
+                if (addDebugMarkers_)
+                    emitCounterIncrement(builder, cntRestoreVregGV_);
+
+                llvm::StoreInst *commitStore = rec.commitStore;
+                rec.phi->replaceUsesWithIf(
+                    restoreVal, [commitStore](llvm::Use &U) { return U.getUser() != commitStore; });
+                inserted++;
+            }
+
+            // Step 4b: Non-PHI restores — defer to SSAUpdater.
+            // V is defined elsewhere and may have uses in blocks not dominated
+            // by BB. SSAUpdater correctly resolves which def reaches each use.
+            for (auto &rec : nonPhiCommits) {
+                llvm::Value *restoreVal = builder.CreateLoad(rec.origVal->getType(), rec.nvmBackup);
+                ssaRestoreDefs[rec.origVal].emplace_back(&BB, restoreVal);
+                if (addDebugMarkers_)
+                    emitCounterIncrement(builder, cntRestoreVregGV_);
+                inserted++;
             }
         }
         // Entry node: no boundary call at program start.
@@ -328,7 +374,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 continue;
             llvm::Value *size =
                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-            // Restore: copy original (NVM/FRAM) -> shadow (VM/SRAM)
             auto shadowIt = shadowMap_.find(GV);
             assert(shadowIt != shadowMap_.end() &&
                    "needRestore requires a VM shadow for the global");
@@ -346,7 +391,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             if (backupIt == nvmBackupMap_.end())
                 continue;
 
-            // Check if V is live-in at any node mapped to this block.
             bool isLiveIn = false;
             for (NodeId node : nodes) {
                 if (stateView.getIneligLiveIn(node).count(V)) {
@@ -358,13 +402,11 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 continue;
 
             if (llvm::isa<llvm::AllocaInst>(V)) {
-                // Stack alloca: memcpy from NVM backup.
                 unsigned sizeBytes = state.getVarSizeBytes(V);
                 if (sizeBytes == 0)
                     continue;
                 llvm::Value *size =
                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
-                // Restore: copy NVM backup -> SRAM original
                 auto *AI = llvm::cast<llvm::AllocaInst>(V);
                 builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second,
                                      backupIt->second->getAlign(), size);
@@ -372,64 +414,22 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     emitCounterIncrement(builder, cntRestoreMemGV_);
                 inserted++;
             } else {
-                // SSA register: typed load from NVM slot.
                 llvm::Value *restored = builder.CreateLoad(V->getType(), backupIt->second);
                 ssaRestoreDefs[V].emplace_back(&BB, restored);
-                inserted++;
-
                 if (addDebugMarkers_)
                     emitCounterIncrement(builder, cntRestoreVregGV_);
+                inserted++;
             }
         }
-
-        allCommitInsts.insert(commitInsts.begin(), commitInsts.end());
     }
 
-    // Phase 2: Resolve deferred SSA commits via SSAUpdater.
-    // For each SSA value with pending commits, use SSAUpdater to find the
-    // reaching definition at each boundary block and create the store with
-    // correct dominance.
-    for (auto &[origVal, commits] : pendingSSACommits) {
-        llvm::SmallVector<llvm::PHINode *, 4> newPHIs;
-        llvm::SSAUpdater commitUpdater(&newPHIs);
-        commitUpdater.Initialize(origVal->getType(), origVal->getName());
-
-        // Seed only the original definition.  Ineligible SSA values are
-        // always Instructions (identified by iterating over block
-        // instructions in StateAnalysis).
-        auto *I = llvm::dyn_cast<llvm::Instruction>(origVal);
-        assert(I && "SSA commit value must be an Instruction");
-        commitUpdater.AddAvailableValue(I->getParent(), origVal);
-
-        for (auto &[nvmBackup, insertBefore] : commits) {
-            // GetValueInMiddleOfBlock is correct here: commit stores sit
-            // at the top of the boundary block (before the boundary call).
-            // When the defining block *is* the boundary, GVIMOB walks
-            // predecessors to find the incoming value — the value from
-            // the closing region, which is exactly what we want to commit.
-            llvm::Value *reaching =
-                commitUpdater.GetValueInMiddleOfBlock(insertBefore->getParent());
-            llvm::IRBuilder<> commitBuilder(insertBefore->getParent(), insertBefore->getIterator());
-            auto *store = commitBuilder.CreateStore(reaching, nvmBackup);
-            allCommitInsts.insert(store);
-
-            if (addDebugMarkers_)
-                emitCounterIncrement(commitBuilder, cntSaveVregGV_);
-        }
-
-        // Mark new PHIs as commit-related so Phase 3 restore rewriting
-        // skips them.
-        for (auto *PHI : newPHIs)
-            allCommitInsts.insert(PHI);
-    }
-
-    // Phase 3: Use SSAUpdater for each ineligible SSA value to correctly
-    // handle multi-definition reaching and insert PHI nodes at merge points.
+    // SSAUpdater pass: rewrite uses of non-PHI SSA values to pick up
+    // restore loads at boundary blocks. This handles values defined in
+    // one block with uses in blocks not dominated by the boundary.
     for (auto &[origVal, defs] : ssaRestoreDefs) {
         llvm::SSAUpdater updater;
         updater.Initialize(origVal->getType(), origVal->getName());
 
-        // The original definition is available in its defining block.
         auto *defInst = llvm::dyn_cast<llvm::Instruction>(origVal);
         const llvm::BasicBlock *defBlock = nullptr;
         if (defInst) {
@@ -437,35 +437,21 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             updater.AddAvailableValue(defInst->getParent(), origVal);
         }
 
-        // Each boundary's restore load is available in its block.
         for (auto &[block, restoredVal] : defs)
             updater.AddAvailableValue(block, restoredVal);
 
-        // Collect uses to rewrite (can't modify use-list while iterating).
         llvm::SmallVector<llvm::Use *, 16> usesToRewrite;
         for (auto &U : origVal->uses()) {
             auto *I = llvm::dyn_cast<llvm::Instruction>(U.getUser());
             if (!I)
                 continue;
-            // Skip commit stores — they correctly use the original value
-            // during normal (non-restart) execution.
             if (allCommitInsts.count(I))
                 continue;
-            // Keep same-block uses on the original SSA def. These uses are
-            // dominated by the local definition and should not consume a
-            // boundary restore value.
             if (defBlock && I->getParent() == defBlock)
                 continue;
             usesToRewrite.push_back(&U);
         }
 
-        // Use RewriteUseAfterInsertions (GetValueAtEndOfBlock) rather than
-        // RewriteUse (GetValueInMiddleOfBlock).  GetValueInMiddleOfBlock
-        // treats the available value as defined mid-block and walks to
-        // predecessors for same-block uses — returning poison for the
-        // entry block (no predecessors).  GetValueAtEndOfBlock returns the
-        // available value directly, which is correct because all original
-        // instructions come after the inserted restore loads.
         for (llvm::Use *U : usesToRewrite)
             updater.RewriteUseAfterInsertions(*U);
     }
