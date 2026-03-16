@@ -183,9 +183,13 @@ def run_assembly_energy(
 _DEBUG_STUBS_C = """\
 void debug_init(void) {}
 void debug_exit(int result) { (void)result; }
-/* GPIO register stubs for native profiling (benchmark.h references P3DIR/P3OUT
-   via static inline functions that get baked into the LLVM IR). */
+/* GPIO and clock register stubs for native profiling.
+   benchmark.h's timing_gpio_init() references MSP430 hardware registers
+   that get baked into the LLVM IR when compiled with --target=msp430-elf. */
 unsigned char P3DIR, P3OUT;
+unsigned char CSCTL0_H;
+unsigned int CSCTL1, CSCTL2, CSCTL3;
+unsigned int PM5CTL0;
 """
 
 
