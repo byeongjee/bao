@@ -12,9 +12,15 @@ Requires the Logic 2 desktop app with automation server enabled
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+# Suppress noisy gRPC fork warnings from logic2-automation.
+# Must be set before grpcio is imported anywhere in the process.
+if "GRPC_ENABLE_FORK_SUPPORT" not in os.environ:
+    os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
 
 from ..runner import DeviceError
 from .flash import flash
