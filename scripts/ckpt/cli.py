@@ -161,6 +161,7 @@ def _resolve_algorithm_config(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
 @click.pass_context
 def compile_milp_cmd(
     ctx: click.Context,
@@ -178,6 +179,7 @@ def compile_milp_cmd(
     clang_opt_level: int,
     extra_includes: tuple[str, ...],
     cpu_freq: str,
+    save_temps: bool,
 ) -> None:
     """Run the MILP checkpoint insertion compilation pipeline.
 
@@ -223,6 +225,7 @@ def compile_milp_cmd(
             device_debug=device_debug,
             estimator_mode=estimator_mode,
             cpu_freq=cpu_freq_hz,
+            save_temps=save_temps,
         ),
     )
 
@@ -261,6 +264,7 @@ def compile_milp_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
 @click.pass_context
 def compile_rockclimb_cmd(
     ctx: click.Context,
@@ -275,6 +279,7 @@ def compile_rockclimb_cmd(
     clang_opt_level: int,
     no_precomputed_energy: bool,
     cpu_freq: str,
+    save_temps: bool,
 ) -> None:
     """Run the RockClimb machine-level compilation pipeline.
 
@@ -315,6 +320,7 @@ def compile_rockclimb_cmd(
             device_debug=device_debug,
             halt_mode=halt_mode,
             cpu_freq=cpu_freq_hz,
+            save_temps=save_temps,
         ),
     )
 
@@ -360,6 +366,7 @@ def compile_rockclimb_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
 @click.pass_context
 def compile_schematic_cmd(
     ctx: click.Context,
@@ -379,6 +386,7 @@ def compile_schematic_cmd(
     extra_includes: tuple[str, ...],
     estimator_mode: str,
     cpu_freq: str,
+    save_temps: bool,
 ) -> None:
     """Run the SCHEMATIC trace-based compilation pipeline.
 
@@ -430,6 +438,7 @@ def compile_schematic_cmd(
             clang_opt_level=clang_opt_level,
             extra_includes=list(extra_includes),
             trace_file=Path(trace_file) if trace_file else None,
+            save_temps=save_temps,
         ),
     )
 

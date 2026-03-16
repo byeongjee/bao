@@ -14,6 +14,7 @@ from ..env import ProjectEnv
 from ..runner import CompilationError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
+from . import common
 from .common import (
     annotate_tripcounts,
     compile_to_ir,
@@ -36,6 +37,7 @@ class RockClimbCompileOptions:
     halt_mode: str
     cpu_freq: int
     clang_opt_level: int = 2
+    save_temps: bool = False
     linker_script: Path | None = None
 
 
@@ -108,6 +110,9 @@ def compile_rockclimb(
             stats_json_dst = opts.output.with_suffix(".stats.json")
             shutil.copy2(stats_json_src, stats_json_dst)
             stats_json = stats_json_dst
+
+        if opts.save_temps:
+            common.save_temps(tmp, opts.output.parent)
 
         # Post-pass steps: MIR -> assembly -> optional link
         # Wrap so pass_output is preserved on failure.

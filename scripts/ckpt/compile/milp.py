@@ -15,6 +15,7 @@ from ..env import ProjectEnv
 from ..runner import CompilationError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
+from . import common
 from .common import (
     annotate_tripcounts,
     collect_bb_freq,
@@ -45,6 +46,7 @@ class MilpCompileOptions:
     cpu_freq: int
     opt_level: int = 2
     clang_opt_level: int = 2
+    save_temps: bool = False
     extra_includes: list[str] = field(default_factory=list)
 
 
@@ -145,6 +147,9 @@ def compile_milp(
             out_s = tmp / "ckpt.s"
             out_o = tmp / "ckpt.o"
             compile_to_object(tc, env, ckpt_ll, out_s, out_o, opt_level=opts.opt_level)
+
+            if opts.save_temps:
+                common.save_temps(tmp, opts.output.parent)
 
             shutil.copy2(out_o, opts.output.with_suffix(".o"))
             shutil.copy2(out_s, opts.output.with_suffix(".s"))

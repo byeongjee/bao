@@ -408,6 +408,16 @@ def now_ms() -> int:
     return int(time.monotonic() * 1000)
 
 
+def save_temps(tmp: Path, dest_dir: Path) -> None:
+    """Copy all intermediate files from *tmp* to *dest_dir*."""
+    import shutil
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for f in sorted(tmp.iterdir()):
+        if f.is_file():
+            shutil.copy2(f, dest_dir / f.name)
+
+
 # ---------------------------------------------------------------------------
 # Shared link step
 # ---------------------------------------------------------------------------
