@@ -215,27 +215,27 @@ void CheckpointOptimizer::addVariables() {
         }
     }
 
-    // needRestore (eligible only, for v in EligLiveIn(b)).
+    // needRestore (eligible only, for all blocks × all eligible variables).
     for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::GlobalVariable *GV : state_.getEligLiveIn(block)) {
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             BlockGVKey gvKey = std::make_pair(block, GV);
             needRestore_[gvKey] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY,
                                                 makeVarNameGV(cfg_, "need_restore", block, GV));
         }
     }
 
-    // commit: eligible live-ins + ineligible live-ins (for b != entry).
+    // commit: all eligible + all ineligible variables (for b != entry).
     for (NodeId block : cfg_.getBlocks()) {
         if (block == entry)
             continue;
         // Eligible commits.
-        for (llvm::GlobalVariable *GV : state_.getEligLiveIn(block)) {
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             BlockVarKey varKey = std::make_pair(block, static_cast<llvm::Value *>(GV));
             commit_[varKey] =
                 model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarNameGV(cfg_, "commit", block, GV));
         }
         // Ineligible commits.
-        for (llvm::Value *V : state_.getIneligLiveIn(block)) {
+        for (llvm::Value *V : state_.getIneligibleObjs()) {
             BlockVarKey varKey = std::make_pair(block, V);
             commit_[varKey] =
                 model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "commit", block, V));
