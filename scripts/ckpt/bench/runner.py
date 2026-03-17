@@ -299,7 +299,7 @@ def run_benchmark_matrix(
                 common_fields: dict[str, str | int | None] = {
                     "basic_blocks": stats.basic_blocks or 0,
                     "edges": stats.edges or 0,
-                    "regions": stats.regions or 0,
+                    "region_boundaries": stats.region_boundaries or 0,
                     "compilation_time_ms": stats.compilation_time_ms or 0,
                     "peak_rss_kb": stats.peak_rss_kb or 0,
                     "profiling_time_ms": compile_result_profiling_ms,
@@ -394,7 +394,7 @@ def print_benchmark_summary(
     _print_group("CFG", [
         ("blocks", _fmt("basic_blocks", fields)),
         ("edges", _fmt("edges", fields)),
-        ("regions", _fmt("regions", fields)),
+        ("region boundaries", _fmt("region_boundaries", fields)),
     ])
 
     # MILP
@@ -411,8 +411,6 @@ def print_benchmark_summary(
     # Checkpoints
     ckpt_items: list[tuple[str, str | None]] = []
     for key, name in [
-        ("region_boundaries", "region boundaries"),
-        ("region_boundaries_inserted", "boundaries inserted"),
         ("enabled_checkpoints", "enabled"),
         ("distributed_checkpoints_inserted", "distributed inserted"),
         ("runtime_calls_inserted", "runtime calls"),
