@@ -814,12 +814,7 @@ static bool stripMineLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolu
     // Forwarding PHIs for non-IV Header PHIs (loop-carried state)
     SmallVector<PHINode *, 4> headerForwardPhis;
     for (auto &info : headerPhiForwarding) {
-        Value *ForwardVal;
-        if (ExitingBB == Header) {
-            ForwardVal = info.headerPhi;
-        } else {
-            ForwardVal = info.headerPhi->getIncomingValueForBlock(Latch);
-        }
+        Value *ForwardVal = info.headerPhi->getIncomingValueForBlock(Latch);
         PHINode *FP =
             OLB.CreatePHI(info.headerPhi->getType(), 1, info.headerPhi->getName() + ".fwd");
         FP->addIncoming(ForwardVal, ExitingBB);
