@@ -142,6 +142,8 @@ def run_rockclimb_benchmarks(
                 device_debug=device_debug,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
+                clang_opt_level=2,
+                opt_level=2,
             )
 
             result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)

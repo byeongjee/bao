@@ -56,6 +56,8 @@ def verify_rockclimb(
                 device_debug=True,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
+                clang_opt_level=2,
+                opt_level=2,
             ),
         )
         return InstrumentedOutput(

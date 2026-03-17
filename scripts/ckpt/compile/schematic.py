@@ -45,8 +45,8 @@ class SchematicCompileOptions:
     device_debug: bool
     halt_mode: str
     cpu_freq: int
-    opt_level: int = 2
-    clang_opt_level: int = 2
+    opt_level: int
+    clang_opt_level: int
     save_temps: bool = False
     extra_includes: list[str] = field(default_factory=list)
     trace_file: Path | None = None
@@ -330,4 +330,5 @@ def _link_schematic(
         boot_defines=boot_defines,
         device_debug=opts.device_debug,
         cpu_freq=opts.cpu_freq,
+        gcc_opt_level=opts.opt_level,
     )

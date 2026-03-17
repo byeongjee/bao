@@ -44,8 +44,8 @@ class MilpCompileOptions:
     halt_mode: str
     device_debug: bool
     cpu_freq: int
-    opt_level: int = 2
-    clang_opt_level: int = 2
+    opt_level: int
+    clang_opt_level: int
     save_temps: bool = False
     extra_includes: list[str] = field(default_factory=list)
 
@@ -372,4 +372,5 @@ def _link_milp(
         boot_defines=boot_defines,
         device_debug=opts.device_debug,
         cpu_freq=opts.cpu_freq,
+        gcc_opt_level=opts.opt_level,
     )

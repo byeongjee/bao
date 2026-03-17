@@ -252,6 +252,7 @@ def compile_milp_cmd(
     default="nop",
     help="Halt mode for linked binary.",
 )
+@click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
 @click.option(
     "--no-precomputed-energy",
@@ -276,6 +277,7 @@ def compile_rockclimb_cmd(
     link: bool,
     device_debug: bool,
     halt_mode: str,
+    opt_level: int,
     clang_opt_level: int,
     no_precomputed_energy: bool,
     cpu_freq: str,
@@ -315,6 +317,7 @@ def compile_rockclimb_cmd(
             output=output_path,
             pass_log_level=ctx.obj["log_level"],
             clang_opt_level=clang_opt_level,
+            opt_level=opt_level,
             precomputed_energy=not no_precomputed_energy,
             link=link,
             device_debug=device_debug,
