@@ -355,7 +355,7 @@ def compile_rockclimb_cmd(
 )
 @click.option("--trace-only", is_flag=True, help="Only collect trace, skip insertion.")
 @click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
-@click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
+@click.option("-Oc", "clang_opt_level", type=int, default=0, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
 @click.option(
     "--estimator-mode",
