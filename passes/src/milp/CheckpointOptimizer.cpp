@@ -522,31 +522,25 @@ void CheckpointOptimizer::constrainCommitAtRegionBoundary() {
 }
 
 // At region starts, accumulated energy equals the startup cost:
-//   eAccum[b] >= E_start(b) - M*(1 - isRegionStart[b])
-//   eAccum[b] <= E_start(b) + M*(1 - isRegionStart[b])
-// Big-M deactivates the constraint for non-region-start blocks.
+// Indicator: isRegionStart[b] = 1  →  eAccum[b] = E_start(b)
+// Replaces big-M formulation with native Gurobi indicator constraints.
 void CheckpointOptimizer::constrainEnergyInitAtRegionStart() {
-    const double M = params_.capacity;
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr eStart = buildEStart(block);
-        model_.addConstr(energyAccumulated_[block] >= eStart - M * (1 - isRegionStart_[block]),
-                         "energy_init_lb_" + nodeToken(cfg_, block));
-        model_.addConstr(energyAccumulated_[block] <= eStart + M * (1 - isRegionStart_[block]),
-                         "energy_init_ub_" + nodeToken(cfg_, block));
+        model_.addGenConstrIndicator(isRegionStart_[block], 1, energyAccumulated_[block] - eStart,
+                                     GRB_EQUAL, 0.0, "energy_init_" + nodeToken(cfg_, block));
     }
 }
 
-// Energy accumulates along CFG edges within a region:
-//   eAccum[dst] >= eAccum[src] + E_blk(src) - M*isRegionStart[dst]
-// Region starts break propagation (big-M deactivation).
+// Indicator: isRegionStart[dst] = 0  →  eAccum[dst] >= eAccum[src] + E_blk(src)
+// Replaces big-M formulation with native Gurobi indicator constraints.
 void CheckpointOptimizer::constrainEnergyPropagation() {
-    const double M = params_.capacity;
     unsigned edgeIdx = 0;
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
-        model_.addConstr(energyAccumulated_[dst] >=
-                             energyAccumulated_[src] + eBlkSrc - M * isRegionStart_[dst],
-                         "energy_propagation_" + std::to_string(edgeIdx++));
+        model_.addGenConstrIndicator(
+            isRegionStart_[dst], 0, energyAccumulated_[dst] - energyAccumulated_[src] - eBlkSrc,
+            GRB_GREATER_EQUAL, 0.0, "energy_propagation_" + std::to_string(edgeIdx++));
     }
 }
 
