@@ -693,9 +693,9 @@ selectLoopsToStripMine(LoopInfo &LI, ScalarEvolution &SE,
     return selected;
 }
 
-static bool stripMineLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
-                          DominatorTree &DT, AssumptionCache &AC, AAResults &AA,
-                          const TargetTransformInfo &TTI) {
+static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
+                                   DominatorTree &DT, AssumptionCache &AC, AAResults &AA,
+                                   const TargetTransformInfo &TTI) {
     // ── Phase 1: Extract and validate loop components ──
     Loop *L = plan.L;
     uint64_t N = plan.N, K = plan.K;
@@ -897,8 +897,8 @@ static bool stripMineLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolu
     return true;
 }
 
-static bool chunkLoop(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
-                      DominatorTree &DT) {
+static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
+                                    DominatorTree &DT) {
     // ── Phase 1: Extract loop components ──
     Loop *L = plan.L;
     uint64_t K = plan.K;
@@ -1178,8 +1178,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         plan.L = L;
         stats.loopsEligible++;
 
-        bool rewritten = plan.isChunking ? chunkLoop(plan, LI, SE, DT)
-                                         : stripMineLoop(plan, LI, SE, DT, AC, AA, TTI);
+        bool rewritten = plan.isChunking ? stripMineByChunkCounter(plan, LI, SE, DT)
+                                         : stripMineByExitRewrite(plan, LI, SE, DT, AC, AA, TTI);
         if (!rewritten) {
             stats.skippedReasons["rewrite-utility-failed"]++;
             PLOGW << "LoopStripMiningPass: rewrite failed " << F.getName() << "::" << headerName
