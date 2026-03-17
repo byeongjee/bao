@@ -91,6 +91,7 @@ def _collect_trace(
     estimator_mode: str,
     halt_mode: str,
     cpu_freq: int,
+    clang_opt_level: int,
 ) -> tuple[Path, int]:
     """Collect a SCHEMATIC execution trace for one benchmark.
 
@@ -116,7 +117,7 @@ def _collect_trace(
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         opt_level=3,
-        clang_opt_level=0,
+        clang_opt_level=clang_opt_level,
         extra_includes=[str(env.project_dir / "passes" / "runtime")],
     )
     trace_result: SchematicCompileResult = compile_schematic(tc, env, trace_opts)
@@ -177,6 +178,8 @@ def run_schematic_benchmarks(
     trace_config: Path | None = None,
     estimator_mode: str,
     cpu_freq: int,
+    clang_opt_level: int,
+    algorithm_label: str,
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -205,13 +208,13 @@ def run_schematic_benchmarks(
     if not bench_paths:
         raise ConfigError("No benchmarks to run")
 
-    capacitors = discover_capacitors(env, "schematic", caps)
+    capacitors = discover_capacitors(env, algorithm_label, caps)
 
     if output_csv is None:
-        output_csv = env.project_dir / "benchmarks" / "schematic_benchmark_summary.csv"
+        output_csv = env.project_dir / "benchmarks" / f"{algorithm_label}_benchmark_summary.csv"
 
     if energy_config is None:
-        energy_config = default_energy_config(env, "schematic")
+        energy_config = default_energy_config(env, algorithm_label)
 
     # Config for trace collection phase (any capacitor works; 10uF by default)
     if trace_config is None:
@@ -243,6 +246,7 @@ def run_schematic_benchmarks(
                     estimator_mode=estimator_mode,
                     halt_mode=halt_mode,
                     cpu_freq=cpu_freq,
+                    clang_opt_level=clang_opt_level,
                 )
 
             trace_json, profiling_ms = trace_cache[bench_name]
@@ -264,7 +268,7 @@ def run_schematic_benchmarks(
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
                 opt_level=3,
-                clang_opt_level=0,
+                clang_opt_level=clang_opt_level,
                 extra_includes=[str(env.project_dir / "passes" / "runtime")],
                 trace_file=trace_json,
             )

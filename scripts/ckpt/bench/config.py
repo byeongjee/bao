@@ -19,6 +19,7 @@ _ENERGY_CONFIG_MAP: dict[str, str] = {
     "milp": "sample_assembly_energy_params.json",
     "rockclimb": "sample_assembly_energy_params.json",
     "schematic": "sample_energy_config_ir.json",
+    "schematicO3": "sample_energy_config_ir.json",
 }
 
 
