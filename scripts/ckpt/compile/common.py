@@ -181,7 +181,7 @@ def run_assembly_energy(
 # BB frequency profiling
 # ---------------------------------------------------------------------------
 
-_DEBUG_STUBS_C = """\
+_NATIVE_STUBS_C = """\
 void debug_init(void) {}
 void debug_exit(int result) { (void)result; }
 /* GPIO and clock register stubs for native profiling.
@@ -192,6 +192,33 @@ unsigned char CSCTL0_H;
 unsigned int CSCTL1, CSCTL2, CSCTL3;
 unsigned int PM5CTL0;
 """
+
+
+def strip_ir_for_native(input_ll: Path, output_ll: Path) -> None:
+    """Strip MSP430 target info from LLVM IR for native host compilation.
+
+    Removes the target triple, datalayout, ELF-only section attributes,
+    and @llvm.compiler.used/@llvm.used so clang can compile natively on
+    the host (e.g., Mach-O on macOS where ".fram" sections are invalid).
+    """
+    ir_text = input_ll.read_text()
+    lines: list[str] = []
+    for line in ir_text.splitlines(keepends=True):
+        if line.startswith("target triple = "):
+            lines.append("\n")
+        elif line.startswith("target datalayout = "):
+            lines.append("\n")
+        elif "@llvm.compiler.used" in line or "@llvm.used" in line:
+            lines.append("\n")
+        else:
+            line = re.sub(r',?\s*section\s+"[^"]+"', "", line)
+            lines.append(line)
+    output_ll.write_text("".join(lines))
+
+
+def write_native_stubs(stubs_c: Path) -> None:
+    """Write C stub file for MSP430 hardware registers used by benchmark.h."""
+    stubs_c.write_text(_NATIVE_STUBS_C)
 
 
 def collect_bb_freq(
@@ -212,27 +239,8 @@ def collect_bb_freq(
     freq_bin = workdir / "freq_run"
     bb_freq_json = workdir / "bb_freq.json"
 
-    # Strip MSP430 target triple, datalayout, ELF-only section attributes,
-    # and @llvm.compiler.used so clang can compile natively on the host
-    # (e.g., Mach-O on macOS where ".fram" sections are invalid).
-    ir_text = inst_ll.read_text()
-    lines: list[str] = []
-    for line in ir_text.splitlines(keepends=True):
-        if line.startswith("target triple = "):
-            lines.append("\n")
-        elif line.startswith("target datalayout = "):
-            lines.append("\n")
-        elif "@llvm.compiler.used" in line or "@llvm.used" in line:
-            lines.append("\n")
-        else:
-            # Remove ELF-specific section attributes (e.g., section ".fram")
-            # that are invalid on non-ELF targets like Mach-O.
-            line = re.sub(r',?\s*section\s+"[^"]+"', "", line)
-            lines.append(line)
-    native_ll.write_text("".join(lines))
-
-    # Write host stubs
-    stubs_c.write_text(_DEBUG_STUBS_C)
+    strip_ir_for_native(inst_ll, native_ll)
+    write_native_stubs(stubs_c)
 
     # Compile native binary
     compile_cmd: list[str] = [

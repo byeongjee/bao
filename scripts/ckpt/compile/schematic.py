@@ -23,7 +23,9 @@ from .common import (
     now_ms,
     optimize_ir,
     run_assembly_energy,
+    strip_ir_for_native,
     write_assembly_energy_config,
+    write_native_stubs,
 )
 
 
@@ -225,18 +227,11 @@ def _collect_or_reuse_trace(
         step_name="trace-collect",
     )
 
-    # Strip MSP430 target triple for native compilation
+    # Strip MSP430 target info for native compilation
     native_ll = tmp / "trace_inst_native.ll"
-    ir_text = trace_inst_ll.read_text()
-    lines: list[str] = []
-    for line in ir_text.splitlines(keepends=True):
-        if line.startswith("target triple = "):
-            lines.append("\n")
-        elif line.startswith("target datalayout = "):
-            lines.append("\n")
-        else:
-            lines.append(line)
-    native_ll.write_text("".join(lines))
+    stubs_c = tmp / "debug_stubs.c"
+    strip_ir_for_native(trace_inst_ll, native_ll)
+    write_native_stubs(stubs_c)
 
     # Compile native trace binary
     trace_bin = tmp / "trace_run"
@@ -246,6 +241,7 @@ def _collect_or_reuse_trace(
             *env.sysroot_flags,
             str(native_ll),
             str(env.schematic_trace_runtime),
+            str(stubs_c),
             "-o", str(trace_bin),
         ],
         step_name="trace-compile",
