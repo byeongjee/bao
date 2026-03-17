@@ -84,6 +84,7 @@ def compile_schematic(
         # Phase 1: C -> LLVM IR at -O0
         input_ll = tmp / "input.ll"
         extra_includes = list(opts.extra_includes)
+        extra_includes.append(str(env.project_dir / "passes" / "runtime"))
 
         compile_to_ir(
             tc, env, opts.input_c, input_ll,
