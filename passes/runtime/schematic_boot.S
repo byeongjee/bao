@@ -73,8 +73,9 @@ _do_recovery:
     mov.w   &__nvm_regs+22, R15
 
 #ifdef DEVICE_DEBUG
-    /* Count 12 register restores */
-    add.w   #12, &cnt_restore_reg
+    push    SR
+    add.w   #14, &cnt_restore_reg
+    pop     SR
 #endif
 
     /* Jump to saved PC (pops from stack).
@@ -128,10 +129,10 @@ __region_boundary:
     mov.w   R15, &__nvm_regs+22
 
 #ifdef DEVICE_DEBUG
-    /* Count 12 register saves */
-    add.w   #12, &cnt_save_reg
-    /* Count 1 boundary */
+    push    SR
+    add.w   #14, &cnt_save_reg
     add.w   #1, &cnt_boundary
+    pop     SR
 #endif
 
     /* Phase 2: Save PC + SP and halt */

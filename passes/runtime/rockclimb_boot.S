@@ -68,6 +68,13 @@ _do_recovery:
     mov.w   &__nvm_regs+20, R14
     mov.w   &__nvm_regs+22, R15
 
+#ifdef DEVICE_DEBUG
+    /* Preserve SR across counter increment — ADD clobbers flags. */
+    push    SR
+    add.w   #14, &cnt_restore_reg
+    pop     SR
+#endif
+
     /* Jump to saved PC (pops from stack).
        After ret: PC = saved PC, SP = __nvm_sp (push -2, ret +2 cancel). */
     ret
@@ -104,6 +111,15 @@ _normal_boot:
     .type   __region_boundary, @function
 
 __region_boundary:
+#ifdef DEVICE_DEBUG
+    /* Preserve SR across counter increments — ADD clobbers flags,
+       and in nop halt mode this function returns to the caller. */
+    push    SR
+    add.w   #1, &cnt_boundary
+    add.w   #2, &cnt_save_reg
+    pop     SR
+#endif
+
     save_pc_sp_and_halt
 
     ret
