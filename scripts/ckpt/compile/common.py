@@ -95,7 +95,7 @@ def optimize_ir(
     input_ll: Path,
     output_ll: Path,
     *,
-    opt_level: int = 2,
+    opt_level: int,
 ) -> StepResult:
     """Run the LLVM default optimization pipeline with vectorization disabled."""
     return run(
@@ -281,7 +281,7 @@ def compile_to_object(
     output_s: Path,
     output_o: Path,
     *,
-    opt_level: int = 2,
+    opt_level: int,
 ) -> StepResult:
     """Lower LLVM IR to MSP430 assembly, then assemble to an object file.
 
@@ -352,6 +352,7 @@ def compile_runtime_c(
     source: Path,
     output_o: Path,
     *,
+    gcc_opt_level: int,
     extra_defines: list[str] | None = None,
 ) -> StepResult:
     """Compile a runtime C source file for MSP430."""
@@ -359,7 +360,7 @@ def compile_runtime_c(
         tc.gcc,
         f"-mmcu={env.device}",
         "-msmall",
-        "-O2",
+        f"-O{gcc_opt_level}",
         f"-I{env.msp430gcc_support_path / 'include'}",
         f"-I{env.project_dir / 'passes' / 'runtime'}",
     ]
@@ -440,6 +441,7 @@ def link_algorithm(
     runtime_source: Path,
     linker_script: Path,
     cpu_freq: int,
+    gcc_opt_level: int,
     boot_defines: list[str] | None,
     device_debug: bool,
 ) -> Path:
@@ -461,7 +463,7 @@ def link_algorithm(
         runtime_defines.append("DEVICE_DEBUG")
 
     runtime_o = stem.with_suffix(".runtime.o")
-    compile_runtime_c(tc, env, runtime_source, runtime_o, extra_defines=runtime_defines)
+    compile_runtime_c(tc, env, runtime_source, runtime_o, gcc_opt_level=gcc_opt_level, extra_defines=runtime_defines)
 
     link_objs = [main_object, boot_o, runtime_o]
 
@@ -469,6 +471,7 @@ def link_algorithm(
         debug_common_o = stem.with_suffix(".debug_common.o")
         compile_runtime_c(
             tc, env, env.debug_common_c, debug_common_o,
+            gcc_opt_level=gcc_opt_level,
             extra_defines=runtime_defines,
         )
         link_objs.append(debug_common_o)

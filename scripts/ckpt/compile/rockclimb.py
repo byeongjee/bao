@@ -36,7 +36,8 @@ class RockClimbCompileOptions:
     device_debug: bool
     halt_mode: str
     cpu_freq: int
-    clang_opt_level: int = 2
+    clang_opt_level: int
+    opt_level: int
     save_temps: bool = False
     linker_script: Path | None = None
 
@@ -354,4 +355,5 @@ def _link_rockclimb(
         boot_defines=boot_defines,
         device_debug=opts.device_debug,
         cpu_freq=opts.cpu_freq,
+        gcc_opt_level=opts.opt_level,
     )

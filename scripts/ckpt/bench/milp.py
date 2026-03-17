@@ -171,6 +171,8 @@ def run_milp_benchmarks(
                 halt_mode=halt_mode,
                 device_debug=device_debug,
                 cpu_freq=cpu_freq,
+                opt_level=2,
+                clang_opt_level=2,
             )
 
             result: MilpCompileResult = compile_milp(tc, env, opts)

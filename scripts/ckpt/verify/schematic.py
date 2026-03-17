@@ -61,6 +61,8 @@ def verify_schematic(
                 device_debug=True,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
+                opt_level=2,
+                clang_opt_level=2,
             ),
         )
         return InstrumentedOutput(

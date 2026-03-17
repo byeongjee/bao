@@ -115,6 +115,7 @@ def _collect_trace(
         device_debug=False,
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
+        opt_level=2,
         clang_opt_level=0,
         extra_includes=[str(env.project_dir / "passes" / "runtime")],
     )
@@ -262,6 +263,7 @@ def run_schematic_benchmarks(
                 device_debug=device_debug,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
+                opt_level=2,
                 clang_opt_level=0,
                 extra_includes=[str(env.project_dir / "passes" / "runtime")],
                 trace_file=trace_json,

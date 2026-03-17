@@ -115,4 +115,5 @@ def _link_uninstrumented(
         boot_defines=boot_defines,
         device_debug=opts.device_debug,
         cpu_freq=opts.cpu_freq,
+        gcc_opt_level=opts.opt_level,
     )
