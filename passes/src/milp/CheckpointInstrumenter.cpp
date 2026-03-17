@@ -368,10 +368,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 if (addDebugMarkers_)
                     emitCounterIncrement(builder, cntRestoreVregGV_);
 
-                llvm::StoreInst *commitStore = rec.commitStore;
                 for (llvm::PHINode *phi : rec.phis) {
-                    phi->replaceUsesWithIf(restoreVal, [commitStore](llvm::Use &U) {
-                        return U.getUser() != commitStore;
+                    phi->replaceUsesWithIf(restoreVal, [&allCommitInsts](llvm::Use &U) {
+                        auto *I = llvm::dyn_cast<llvm::Instruction>(U.getUser());
+                        return !I || !allCommitInsts.count(I);
                     });
                 }
                 inserted++;

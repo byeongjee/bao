@@ -287,7 +287,12 @@ computeIneligSSALiveness(llvm::Function &F, const CFGAnalysis &cfg,
         }
 
         // V is live-in if it has real or PHI liveness.
+        // Skip defBlock: V is defined there, so it cannot be live-in.
+        // (phiLiveInBlocks may include defBlock for self-edges or
+        // back-edges, but the PHI commit/restore handles those.)
         for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
+            if (BB == defBlock)
+                continue;
             if (realLiveIn[BB] || phiLiveInBlocks.count(BB))
                 result[BB].insert(V);
         }

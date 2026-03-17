@@ -814,7 +814,19 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     // Forwarding PHIs for non-IV Header PHIs (loop-carried state)
     SmallVector<PHINode *, 4> headerForwardPhis;
     for (auto &info : headerPhiForwarding) {
-        Value *ForwardVal = info.headerPhi->getIncomingValueForBlock(Latch);
+        Value *ForwardVal;
+        if (ExitingBB == Header && Latch != Header) {
+            // Multi-block loop exiting from header: the exit fires before the
+            // body runs, so the loop-carried value (defined in the latch) does
+            // not dominate the exit edge.  The header PHI itself does dominate
+            // and already holds the last completed iteration's result.
+            ForwardVal = info.headerPhi;
+        } else {
+            // Single-block loop (Latch == Header) or latch-exiting: the body
+            // has executed, so forward the loop-carried value — the result
+            // of the current (last) iteration.
+            ForwardVal = info.headerPhi->getIncomingValueForBlock(Latch);
+        }
         PHINode *FP =
             OLB.CreatePHI(info.headerPhi->getType(), 1, info.headerPhi->getName() + ".fwd");
         FP->addIncoming(ForwardVal, ExitingBB);
