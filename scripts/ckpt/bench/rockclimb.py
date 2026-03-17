@@ -36,7 +36,7 @@ _CSV_HEADER: list[str] = [
     "status",
     "basic_blocks",
     "edges",
-    "regions",
+    "region_boundaries",
     "compilation_time_ms",
     "peak_rss_kb",
     "profiling_time_ms",
