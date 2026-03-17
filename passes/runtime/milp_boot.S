@@ -94,7 +94,9 @@ _normal_boot:
 
 __region_boundary:
 #ifdef DEVICE_DEBUG
+    push    SR
     add.w   #1, &cnt_boundary
+    pop     SR
 #endif
 
     save_pc_sp_and_halt

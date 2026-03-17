@@ -85,16 +85,9 @@ void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
         CallMI->addRegisterDefined(reg, TRI);
     }
 
-    // Debug counter: increment cnt_boundary by 1.
-    if (addDebugMarkers_ && cntBoundaryGV_) {
-        emitCounterIncrement(MBB, InsertPt, DL, cntBoundaryGV_, 1);
-    }
-
-    // Debug counter: increment cnt_restore_reg by 14 (R4-R15 + PC + SP).
-    // SR and CG (R2, R3) are not restored.
-    if (addDebugMarkers_ && cntRestoreGV_) {
-        emitCounterIncrement(MBB, InsertPt, DL, cntRestoreGV_, 14);
-    }
+    // cnt_boundary and cnt_restore_reg are counted in assembly
+    // (rockclimb_boot.S) under #ifdef DEVICE_DEBUG, consistent with
+    // MILP and SCHEMATIC.
 }
 
 void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpointPoint &ckpt) {
