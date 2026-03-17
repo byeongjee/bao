@@ -41,7 +41,6 @@ _CSV_HEADER: list[str] = [
     "peak_rss_kb",
     "profiling_time_ms",
     "execution_time_us",
-    "boundary_checks",
     "runtime_region_boundary_calls",
     "runtime_debug_save_reg_calls",
     "runtime_debug_restore_reg_calls",
@@ -66,7 +65,6 @@ def _build_row(
 ) -> dict[str, str | int | None]:
     """Build RockClimb-specific CSV fields."""
     return {
-        "boundary_checks": stats.boundary_checks or 0,
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
         "runtime_debug_save_reg_calls": nvm_counter(nvm, "save_reg"),
         "runtime_debug_restore_reg_calls": nvm_counter(nvm, "restore_reg"),

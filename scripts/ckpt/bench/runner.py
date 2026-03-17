@@ -415,7 +415,6 @@ def print_benchmark_summary(
         ("region_boundaries_inserted", "boundaries inserted"),
         ("enabled_checkpoints", "enabled"),
         ("distributed_checkpoints_inserted", "distributed inserted"),
-        ("boundary_checks", "boundary checks"),
         ("runtime_calls_inserted", "runtime calls"),
     ]:
         val = _fmt(key, fields)
