@@ -152,8 +152,8 @@ def _resolve_algorithm_config(
     default="nop",
     help="Halt mode for linked binary.",
 )
-@click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
-@click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
+@click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
+@click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
 @click.option(
     "--cpu-freq",
@@ -252,8 +252,8 @@ def compile_milp_cmd(
     default="nop",
     help="Halt mode for linked binary.",
 )
-@click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
-@click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
+@click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
+@click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
 @click.option(
     "--no-precomputed-energy",
     is_flag=True,
@@ -354,8 +354,8 @@ def compile_rockclimb_cmd(
     "--trace-file", type=click.Path(exists=True), help="Pre-collected trace JSON."
 )
 @click.option("--trace-only", is_flag=True, help="Only collect trace, skip insertion.")
-@click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
-@click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
+@click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
+@click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
 @click.option(
     "--estimator-mode",
@@ -462,8 +462,8 @@ def compile_schematic_cmd(
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link/--no-link", default=True, help="Link with boot.S and runtime (default: on).")
 @click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
-@click.option("-O", "opt_level", type=int, default=2, help="LLC opt level.")
-@click.option("-Oc", "clang_opt_level", type=int, default=2, help="Clang opt level.")
+@click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
+@click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
 @click.option(
     "--cpu-freq",

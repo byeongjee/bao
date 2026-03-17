@@ -161,8 +161,8 @@ def _compile_baseline(
             output=output,
             device_debug=True,
             cpu_freq=cpu_freq,
-            opt_level=2,
-            clang_opt_level=2,
+            opt_level=3,
+            clang_opt_level=3,
             link=True,
         ),
     )
