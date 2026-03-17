@@ -87,8 +87,8 @@ def run_uninstrumented_benchmarks(
                         output=out_dir / bench_name,
                         device_debug=False,
                         cpu_freq=cpu_freq,
-                        opt_level=2,
-                        clang_opt_level=2,
+                        opt_level=3,
+                        clang_opt_level=3,
                         link=True,
                     ),
                 )
