@@ -24,7 +24,6 @@ from ..env import ProjectEnv
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
-    extract_stat,
 )
 from ..errors import ConfigError
 from ..runner import CompilationError, StepResult
@@ -37,7 +36,7 @@ from .config import (
     discover_capacitors,
 )
 from .runner import (
-    build_base_fields,
+    CompileResult,
     check_device_available,
     nvm_counter,
     run_benchmark_matrix,
@@ -123,13 +122,7 @@ def _collect_trace(
 
     logger.debug("Trace output:\n%s", trace_result.pass_output)
 
-    profiling_time_ms = 0
-    raw_prof = extract_stat(trace_result.pass_output, "Profiling time (ms)")
-    if raw_prof is not None:
-        try:
-            profiling_time_ms = int(raw_prof)
-        except ValueError:
-            pass
+    profiling_time_ms = trace_result.profiling_time_ms
 
     trace_json = trace_result.trace_file
     if trace_json is None or not trace_json.is_file():
@@ -153,13 +146,9 @@ def _build_row(
     stats: PassStatistics,
     nvm: NvmCounters | None,
     full_output: str,
-    *,
-    profiling_time_ms: int = 0,
 ) -> dict[str, str | int | None]:
-    """Build a CSV row dict from parsed statistics and NVM counters."""
-    fields = build_base_fields(stats, full_output, nvm)
-    fields.update({
-        "profiling_time_ms": profiling_time_ms,
+    """Build SCHEMATIC-specific CSV fields."""
+    return {
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
         "runtime_debug_save_reg_calls": nvm_counter(nvm, "save_reg"),
         "runtime_debug_restore_reg_calls": nvm_counter(nvm, "restore_reg"),
@@ -171,8 +160,7 @@ def _build_row(
         "loop_decisions": stats.loop_decisions or 0,
         "paths_analyzed": stats.paths_analyzed or 0,
         "runtime_calls_inserted": stats.runtime_calls_inserted or 0,
-    })
-    return fields
+    }
 
 
 def run_schematic_benchmarks(
@@ -242,7 +230,7 @@ def run_schematic_benchmarks(
 
         def compile_fn(
             bench_path: Path, cap: CapacitorConfig
-        ) -> tuple[Path, str, Path | None]:
+        ) -> CompileResult:
             bench_name = bench_path.stem
 
             # Collect trace on first capacitor for this benchmark
@@ -256,7 +244,7 @@ def run_schematic_benchmarks(
                     cpu_freq=cpu_freq,
                 )
 
-            trace_json, _ = trace_cache[bench_name]
+            trace_json, profiling_ms = trace_cache[bench_name]
 
             out_dir = workdir / f"{bench_name}_{cap.label}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -281,18 +269,10 @@ def run_schematic_benchmarks(
             result: SchematicCompileResult = compile_schematic(
                 tc, env, compile_opts
             )
-            return out_dir, result.pass_output, result.stats_json
-
-        def row_builder(
-            bench_name: str,
-            cap_label: str,
-            stats: PassStatistics,
-            nvm: NvmCounters | None,
-            full_output: str,
-        ) -> dict[str, str | int | None]:
-            _, profiling_ms = trace_cache.get(bench_name, (None, 0))
-            return _build_row(
-                bench_name, cap_label, stats, nvm, full_output,
+            return CompileResult(
+                out_dir=out_dir,
+                pass_output=result.pass_output,
+                stats_json=result.stats_json,
                 profiling_time_ms=profiling_ms,
             )
 
@@ -306,6 +286,6 @@ def run_schematic_benchmarks(
             nvm_symbols=_NVM_SYMBOLS,
             device_debug=device_debug,
             csv_header=_CSV_HEADER,
-            row_builder=row_builder,
+            row_builder=_build_row,
             saleae_manager=saleae_manager,
         )

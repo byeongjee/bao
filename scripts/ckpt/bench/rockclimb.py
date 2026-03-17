@@ -28,7 +28,7 @@ from .config import (
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import build_base_fields, check_device_available, nvm_counter, run_benchmark_matrix
+from .runner import CompileResult, check_device_available, nvm_counter, run_benchmark_matrix
 
 _CSV_HEADER: list[str] = [
     "benchmark",
@@ -64,16 +64,13 @@ def _build_row(
     nvm: NvmCounters | None,
     full_output: str,
 ) -> dict[str, str | int | None]:
-    """Build a CSV row dict from parsed statistics and NVM counters."""
-    fields = build_base_fields(stats, full_output, nvm)
-    fields.update({
-        "profiling_time_ms": "",
+    """Build RockClimb-specific CSV fields."""
+    return {
         "boundary_checks": stats.boundary_checks or 0,
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
         "runtime_debug_save_reg_calls": nvm_counter(nvm, "save_reg"),
         "runtime_debug_restore_reg_calls": nvm_counter(nvm, "restore_reg"),
-    })
-    return fields
+    }
 
 
 def run_rockclimb_benchmarks(
@@ -129,7 +126,7 @@ def run_rockclimb_benchmarks(
 
         def compile_fn(
             bench_path: Path, cap: CapacitorConfig
-        ) -> tuple[Path, str, Path | None]:
+        ) -> CompileResult:
             bench_name = bench_path.stem
             out_dir = workdir / f"{bench_name}_{cap.label}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -148,7 +145,12 @@ def run_rockclimb_benchmarks(
             )
 
             result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)
-            return out_dir, result.pass_output, result.stats_json
+            return CompileResult(
+                out_dir=out_dir,
+                pass_output=result.pass_output,
+                stats_json=result.stats_json,
+                profiling_time_ms=0,
+            )
 
         run_benchmark_matrix(
             env,
