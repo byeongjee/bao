@@ -302,8 +302,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         common.edges = ctx.cfg->getEdges().size();
         common.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
         common.regions = solution.regionStarts.size();
-        common.regionBoundaries =
-            solution.regionStarts.empty() ? 0 : solution.regionStarts.size() - 1;
+        common.regionBoundaries = solution.regionStarts.size();
         common.runtimeCallsInserted = inserted;
         common.compilationTimeMs = totalExecutionTimeMs;
         common.peakRSSKb = getPeakRSSKb();
@@ -347,7 +346,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         c.edges = ctx.cfg->getEdges().size();
         c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
         c.regions = solution.regionStarts.size();
-        c.regionBoundaries = solution.regionStarts.empty() ? 0 : solution.regionStarts.size() - 1;
+        c.regionBoundaries = solution.regionStarts.size();
         c.runtimeCallsInserted = inserted;
         c.compilationTimeMs = totalExecutionTimeMs;
         c.peakRSSKb = getPeakRSSKb();

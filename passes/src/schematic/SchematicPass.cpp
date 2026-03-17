@@ -591,7 +591,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         common.edges = ctx.cfg->getEdges().size();
         common.candidateGlobals = state.getCandidates().size();
         common.regions = solution.regions.size();
-        common.regionBoundaries = solution.enabledCheckpoints.size();
+        common.regionBoundaries = solution.regions.size();
         common.runtimeCallsInserted = inserted;
         common.compilationTimeMs = totalExecutionTimeMs;
         common.peakRSSKb = getPeakRSSKb();
@@ -615,7 +615,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         c.edges = ctx.cfg->getEdges().size();
         c.candidateGlobals = state.getCandidates().size();
         c.regions = solution.regions.size();
-        c.regionBoundaries = solution.enabledCheckpoints.size();
+        c.regionBoundaries = solution.regions.size();
         c.runtimeCallsInserted = inserted;
         c.compilationTimeMs = totalExecutionTimeMs;
         c.peakRSSKb = getPeakRSSKb();
