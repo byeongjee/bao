@@ -238,7 +238,7 @@ def _verify_one(
             compile_output = exc.pass_output or (exc.result.output if exc.result else str(exc))
             infeasible = detect_infeasibility(compile_output)
             if infeasible:
-                logger.info("  SKIP (%s)", infeasible)
+                logger.warning("  SKIP (%s)", infeasible)
                 return BenchResult(
                     bench_name, cap_label, Status.SKIP, infeasible,
                     baseline_result=baseline_result,
@@ -253,7 +253,7 @@ def _verify_one(
         # -- C: Check infeasibility --
         infeasible = detect_infeasibility(compile_output)
         if infeasible:
-            logger.info("  SKIP (%s)", infeasible)
+            logger.warning("  SKIP (%s)", infeasible)
             return BenchResult(
                 bench_name, cap_label, Status.SKIP, infeasible,
                 baseline_result=baseline_result,
@@ -309,7 +309,7 @@ def _verify_one(
                 algorithm_result=inst_result_val,
             )
         else:
-            logger.info("  FAIL (baseline=%s %s=%s)", baseline_result, algorithm, inst_result_val)
+            logger.error("  FAIL (baseline=%s %s=%s)", baseline_result, algorithm, inst_result_val)
             return BenchResult(
                 bench_name, cap_label, Status.FAIL,
                 f"baseline={baseline_result} {algorithm}={inst_result_val}",

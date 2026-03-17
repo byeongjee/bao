@@ -261,7 +261,7 @@ def run_benchmark_matrix(
                 if stats_json_data is not None:
                     stats, json_feasible, json_reason = load_stats_json(stats_json_data)
                     if not json_feasible:
-                        logger.warning("  INFEASIBLE (%s)", json_reason)
+                        logger.error("  INFEASIBLE (%s)", json_reason)
                         row = BenchmarkRow(
                             benchmark=row_name,
                             capacitor=cap.label,
@@ -273,7 +273,7 @@ def run_benchmark_matrix(
                     # ----- Check infeasibility (text fallback) -----
                     infeasible_reason = detect_infeasibility(full_output)
                     if infeasible_reason is not None:
-                        logger.warning("  INFEASIBLE (%s)", infeasible_reason)
+                        logger.error("  INFEASIBLE (%s)", infeasible_reason)
                         row = BenchmarkRow(
                             benchmark=row_name,
                             capacitor=cap.label,
@@ -362,7 +362,10 @@ def print_benchmark_summary(
 ) -> None:
     """Print a detailed multi-line summary for a benchmark run."""
     label = status.upper() if status != "ok" else "OK"
-    logger.info("  %s", label)
+    if status == "ok":
+        logger.info("  %s", label)
+    else:
+        logger.error("  %s", label)
 
     def _fmt(key: str, fields: dict[str, str | int | None]) -> str | None:
         val = fields.get(key)
