@@ -96,24 +96,28 @@ Requires `passes/build/CheckpointPass.so` to be built first. Test configs live i
 
 ## Scripts — `ckpt` Python Package
 
-The `scripts/ckpt/` package provides the compilation, benchmarking, and device interaction toolchain as a Python CLI. Install with `uv pip install -e .` (adds `click` dependency). Run via `python -m ckpt` or the `ckpt` entry point.
+The `scripts/ckpt/` package provides the compilation, benchmarking, and device interaction toolchain as a Python CLI. Install with `uv sync` (adds `click` dependency). Run via `python -m ckpt` or the `ckpt` entry point.
 
 ### CLI Commands
 
 ```bash
 # Compilation pipelines (INPUT can be a benchmark name or path to .c file)
-ckpt compile milp      INPUT --cap CAP [--link] [--estimator-mode assembly|ir] [--save-temps] ...
-ckpt compile rockclimb INPUT --cap CAP [--link] [--no-precomputed-energy] [--save-temps] ...
-ckpt compile schematic INPUT --cap CAP [--link] [--trace FILE] [--trace-only] [--save-temps] ...
+ckpt compile milp           INPUT --cap CAP [--link] [--estimator-mode assembly|ir] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
+ckpt compile rockclimb      INPUT --cap CAP [--link] [--no-precomputed-energy] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
+ckpt compile schematic      INPUT --cap CAP [--link] [--trace-file FILE] [--trace-only] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
+ckpt compile uninstrumented INPUT [--link] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
 # Explicit config paths also accepted: -e ENERGY_CONFIG -m/-c/-s ALGO_CONFIG
 
 # Benchmark runners (compile + flash + NVM readback → CSV)
-ckpt bench milp        [BENCHMARKS...] [--cap 1uF] [--debug-counters] [-o CSV]
-ckpt bench rockclimb   [BENCHMARKS...] [--cap 1uF] [--debug-counters] [-o CSV]
-ckpt bench schematic   [BENCHMARKS...] [--cap 1uF] [--debug-counters] [-o CSV]
+ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [-o CSV]
+ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [-o CSV]
+ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--trace-config] [-o CSV]
+ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [-o CSV]
 
-# Semantic verification
-ckpt verify rockclimb  [BENCHMARKS...] [--cap 1uF]
+# Semantic verification (defaults to --halt-mode bor to exercise checkpoint/restore under resets)
+ckpt verify milp       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq]
+ckpt verify rockclimb  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--cpu-freq]
+ckpt verify schematic  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq]
 
 # Analysis
 ckpt analyze strip-mining LOG_FILE [-o CSV]
@@ -129,6 +133,8 @@ ckpt device read-serial [--timeout N] [--end-marker M]
 scripts/ckpt/
 ├── cli.py               # Click root group + all subcommands
 ├── env.py               # ProjectEnv dataclass, .env/.envrc loading, path resolution
+├── errors.py            # Exception hierarchy: CkptError → ToolError, CompilationError, etc.
+├── log.py               # Logging setup with module-prefixed formatting
 ├── toolchain.py         # Toolchain dataclass (clang/opt/llc/gcc paths), validation
 ├── runner.py            # subprocess wrapper: run(), StepResult, ToolError
 ├── tempdir.py           # @contextmanager compilation_workdir()
@@ -138,7 +144,8 @@ scripts/ckpt/
 │   │                    #   compile_to_object, assemble_and_link, collect_bb_freq
 │   ├── milp.py          # MilpCompileOptions + compile_milp() (two-pass assembly + single-pass IR)
 │   ├── rockclimb.py     # RockClimbCompileOptions + compile_rockclimb() (MIR pipeline)
-│   └── schematic.py     # SchematicCompileOptions + compile_schematic() (trace + insertion)
+│   ├── schematic.py     # SchematicCompileOptions + compile_schematic() (trace + insertion)
+│   └── uninstrumented.py # UninstrumentedCompileOptions + compile_uninstrumented() (baseline)
 ├── device/
 │   ├── nvm.py           # Symbol resolution, hex dump parsing
 │   ├── serial.py        # UART reading
@@ -149,12 +156,16 @@ scripts/ckpt/
 │   ├── runner.py        # Shared benchmark matrix loop + CSV output
 │   ├── milp.py          # MILP benchmark runner
 │   ├── rockclimb.py     # RockClimb benchmark runner
-│   └── schematic.py     # SCHEMATIC benchmark runner (two-phase: trace once, then per-cap)
+│   ├── schematic.py     # SCHEMATIC benchmark runner (two-phase: trace once, then per-cap)
+│   └── uninstrumented.py # Baseline execution time measurement (no checkpoints)
 ├── verify/
-│   └── rockclimb.py     # Semantic verification (baseline vs RockClimb comparison)
+│   ├── common.py        # Shared verification infrastructure (verify_algorithm callback pattern)
+│   ├── milp.py          # MILP semantic verification
+│   ├── rockclimb.py     # RockClimb semantic verification
+│   └── schematic.py     # SCHEMATIC semantic verification
 └── analysis/
     ├── strip_mining.py  # Parse verbose logs for strip-mining K values
-    └── plot.py          # Plot benchmark CSV results (requires `pip install .[plot]`)
+    └── plot.py          # Plot benchmark CSV results (requires `uv sync --extra plot`)
 ```
 
 ## Architecture
@@ -279,7 +290,7 @@ Sample configs are in `benchmarks/` and `tests/`.
 - **CMake 3.20+**, C++17 compiler
 - **nlohmann/json** (fetched automatically by CMake)
 - **Python 3.14+**, managed via **uv**
-- **click>=8.1** (CLI framework, installed with `uv pip install -e .`)
+- **click>=8.1** (CLI framework, installed with `uv sync`)
 - **pyserial>=3.5** (device UART communication)
-- **matplotlib, numpy** (optional, for plotting: `uv pip install -e ".[plot]"`)
+- **matplotlib, numpy** (optional, for plotting: `uv sync --extra plot`)
 - **logic2-automation** (optional, for Saleae timing: `uv sync --extra saleae`)
