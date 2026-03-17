@@ -201,7 +201,7 @@ void CheckpointOptimizer::addVariables() {
                                               makeVarNameGV(cfg_, "place_in_vm", block, GV));
             pending_[varKey] =
                 model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarNameGV(cfg_, "pending", block, GV));
-            vmPending_[gvKey] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY,
+            vmPending_[gvKey] = model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS,
                                               makeVarNameGV(cfg_, "vm_pending", block, GV));
         }
     }
@@ -219,7 +219,7 @@ void CheckpointOptimizer::addVariables() {
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             BlockGVKey gvKey = std::make_pair(block, GV);
-            needRestore_[gvKey] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY,
+            needRestore_[gvKey] = model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS,
                                                 makeVarNameGV(cfg_, "need_restore", block, GV));
         }
     }
@@ -231,14 +231,14 @@ void CheckpointOptimizer::addVariables() {
         // Eligible commits.
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             BlockVarKey varKey = std::make_pair(block, static_cast<llvm::Value *>(GV));
-            commit_[varKey] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarNameGV(cfg_, "commit", block, GV));
+            commit_[varKey] = model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS,
+                                            makeVarNameGV(cfg_, "commit", block, GV));
         }
         // Ineligible commits.
         for (llvm::Value *V : state_.getIneligibleObjs()) {
             BlockVarKey varKey = std::make_pair(block, V);
             commit_[varKey] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "commit", block, V));
+                model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "commit", block, V));
         }
     }
 
