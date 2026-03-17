@@ -352,6 +352,7 @@ def _compile_schematic_impl(
     estimator_mode: str,
     cpu_freq: str,
     save_temps: bool,
+    algorithm_label: str,
 ) -> None:
     from .bench.config import default_energy_config
     from .compile.schematic import SchematicCompileOptions, compile_schematic
@@ -365,7 +366,7 @@ def _compile_schematic_impl(
     schematic_config_path: Path | None
     if not trace_only:
         schematic_config_path = _resolve_algorithm_config(
-            env, "schematic", schematic_config, cap,
+            env, algorithm_label, schematic_config, cap,
             "-s/--schematic-config or --cap",
         )
     else:
@@ -377,7 +378,7 @@ def _compile_schematic_impl(
     elif estimator_mode == "ir":
         energy_config_path = env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
     else:
-        energy_config_path = default_energy_config(env, "schematic")
+        energy_config_path = default_energy_config(env, algorithm_label)
 
     result = compile_schematic(
         ctx.obj["tc"],
@@ -481,7 +482,7 @@ def compile_schematic_cmd(
         ctx, input_c, energy_config, schematic_config, cap, output,
         link, debug, device_debug, halt_mode, trace_file, trace_only,
         opt_level, clang_opt_level, extra_includes, estimator_mode,
-        cpu_freq, save_temps,
+        cpu_freq, save_temps, algorithm_label="schematic",
     )
 
 
@@ -551,7 +552,7 @@ def compile_schematic_o3_cmd(
         ctx, input_c, energy_config, schematic_config, cap, output,
         link, debug, device_debug, halt_mode, trace_file, trace_only,
         opt_level, clang_opt_level, extra_includes, estimator_mode,
-        cpu_freq, save_temps,
+        cpu_freq, save_temps, algorithm_label="schematicO3",
     )
 
 
