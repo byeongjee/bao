@@ -30,6 +30,11 @@ ALGORITHMS = {
         "label": "SCHEMATIC",
         "color": "#4CAF50",
     },
+    "schematicO3": {
+        "file": "schematicO3_benchmark_summary.csv",
+        "label": "SCHEMATIC-O3",
+        "color": "#8BC34A",
+    },
 }
 
 METRICS = {

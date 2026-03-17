@@ -333,6 +333,88 @@ def compile_rockclimb_cmd(
     logger.debug("Pass output:\n%s", result.pass_output)
 
 
+def _compile_schematic_impl(
+    ctx: click.Context,
+    input_c: str,
+    energy_config: str | None,
+    schematic_config: str | None,
+    cap: str | None,
+    output: str | None,
+    link: bool,
+    debug: bool,
+    device_debug: bool,
+    halt_mode: str,
+    trace_file: str | None,
+    trace_only: bool,
+    opt_level: int,
+    clang_opt_level: int,
+    extra_includes: tuple[str, ...],
+    estimator_mode: str,
+    cpu_freq: str,
+    save_temps: bool,
+) -> None:
+    from .bench.config import default_energy_config
+    from .compile.schematic import SchematicCompileOptions, compile_schematic
+
+    env = ctx.obj["env"]
+
+    input_path = _resolve_input(env, input_c)
+    output_path = Path(output) if output else Path("build") / input_path.stem
+    cpu_freq_hz = int(cpu_freq) * 1_000_000
+
+    schematic_config_path: Path | None
+    if not trace_only:
+        schematic_config_path = _resolve_algorithm_config(
+            env, "schematic", schematic_config, cap,
+            "-s/--schematic-config or --cap",
+        )
+    else:
+        schematic_config_path = Path(schematic_config) if schematic_config else None
+
+    energy_config_path: Path
+    if energy_config is not None:
+        energy_config_path = Path(energy_config)
+    elif estimator_mode == "ir":
+        energy_config_path = env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+    else:
+        energy_config_path = default_energy_config(env, "schematic")
+
+    result = compile_schematic(
+        ctx.obj["tc"],
+        env,
+        SchematicCompileOptions(
+            input_c=input_path,
+            energy_config=energy_config_path,
+            schematic_config=schematic_config_path,
+            output=output_path,
+            estimator_mode=estimator_mode,
+            pass_log_level=ctx.obj["log_level"],
+            debug=debug,
+            trace_only=trace_only,
+            link=link,
+            device_debug=device_debug,
+            halt_mode=halt_mode,
+            cpu_freq=cpu_freq_hz,
+            opt_level=opt_level,
+            clang_opt_level=clang_opt_level,
+            extra_includes=list(extra_includes),
+            trace_file=Path(trace_file) if trace_file else None,
+            save_temps=save_temps,
+        ),
+    )
+
+    if result.object_file:
+        logger.info("Object: %s", result.object_file)
+    if result.assembly_file:
+        logger.info("Assembly: %s", result.assembly_file)
+    if result.elf_file:
+        logger.info("ELF: %s", result.elf_file)
+    if result.trace_file:
+        logger.info("Trace: %s", result.trace_file)
+    if result.pass_output:
+        logger.debug("Pass output:\n%s", result.pass_output)
+
+
 @compile.command("schematic")
 @click.argument("input_c")
 @click.option("-e", "--energy-config", type=click.Path(exists=True),
@@ -395,66 +477,82 @@ def compile_schematic_cmd(
 
     INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
     """
-    from .bench.config import default_energy_config
-    from .compile.schematic import SchematicCompileOptions, compile_schematic
-
-    env = ctx.obj["env"]
-
-    input_path = _resolve_input(env, input_c)
-    output_path = Path(output) if output else Path("build") / input_path.stem
-    cpu_freq_hz = int(cpu_freq) * 1_000_000
-
-    schematic_config_path: Path | None
-    if not trace_only:
-        schematic_config_path = _resolve_algorithm_config(
-            env, "schematic", schematic_config, cap,
-            "-s/--schematic-config or --cap",
-        )
-    else:
-        schematic_config_path = Path(schematic_config) if schematic_config else None
-
-    energy_config_path: Path
-    if energy_config is not None:
-        energy_config_path = Path(energy_config)
-    elif estimator_mode == "ir":
-        energy_config_path = env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
-    else:
-        energy_config_path = default_energy_config(env, "schematic")
-
-    result = compile_schematic(
-        ctx.obj["tc"],
-        env,
-        SchematicCompileOptions(
-            input_c=input_path,
-            energy_config=energy_config_path,
-            schematic_config=schematic_config_path,
-            output=output_path,
-            estimator_mode=estimator_mode,
-            pass_log_level=ctx.obj["log_level"],
-            debug=debug,
-            trace_only=trace_only,
-            link=link,
-            device_debug=device_debug,
-            halt_mode=halt_mode,
-            cpu_freq=cpu_freq_hz,
-            opt_level=opt_level,
-            clang_opt_level=clang_opt_level,
-            extra_includes=list(extra_includes),
-            trace_file=Path(trace_file) if trace_file else None,
-            save_temps=save_temps,
-        ),
+    _compile_schematic_impl(
+        ctx, input_c, energy_config, schematic_config, cap, output,
+        link, debug, device_debug, halt_mode, trace_file, trace_only,
+        opt_level, clang_opt_level, extra_includes, estimator_mode,
+        cpu_freq, save_temps,
     )
 
-    if result.object_file:
-        logger.info("Object: %s", result.object_file)
-    if result.assembly_file:
-        logger.info("Assembly: %s", result.assembly_file)
-    if result.elf_file:
-        logger.info("ELF: %s", result.elf_file)
-    if result.trace_file:
-        logger.info("Trace: %s", result.trace_file)
-    if result.pass_output:
-        logger.debug("Pass output:\n%s", result.pass_output)
+
+@compile.command("schematicO3")
+@click.argument("input_c")
+@click.option("-e", "--energy-config", type=click.Path(exists=True),
+              help="Energy config (default: auto-detected by estimator mode).")
+@click.option("-s", "--schematic-config", type=click.Path(exists=True),
+              help="SCHEMATIC config (alternative to --cap).")
+@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
+@click.option("-o", "--output", type=click.Path())
+@click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
+@click.option("--debug", is_flag=True, help="Enable DEBUG output.")
+@click.option("--device-debug", is_flag=True, help="Enable device debug.")
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    default="nop",
+    help="Halt mode for linked binary.",
+)
+@click.option(
+    "--trace-file", type=click.Path(exists=True), help="Pre-collected trace JSON."
+)
+@click.option("--trace-only", is_flag=True, help="Only collect trace, skip insertion.")
+@click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
+@click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
+@click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
+@click.option(
+    "--estimator-mode",
+    type=click.Choice(["assembly", "ir"]),
+    default="assembly",
+    help="Energy estimator mode.",
+)
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
+@click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
+@click.pass_context
+def compile_schematic_o3_cmd(
+    ctx: click.Context,
+    input_c: str,
+    energy_config: str | None,
+    schematic_config: str | None,
+    cap: str | None,
+    output: str | None,
+    link: bool,
+    debug: bool,
+    device_debug: bool,
+    halt_mode: str,
+    trace_file: str | None,
+    trace_only: bool,
+    opt_level: int,
+    clang_opt_level: int,
+    extra_includes: tuple[str, ...],
+    estimator_mode: str,
+    cpu_freq: str,
+    save_temps: bool,
+) -> None:
+    """Run the SCHEMATIC-O3 trace-based compilation pipeline (clang -O3).
+
+    INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
+    """
+    _compile_schematic_impl(
+        ctx, input_c, energy_config, schematic_config, cap, output,
+        link, debug, device_debug, halt_mode, trace_file, trace_only,
+        opt_level, clang_opt_level, extra_includes, estimator_mode,
+        cpu_freq, save_temps,
+    )
 
 
 @compile.command("uninstrumented")
@@ -693,6 +791,75 @@ def bench_schematic_cmd(
         trace_config=Path(trace_config) if trace_config else None,
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        clang_opt_level=0,
+        algorithm_label="schematic",
+    )
+
+
+@bench.command("schematicO3")
+@click.argument("benchmarks", nargs=-1)
+@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
+@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
+@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    default="swbor",
+    help="Halt mode for linked binary.",
+)
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Override default energy config.",
+)
+@click.option(
+    "--trace-config",
+    type=click.Path(exists=True),
+    help="Override trace-collection config (default: config_10uF.json).",
+)
+@click.option(
+    "--estimator-mode",
+    type=click.Choice(["assembly", "ir"]),
+    default="assembly",
+    help="Energy estimator mode.",
+)
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
+@click.pass_context
+def bench_schematic_o3_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    cap: tuple[str, ...],
+    device_debug: bool,
+    output: str | None,
+    halt_mode: str,
+    energy_config: str | None,
+    trace_config: str | None,
+    estimator_mode: str,
+    cpu_freq: str,
+) -> None:
+    """Run SCHEMATIC-O3 benchmarks across programs and capacitor sizes."""
+    from .bench.schematic import run_schematic_benchmarks
+
+    run_schematic_benchmarks(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=list(benchmarks) if benchmarks else None,
+        caps=list(cap) if cap else None,
+        device_debug=device_debug,
+        halt_mode=halt_mode,
+        output_csv=Path(output) if output else None,
+        energy_config=Path(energy_config) if energy_config else None,
+        trace_config=Path(trace_config) if trace_config else None,
+        estimator_mode=estimator_mode,
+        cpu_freq=int(cpu_freq) * 1_000_000,
+        clang_opt_level=3,
+        algorithm_label="schematicO3",
     )
 
 
@@ -887,6 +1054,65 @@ def verify_schematic_cmd(
         energy_config=Path(energy_config) if energy_config else None,
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        clang_opt_level=0,
+        algorithm_label="schematic",
+    )
+    if not success:
+        raise SystemExit(1)
+
+
+@verify.command("schematicO3")
+@click.argument("benchmarks", nargs=-1)
+@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Override default energy config.",
+)
+# bor is required: verify tests correctness under resets (intermittent computing).
+@click.option(
+    "--halt-mode",
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    default="bor",
+    help="Halt mode for linked binary (default: bor).",
+)
+@click.option(
+    "--estimator-mode",
+    type=click.Choice(["assembly", "ir"]),
+    default="assembly",
+    help="Energy estimator mode.",
+)
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
+@click.pass_context
+def verify_schematic_o3_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    cap: tuple[str, ...],
+    energy_config: str | None,
+    halt_mode: str,
+    estimator_mode: str,
+    cpu_freq: str,
+) -> None:
+    """Verify semantic correctness of SCHEMATIC-O3 checkpoint insertion."""
+    from .verify.schematic import verify_schematic
+
+    success = verify_schematic(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=list(benchmarks) if benchmarks else None,
+        caps=list(cap) if cap else None,
+        halt_mode=halt_mode,
+        energy_config=Path(energy_config) if energy_config else None,
+        estimator_mode=estimator_mode,
+        cpu_freq=int(cpu_freq) * 1_000_000,
+        clang_opt_level=3,
+        algorithm_label="schematicO3",
     )
     if not success:
         raise SystemExit(1)

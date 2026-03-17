@@ -30,12 +30,14 @@ def verify_schematic(
     energy_config: Path | None,
     estimator_mode: str,
     cpu_freq: int,
+    clang_opt_level: int,
+    algorithm_label: str,
 ) -> bool:
     """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
     from ..bench.config import default_energy_config
 
     if energy_config is None:
-        energy_config = default_energy_config(env, "schematic")
+        energy_config = default_energy_config(env, algorithm_label)
 
     def compile_instrumented(
         tc: Toolchain,
@@ -62,7 +64,7 @@ def verify_schematic(
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
                 opt_level=3,
-                clang_opt_level=0,
+                clang_opt_level=clang_opt_level,
             ),
         )
         return InstrumentedOutput(
@@ -72,7 +74,7 @@ def verify_schematic(
 
     return verify_algorithm(
         env, tc,
-        algorithm="schematic",
+        algorithm=algorithm_label,
         benchmarks=benchmarks,
         caps=caps,
         halt_mode=halt_mode,
