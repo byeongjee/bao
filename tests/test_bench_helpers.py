@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from ckpt.bench.runner import build_base_fields, nvm_counter
-from ckpt.output_parser import NvmCounters, PassStatistics
+from pathlib import Path
+
+from ckpt.bench.runner import CompileResult, nvm_counter
+from ckpt.output_parser import NvmCounters
 from ckpt.runner import StepResult
 
 
@@ -47,33 +49,28 @@ class TestNvmCounter:
 
 
 # ---------------------------------------------------------------------------
-# build_base_fields
+# CompileResult
 # ---------------------------------------------------------------------------
 
-class TestBuildBaseFields:
-    def test_full_stats(self):
-        stats = PassStatistics(
-            basic_blocks=24,
-            edges=30,
-            regions=3,
-            compilation_time_ms=500,
-            peak_rss_kb=10240,
+class TestCompileResult:
+    def test_fields(self):
+        cr = CompileResult(
+            out_dir=Path("/tmp/out"),
+            pass_output="some output",
+            stats_json=None,
+            profiling_time_ms=123,
         )
-        output = "some output\nRESULT: 42\nmore"
-        fields = build_base_fields(stats, output, None)
-        assert fields["basic_blocks"] == 24
-        assert fields["edges"] == 30
-        assert fields["regions"] == 3
-        assert fields["compilation_time_ms"] == 500
-        assert fields["peak_rss_kb"] == 10240
-        assert fields["result"] == "42"
+        assert cr.out_dir == Path("/tmp/out")
+        assert cr.pass_output == "some output"
+        assert cr.stats_json is None
+        assert cr.profiling_time_ms == 123
 
-    def test_all_none_stats(self):
-        stats = PassStatistics()
-        fields = build_base_fields(stats, "no result line", None)
-        assert fields["basic_blocks"] == 0
-        assert fields["edges"] == 0
-        assert fields["regions"] == 0
-        assert fields["compilation_time_ms"] == 0
-        assert fields["peak_rss_kb"] == 0
-        assert fields["result"] == ""
+    def test_with_stats_json(self):
+        p = Path("/tmp/stats.json")
+        cr = CompileResult(
+            out_dir=Path("/tmp/out"),
+            pass_output="",
+            stats_json=p,
+            profiling_time_ms=0,
+        )
+        assert cr.stats_json == p

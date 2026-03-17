@@ -53,32 +53,22 @@ class BenchmarkRow:
     fields: dict[str, str | int | None] = field(default_factory=dict)
 
 
+@dataclass
+class CompileResult:
+    """Result from a per-(benchmark, capacitor) compilation."""
+
+    out_dir: Path
+    pass_output: str
+    stats_json: Path | None
+    profiling_time_ms: int
+
+
 def nvm_counter(nvm: NvmCounters | None, attr: str) -> int:
     """Safely read an NVM counter attribute, defaulting to 0."""
     if nvm is None:
         return 0
     val = getattr(nvm, attr, None)
     return val if val is not None else 0
-
-
-def build_base_fields(
-    stats: PassStatistics, full_output: str,
-    nvm: NvmCounters | None,
-) -> dict[str, str | int | None]:
-    """Build the common stats fields shared by all algorithms."""
-    result = ""
-    if nvm is not None and nvm.result is not None:
-        result = str(nvm.result)
-    else:
-        result = extract_stat(full_output, "RESULT") or ""
-    return {
-        "basic_blocks": stats.basic_blocks or 0,
-        "edges": stats.edges or 0,
-        "regions": stats.regions or 0,
-        "compilation_time_ms": stats.compilation_time_ms or 0,
-        "peak_rss_kb": stats.peak_rss_kb or 0,
-        "result": result,
-    }
 
 
 def check_device_available() -> bool:
@@ -109,8 +99,8 @@ RowBuilder = Callable[
 # Type alias for the per-(benchmark, capacitor) compile function.
 #
 # Signature:
-#   (bench_path, capacitor) -> (output_dir, compile_output_text)
-CompileFn = Callable[[Path, CapacitorConfig], tuple[Path, str, Path | None]]
+#   (bench_path, capacitor) -> CompileResult
+CompileFn = Callable[[Path, CapacitorConfig], CompileResult]
 
 
 
@@ -194,9 +184,14 @@ def run_benchmark_matrix(
 
                 # ----- Compile -----
                 had_compilation_error = False
+                compile_result_profiling_ms: int = 0
                 stats_json_path: Path | None = None
                 try:
-                    output_dir, compile_output, stats_json_path = compile_fn(bench_path, cap)
+                    compile_result = compile_fn(bench_path, cap)
+                    output_dir: Path | None = compile_result.out_dir
+                    compile_output: str = compile_result.pass_output
+                    stats_json_path = compile_result.stats_json
+                    compile_result_profiling_ms = compile_result.profiling_time_ms
                 except CompilationError as exc:
                     compile_output = exc.pass_output or (exc.result.output if exc.result else "")
                     output_dir = None
@@ -295,10 +290,27 @@ def run_benchmark_matrix(
 
                     stats = parse_pass_output(full_output)
 
-                # ----- Build row -----
-                row_fields = row_builder(
+                # ----- Build common fields -----
+                result_val = ""
+                if nvm is not None and nvm.result is not None:
+                    result_val = str(nvm.result)
+                else:
+                    result_val = extract_stat(full_output, "RESULT") or ""
+                common_fields: dict[str, str | int | None] = {
+                    "basic_blocks": stats.basic_blocks or 0,
+                    "edges": stats.edges or 0,
+                    "regions": stats.regions or 0,
+                    "compilation_time_ms": stats.compilation_time_ms or 0,
+                    "peak_rss_kb": stats.peak_rss_kb or 0,
+                    "profiling_time_ms": compile_result_profiling_ms,
+                    "result": result_val,
+                }
+
+                # ----- Build row (algorithm-specific fields on top) -----
+                row_fields = common_fields
+                row_fields.update(row_builder(
                     bench_name, cap.label, stats, nvm, full_output
-                )
+                ))
                 if execution_time_us is not None:
                     row_fields["execution_time_us"] = str(round(execution_time_us, 2))
 

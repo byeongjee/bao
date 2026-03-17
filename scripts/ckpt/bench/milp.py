@@ -25,7 +25,7 @@ from .config import (
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import build_base_fields, check_device_available, nvm_counter, run_benchmark_matrix
+from .runner import CompileResult, check_device_available, nvm_counter, run_benchmark_matrix
 
 _CSV_HEADER: list[str] = [
     "benchmark",
@@ -71,13 +71,11 @@ def _build_row(
     nvm: NvmCounters | None,
     full_output: str,
 ) -> dict[str, str | int | None]:
-    """Build a CSV row dict from parsed statistics and NVM counters."""
-    fields = build_base_fields(stats, full_output, nvm)
+    """Build MILP-specific CSV fields."""
     optimal = stats.optimal_solution
     if optimal is not None:
         optimal = "yes" if optimal == "yes" else "no"
-    fields.update({
-        "profiling_time_ms": stats.profiling_time_ms or 0,
+    return {
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
         "runtime_debug_save_vreg_calls": nvm_counter(nvm, "save_vreg"),
         "runtime_debug_restore_vreg_calls": nvm_counter(nvm, "restore_vreg"),
@@ -90,8 +88,7 @@ def _build_row(
         "region_boundaries_inserted": stats.region_boundaries or 0,
         "distributed_checkpoints_inserted": stats.distributed_checkpoints or 0,
         "milp_solve_time_ms": stats.solve_time_ms or 0,
-    })
-    return fields
+    }
 
 
 def run_milp_benchmarks(
@@ -157,7 +154,7 @@ def run_milp_benchmarks(
 
         def compile_fn(
             bench_path: Path, cap: CapacitorConfig
-        ) -> tuple[Path, str, Path | None]:
+        ) -> CompileResult:
             bench_name = bench_path.stem
             out_dir = workdir / f"{bench_name}_{cap.label}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +174,12 @@ def run_milp_benchmarks(
             )
 
             result: MilpCompileResult = compile_milp(tc, env, opts)
-            return out_dir, result.pass_output, result.stats_json
+            return CompileResult(
+                out_dir=out_dir,
+                pass_output=result.pass_output,
+                stats_json=result.stats_json,
+                profiling_time_ms=result.profiling_time_ms,
+            )
 
         run_benchmark_matrix(
             env,
