@@ -151,6 +151,34 @@ void SchematicInstrumenter::rewriteAccessesInRegion(const std::vector<llvm::Basi
     }
 }
 
+void SchematicInstrumenter::rewriteAllShadowAccesses(llvm::Function &F) {
+    for (llvm::BasicBlock &BB : F) {
+        for (llvm::Instruction &I : BB) {
+            for (unsigned i = 0; i < I.getNumOperands(); ++i) {
+                llvm::Value *Op = I.getOperand(i);
+
+                auto it = shadowMap_.find(Op);
+                if (it != shadowMap_.end()) {
+                    I.setOperand(i, it->second);
+                    continue;
+                }
+
+                // Handle constant expressions that reference shadow-mapped globals.
+                if (auto *C = llvm::dyn_cast<llvm::Constant>(Op)) {
+                    for (const auto &[V, shadow] : shadowMap_) {
+                        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+                            if (auto *replaced = replaceGVInConstant(C, GV, shadow)) {
+                                I.setOperand(i, replaced);
+                                C = replaced; // chain replacements
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Emit an inline increment of an i16 NVM counter global: load, add 1, store.
 static void emitCounterIncrement(llvm::IRBuilder<> &builder, llvm::GlobalVariable *counterGV) {
     llvm::Type *I16Ty = llvm::Type::getInt16Ty(builder.getContext());
@@ -362,9 +390,14 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
     // Step 3: Create shadow globals.
     createShadowGlobals(F, solution, state);
 
-    // Step 4: Rewrite accesses in regions.
-    for (const auto &region : solution.regions)
-        rewriteAccessesInRegion(region.blocks, region.allocation);
+    // Step 4: Rewrite ALL accesses for variables that have shadow globals.
+    // If a shadow global was created for a variable (alloca or global), every
+    // access throughout the entire function must use the shadow — not just
+    // accesses in regions where that variable happens to be VM-placed.
+    // Without this, a variable may be initialized via its alloca (in a region
+    // where it is NVM-placed) but read via its shadow global (in a different
+    // region where it is VM-placed), causing the initial value to be lost.
+    rewriteAllShadowAccesses(F);
 
     // Step 5: Entry block — no boundary call (consistent with RockClimb,
     // which skips the entry block boundary). The first region starts at
