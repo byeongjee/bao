@@ -122,14 +122,19 @@ def compile_milp(
             milp_extra_flags.append("-add-debug-markers")
         milp_extra_flags.append(f"-ckpt-log-level={opts.pass_log_level}")
 
-        if opts.estimator_mode == "assembly":
-            pass_output, profiling_ms = _assembly_mode(
-                tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
-            )
-        else:
-            pass_output, profiling_ms = _ir_mode(
-                tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
-            )
+        try:
+            if opts.estimator_mode == "assembly":
+                pass_output, profiling_ms = _assembly_mode(
+                    tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
+                )
+            else:
+                pass_output, profiling_ms = _ir_mode(
+                    tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
+                )
+        except CompilationError:
+            if opts.save_temps:
+                common.save_temps(tmp, opts.output.parent)
+            raise
 
         # Copy stats JSON if available
         stats_json: Path | None = None
@@ -157,6 +162,8 @@ def compile_milp(
             if link:
                 elf_file = _link_milp(tc, env, opts)
         except CompilationError as exc:
+            if opts.save_temps:
+                common.save_temps(tmp, opts.output.parent)
             exc.pass_output = pass_output
             exc.stats_json = stats_json
             raise
