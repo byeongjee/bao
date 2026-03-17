@@ -48,9 +48,9 @@ MEMORY {
   INFOB            : ORIGIN = 0x1900, LENGTH = 0x0080 /* END=0x197F, size 128 */
   INFOC            : ORIGIN = 0x1880, LENGTH = 0x0080 /* END=0x18FF, size 128 */
   INFOD            : ORIGIN = 0x1800, LENGTH = 0x0080 /* END=0x187F, size 128 */
-  /* MODIFIED: Split FRAM to reserve 1KB for MILP runtime NVM checkpoint storage */
-  NVM (rxw)        : ORIGIN = 0x4000, LENGTH = 0x0400 /* END=0x43FF, size 1024 - MILP runtime NVM */
-  FRAM (rx)        : ORIGIN = 0x4400, LENGTH = 0xBB80 /* END=0xFF7F, size 48000 (was 49024) */
+  /* MODIFIED: Split FRAM to reserve 2KB for MILP runtime NVM checkpoint storage */
+  NVM (rxw)        : ORIGIN = 0x4000, LENGTH = 0x0800 /* END=0x47FF, size 2048 - MILP runtime NVM */
+  FRAM (rx)        : ORIGIN = 0x4800, LENGTH = 0xB780 /* END=0xFF7F, size 46976 (was 49024) */
   HIFRAM (rxw)     : ORIGIN = 0x00010000, LENGTH = 0x00033FF7 /* Boundaries changed to fix CPU47 */
   JTAGSIGNATURE    : ORIGIN = 0xFF80, LENGTH = 0x0004
   BSLSIGNATURE     : ORIGIN = 0xFF84, LENGTH = 0x0004
