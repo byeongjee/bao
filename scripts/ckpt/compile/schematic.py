@@ -317,6 +317,8 @@ def _link_schematic(
         boot_defines.append("HALT_BOR")
     elif opts.halt_mode == "lpm4":
         boot_defines.append("HALT_LPM4")
+    elif opts.halt_mode == "swbor":
+        boot_defines.append("HALT_SWBOR")
 
     return link_algorithm(
         tc, env,

@@ -67,9 +67,9 @@ def compile_rockclimb(
       strip .cfi_* ->
       (if link: assemble + link with rockclimb_boot.S + rockclimb_runtime.c)
     """
-    # bor/lpm4 and debug-counters imply linking
+    # bor/lpm4/swbor and debug-counters imply linking
     link = opts.link
-    if opts.halt_mode in ("bor", "lpm4"):
+    if opts.halt_mode in ("bor", "lpm4", "swbor"):
         link = True
     if opts.device_debug:
         link = True
@@ -339,6 +339,8 @@ def _link_rockclimb(
         boot_defines.append("HALT_BOR")
     elif opts.halt_mode == "lpm4":
         boot_defines.append("HALT_LPM4")
+    elif opts.halt_mode == "swbor":
+        boot_defines.append("HALT_SWBOR")
     if opts.device_debug:
         boot_defines.append("DEVICE_DEBUG")
 

@@ -37,11 +37,11 @@
  * save_pc_sp_and_halt — Save return address + caller SP to NVM, then halt.
  *
  * Expects __nvm_pc and __nvm_sp to be .extern'd by the caller.
- * Halt mode selected by HALT_BOR / HALT_LPM4 defines.
- * If neither is defined, this is debug/nop mode (no save, no halt).
+ * Halt mode selected by HALT_BOR / HALT_LPM4 / HALT_SWBOR defines.
+ * If none is defined, this is debug/nop mode (no save, no halt).
  */
 .macro save_pc_sp_and_halt
-#if defined(HALT_BOR) || defined(HALT_LPM4)
+#if defined(HALT_BOR) || defined(HALT_LPM4) || defined(HALT_SWBOR)
     /* Save return address as recovery PC.
        0(SP) holds the return address pushed by CALL. */
     mov.w   0(SP), &__nvm_pc
@@ -56,6 +56,13 @@
     mov.w   #0xA504, &0x0120
     /* Unreachable — CPU resets before next instruction */
 
+#elif defined(HALT_SWBOR)
+    /* Software-simulated reboot: jump directly to _start.
+       FRAM state (including __nvm_pc) survives; boot code detects
+       __nvm_pc != 0 and enters recovery, simulating a full power-loss cycle. */
+    br      #_start
+    /* Unreachable — jump is unconditional */
+
 #else /* HALT_LPM4 */
     /* Enter LPM4 deep sleep (CPUOFF+OSCOFF+SCG0+SCG1 = bits 4-7 of SR).
        System powers off. On energy harvest, reset vector fires. */
@@ -63,7 +70,7 @@
     nop
     /* If woken by interrupt (not full reboot), fall through to ret */
 
-#endif /* BOR vs LPM4 */
+#endif /* BOR vs SWBOR vs LPM4 */
 
 #else
     /* Debug/nop mode: no state save, no halt. Saving __nvm_pc here would

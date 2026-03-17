@@ -148,7 +148,7 @@ def _resolve_algorithm_config(
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
     default="nop",
     help="Halt mode for linked binary.",
 )
@@ -248,7 +248,7 @@ def compile_milp_cmd(
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
     default="nop",
     help="Halt mode for linked binary.",
 )
@@ -343,7 +343,7 @@ def compile_rockclimb_cmd(
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
     default="nop",
     help="Halt mode for linked binary.",
 )
@@ -527,8 +527,8 @@ def bench() -> None:
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
-    default="nop",
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    default="swbor",
     help="Halt mode for linked binary.",
 )
 @click.option(
@@ -585,8 +585,8 @@ def bench_milp_cmd(
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
-    default="nop",
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    default="swbor",
     help="Halt mode for linked binary.",
 )
 @click.option(
@@ -635,8 +635,8 @@ def bench_rockclimb_cmd(
 @click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
-    default="nop",
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    default="swbor",
     help="Halt mode for linked binary.",
 )
 @click.option(
@@ -744,7 +744,7 @@ def verify() -> None:
 # boot path triggered by BOR.
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
     default="bor",
     help="Halt mode for linked binary (default: bor).",
 )
@@ -791,7 +791,7 @@ def verify_rockclimb_cmd(
 # bor is required: verify tests correctness under resets (intermittent computing).
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
     default="bor",
     help="Halt mode for linked binary (default: bor).",
 )
@@ -846,7 +846,7 @@ def verify_milp_cmd(
 # bor is required: verify tests correctness under resets (intermittent computing).
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4"]),
+    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
     default="bor",
     help="Halt mode for linked binary (default: bor).",
 )
