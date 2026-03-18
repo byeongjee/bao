@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <set>
+#include <vector>
 
 namespace checkpoint {
 
@@ -434,7 +435,48 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
         if (isLoopBackEdge)
             continue;
 
-        llvm::BasicBlock *ckptBB = splitEdge(edge.src, edge.dst);
+        // Resolve the checkpoint edge to a real CFG edge.
+        // Function-level trace paths have loops collapsed, so consecutive
+        // trace blocks may not be direct CFG successors (the loop body is
+        // between them).  The reference implementation operates on a
+        // loop-collapsed CFG where these edges exist; we map them to the
+        // actual LLVM CFG edge (src → successor_of_src that reaches dst).
+        llvm::BasicBlock *resolvedDst = nullptr;
+        for (llvm::BasicBlock *succ : successors(edge.src)) {
+            if (succ == edge.dst) {
+                resolvedDst = edge.dst;
+                break;
+            }
+        }
+        if (!resolvedDst) {
+            // BFS from each successor of src to find which one reaches dst.
+            for (llvm::BasicBlock *succ : successors(edge.src)) {
+                std::set<llvm::BasicBlock *> visited;
+                std::vector<llvm::BasicBlock *> worklist;
+                worklist.push_back(succ);
+                bool found = false;
+                while (!worklist.empty()) {
+                    llvm::BasicBlock *cur = worklist.back();
+                    worklist.pop_back();
+                    if (cur == edge.dst) {
+                        found = true;
+                        break;
+                    }
+                    if (!visited.insert(cur).second)
+                        continue;
+                    for (llvm::BasicBlock *s : successors(cur))
+                        worklist.push_back(s);
+                }
+                if (found) {
+                    resolvedDst = succ;
+                    break;
+                }
+            }
+        }
+        if (!resolvedDst)
+            continue;
+
+        llvm::BasicBlock *ckptBB = splitEdge(edge.src, resolvedDst);
         if (!ckptBB)
             continue;
 

@@ -178,7 +178,6 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         }
 
         // Forward propagation of E_left through disabled edges.
-        std::set<BasicBlock *> fwdVisitedLoopHeaders;
         bool changed = true;
         while (changed) {
             changed = false;
@@ -206,13 +205,13 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 double dstExecEnergy = getBlockExecEnergy(dstBB);
 
                 // Loop-aware scaling (reference: cfg_modification.py:293-295).
-                // Any block in a loop triggers scaling (not just headers).
-                if (Loop *L = LI.getLoopFor(dstBB)) {
-                    BasicBlock *header = L->getHeader();
-                    if (auto loopIt = solution.loopDecisions.find(header);
-                        loopIt != solution.loopDecisions.end() &&
-                        !fwdVisitedLoopHeaders.count(header)) {
-                        fwdVisitedLoopHeaders.insert(header);
+                // Apply scaling for each loop that this edge enters (dst is in
+                // the loop but src is not). Walk from innermost to outermost.
+                for (Loop *L = LI.getLoopFor(dstBB); L; L = L->getParentLoop()) {
+                    if (L->contains(srcBB))
+                        break; // src is in this loop and all parents
+                    auto loopIt = solution.loopDecisions.find(L->getHeader());
+                    if (loopIt != solution.loopDecisions.end()) {
                         unsigned nbIter = loopIt->second.numIterationsPerCharge;
                         if (nbIter > 1)
                             dstExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
@@ -228,7 +227,6 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         }
 
         // Backward propagation of E_to_leave through disabled edges.
-        std::set<BasicBlock *> bwdVisitedLoopHeaders;
         changed = true;
         while (changed) {
             changed = false;
@@ -265,13 +263,14 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 double srcExecEnergy = getBlockExecEnergy(srcBB);
 
                 // Loop-aware scaling (reference: cfg_modification.py:232-234).
-                // Any block in a loop triggers scaling (not just headers).
-                if (Loop *L = LI.getLoopFor(srcBB)) {
-                    BasicBlock *header = L->getHeader();
-                    if (auto loopIt = solution.loopDecisions.find(header);
-                        loopIt != solution.loopDecisions.end() &&
-                        !bwdVisitedLoopHeaders.count(header)) {
-                        bwdVisitedLoopHeaders.insert(header);
+                // Apply scaling for each loop that this edge exits (src is in
+                // the loop but dst is not). E_to_leave propagates backward, so
+                // exiting a loop forward means entering it backward.
+                for (Loop *L = LI.getLoopFor(srcBB); L; L = L->getParentLoop()) {
+                    if (L->contains(dstBB))
+                        break; // dst is in this loop and all parents
+                    auto loopIt = solution.loopDecisions.find(L->getHeader());
+                    if (loopIt != solution.loopDecisions.end()) {
                         unsigned nbIter = loopIt->second.numIterationsPerCharge;
                         if (nbIter > 1)
                             srcExecEnergy += (nbIter - 1) * loopIt->second.E_loop;

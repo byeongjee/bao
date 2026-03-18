@@ -217,6 +217,114 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         }
     }
 
+    // 3b. Find uncovered blocks within this loop (reference: schematic.py:554).
+    // Blocks not on any body path (e.g., preheaders created by LoopSimplify)
+    // must be analyzed here, within the loop context, before multi-iteration
+    // scaling is applied. The reference calls find_and_analyse_not_fixed_paths
+    // on the loop subgraph after analyzing loop traces.
+    {
+        // Seed E_left/E_to_leave so boundary blocks have values for RCG budget.
+        std::map<llvm::Value *, Placement> headerPlacement;
+        auto hdIt0 = solution.decidedPlacements.find(header);
+        if (hdIt0 != solution.decidedPlacements.end())
+            headerPlacement = hdIt0->second;
+        RegionAllocation prelimAlloc = buildBoundaryAllocation(headerPlacement);
+        propagateLoopEnergy(L, prelimAlloc, solution);
+
+        std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
+        for (llvm::BasicBlock *BB : loopBlocks) {
+            auto metaIt = solution.blockMeta.find(BB);
+            if (metaIt != solution.blockMeta.end() && metaIt->second.analyzed)
+                continue;
+
+            // Build synthetic path of contiguous unanalyzed blocks.
+            std::vector<llvm::BasicBlock *> synPath;
+            llvm::BasicBlock *sBound = nullptr;
+            llvm::BasicBlock *eBound = nullptr;
+
+            // Find an analyzed predecessor within the loop as start boundary.
+            for (llvm::BasicBlock *pred : predecessors(BB)) {
+                if (!L->contains(pred))
+                    continue;
+                auto pMeta = solution.blockMeta.find(pred);
+                if (pMeta != solution.blockMeta.end() && pMeta->second.analyzed) {
+                    sBound = pred;
+                    break;
+                }
+            }
+
+            // Walk forward through unanalyzed blocks within the loop.
+            std::set<llvm::BasicBlock *> visited;
+            std::vector<llvm::BasicBlock *> stack;
+            stack.push_back(BB);
+            while (!stack.empty()) {
+                llvm::BasicBlock *cur = stack.back();
+                stack.pop_back();
+                if (visited.count(cur))
+                    continue;
+                if (!L->contains(cur))
+                    continue;
+                auto curMeta = solution.blockMeta.find(cur);
+                if (curMeta != solution.blockMeta.end() && curMeta->second.analyzed)
+                    continue;
+                visited.insert(cur);
+                synPath.push_back(cur);
+                for (llvm::BasicBlock *succ : successors(cur)) {
+                    if (!L->contains(succ))
+                        continue;
+                    auto sMeta = solution.blockMeta.find(succ);
+                    if (sMeta == solution.blockMeta.end() || !sMeta->second.analyzed) {
+                        stack.push_back(succ);
+                        break; // greedy: follow one successor
+                    }
+                }
+            }
+
+            if (synPath.empty())
+                continue;
+
+            // Find an analyzed successor within the loop as end boundary.
+            llvm::BasicBlock *lastBB = synPath.back();
+            for (llvm::BasicBlock *succ : successors(lastBB)) {
+                if (!L->contains(succ))
+                    continue;
+                auto sMeta = solution.blockMeta.find(succ);
+                if (sMeta != solution.blockMeta.end() && sMeta->second.analyzed) {
+                    eBound = succ;
+                    break;
+                }
+            }
+
+            // Use nullptr boundaries so the RCG solver uses the full capacity
+            // as budget (reference: find_and_analyse_not_fixed_paths operates
+            // on the loop subgraph with synthetic Start/End nodes that default
+            // to energy_budget - chkpt_restore, not boundary block E_left).
+            (void)sBound;
+            (void)eBound;
+            RCGSolver solver(synPath, state_, cfg_, params_, solution.blockMeta,
+                             solution.decidedPlacements, nullptr, nullptr, tracker_, overridesPtr);
+            RCGResult result = solver.solve();
+            if (!result.feasible) {
+                PLOGE << "SCHEMATIC infeasible: loop uncovered block '" << BB->getName()
+                      << "' in loop at '" << header->getName() << "': " << result.errorMessage;
+                return false;
+            }
+
+            for (const auto &ckpt : result.selectedCheckpoints)
+                solution.enabledCheckpoints.insert(ckpt);
+            for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
+                const auto &blocks = result.intervalBlocks[i];
+                const auto &alloc = result.allocations[i];
+                for (llvm::BasicBlock *B : blocks) {
+                    for (const auto &[gv, place] : alloc.placement)
+                        solution.decidedPlacements[B][gv] = place;
+                    solution.blockMeta[B].analyzed = true;
+                }
+                solution.regions.push_back({blocks, alloc});
+            }
+        }
+    }
+
     // 4. Get header and latch allocations from decided placements.
     std::map<llvm::Value *, Placement> headerAlloc;
     auto hdIt = solution.decidedPlacements.find(header);
