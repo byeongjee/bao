@@ -48,6 +48,15 @@ class LoopAnalyzer {
 
     RegionAllocation
     buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const;
+
+    /// Get block energy adjusted for VM placement savings.
+    double getAdjustedBlockEnergy(llvm::BasicBlock *BB, const RegionAllocation &alloc) const;
+
+    /// Edge-based energy propagation within a loop (reference: cfg_modification.py:171-317).
+    /// Iterates over CFG edges within the loop (including inner loop bodies),
+    /// propagating through disabled checkpoint chains only. Uses fixed-point iteration.
+    void propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &alloc,
+                             SchematicSolution &solution);
 };
 
 } // namespace checkpoint

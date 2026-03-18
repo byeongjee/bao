@@ -9,6 +9,7 @@
 #include "llvm/IR/CFG.h"
 
 #include <cmath>
+#include <limits>
 #include <set>
 
 namespace checkpoint {
@@ -232,11 +233,16 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     // 5. Check if allocations differ at header vs latch.
     if (placementsDiffer(headerAlloc, latchAlloc)) {
+        llvm::errs() << "LOOP_DEBUG: loop=" << header->getName()
+                     << " -> mandatoryBackEdge (placementsDiffer)\n";
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         decision.E_loop = 0.0;
         decision.bodyAllocation = buildBoundaryAllocation(headerAlloc);
         solution.loopDecisions[header] = decision;
+
+        // Propagate energy so outer loops see correct costs on loop blocks.
+        propagateLoopEnergy(L, decision.bodyAllocation, solution);
 
         // Add back-edge checkpoint.
         if (latch)
@@ -244,9 +250,38 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
+    // DEBUG: Print body paths for loops with maxTripCount <= 5 (outer loops)
+    if (maxTripCount <= 5) {
+        llvm::errs() << "OUTER_LOOP_DEBUG: loop=" << header->getName() << " maxTC=" << maxTripCount
+                     << " bodyPaths=" << bodyPaths.size() << "\n";
+        for (unsigned p = 0; p < bodyPaths.size(); ++p) {
+            llvm::errs() << "  path[" << p << "]: ";
+            for (auto *BB : bodyPaths[p])
+                llvm::errs() << BB->getName() << " ";
+            llvm::errs() << "\n";
+            // Print E_to_leave for each block
+            for (auto *BB : bodyPaths[p]) {
+                auto it = solution.blockMeta.find(BB);
+                double etl = (it != solution.blockMeta.end()) ? it->second.E_to_leave : -1;
+                llvm::errs() << "    " << BB->getName() << " E_to_leave=" << etl << "\n";
+            }
+        }
+    }
+
     // 6. Allocations match — compute energy per iteration using reference formula:
-    //    E_loop = header.E_to_leave - latch.E_to_leave + loop_increment_cost_nvm
+    //    E_loop = header.E_to_leave - latch.E_to_leave + latchCost + loop_increment_cost_nvm
+    //
+    //    The reference uses synthetic zero-cost START_Loop/END_Loop boundary nodes,
+    //    so first_bb.E_to_leave - last_bb.E_to_leave captures ALL block costs
+    //    (header through latch inclusive). We use real blocks, so header.E_to_leave
+    //    already includes latch's cost in the accumulator, meaning the difference
+    //    misses the latch's own execution cost. We add it back explicitly.
     RegionAllocation bodyAlloc = buildBoundaryAllocation(headerAlloc);
+
+    // Run initial energy propagation before computing E_loop — without this,
+    // E_to_leave/E_left are at defaults (0.0 / max) since RCG does not set them.
+    propagateLoopEnergy(L, bodyAlloc, solution);
+
     double headerEToLeave = 0.0;
     double latchEToLeave = 0.0;
     {
@@ -259,7 +294,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 latchEToLeave = lMeta->second.E_to_leave;
         }
     }
-    double E_loop = headerEToLeave - latchEToLeave + params_.loopIncrementCostNvm;
+    double latchCost = latch ? getAdjustedBlockEnergy(latch, bodyAlloc) : 0.0;
+    double E_loop = headerEToLeave - latchEToLeave + latchCost + params_.loopIncrementCostNvm;
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
 
@@ -291,8 +327,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // numIt converges.
     bool hasEnabledCheckpoints = false;
     for (const auto &ckpt : solution.enabledCheckpoints) {
-        // Check if any enabled checkpoint is a back-edge of this loop.
-        if (ckpt.dst == header && L->contains(ckpt.src)) {
+        // Check if any enabled checkpoint is internal to this loop
+        // (both src and dst within the loop). Reference checks all edges,
+        // not just back-edges to the header.
+        if (L->contains(ckpt.src) && L->contains(ckpt.dst)) {
             hasEnabledCheckpoints = true;
             break;
         }
@@ -329,76 +367,16 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 solution.blockMeta[BB].analyzed = true;
             }
 
-            // 4. Re-compute E_to_leave by backward energy accumulation
-            //    and E_left by forward energy accumulation through body paths.
-            {
-                // Backward pass: accumulate E_to_leave from latch to header.
-                // NOTE: The save/restore seeds unconditionally charge all VM
-                // variables (not using livenessFlags). This is intentionally
-                // conservative and matches the reference implementation's
-                // convergence loop behavior.
-                for (const auto &path : bodyPaths) {
-                    double accum = params_.E_epi + params_.N_reg * params_.regStoreEnergy +
-                                   params_.loopIncrementCostNvm;
-                    for (const auto &[gv, place] : bodyAlloc.placement) {
-                        if (place == Placement::VM)
-                            accum += params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
-                    }
-                    for (int b = static_cast<int>(path.size()) - 1; b >= 0; --b) {
-                        llvm::BasicBlock *BB = path[b];
-                        double bbE = cfg_.getBlockInfo(BB).energyCost;
-                        for (const auto &[gv, place] : bodyAlloc.placement) {
-                            if (place != Placement::VM)
-                                continue;
-                            unsigned loads = state_.getLoadCount(BB, gv);
-                            unsigned stores = state_.getStoreCount(BB, gv);
-                            bbE -= params_.nvmAccessPenalty * (loads + stores);
-                        }
-                        accum += bbE;
-                        auto &meta = solution.blockMeta[BB];
-                        if (accum > meta.E_to_leave)
-                            meta.E_to_leave = accum;
-                        else
-                            accum = meta.E_to_leave;
-                    }
-                }
+            // 4. Re-compute E_to_leave/E_left through body paths.
+            propagateLoopEnergy(L, bodyAlloc, solution);
 
-                // Forward pass: propagate E_left from header through body paths.
-                double eleftSeed =
-                    params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
-                for (const auto &[gv, place] : bodyAlloc.placement) {
-                    if (place == Placement::VM)
-                        eleftSeed -= params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
-                }
-                for (const auto &path : bodyPaths) {
-                    double accum = 0.0;
-                    for (unsigned b = 0; b < path.size(); ++b) {
-                        llvm::BasicBlock *BB = path[b];
-                        double bbE = cfg_.getBlockInfo(BB).energyCost;
-                        for (const auto &[gv, place] : bodyAlloc.placement) {
-                            if (place != Placement::VM)
-                                continue;
-                            unsigned loads = state_.getLoadCount(BB, gv);
-                            unsigned stores = state_.getStoreCount(BB, gv);
-                            bbE -= params_.nvmAccessPenalty * (loads + stores);
-                        }
-                        accum += bbE;
-                        double newELeft = eleftSeed - accum;
-                        auto &meta = solution.blockMeta[BB];
-                        if (newELeft < meta.E_left)
-                            meta.E_left = newELeft;
-                        else
-                            accum = eleftSeed - meta.E_left;
-                    }
-                }
-            }
-
-            // 5. Recompute E_loop.
+            // 5. Recompute E_loop (with latch cost correction).
             auto hMeta2 = solution.blockMeta.find(header);
             auto lMeta2 = latch ? solution.blockMeta.find(latch) : solution.blockMeta.end();
             headerEToLeave = (hMeta2 != solution.blockMeta.end()) ? hMeta2->second.E_to_leave : 0.0;
             latchEToLeave = (lMeta2 != solution.blockMeta.end()) ? lMeta2->second.E_to_leave : 0.0;
-            E_loop = headerEToLeave - latchEToLeave + params_.loopIncrementCostNvm;
+            latchCost = latch ? getAdjustedBlockEnergy(latch, bodyAlloc) : 0.0;
+            E_loop = headerEToLeave - latchEToLeave + latchCost + params_.loopIncrementCostNvm;
             decision.E_loop = E_loop;
             decision.bodyAllocation = bodyAlloc;
 
@@ -417,20 +395,30 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         }
     }
 
+    llvm::errs() << "LOOP_DEBUG: loop=" << header->getName() << " E_loop=" << E_loop
+                 << " numIt=" << numIt << " maxTC=" << maxTripCount
+                 << " headerEToLeave=" << headerEToLeave << " latchEToLeave=" << latchEToLeave
+                 << " latchCost=" << latchCost << " hasEnabledCkpts=" << hasEnabledCheckpoints
+                 << " availEnergy=" << availableEnergy << "\n";
+
     if (numIt > maxTripCount) {
         // Entire loop fits — no checkpoint needed, but use maxTripCount for
         // energy scaling so propagation accounts for all iterations.
         decision.numIterationsPerCharge = static_cast<unsigned>(maxTripCount);
         decision.loopFitsEntirely = true;
+        llvm::errs() << "LOOP_DEBUG:   -> loopFitsEntirely (numIt=" << numIt
+                     << " > maxTC=" << maxTripCount << ")\n";
     } else if (numIt < 3) {
         // Too few iterations per charge — checkpoint every iteration.
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         if (latch)
             solution.enabledCheckpoints.insert(CFGEdge{latch, header});
+        llvm::errs() << "LOOP_DEBUG:   -> mandatoryBackEdge (numIt=" << numIt << ")\n";
     } else {
         // Conditional checkpoint every numIt iterations.
         decision.numIterationsPerCharge = numIt;
+        llvm::errs() << "LOOP_DEBUG:   -> conditional (numIt=" << numIt << ")\n";
     }
 
     solution.loopDecisions[header] = decision;
@@ -454,6 +442,154 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     return true;
 }
 
+double LoopAnalyzer::getAdjustedBlockEnergy(llvm::BasicBlock *BB,
+                                            const RegionAllocation &alloc) const {
+    double bbE = cfg_.getBlockInfo(BB).energyCost;
+    for (const auto &[gv, place] : alloc.placement) {
+        if (place != Placement::VM)
+            continue;
+        unsigned loads = state_.getLoadCount(BB, gv);
+        unsigned stores = state_.getStoreCount(BB, gv);
+        bbE -= params_.nvmAccessPenalty * (loads + stores);
+    }
+    return bbE;
+}
+
+void LoopAnalyzer::propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &alloc,
+                                       SchematicSolution &solution) {
+    llvm::BasicBlock *header = L->getHeader();
+    llvm::BasicBlock *latch = L->getLoopLatch();
+
+    // Collect all blocks in this loop (including inner loop blocks).
+    std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
+    std::set<llvm::BasicBlock *> loopBlockSet(loopBlocks.begin(), loopBlocks.end());
+
+    // --- Backward pass: propagate E_to_leave ---
+    // Seed: checkpoint-save cost after the latch (reference schematic.py:604-606).
+    double bwdSeed =
+        params_.E_epi + params_.N_reg * params_.regStoreEnergy + params_.loopIncrementCostNvm;
+    for (const auto &[gv, place] : alloc.placement) {
+        if (place == Placement::VM)
+            bwdSeed += params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
+    }
+
+    // Initialize latch E_to_leave = seed + latch execution cost.
+    if (latch && loopBlockSet.count(latch)) {
+        double latchCost = getAdjustedBlockEnergy(latch, alloc);
+        double latchEToLeave = bwdSeed + latchCost;
+        auto &meta = solution.blockMeta[latch];
+        if (latchEToLeave > meta.E_to_leave)
+            meta.E_to_leave = latchEToLeave;
+    }
+
+    // Seed E_to_leave at enabled checkpoint sources within the loop.
+    for (const auto &ckpt : solution.enabledCheckpoints) {
+        if (!loopBlockSet.count(ckpt.src) || !loopBlockSet.count(ckpt.dst))
+            continue;
+        if (ckpt.dst == header) // back-edge checkpoint handled separately
+            continue;
+        double saveE = bwdSeed; // reuse same save-cost seed
+        saveE += getAdjustedBlockEnergy(ckpt.src, alloc);
+        auto &meta = solution.blockMeta[ckpt.src];
+        if (saveE > meta.E_to_leave)
+            meta.E_to_leave = saveE;
+    }
+
+    // Fixed-point: for each edge (src->dst), src.E_to_leave = max(current, srcCost +
+    // dst.E_to_leave). Skip enabled checkpoints, back-edges, edges leaving the loop.
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (llvm::BasicBlock *srcBB : loopBlocks) {
+            for (llvm::BasicBlock *dstBB : successors(srcBB)) {
+                if (!loopBlockSet.count(dstBB))
+                    continue;
+                if (dstBB == header)
+                    continue;
+                CFGEdge edge{srcBB, dstBB};
+                if (solution.enabledCheckpoints.count(edge))
+                    continue;
+
+                auto dstIt = solution.blockMeta.find(dstBB);
+                if (dstIt == solution.blockMeta.end())
+                    continue;
+
+                double srcCost = getAdjustedBlockEnergy(srcBB, alloc);
+                double newEToLeave = srcCost + dstIt->second.E_to_leave;
+                auto &srcMeta = solution.blockMeta[srcBB];
+                if (newEToLeave > srcMeta.E_to_leave) {
+                    srcMeta.E_to_leave = newEToLeave;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    // --- Forward pass: propagate E_left ---
+    // Seed: capacity - restore cost (reference schematic.py:599-603).
+    double fwdSeed = params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+    for (const auto &[gv, place] : alloc.placement) {
+        if (place == Placement::VM)
+            fwdSeed -= params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
+    }
+
+    // Initialize header E_left = fwdSeed - header execution cost.
+    {
+        double headerCost = getAdjustedBlockEnergy(header, alloc);
+        double headerELeft = fwdSeed - headerCost;
+        auto &meta = solution.blockMeta[header];
+        if (headerELeft < meta.E_left)
+            meta.E_left = headerELeft;
+    }
+
+    // Seed E_left at enabled checkpoint destinations within the loop.
+    for (const auto &ckpt : solution.enabledCheckpoints) {
+        if (!loopBlockSet.count(ckpt.src) || !loopBlockSet.count(ckpt.dst))
+            continue;
+        if (ckpt.dst == header)
+            continue;
+        double restoreE = params_.E_pro + params_.N_reg * params_.regRestoreEnergy;
+        for (const auto &[gv, place] : alloc.placement) {
+            if (place == Placement::VM)
+                restoreE += params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
+        }
+        double dstCost = getAdjustedBlockEnergy(ckpt.dst, alloc);
+        double newELeft = params_.capacity - restoreE - dstCost;
+        auto &meta = solution.blockMeta[ckpt.dst];
+        if (newELeft < meta.E_left)
+            meta.E_left = newELeft;
+    }
+
+    // Fixed-point: for each edge (src->dst), dst.E_left = min(current, src.E_left - dstCost).
+    changed = true;
+    while (changed) {
+        changed = false;
+        for (llvm::BasicBlock *srcBB : loopBlocks) {
+            for (llvm::BasicBlock *dstBB : successors(srcBB)) {
+                if (!loopBlockSet.count(dstBB))
+                    continue;
+                if (dstBB == header)
+                    continue;
+                CFGEdge edge{srcBB, dstBB};
+                if (solution.enabledCheckpoints.count(edge))
+                    continue;
+
+                auto srcIt = solution.blockMeta.find(srcBB);
+                if (srcIt == solution.blockMeta.end())
+                    continue;
+
+                double dstCost = getAdjustedBlockEnergy(dstBB, alloc);
+                double newELeft = srcIt->second.E_left - dstCost;
+                auto &dstMeta = solution.blockMeta[dstBB];
+                if (newELeft < dstMeta.E_left) {
+                    dstMeta.E_left = newELeft;
+                    changed = true;
+                }
+            }
+        }
+    }
+}
+
 bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
     // Process loops bottom-up (innermost first).
     auto loops = LI_.getLoopsInPreorder();
@@ -461,6 +597,38 @@ bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
         if (!analyzeLoop(*it, solution))
             return false;
     }
+
+    // Undo iteration-scaling adjustments and re-propagate at single-iteration
+    // scale. The adjustments were needed during bottom-up analysis so outer
+    // loops could see inner loop multi-iteration costs via the accumulator.
+    // Now that all loop decisions are final, we reset to single-iteration
+    // E_to_leave/E_left values. This prevents the function-level RCG solver
+    // from seeing inflated E_to_leave on loop boundary blocks (which would
+    // make budget = capacity - E_to_leave go negative).
+    // SchematicPass::propagateEnergy() will apply iteration scaling correctly
+    // via loopDecisions, producing the same final values as the reference.
+
+    // Phase 1: Reset E_to_leave/E_left on all loop blocks to defaults.
+    for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
+        llvm::Loop *L = *it;
+        for (llvm::BasicBlock *BB : L->getBlocksVector()) {
+            auto &meta = solution.blockMeta[BB];
+            meta.E_to_leave = 0.0;
+            meta.E_left = std::numeric_limits<double>::max();
+        }
+    }
+
+    // Phase 2: Re-propagate energy bottom-up at single-iteration scale.
+    for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
+        llvm::Loop *L = *it;
+        llvm::BasicBlock *header = L->getHeader();
+        auto decIt = solution.loopDecisions.find(header);
+        if (decIt == solution.loopDecisions.end())
+            continue;
+
+        propagateLoopEnergy(L, decIt->second.bodyAllocation, solution);
+    }
+
     return true;
 }
 
