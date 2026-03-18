@@ -477,8 +477,10 @@ void LoopAnalyzer::propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &al
             for (llvm::BasicBlock *dstBB : successors(srcBB)) {
                 if (!loopBlockSet.count(dstBB))
                     continue;
-                if (dstBB == header)
-                    continue;
+                // Skip back-edges: any edge from within a loop back to its header.
+                if (llvm::Loop *dstLoop = LI_.getLoopFor(dstBB))
+                    if (dstLoop->getHeader() == dstBB && dstLoop->contains(srcBB))
+                        continue;
                 CFGEdge edge{srcBB, dstBB};
                 if (solution.enabledCheckpoints.count(edge))
                     continue;
@@ -541,8 +543,10 @@ void LoopAnalyzer::propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &al
             for (llvm::BasicBlock *dstBB : successors(srcBB)) {
                 if (!loopBlockSet.count(dstBB))
                     continue;
-                if (dstBB == header)
-                    continue;
+                // Skip back-edges: any edge from within a loop back to its header.
+                if (llvm::Loop *dstLoop = LI_.getLoopFor(dstBB))
+                    if (dstLoop->getHeader() == dstBB && dstLoop->contains(srcBB))
+                        continue;
                 CFGEdge edge{srcBB, dstBB};
                 if (solution.enabledCheckpoints.count(edge))
                     continue;

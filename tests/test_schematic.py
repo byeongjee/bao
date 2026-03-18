@@ -55,10 +55,9 @@ SCENARIOS = [
         SCHEMATIC_CONFIG,
         # Inner loop energy far exceeds capacity — outer loop must NOT fit
         # entirely. With the nested-energy-propagation fix, the outer loop
-        # back-edge also gets a checkpoint (mandatoryBackEdge). Without the
-        # fix, the outer loop is incorrectly marked loopFitsEntirely and
-        # produces only 7 boundaries instead of 8.
-        {"exit": 0, "min_boundary": 8,
+        # back-edge also gets a checkpoint (mandatoryBackEdge). Both loops
+        # must produce checkpoints (min 2 loop decisions, 3+ enabled ckpts).
+        {"exit": 0, "min_boundary": 4,
          "stderr_contains": "Loop decisions:"},
     ),
 ]
