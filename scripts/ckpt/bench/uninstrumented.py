@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import time
 from pathlib import Path
 
 from ..compile.uninstrumented import (
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 _CSV_HEADER: list[str] = [
     "benchmark",
     "status",
+    "compilation_time_ms",
     "execution_time_us",
 ]
 
@@ -80,6 +82,7 @@ def run_uninstrumented_benchmarks(
 
             # Compile
             try:
+                t0 = time.monotonic()
                 result = compile_uninstrumented(
                     tc, env,
                     UninstrumentedCompileOptions(
@@ -92,14 +95,15 @@ def run_uninstrumented_benchmarks(
                         link=True,
                     ),
                 )
+                compilation_time_ms = int((time.monotonic() - t0) * 1000)
             except Exception as exc:
                 logger.error("  FAILED (compilation): %s", exc)
-                writer.writerow([bench_name, "failed", ""])
+                writer.writerow([bench_name, "failed", "", ""])
                 continue
 
             if result.elf_file is None or not result.elf_file.exists():
                 logger.error("  FAILED (no ELF produced)")
-                writer.writerow([bench_name, "failed", ""])
+                writer.writerow([bench_name, "failed", str(compilation_time_ms), ""])
                 continue
 
             # Flash + measure
@@ -110,13 +114,16 @@ def run_uninstrumented_benchmarks(
                     result.elf_file, saleae_manager,
                     _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
                 )
-                logger.info("  OK  execution_time=%.2f us", execution_time_us)
+                logger.info("  OK  compilation_time=%dms execution_time=%.2fus",
+                            compilation_time_ms, execution_time_us)
                 writer.writerow([
-                    bench_name, "ok", str(round(execution_time_us, 2)),
+                    bench_name, "ok",
+                    str(compilation_time_ms),
+                    str(round(execution_time_us, 2)),
                 ])
             except DeviceError as exc:
                 logger.error("  DEVICE ERROR: %s", exc)
-                writer.writerow([bench_name, "device_error", ""])
+                writer.writerow([bench_name, "device_error", str(compilation_time_ms), ""])
 
     logger.info("")
     logger.info("==========================================")
