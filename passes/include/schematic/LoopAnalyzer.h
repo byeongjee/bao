@@ -15,6 +15,10 @@
 
 namespace checkpoint {
 
+/// Per-block energy cost overrides for inner loop headers.
+/// Maps inner loop headers → numIterationsPerCharge * E_loop.
+using BlockCostOverrides = llvm::DenseMap<llvm::BasicBlock *, double>;
+
 class LoopAnalyzer {
   public:
     LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
@@ -57,6 +61,11 @@ class LoopAnalyzer {
     /// propagating through disabled checkpoint chains only. Uses fixed-point iteration.
     void propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &alloc,
                              SchematicSolution &solution);
+
+    /// Build cost overrides for inner loop headers within loop L.
+    /// Uses the inner loop's already-computed decision (E_loop, numIterationsPerCharge).
+    BlockCostOverrides computeInnerLoopCostOverrides(llvm::Loop *L,
+                                                     const SchematicSolution &solution) const;
 };
 
 } // namespace checkpoint

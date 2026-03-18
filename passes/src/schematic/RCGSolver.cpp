@@ -14,11 +14,11 @@ RCGSolver::RCGSolver(
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
     const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
     llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock,
-    VMAddressTracker *tracker)
+    VMAddressTracker *tracker, const llvm::DenseMap<llvm::BasicBlock *, double> *costOverrides)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
       existingMeta_(existingMeta), decidedPlacements_(decidedPlacements),
       startBoundaryBlock_(startBoundaryBlock), endBoundaryBlock_(endBoundaryBlock),
-      tracker_(tracker) {}
+      tracker_(tracker), costOverrides_(costOverrides) {}
 
 void RCGSolver::buildNodes() {
     nodes_.clear();
@@ -159,7 +159,8 @@ RCGResult RCGSolver::solve() {
         const RegionAllocation *sc = startConstraintAlloc ? &*startConstraintAlloc : nullptr;
         const RegionAllocation *ec = endConstraintAlloc ? &*endConstraintAlloc : nullptr;
         auto alloc = computeIntervalAllocation(blocks, state_, params_, fixed, tracker_, sc, ec);
-        double energy = computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, true, true);
+        double energy =
+            computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, true, true, costOverrides_);
         alloc.intervalEnergy = energy;
         double budget = getIntervalBudget(0, 1);
 
@@ -214,8 +215,8 @@ RCGResult RCGSolver::solve() {
                 (isLast && endConstraintAlloc) ? &*endConstraintAlloc : nullptr;
             auto alloc =
                 computeIntervalAllocation(blocks, state_, params_, fixed, tracker_, sc, ec);
-            double energy =
-                computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, isFirst, isLast);
+            double energy = computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, isFirst,
+                                                  isLast, costOverrides_);
             alloc.intervalEnergy = energy;
             double budget = getIntervalBudget(i, j);
 

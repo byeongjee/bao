@@ -590,6 +590,23 @@ void LoopAnalyzer::propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &al
     }
 }
 
+BlockCostOverrides
+LoopAnalyzer::computeInnerLoopCostOverrides(llvm::Loop *L,
+                                            const SchematicSolution &solution) const {
+    BlockCostOverrides overrides;
+    for (llvm::Loop *sub : L->getSubLoops()) {
+        llvm::BasicBlock *header = sub->getHeader();
+        auto decIt = solution.loopDecisions.find(header);
+        if (decIt == solution.loopDecisions.end())
+            continue;
+        const auto &dec = decIt->second;
+        if (dec.E_loop <= 0.0)
+            continue;
+        overrides[header] = dec.numIterationsPerCharge * dec.E_loop;
+    }
+    return overrides;
+}
+
 bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
     // Process loops bottom-up (innermost first).
     auto loops = LI_.getLoopsInPreorder();

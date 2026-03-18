@@ -47,10 +47,13 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                           const RegionAllocation *endConstraint, unsigned accessScale = 1);
 
 /// Compute total interval energy (spec §7.2).
-double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                             const RegionAllocation &allocation,
-                             const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
-                             const SchematicParams &params, bool isFirstInterval,
-                             bool isLastInterval);
+/// costOverrides: if non-null, blocks in the map use the override value
+/// instead of cfg.getBlockInfo(BB).energyCost (for inner loop headers).
+double
+computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                      const RegionAllocation &allocation, const SchematicStateAnalysis &state,
+                      const CFGAnalysis &cfg, const SchematicParams &params, bool isFirstInterval,
+                      bool isLastInterval,
+                      const llvm::DenseMap<llvm::BasicBlock *, double> *costOverrides = nullptr);
 
 } // namespace checkpoint
