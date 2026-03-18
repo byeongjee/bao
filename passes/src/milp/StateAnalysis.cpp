@@ -266,7 +266,7 @@ bool StateAnalysis::isAllowedDirectCall(const llvm::CallBase &CB) const {
     llvm::StringRef Name = Callee->getName();
     if (Name == "__loop_tripcount")
         return true;
-    if (Name == "debug_init" || Name == "debug_exit")
+    if (Name == "debug_init" || Name == "debug_exit" || Name == "bench_halt")
         return true;
     if (Name.starts_with("timing_gpio_"))
         return true;

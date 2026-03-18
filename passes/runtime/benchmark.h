@@ -122,6 +122,8 @@ void debug_exit(int result);
 
 #else
 
+void bench_halt(void);
+
 #define BENCH_INIT()                                                                               \
     do {                                                                                           \
         timing_gpio_init();                                                                        \
@@ -131,6 +133,7 @@ void debug_exit(int result);
     do {                                                                                           \
         timing_gpio_stop();                                                                        \
         (void)(result);                                                                            \
+        bench_halt();                                                                              \
     } while (0)
 
 #endif /* DEVICE_DEBUG */

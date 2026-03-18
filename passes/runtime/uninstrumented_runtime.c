@@ -10,6 +10,11 @@
  *   - debug_init() and UART from debug_common.c
  */
 
+#include <msp430.h>
+void bench_halt(void) {
+    __bis_SR_register(LPM4_bits);
+}
+
 #ifdef DEVICE_DEBUG
 
 #include "debug_common.h"

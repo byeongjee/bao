@@ -184,6 +184,7 @@ def run_assembly_energy(
 _NATIVE_STUBS_C = """\
 void debug_init(void) {}
 void debug_exit(int result) { (void)result; }
+void bench_halt(void) {}
 /* GPIO and clock register stubs for native profiling.
    benchmark.h's timing_gpio_init() references MSP430 hardware registers
    that get baked into the LLVM IR when compiled with --target=msp430-elf. */

@@ -32,6 +32,14 @@ __attribute__((section(".nvm"))) uint16_t __nvm_sp = 0;
 
 /* __region_boundary is provided by milp_boot.S */
 
+/* Halt CPU after benchmark completes.
+   Prevents post-main restarts from producing spurious GPIO edges
+   that inflate Saleae timing measurements. */
+#include <msp430.h>
+void bench_halt(void) {
+    __bis_SR_register(LPM4_bits);
+}
+
 #ifdef DEVICE_DEBUG
 
 #include "debug_common.h"

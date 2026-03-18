@@ -131,20 +131,29 @@ def saleae_run(
         return _extract_timing(csv_path)
 
 
+_SHORT_PULSE_THRESHOLD = 0.001  # 1 ms — start pulse is ~10 us, stop pulse is ~5 ms
+
+
 def _extract_timing(csv_path: Path) -> float:
     """Parse Saleae digital CSV export to find execution time.
 
     The CSV has columns like ``Time [s], Channel 0``.
-    GPIO uses pulse-based signalling (UP→DOWN at start and stop),
-    so execution time is measured as:
-        first falling edge (end of start pulse) →
-        last rising edge (beginning of stop pulse).
+    GPIO uses pulse-based signalling:
+    - Start pulse: ~10 us HIGH (short, below 1 ms threshold)
+    - Stop pulse:  ~5 ms HIGH (long, above 1 ms threshold)
+
+    Execution time is measured as:
+        last short pulse falling edge → first long pulse rising edge.
+
+    This handles spurious start pulses from device resets during
+    flashing or initialization.
 
     Raises DeviceError if edges are missing.
     """
-    first_falling: float | None = None
-    last_rising: float | None = None
+    # Collect all pulses as (rising_time, falling_time) pairs.
+    pulses: list[tuple[float, float]] = []
     prev_val: int | None = None
+    rising_time: float | None = None
 
     with open(csv_path) as f:
         f.readline()  # skip header
@@ -156,24 +165,51 @@ def _extract_timing(csv_path: Path) -> float:
             value = int(parts[1])
 
             if prev_val is not None:
-                if prev_val == 1 and value == 0 and first_falling is None:
-                    first_falling = timestamp
-                elif prev_val == 0 and value == 1:
-                    last_rising = timestamp
+                if prev_val == 0 and value == 1:
+                    rising_time = timestamp
+                elif prev_val == 1 and value == 0 and rising_time is not None:
+                    pulses.append((rising_time, timestamp))
+                    rising_time = None
 
             prev_val = value
 
-    if first_falling is None:
+    if not pulses:
         raise DeviceError(
-            "No falling edge detected on Saleae channel "
+            "No pulses detected on Saleae channel "
             f"{_SALEAE_CHANNEL}. GPIO never pulsed -- "
             "check that the benchmark was compiled with benchmark.h"
         )
-    if last_rising is None:
+
+    # Classify pulses by duration.
+    short_pulses = [(r, f) for r, f in pulses if (f - r) < _SHORT_PULSE_THRESHOLD]
+    long_pulses = [(r, f) for r, f in pulses if (f - r) >= _SHORT_PULSE_THRESHOLD]
+
+    if not short_pulses:
         raise DeviceError(
-            "No rising edge after start pulse on Saleae channel "
+            "No start pulse (short HIGH < 1 ms) detected on Saleae channel "
+            f"{_SALEAE_CHANNEL}. Check benchmark GPIO signalling."
+        )
+    if not long_pulses:
+        raise DeviceError(
+            "No stop pulse (long HIGH >= 1 ms) detected on Saleae channel "
             f"{_SALEAE_CHANNEL}. Program may have hung or "
             "capture timeout was too short."
         )
 
-    return (last_rising - first_falling) * 1_000_000  # seconds -> us
+    # Last short pulse falling edge = benchmark start.
+    start_time = short_pulses[-1][1]
+
+    # First long pulse rising edge after start = benchmark stop.
+    stop_time: float | None = None
+    for rising, _falling in long_pulses:
+        if rising > start_time:
+            stop_time = rising
+            break
+
+    if stop_time is None:
+        raise DeviceError(
+            "No stop pulse found after the last start pulse on Saleae channel "
+            f"{_SALEAE_CHANNEL}. Program may have hung."
+        )
+
+    return (stop_time - start_time) * 1_000_000  # seconds -> us

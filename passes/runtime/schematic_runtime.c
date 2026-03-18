@@ -33,6 +33,11 @@ __attribute__((section(".nvm"))) uint16_t __nvm_sp = 0;
 
 /* __region_boundary is provided by schematic_boot.S */
 
+#include <msp430.h>
+void bench_halt(void) {
+    __bis_SR_register(LPM4_bits);
+}
+
 #ifdef DEVICE_DEBUG
 
 #include "debug_common.h"
