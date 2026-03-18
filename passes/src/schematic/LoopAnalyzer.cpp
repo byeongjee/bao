@@ -193,7 +193,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
         // Update solution from RCG result.
         for (const auto &ckpt : result.selectedCheckpoints)
-            solution.enabledCheckpoints.insert(ckpt);
+            solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
 
         for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
             const auto &blocks = result.intervalBlocks[i];
@@ -311,7 +311,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             }
 
             for (const auto &ckpt : result.selectedCheckpoints)
-                solution.enabledCheckpoints.insert(ckpt);
+                solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
             for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
                 const auto &blocks = result.intervalBlocks[i];
                 const auto &alloc = result.allocations[i];

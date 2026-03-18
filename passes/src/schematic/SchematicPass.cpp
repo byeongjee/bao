@@ -292,7 +292,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     // propagate_energy_left / propagate_energy_to_leave).
     auto updateSolutionFromIntervals = [&](const RCGResult &result) {
         for (const auto &ckpt : result.selectedCheckpoints)
-            solution.enabledCheckpoints.insert(ckpt);
+            solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
 
         for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
             const auto &blocks = result.intervalBlocks[i];

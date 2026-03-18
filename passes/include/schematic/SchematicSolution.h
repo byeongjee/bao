@@ -3,6 +3,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Value.h"
 
 #include <limits>
@@ -26,6 +27,36 @@ struct CFGEdge {
 
     bool operator==(const CFGEdge &o) const { return src == o.src && dst == o.dst; }
 };
+
+/// Resolve a checkpoint edge to a real CFG edge.
+/// Function-level traces have loops collapsed, so RCG-selected checkpoints
+/// may reference edges (src→dst) where dst is not a direct CFG successor of
+/// src (the loop body is between them).  The reference implementation uses a
+/// loop-collapsed CFG where these edges exist; we map them to the actual
+/// LLVM CFG edge: src → successor_of_src that can reach dst via BFS.
+/// Returns the resolved edge, or the original if already valid.
+inline CFGEdge resolveCheckpointEdge(const CFGEdge &edge) {
+    for (llvm::BasicBlock *succ : llvm::successors(edge.src)) {
+        if (succ == edge.dst)
+            return edge;
+    }
+    // BFS from each successor to find which one reaches dst.
+    for (llvm::BasicBlock *succ : llvm::successors(edge.src)) {
+        std::set<llvm::BasicBlock *> visited;
+        std::vector<llvm::BasicBlock *> worklist = {succ};
+        while (!worklist.empty()) {
+            llvm::BasicBlock *cur = worklist.back();
+            worklist.pop_back();
+            if (cur == edge.dst)
+                return CFGEdge{edge.src, succ};
+            if (!visited.insert(cur).second)
+                continue;
+            for (llvm::BasicBlock *s : llvm::successors(cur))
+                worklist.push_back(s);
+        }
+    }
+    return edge; // fallback: return original
+}
 
 struct RegionAllocation {
     std::map<llvm::Value *, Placement> placement;
