@@ -236,8 +236,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     // 5. Check if allocations differ at header vs latch.
     if (placementsDiffer(headerAlloc, latchAlloc)) {
-        llvm::errs() << "LOOP_DEBUG: loop=" << header->getName()
-                     << " -> mandatoryBackEdge (placementsDiffer)\n";
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         decision.E_loop = 0.0;
@@ -251,24 +249,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         if (latch)
             solution.enabledCheckpoints.insert(CFGEdge{latch, header});
         return true;
-    }
-
-    // DEBUG: Print body paths for loops with maxTripCount <= 5 (outer loops)
-    if (maxTripCount <= 5) {
-        llvm::errs() << "OUTER_LOOP_DEBUG: loop=" << header->getName() << " maxTC=" << maxTripCount
-                     << " bodyPaths=" << bodyPaths.size() << "\n";
-        for (unsigned p = 0; p < bodyPaths.size(); ++p) {
-            llvm::errs() << "  path[" << p << "]: ";
-            for (auto *BB : bodyPaths[p])
-                llvm::errs() << BB->getName() << " ";
-            llvm::errs() << "\n";
-            // Print E_to_leave for each block
-            for (auto *BB : bodyPaths[p]) {
-                auto it = solution.blockMeta.find(BB);
-                double etl = (it != solution.blockMeta.end()) ? it->second.E_to_leave : -1;
-                llvm::errs() << "    " << BB->getName() << " E_to_leave=" << etl << "\n";
-            }
-        }
     }
 
     // 6. Allocations match — compute energy per iteration using reference formula:
@@ -398,30 +378,20 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         }
     }
 
-    llvm::errs() << "LOOP_DEBUG: loop=" << header->getName() << " E_loop=" << E_loop
-                 << " numIt=" << numIt << " maxTC=" << maxTripCount
-                 << " headerEToLeave=" << headerEToLeave << " latchEToLeave=" << latchEToLeave
-                 << " latchCost=" << latchCost << " hasEnabledCkpts=" << hasEnabledCheckpoints
-                 << " availEnergy=" << availableEnergy << "\n";
-
     if (numIt > maxTripCount) {
         // Entire loop fits — no checkpoint needed, but use maxTripCount for
         // energy scaling so propagation accounts for all iterations.
         decision.numIterationsPerCharge = static_cast<unsigned>(maxTripCount);
         decision.loopFitsEntirely = true;
-        llvm::errs() << "LOOP_DEBUG:   -> loopFitsEntirely (numIt=" << numIt
-                     << " > maxTC=" << maxTripCount << ")\n";
     } else if (numIt < 3) {
         // Too few iterations per charge — checkpoint every iteration.
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         if (latch)
             solution.enabledCheckpoints.insert(CFGEdge{latch, header});
-        llvm::errs() << "LOOP_DEBUG:   -> mandatoryBackEdge (numIt=" << numIt << ")\n";
     } else {
         // Conditional checkpoint every numIt iterations.
         decision.numIterationsPerCharge = numIt;
-        llvm::errs() << "LOOP_DEBUG:   -> conditional (numIt=" << numIt << ")\n";
     }
 
     solution.loopDecisions[header] = decision;
