@@ -111,6 +111,71 @@ def optimize_ir(
     )
 
 
+_NOINLINE_FUNCTIONS = frozenset({
+    "timing_gpio_init",
+    "timing_gpio_start",
+    "timing_gpio_stop",
+    "_timing_delay_cycles",
+    "bench_halt",
+    "main",
+})
+"""Benchmark infrastructure functions that must never be inlined."""
+
+
+def _strip_noinline_for_inlining(input_ll: Path, output_ll: Path) -> None:
+    """Strip ``noinline`` from attribute groups, then re-add it to infra functions.
+
+    At -O0 clang puts ``noinline`` on a shared attribute group used by every
+    function.  We remove it globally so the inliner can act on business-logic
+    helpers, then add ``noinline`` back as an inline attribute on benchmark
+    infrastructure functions that must stay separate.
+    """
+    import re
+
+    text = input_ll.read_text()
+
+    # Remove noinline from attribute groups: "attributes #N = { ... noinline ... }"
+    text = re.sub(r"(?<=\s)noinline(?=[\s}])", "", text)
+
+    # Re-add noinline to infrastructure function definitions.
+    # Match: define ... @funcname(  →  define ... @funcname( with noinline before #N
+    for name in _NOINLINE_FUNCTIONS:
+        # Pattern: "define ... @name(" — insert noinline before the attribute group ref
+        text = re.sub(
+            rf"(define\s[^@]*@{re.escape(name)}\([^)]*\)\s*)(#\d+)",
+            r"\1noinline \2",
+            text,
+        )
+
+    output_ll.write_text(text)
+
+
+def inline_functions(
+    tc: Toolchain,
+    input_ll: Path,
+    output_ll: Path,
+) -> StepResult:
+    """Run LLVM inlining passes without other optimizations.
+
+    At -O0 clang marks all functions ``noinline`` via a shared attribute group,
+    which prevents the inliner from acting.  We strip ``noinline`` from the
+    attribute groups but re-add it to benchmark infrastructure functions (timing,
+    halt) so only business-logic helpers get inlined.
+    """
+    stripped_ll = input_ll.with_name(input_ll.stem + "_stripped.ll")
+    _strip_noinline_for_inlining(input_ll, stripped_ll)
+
+    return run(
+        [
+            tc.opt,
+            "-passes=always-inline,inline",
+            "-S", str(stripped_ll),
+            "-o", str(output_ll),
+        ],
+        step_name="inline-functions",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Assembly-based energy estimation
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ from .common import (
     annotate_tripcounts,
     compile_to_ir,
     compile_to_object,
+    inline_functions,
     link_algorithm,
     now_ms,
     optimize_ir,
@@ -101,12 +102,16 @@ def compile_schematic(
         tripcount_ll = tmp / "tripcount.ll"
         annotate_tripcounts(tc, env, input_ll, tripcount_ll)
 
+        # Inline functions so trace and schematic pass see a single function
+        inlined_ll = tmp / "inlined.ll"
+        inline_functions(tc, tripcount_ll, inlined_ll)
+
         # Frontend optimization
-        schematic_input_ll = tripcount_ll
+        schematic_input_ll = inlined_ll
         if opts.clang_opt_level != 0:
             optimized_ll = tmp / "input_optimized.ll"
             optimize_ir(
-                tc, tripcount_ll, optimized_ll,
+                tc, inlined_ll, optimized_ll,
                 opt_level=opts.clang_opt_level,
             )
             schematic_input_ll = optimized_ll
