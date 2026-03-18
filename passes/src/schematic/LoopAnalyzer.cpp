@@ -178,9 +178,12 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     if (loopLatch && solution.decidedPlacements.count(loopLatch))
         endBound = loopLatch;
 
+    BlockCostOverrides innerOverrides = computeInnerLoopCostOverrides(L, solution);
+    const BlockCostOverrides *overridesPtr = innerOverrides.empty() ? nullptr : &innerOverrides;
+
     for (const auto &path : bodyPaths) {
         RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta,
-                         solution.decidedPlacements, startBound, endBound, tracker_);
+                         solution.decidedPlacements, startBound, endBound, tracker_, overridesPtr);
         RCGResult result = solver.solve();
         if (!result.feasible) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for loop at '"
