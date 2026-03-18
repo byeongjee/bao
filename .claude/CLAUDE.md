@@ -168,6 +168,18 @@ scripts/ckpt/
     └── plot.py          # Plot benchmark CSV results (requires `uv sync --extra plot`)
 ```
 
+### Standalone Scripts
+
+```bash
+# Re-run all benchmarks (with/without device-debug + uninstrumented)
+uv run python scripts/run_benchmarks.py [BENCHMARKS...]   # e.g., test aes crc rsa
+
+# Visualize results from result/ directory
+uv run --extra plot python scripts/plot_results.py [--output-dir DIR] [--normalize] [--benchmarks B...] [--metrics M...]
+```
+
+`scripts/run_benchmarks.py` runs each algorithm with and without `--device-debug`, plus uninstrumented, saving CSVs to `result/`. `scripts/plot_results.py` reads those CSVs and produces per-capacitor bar charts for 5 metrics: `region_boundaries`, `runtime_region_boundary_calls`, `execution_time`, `profiling_time`, `compilation_time`. Runtime region boundary data comes from `*-swbor.csv` (device-debug); timing data from `*-swbor-no-debug.csv`. `--normalize` normalizes to uninstrumented (when available) or MILP.
+
 ## Architecture
 
 ### Source Layout
