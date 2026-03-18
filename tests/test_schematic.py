@@ -48,6 +48,19 @@ SCENARIOS = [
         {"exit": 0, "min_boundary": 2,
          "stderr_contains": "Paths analyzed:"},
     ),
+    (
+        "nested_loop_energy",
+        "scenario_nested_loop_energy.c",
+        ENERGY_CONFIG,
+        SCHEMATIC_CONFIG,
+        # Inner loop energy far exceeds capacity — outer loop must NOT fit
+        # entirely. With the nested-energy-propagation fix, the outer loop
+        # back-edge also gets a checkpoint (mandatoryBackEdge). Without the
+        # fix, the outer loop is incorrectly marked loopFitsEntirely and
+        # produces only 7 boundaries instead of 8.
+        {"exit": 0, "min_boundary": 8,
+         "stderr_contains": "Loop decisions:"},
+    ),
 ]
 
 _SCENARIO_IDS = [s[0] for s in SCENARIOS]

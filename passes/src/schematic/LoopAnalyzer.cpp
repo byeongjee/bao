@@ -358,6 +358,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                         auto &meta = solution.blockMeta[BB];
                         if (accum > meta.E_to_leave)
                             meta.E_to_leave = accum;
+                        else
+                            accum = meta.E_to_leave;
                     }
                 }
 
@@ -385,6 +387,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                         auto &meta = solution.blockMeta[BB];
                         if (newELeft < meta.E_left)
                             meta.E_left = newELeft;
+                        else
+                            accum = eleftSeed - meta.E_left;
                     }
                 }
             }
