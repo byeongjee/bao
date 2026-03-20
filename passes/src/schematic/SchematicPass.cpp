@@ -210,11 +210,11 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 for (Loop *L = LI.getLoopFor(dstBB); L; L = L->getParentLoop()) {
                     if (L->contains(srcBB))
                         break; // src is in this loop and all parents
-                    auto loopIt = solution.loopDecisions.find(L->getHeader());
-                    if (loopIt != solution.loopDecisions.end()) {
-                        unsigned nbIter = loopIt->second.numIterationsPerCharge;
-                        if (nbIter > 1)
-                            dstExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
+                    auto headerIt = solution.blockMeta.find(L->getHeader());
+                    if (headerIt != solution.blockMeta.end() && headerIt->second.loop) {
+                        const auto &mark = *headerIt->second.loop;
+                        if (mark.nbIter > 1)
+                            dstExecEnergy += (mark.nbIter - 1) * mark.costOneIt;
                     }
                 }
 
@@ -269,11 +269,11 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 for (Loop *L = LI.getLoopFor(srcBB); L; L = L->getParentLoop()) {
                     if (L->contains(dstBB))
                         break; // dst is in this loop and all parents
-                    auto loopIt = solution.loopDecisions.find(L->getHeader());
-                    if (loopIt != solution.loopDecisions.end()) {
-                        unsigned nbIter = loopIt->second.numIterationsPerCharge;
-                        if (nbIter > 1)
-                            srcExecEnergy += (nbIter - 1) * loopIt->second.E_loop;
+                    auto headerIt = solution.blockMeta.find(L->getHeader());
+                    if (headerIt != solution.blockMeta.end() && headerIt->second.loop) {
+                        const auto &mark = *headerIt->second.loop;
+                        if (mark.nbIter > 1)
+                            srcExecEnergy += (mark.nbIter - 1) * mark.costOneIt;
                     }
                 }
 
