@@ -46,9 +46,11 @@ SCENARIOS = [
         "scenario_switch.c",
         ENERGY_CONFIG,
         SCHEMATIC_CONFIG,
-        # Multi-path CFG: must NOT be falsely infeasible (the main energy propagation bug).
-        # Requires multiple regions due to divergent paths with different energy costs.
-        {"exit": 0, "min_boundary": 2,
+        # Multi-path CFG (switch with 4 cases + default). With capacity=500 and
+        # IR-level costs (~67 energy for the expensive path), the entire function
+        # fits without checkpoints. Validates multi-successor CFG handling: no
+        # false infeasibility, correct uncovered-path analysis for untouched cases.
+        {"exit": 0, "max_boundary": 0,
          "stderr_contains": "Paths analyzed:"},
     ),
     (
