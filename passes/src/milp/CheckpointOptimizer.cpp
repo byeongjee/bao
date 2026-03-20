@@ -372,6 +372,19 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
             idx++;
         }
     }
+
+    // Forbid region boundaries at merge points.  EdgeSplitPass guarantees
+    // that every predecessor of a merge point has a single predecessor,
+    // so the optimizer will place boundaries at those split blocks instead.
+    for (NodeId block : cfg_.getBlocks()) {
+        if (block == cfg_.getEntryBlock())
+            continue;
+        const auto &preds = predecessors_[block];
+        if (preds.size() > 1) {
+            model_.addConstr(isRegionStart_[block] == 0,
+                             "no_boundary_merge_" + std::to_string(block));
+        }
+    }
 }
 
 // Pending-state propagation for all tracked variables (eligible + ineligible):
