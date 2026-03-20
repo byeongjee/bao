@@ -1,6 +1,7 @@
 #include "schematic/LoopAnalyzer.h"
 #include "common/Logger.h"
 #include "common/LoopTripCount.h"
+#include "schematic/EnergyPropagation.h"
 #include "schematic/IntervalAllocator.h"
 #include "schematic/RCGSolver.h"
 
@@ -9,6 +10,7 @@
 #include "llvm/IR/CFG.h"
 
 #include <cmath>
+#include <limits>
 #include <set>
 
 namespace checkpoint {
@@ -134,6 +136,106 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 solution.blockMeta[BB].analyzed = true;
             }
             solution.regions.push_back({blocks, alloc});
+        }
+
+        // Per-checkpoint energy propagation after RCG solve (reference: apply_memory_allocation
+        // lines 449-466)
+        {
+            struct SeedCkpt {
+                llvm::BasicBlock *bbBefore;
+                llvm::BasicBlock *bbAfter;
+                bool isVirtual;
+            };
+            std::vector<SeedCkpt> ckpts;
+            ckpts.push_back({startSynth, path.front(), /*isVirtual=*/true});
+            for (const auto &ckptEdge : result.selectedCheckpoints)
+                ckpts.push_back({ckptEdge.src, ckptEdge.dst, /*isVirtual=*/false});
+            ckpts.push_back({path.back(), endSynth, /*isVirtual=*/true});
+
+            for (const auto &ck : ckpts) {
+                if (ck.bbAfter) {
+                    double energyLeftStart;
+                    auto metaIt = solution.blockMeta.find(ck.bbAfter);
+                    if (ck.isVirtual && metaIt != solution.blockMeta.end() &&
+                        metaIt->second.E_left < std::numeric_limits<double>::max()) {
+                        energyLeftStart =
+                            metaIt->second.E_left + cfg_.getBlockInfo(ck.bbAfter).energyCost;
+                        // Adjust for VM savings (same as getBlockExecEnergy but inline)
+                        auto allocIt = solution.decidedPlacements.find(ck.bbAfter);
+                        if (allocIt != solution.decidedPlacements.end()) {
+                            for (const auto &[gv, place] : allocIt->second) {
+                                if (place == Placement::VM)
+                                    energyLeftStart += params_.nvmAccessPenalty *
+                                                       (state_.getLoadCount(ck.bbAfter, gv) +
+                                                        state_.getStoreCount(ck.bbAfter, gv));
+                            }
+                        }
+                    } else {
+                        energyLeftStart = params_.capacity - params_.E_pro -
+                                          params_.N_reg * params_.regRestoreEnergy;
+                        auto allocIt = solution.decidedPlacements.find(ck.bbAfter);
+                        if (allocIt != solution.decidedPlacements.end()) {
+                            for (const auto &[gv, place] : allocIt->second) {
+                                if (place == Placement::VM)
+                                    energyLeftStart -= params_.memRestoreEnergyPerByte *
+                                                       state_.getVarSizeBytes(gv);
+                            }
+                        }
+                    }
+                    CFGEdge fwdEdge{ck.bbBefore, ck.bbAfter};
+                    propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg_, state_, params_,
+                                        LI_, /*loopScope=*/L);
+                }
+
+                if (ck.bbBefore) {
+                    double eToLeave;
+                    auto metaIt = solution.blockMeta.find(ck.bbBefore);
+                    if (metaIt != solution.blockMeta.end() && metaIt->second.E_to_leave != 0.0) {
+                        eToLeave =
+                            metaIt->second.E_to_leave - cfg_.getBlockInfo(ck.bbBefore).energyCost;
+                        auto allocIt = solution.decidedPlacements.find(ck.bbBefore);
+                        if (allocIt != solution.decidedPlacements.end()) {
+                            for (const auto &[gv, place] : allocIt->second) {
+                                if (place == Placement::VM)
+                                    eToLeave += params_.nvmAccessPenalty *
+                                                (state_.getLoadCount(ck.bbBefore, gv) +
+                                                 state_.getStoreCount(ck.bbBefore, gv));
+                            }
+                        }
+                    } else {
+                        eToLeave = params_.E_epi + params_.N_reg * params_.regStoreEnergy;
+                        auto allocIt = solution.decidedPlacements.find(ck.bbBefore);
+                        if (allocIt != solution.decidedPlacements.end()) {
+                            for (const auto &[gv, place] : allocIt->second) {
+                                if (place == Placement::VM)
+                                    eToLeave +=
+                                        params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
+                            }
+                        }
+                    }
+                    CFGEdge bwdEdge{ck.bbBefore, ck.bbAfter};
+                    propagateEnergyToLeave(bwdEdge, eToLeave, solution, cfg_, state_, params_, LI_,
+                                           /*loopScope=*/L);
+                }
+            }
+
+            // Update synthetic boundary block metadata after propagation
+            solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[header].E_to_leave;
+            solution.blockMeta[startSynth].E_left =
+                params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+            for (const auto &[gv, place] : solution.decidedPlacements[startSynth]) {
+                if (place == Placement::VM)
+                    solution.blockMeta[startSynth].E_left -=
+                        params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
+            }
+            solution.blockMeta[endSynth].E_to_leave = params_.E_epi +
+                                                      params_.N_reg * params_.regStoreEnergy +
+                                                      params_.loopIncrementCostNvm;
+            for (const auto &[gv, place] : solution.decidedPlacements[endSynth]) {
+                if (place == Placement::VM)
+                    solution.blockMeta[endSynth].E_to_leave +=
+                        params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
+            }
         }
     }
 
