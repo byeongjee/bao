@@ -212,6 +212,7 @@ def _precomputed_pipeline(
             str(env.bb_analyzer),
             "--energy-params", str(opts.energy_config),
             "--bb-mapping", str(bb_mapping),
+            f"-ckpt-log-level={opts.pass_log_level}",
             str(energy_obj),
         ],
         step_name="bb-energy-analyzer",

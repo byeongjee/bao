@@ -195,7 +195,7 @@ def _assembly_mode(
     Returns (pass_output, profiling_time_ms).
     """
     # Phase 2: Pre-strip-mining assembly energy
-    pre_bb_energy, pre_stderr = run_assembly_energy(tc, env, milp_input_ll, tmp / "pre", opts.energy_config)
+    pre_bb_energy, pre_stderr = run_assembly_energy(tc, env, milp_input_ll, tmp / "pre", opts.energy_config, opts.pass_log_level)
 
     pre_energy_config = write_assembly_energy_config(
         tmp / "pre_energy_config.json",
@@ -217,7 +217,7 @@ def _assembly_mode(
     run(preprocess_cmd, step_name="milp-preprocess")
 
     # Phase 4: Post-strip-mining assembly energy
-    post_bb_energy, post_stderr = run_assembly_energy(tc, env, preprocessed_ll, tmp / "post", opts.energy_config)
+    post_bb_energy, post_stderr = run_assembly_energy(tc, env, preprocessed_ll, tmp / "post", opts.energy_config, opts.pass_log_level)
 
     post_energy_config = write_assembly_energy_config(
         tmp / "post_energy_config.json",

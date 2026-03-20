@@ -187,6 +187,7 @@ def run_assembly_energy(
     input_ll: Path,
     prefix: Path,
     params_config: Path,
+    pass_log_level: str,
 ) -> tuple[Path, str]:
     """Run the assembly-based BB energy estimation pipeline.
 
@@ -233,6 +234,7 @@ def run_assembly_energy(
             str(env.bb_analyzer),
             "--energy-params", str(params_config),
             "--bb-mapping", str(bb_mapping),
+            f"-ckpt-log-level={pass_log_level}",
             str(energy_obj),
         ],
         step_name="bb-energy-analyzer",
