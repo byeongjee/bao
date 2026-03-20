@@ -114,17 +114,16 @@ class CheckpointOptimizer {
     bool acceptFeasible_ = false;
     double timeLimit_ = 600.0;
 
-    using BlockGVKey = std::pair<NodeId, llvm::GlobalVariable *>;
     using BlockVarKey = std::pair<NodeId, llvm::Value *>;
 
-    // MILP variables
-    std::map<NodeId, GRBVar> isRegionStart_;     // x[b]
-    std::map<BlockGVKey, GRBVar> placeInVm_;     // p[b,v] — eligible only
-    std::map<BlockGVKey, GRBVar> needRestore_;   // y[b,v] — eligible only
-    std::map<BlockVarKey, GRBVar> pending_;      // pending[b,v] — all tracked
-    std::map<BlockGVKey, GRBVar> vmPending_;     // vm_pending[b,v] — eligible only
-    std::map<BlockVarKey, GRBVar> commit_;       // commit[b,v] — all tracked
-    std::map<NodeId, GRBVar> energyAccumulated_; // eaccum[b]
+    // MILP variables (paper notation)
+    std::map<NodeId, GRBVar> r_;         // r_b: region start
+    std::map<BlockVarKey, GRBVar> m_;    // m_{b,v}: VM placement (all tracked)
+    std::map<BlockVarKey, GRBVar> rHat_; // r̂_{b,v}: need-restore (all tracked)
+    std::map<BlockVarKey, GRBVar> d_;    // d_{b,v}: dirty/pending (all tracked)
+    std::map<BlockVarKey, GRBVar> dHat_; // d̂_{b,v}: VM-dirty (all tracked)
+    std::map<BlockVarKey, GRBVar> s_;    // s_{b,v}: save (all tracked)
+    std::map<NodeId, GRBVar> eAccum_;    // ε_accum[b]: accumulated energy
 
     std::map<NodeId, std::vector<NodeId>> predecessors_;
 
@@ -134,16 +133,17 @@ class CheckpointOptimizer {
     void addConstraints();
     void extractSolution();
 
-    // Constraint helpers
-    void constrainEntryAsRegionStart();
-    void constrainVMCapacity();
-    void constrainNeedRestoreLinearization();
-    void constrainPlacementPropagation();
-    void constrainPendingStatePropagation();
-    void constrainCommitAtRegionBoundary();
-    void constrainEnergyInitAtRegionStart();
-    void constrainEnergyPropagation();
-    void constrainEnergyWithinCapacity();
+    // Constraint helpers (paper constraint numbers)
+    void constrainEntryAsRegionStart();       // C1
+    void constrainIneligiblePlacement();      // C2 (new)
+    void constrainNeedRestoreLinearization(); // C3
+    void constrainVMCapacity();               // VM capacity
+    void constrainPlacementPropagation();     // C12, C13
+    void constrainDirtyPropagation();         // C4, C5, C6
+    void constrainSaveAtRegionBoundary();     // C7, C8
+    void constrainEnergyInitAtRegionStart();  // C9
+    void constrainEnergyPropagation();        // C10
+    void constrainEnergyWithinCapacity();     // C11
 
     // Expression builders (linear in decision variables)
     GRBLinExpr buildEBlk(NodeId block);
