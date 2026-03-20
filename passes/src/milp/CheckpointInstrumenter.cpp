@@ -466,8 +466,18 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 continue;
             if (allCommitInsts.count(I))
                 continue;
-            if (defBlock && I->getParent() == defBlock)
-                continue;
+            if (defBlock) {
+                if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(I)) {
+                    // For PHI uses, the value flows from the incoming block,
+                    // not the PHI's parent.  Only skip if the incoming block
+                    // is the def block (where the original def dominates).
+                    llvm::BasicBlock *incomingBB = PHI->getIncomingBlock(U);
+                    if (incomingBB == defBlock)
+                        continue;
+                } else if (I->getParent() == defBlock) {
+                    continue;
+                }
+            }
             usesToRewrite.push_back(&U);
         }
 
