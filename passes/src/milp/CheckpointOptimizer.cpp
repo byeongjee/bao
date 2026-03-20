@@ -278,12 +278,11 @@ void CheckpointOptimizer::addConstraints() {
     constrainEnergyWithinCapacity();     // C11
 }
 
-// Entry block is always a region start:
-//   r_[entry] = 1
+// C1: r[entry] = 1
 void CheckpointOptimizer::constrainEntryAsRegionStart() {
     NodeId entry = cfg_.getEntryBlock();
     if (entry != kInvalidNodeId && r_.count(entry)) {
-        model_.addConstr(r_[entry] == 1, "entry_region_start");
+        model_.addConstr(r_[entry] == 1, "C1_entry_region_start");
     }
 }
 
@@ -298,82 +297,75 @@ void CheckpointOptimizer::constrainIneligiblePlacement() {
     }
 }
 
-// Per-block VM (SRAM) capacity limit:
-//   sum_v( size(v) * m[b,v] ) + ineligibleSize <= VM_capacity
-// Eligible objects may or may not be in VM; ineligible memory objects always are.
+// Σ size(v) * m[b,v] <= VM_capacity  (∀ b)
 void CheckpointOptimizer::constrainVMCapacity() {
-    if (state_.getVMObjs().empty() && state_.getIneligibleObjs().empty())
-        return;
-
-    // Memory-backed ineligible objects always occupy VM (e.g., globals/allocas).
-    // Cross-block SSA values are checkpoint-tracked state but do not consume
-    // persistent VM capacity.
-    double ineligibleSize = 0;
-    for (llvm::Value *V : state_.getIneligibleObjs()) {
-        if (!llvm::isa<llvm::GlobalVariable>(V) && !llvm::isa<llvm::AllocaInst>(V)) {
-            continue;
-        }
-        int sizeBytes = state_.getVarSizeBytes(V);
-        if (sizeBytes > 0)
-            ineligibleSize += static_cast<double>(sizeBytes);
-    }
+    std::vector<llvm::Value *> allTracked;
+    for (llvm::GlobalVariable *GV : state_.getVMObjs())
+        allTracked.push_back(static_cast<llvm::Value *>(GV));
+    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
+                      state_.getIneligibleObjs().end());
 
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr vmUsage = 0;
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-            int sizeBytes = state_.getVarSizeBytes(GV);
-            if (sizeBytes <= 0) {
+        for (llvm::Value *V : allTracked) {
+            // Only memory-backed objects consume VM capacity.
+            if (!llvm::isa<llvm::GlobalVariable>(V) && !llvm::isa<llvm::AllocaInst>(V))
                 continue;
-            }
-            vmUsage += static_cast<double>(sizeBytes) *
-                       m_[std::make_pair(block, static_cast<llvm::Value *>(GV))];
+            int sizeBytes = state_.getVarSizeBytes(V);
+            if (sizeBytes <= 0)
+                continue;
+            vmUsage += static_cast<double>(sizeBytes) * m_[std::make_pair(block, V)];
         }
-        model_.addConstr(vmUsage + ineligibleSize <= static_cast<double>(params_.vmCapacityBytes),
+        model_.addConstr(vmUsage <= static_cast<double>(params_.vmCapacityBytes),
                          "vm_capacity_" + nodeToken(cfg_, block));
     }
 }
 
-// rHat[b,v] = r_[b] AND m[b,v]
-// A variable needs restoring from FRAM only when a new region begins
-// and the variable is placed in volatile memory (VM/SRAM).
+// C3: rHat[b,v] = r[b] AND m[b,v] AND L_{b,v}
+//     When L_{b,v}=0: rHat[b,v] = 0
+//     When L_{b,v}=1: rHat[b,v] = r[b] AND m[b,v]  (via addGenConstrAnd)
 void CheckpointOptimizer::constrainNeedRestoreLinearization() {
-    for (const auto &[key, needVar] : rHat_) {
+    // Build live-in check.
+    auto isLiveIn = [&](NodeId block, llvm::Value *V) -> bool {
+        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
+            return state_.getEligLiveIn(block).count(GV) > 0;
+        return state_.getIneligLiveIn(block).count(V) > 0;
+    };
+
+    for (const auto &[key, rHatVar] : rHat_) {
         NodeId block = key.first;
         llvm::Value *V = key.second;
-        auto placeIt = m_.find(key);
-        if (placeIt == m_.end())
-            continue;
 
-        std::string prefix = "rHat_" + nodeToken(cfg_, block) + "_" + valueToken(V);
-        model_.addConstr(needVar <= r_[block], prefix + "_le_r");
-        model_.addConstr(needVar <= placeIt->second, prefix + "_le_m");
-        model_.addConstr(needVar >= r_[block] + placeIt->second - 1, prefix + "_ge_rm");
+        if (!isLiveIn(block, V)) {
+            // L_{b,v} = 0: fix rHat = 0.
+            model_.addConstr(rHatVar == 0,
+                             "C3_rHat_not_live_" + nodeToken(cfg_, block) + "_" + valueToken(V));
+        } else {
+            // L_{b,v} = 1: rHat = r AND m.
+            GRBVar inputs[] = {r_[block], m_[key]};
+            model_.addGenConstrAnd(rHatVar, inputs, 2,
+                                   "C3_rHat_and_" + nodeToken(cfg_, block) + "_" + valueToken(V));
+        }
     }
 }
 
-// Placement consistency across CFG edges:
-//   m[succ,v] <= m[pred,v] + r_[succ]
-//   m[succ,v] >= m[pred,v] - r_[succ]
-// Within a region (r_=0), placement is inherited from predecessors.
-// At region boundaries, placement may change freely.
+// C12: m[succ,v] <= m[pred,v] + r[succ]  (∀ edge, v ∈ V_elig)
+// C13: m[succ,v] >= m[pred,v] - r[succ]  (∀ edge, v ∈ V_elig)
 void CheckpointOptimizer::constrainPlacementPropagation() {
     unsigned idx = 0;
     for (const auto &[pred, succ] : cfg_.getEdges()) {
         for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
             BlockVarKey predKey = std::make_pair(pred, static_cast<llvm::Value *>(GV));
             BlockVarKey succKey = std::make_pair(succ, static_cast<llvm::Value *>(GV));
-            GRBVar pPred = m_[predKey];
-            GRBVar pSucc = m_[succKey];
-            GRBVar xSucc = r_[succ];
-            model_.addConstr(pSucc <= pPred + xSucc, "placement_prop_fwd_" + std::to_string(idx));
-            model_.addConstr(pSucc >= pPred - xSucc, "placement_prop_bwd_" + std::to_string(idx));
+            model_.addConstr(m_[succKey] <= m_[predKey] + r_[succ],
+                             "C12_placement_fwd_" + std::to_string(idx));
+            model_.addConstr(m_[succKey] >= m_[predKey] - r_[succ],
+                             "C13_placement_bwd_" + std::to_string(idx));
             idx++;
         }
     }
 
-    // Forbid region boundaries at merge points.  EdgeSplitPass guarantees
-    // that every predecessor of a merge point has a single predecessor,
-    // so the optimizer will place boundaries at those split blocks instead.
+    // Forbid region boundaries at merge points.
     for (NodeId block : cfg_.getBlocks()) {
         if (block == cfg_.getEntryBlock())
             continue;
@@ -384,15 +376,11 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
     }
 }
 
-// Dirty-state propagation for all tracked variables (eligible + ineligible):
-//   d[b,v] >= def(b,v)                                       (local def)
-//   d[b,v] <= def(b,v) + sum_{p in preds(b)} d[p,v]         (upper bound)
-//   d[b,v] <= def(b,v) + (1 - r_[b])                        (region reset)
-//   d[succ,v] >= d[pred,v] - r_[succ]                       (edge prop)
-// Tracks whether variable v has an uncommitted modification reaching block b.
-// Region starts reset dirty state (forcing a save at the boundary).
+// C4:  d[b,v] >= D_{b,v}                              (∀ b, v)
+// C5:  d[succ,v] >= d[pred,v] - r[succ]               (∀ edge, v)
+// C5': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]           (∀ b, v)  [LP tightening]
+// C6:  d[b,v] <= D_{b,v} - r[b] + 1                   (∀ b, v)
 void CheckpointOptimizer::constrainDirtyPropagation() {
-    // Build combined list of all tracked variables as Value* (elig + inelig).
     std::vector<llvm::Value *> allTracked;
     for (llvm::GlobalVariable *GV : state_.getVMObjs())
         allTracked.push_back(static_cast<llvm::Value *>(GV));
@@ -402,9 +390,8 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::Value *V : allTracked) {
             BlockVarKey key = std::make_pair(block, V);
-            GRBVar p = d_[key];
+            GRBVar dVar = d_[key];
 
-            // Def indicator: check eligible then ineligible.
             bool isDef = false;
             if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
                 isDef = state_.getEligDefIndicator(block, GV);
@@ -413,84 +400,87 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
             double def = isDef ? 1.0 : 0.0;
 
             std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
-            model_.addConstr(p >= def, "d_local_def_" + suffix);
 
+            // C4: d[b,v] >= D_{b,v}
+            model_.addConstr(dVar >= def, "C4_dirty_local_" + suffix);
+
+            // C5': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]  [LP tightening]
             GRBLinExpr predSum = 0;
             for (NodeId pred : predecessors_[block]) {
                 predSum += d_[std::make_pair(pred, V)];
             }
-            model_.addConstr(p <= def + predSum, "d_upper_bound_" + suffix);
-            model_.addConstr(p <= def + (1 - r_[block]), "d_region_reset_" + suffix);
+            model_.addConstr(dVar <= def + predSum, "C5p_dirty_upper_" + suffix);
+
+            // C6: d[b,v] <= D_{b,v} - r[b] + 1
+            model_.addConstr(dVar <= def + (1 - r_[block]), "C6_dirty_reset_" + suffix);
         }
     }
 
+    // C5: d[succ,v] >= d[pred,v] - r[succ]  (∀ edge, v)
     unsigned idx = 0;
     for (const auto &[pred, succ] : cfg_.getEdges()) {
         for (llvm::Value *V : allTracked) {
             model_.addConstr(d_[std::make_pair(succ, V)] >= d_[std::make_pair(pred, V)] - r_[succ],
-                             "d_edge_prop_" + std::to_string(idx));
+                             "C5_dirty_edge_" + std::to_string(idx));
             idx++;
         }
     }
 }
 
-// Save model — forces dirty state to be saved at region boundaries.
-//
-// dHat[b,v] = d[b,v] AND m[b,v]  (eligible only)
-//   Tracks dirty modifications for VM-placed eligible variables.
-//
-// For each save variable (b != entry, v in LiveIn(b)):
-//   s[b,v] <= r_[b]                          (only at boundaries)
-//   s[b,v] <= sum_{p} state[p,v]             (some pred must be dirty)
-//   s[b,v] >= r_[b] + state[p,v] - 1        (for each pred p)
-// where state = d (ineligible) or dHat (eligible).
+// C7:  dHat[b,v] = d[b,v] AND m[b,v]                  (via addGenConstrAnd)
+// C8:  s[succ,v] >= dHat[pred,v] + r[succ] - 1        (∀ edge, v)
+// C8': s[b,v] <= r[b]                                  (∀ b, v)  [LP tightening]
+// C8': s[b,v] <= Σ_pred dHat[pred,v]                   (∀ b, v)  [LP tightening]
 void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
-    // dHat[b,v] = d[b,v] AND m[b,v] — eligibles only
+    std::vector<llvm::Value *> allTracked;
+    for (llvm::GlobalVariable *GV : state_.getVMObjs())
+        allTracked.push_back(static_cast<llvm::Value *>(GV));
+    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
+                      state_.getIneligibleObjs().end());
+
+    // C7: dHat[b,v] = d[b,v] AND m[b,v]
     for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
-            BlockVarKey key = std::make_pair(block, static_cast<llvm::Value *>(GV));
-            std::string prefix =
-                "dHat_and_" + nodeToken(cfg_, block) + "_" + sanitizeToken(GV->getName());
-            model_.addConstr(dHat_[key] <= d_[key], prefix + "_le_d");
-            model_.addConstr(dHat_[key] <= m_[key], prefix + "_le_m");
-            model_.addConstr(dHat_[key] >= d_[key] + m_[key] - 1, prefix + "_ge_dm");
+        for (llvm::Value *V : allTracked) {
+            BlockVarKey key = std::make_pair(block, V);
+            GRBVar inputs[] = {d_[key], m_[key]};
+            model_.addGenConstrAnd(dHat_[key], inputs, 2,
+                                   "C7_dHat_and_" + nodeToken(cfg_, block) + "_" + valueToken(V));
         }
     }
 
-    // s[b,v] model (for b != entry and v in LiveIn(b))
-    for (const auto &[key, saveVar] : s_) {
+    // C8 + LP tightening for s variables.
+    for (const auto &[key, sVar] : s_) {
         NodeId block = key.first;
         llvm::Value *V = key.second;
-
         std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
 
-        model_.addConstr(saveVar <= r_[block], "s_le_r_" + suffix);
+        // C8': s[b,v] <= r[b]
+        model_.addConstr(sVar <= r_[block], "C8p_save_le_r_" + suffix);
 
-        if (state_.isIneligible(V)) {
-            // Ineligible save — uses d directly (always in VM).
-            GRBLinExpr predDirty = 0;
-            for (NodeId pred : predecessors_[block]) {
-                predDirty += d_[std::make_pair(pred, V)];
-            }
-            model_.addConstr(saveVar <= predDirty, "inelig_s_le_preds_" + suffix);
-            for (NodeId pred : predecessors_[block]) {
-                model_.addConstr(saveVar >= r_[block] + d_[std::make_pair(pred, V)] - 1,
-                                 "inelig_s_ge_pred_" + nodeToken(cfg_, pred) + "_" + suffix);
-            }
-        } else {
-            // Eligible save — uses dHat.
-            auto *GV = llvm::cast<llvm::GlobalVariable>(V);
-            GRBLinExpr predDHat = 0;
-            for (NodeId pred : predecessors_[block]) {
-                predDHat += dHat_[std::make_pair(pred, static_cast<llvm::Value *>(GV))];
-            }
-            model_.addConstr(saveVar <= predDHat, "elig_s_le_preds_" + suffix);
-            for (NodeId pred : predecessors_[block]) {
-                model_.addConstr(
-                    saveVar >=
-                        r_[block] + dHat_[std::make_pair(pred, static_cast<llvm::Value *>(GV))] - 1,
-                    "elig_s_ge_pred_" + nodeToken(cfg_, pred) + "_" + suffix);
-            }
+        // C8': s[b,v] <= Σ_pred dHat[pred,v]
+        GRBLinExpr predDHatSum = 0;
+        for (NodeId pred : predecessors_[block]) {
+            predDHatSum += dHat_[std::make_pair(pred, V)];
+        }
+        model_.addConstr(sVar <= predDHatSum, "C8p_save_le_preds_" + suffix);
+    }
+
+    // C8: s[succ,v] >= dHat[pred,v] + r[succ] - 1  (∀ edge, v where s exists)
+    // Build per-block save variable lookup for efficiency.
+    std::map<NodeId, std::vector<std::pair<llvm::Value *, GRBVar>>> saveByBlock;
+    for (const auto &[key, sVar] : s_) {
+        saveByBlock[key.first].emplace_back(key.second, sVar);
+    }
+
+    unsigned idx = 0;
+    for (const auto &[pred, succ] : cfg_.getEdges()) {
+        auto it = saveByBlock.find(succ);
+        if (it == saveByBlock.end())
+            continue;
+        for (const auto &[V, sVar] : it->second) {
+            model_.addConstr(sVar >= dHat_[std::make_pair(pred, V)] + r_[succ] - 1,
+                             "C8_save_edge_" + std::to_string(idx));
+            idx++;
         }
     }
 }
@@ -502,7 +492,7 @@ void CheckpointOptimizer::constrainEnergyInitAtRegionStart() {
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr eStart = buildEStart(block);
         model_.addGenConstrIndicator(r_[block], 1, eAccum_[block] - eStart, GRB_EQUAL, 0.0,
-                                     "energy_init_" + nodeToken(cfg_, block));
+                                     "C9_energy_init_" + nodeToken(cfg_, block));
     }
 }
 
@@ -514,7 +504,7 @@ void CheckpointOptimizer::constrainEnergyPropagation() {
         GRBLinExpr eBlkSrc = buildEBlk(src);
         model_.addGenConstrIndicator(r_[dst], 0, eAccum_[dst] - eAccum_[src] - eBlkSrc,
                                      GRB_GREATER_EQUAL, 0.0,
-                                     "energy_propagation_" + std::to_string(edgeIdx++));
+                                     "C10_energy_prop_" + std::to_string(edgeIdx++));
     }
 }
 
@@ -530,13 +520,13 @@ void CheckpointOptimizer::constrainEnergyWithinCapacity() {
         GRBLinExpr eBlkSrc = buildEBlk(src);
         GRBLinExpr eEndDst = buildEEnd(dst);
         model_.addConstr(eAccum_[src] + eBlkSrc + eEndDst <= Ebuf,
-                         "energy_capacity_edge_" + std::to_string(edgeIdx++));
+                         "C11_energy_edge_" + std::to_string(edgeIdx++));
     }
 
     for (NodeId exitBlock : cfg_.getExitBlocks()) {
         GRBLinExpr eBlkExit = buildEBlk(exitBlock);
         model_.addConstr(eAccum_[exitBlock] + eBlkExit <= Ebuf,
-                         "energy_capacity_exit_" + nodeToken(cfg_, exitBlock));
+                         "C11_energy_exit_" + nodeToken(cfg_, exitBlock));
     }
 }
 
@@ -552,30 +542,17 @@ GRBLinExpr CheckpointOptimizer::buildEBlk(NodeId block) {
     return expr;
 }
 
+// E_start(b) = E_pro * r[b] + Σ_v E_rst_v * rHat[b,v]
 GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
-    GRBLinExpr expr = 0;
-
-    // Ineligible restore cost: unconditional at region start (constant coeff).
-    double ineligRestoreCost = 0;
-    for (llvm::Value *V : state_.getIneligLiveIn(block)) {
-        double eRestore = energy_.getERestore(V);
-        if (eRestore > 0.0)
-            ineligRestoreCost += eRestore;
-    }
-    expr += (params_.E_pro + ineligRestoreCost) * r_[block];
-
-    // Eligible restore cost: variable (depends on rHat).
-    for (llvm::GlobalVariable *GV : state_.getEligLiveIn(block)) {
-        BlockVarKey key = std::make_pair(block, static_cast<llvm::Value *>(GV));
-        auto it = rHat_.find(key);
-        if (it == rHat_.end())
+    GRBLinExpr expr = params_.E_pro * r_[block];
+    for (const auto &[key, rHatVar] : rHat_) {
+        if (key.first != block)
             continue;
-        double eRestore = energy_.getERestore(GV);
+        double eRestore = energy_.getERestore(key.second);
         if (eRestore > 0.0) {
-            expr += eRestore * it->second;
+            expr += eRestore * rHatVar;
         }
     }
-
     return expr;
 }
 
