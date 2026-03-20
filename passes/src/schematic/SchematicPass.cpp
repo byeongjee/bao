@@ -4,6 +4,7 @@
 #include "common/Logger.h"
 #include "common/PassStatistics.h"
 #include "milp/CheckpointContext.h"
+#include "schematic/EnergyPropagation.h"
 #include "schematic/IntervalAllocator.h"
 #include "schematic/LoopAnalyzer.h"
 #include "schematic/RCGSolver.h"
@@ -25,6 +26,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <chrono>
 #include <deque>
+#include <limits>
 #include <set>
 
 using namespace llvm;
@@ -159,106 +161,9 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         return cost;
     };
 
-    // CFG-based energy propagation (reference: cfg_modification.py:171-317).
-    // Propagates E_left forward and E_to_leave backward through disabled
-    // checkpoint chains. Order: Phase 3 (seed checkpoint entries) → forward → backward.
-    auto propagateEnergy = [&]() {
-        // Phase 3: Initialize E_left at checkpoint entry points (Fix 4: before forward prop).
-        for (const auto &ckpt : solution.enabledCheckpoints) {
-            BasicBlock *dstBB = ckpt.dst;
-            auto dstIt = solution.blockMeta.find(dstBB);
-            if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
-                continue;
-            double restoreE =
-                params.E_pro + params.N_reg * params.regRestoreEnergy + getVarRestoreCost(dstBB);
-            double dstExecEnergy = getBlockExecEnergy(dstBB);
-            double newELeft = params.capacity - restoreE - dstExecEnergy;
-            if (newELeft < dstIt->second.E_left)
-                solution.blockMeta[dstBB].E_left = newELeft;
-        }
-
-        // Forward propagation of E_left through disabled edges.
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (const auto &[src, dst] : ctx.cfg->getEdges()) {
-                auto *srcBB = const_cast<BasicBlock *>(src);
-                auto *dstBB = const_cast<BasicBlock *>(dst);
-                CFGEdge edge{srcBB, dstBB};
-
-                if (solution.enabledCheckpoints.count(edge))
-                    continue;
-
-                // Skip loop back-edges.
-                if (Loop *L = LI.getLoopFor(dstBB)) {
-                    if (dstBB == L->getHeader() && L->contains(srcBB))
-                        continue;
-                }
-
-                auto srcIt = solution.blockMeta.find(srcBB);
-                auto dstIt = solution.blockMeta.find(dstBB);
-                if (srcIt == solution.blockMeta.end() || !srcIt->second.analyzed)
-                    continue;
-                if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
-                    continue;
-
-                double dstExecEnergy = getBlockExecEnergy(dstBB);
-                double newELeft = srcIt->second.E_left - dstExecEnergy;
-                if (newELeft < dstIt->second.E_left) {
-                    solution.blockMeta[dstBB].E_left = newELeft;
-                    changed = true;
-                }
-            }
-        }
-
-        // Backward propagation of E_to_leave through disabled edges.
-        changed = true;
-        while (changed) {
-            changed = false;
-            for (const auto &[src, dst] : ctx.cfg->getEdges()) {
-                auto *srcBB = const_cast<BasicBlock *>(src);
-                auto *dstBB = const_cast<BasicBlock *>(dst);
-                CFGEdge edge{srcBB, dstBB};
-
-                // At enabled checkpoints, E_to_leave includes save + exec cost.
-                if (solution.enabledCheckpoints.count(edge)) {
-                    double saveE =
-                        params.E_epi + params.N_reg * params.regStoreEnergy + getVarSaveCost(srcBB);
-                    saveE += getBlockExecEnergy(srcBB);
-                    if (saveE > solution.blockMeta[srcBB].E_to_leave) {
-                        solution.blockMeta[srcBB].E_to_leave = saveE;
-                        changed = true;
-                    }
-                    continue;
-                }
-
-                // Skip loop back-edges.
-                if (Loop *L = LI.getLoopFor(dstBB)) {
-                    if (dstBB == L->getHeader() && L->contains(srcBB))
-                        continue;
-                }
-
-                auto srcIt = solution.blockMeta.find(srcBB);
-                auto dstIt = solution.blockMeta.find(dstBB);
-                if (srcIt == solution.blockMeta.end() || !srcIt->second.analyzed)
-                    continue;
-                if (dstIt == solution.blockMeta.end() || !dstIt->second.analyzed)
-                    continue;
-
-                double srcExecEnergy = getBlockExecEnergy(srcBB);
-                double newEToLeave = srcExecEnergy + dstIt->second.E_to_leave;
-                if (newEToLeave > srcIt->second.E_to_leave) {
-                    solution.blockMeta[srcBB].E_to_leave = newEToLeave;
-                    changed = true;
-                }
-            }
-        }
-    };
-
     // Helper: update solution from RCG interval results.
     // Only sets analyzed flag, placements, and regions. E_left/E_to_leave are
-    // handled entirely by propagateEnergy() (reference delegates to
-    // propagate_energy_left / propagate_energy_to_leave).
+    // handled by per-checkpoint propagateEnergyLeft / propagateEnergyToLeave.
     auto updateSolutionFromIntervals = [&](const RCGResult &result) {
         for (const auto &ckpt : result.selectedCheckpoints)
             solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
@@ -369,14 +274,58 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             }
 
             updateSolutionFromIntervals(result);
+
+            // Per-checkpoint energy propagation (reference: apply_memory_allocation lines 449-466)
+            {
+                struct SeedCkpt {
+                    llvm::BasicBlock *bbBefore;
+                    llvm::BasicBlock *bbAfter;
+                    bool isVirtual;
+                };
+                std::vector<SeedCkpt> ckpts;
+                ckpts.push_back({startBound, segments[s].front(), /*isVirtual=*/true});
+                for (const auto &ckptEdge : result.selectedCheckpoints)
+                    ckpts.push_back({ckptEdge.src, ckptEdge.dst, /*isVirtual=*/false});
+                ckpts.push_back({segments[s].back(), endBound, /*isVirtual=*/true});
+
+                for (const auto &ck : ckpts) {
+                    if (ck.bbAfter) {
+                        double energyLeftStart;
+                        auto metaIt = solution.blockMeta.find(ck.bbAfter);
+                        // Reference line 453: virtual checkpoint with existing value
+                        if (ck.isVirtual && metaIt != solution.blockMeta.end() &&
+                            metaIt->second.E_left < std::numeric_limits<double>::max()) {
+                            energyLeftStart =
+                                metaIt->second.E_left + getBlockExecEnergy(ck.bbAfter);
+                        } else {
+                            energyLeftStart = params.capacity - params.E_pro -
+                                              params.N_reg * params.regRestoreEnergy -
+                                              getVarRestoreCost(ck.bbAfter);
+                        }
+                        CFGEdge fwdEdge{ck.bbBefore, ck.bbAfter};
+                        propagateEnergyLeft(fwdEdge, energyLeftStart, solution, *ctx.cfg, state,
+                                            params, LI, /*loopScope=*/nullptr);
+                    }
+
+                    if (ck.bbBefore) {
+                        double eToLeave;
+                        auto metaIt = solution.blockMeta.find(ck.bbBefore);
+                        // Reference line 461: existing nonzero value → undo block cost
+                        if (metaIt != solution.blockMeta.end() &&
+                            metaIt->second.E_to_leave != 0.0) {
+                            eToLeave = metaIt->second.E_to_leave - getBlockExecEnergy(ck.bbBefore);
+                        } else {
+                            eToLeave = params.E_epi + params.N_reg * params.regStoreEnergy +
+                                       getVarSaveCost(ck.bbBefore);
+                        }
+                        CFGEdge bwdEdge{ck.bbBefore, ck.bbAfter};
+                        propagateEnergyToLeave(bwdEdge, eToLeave, solution, *ctx.cfg, state, params,
+                                               LI, /*loopScope=*/nullptr);
+                    }
+                }
+            }
         }
-
-        // Propagate energy after each path so subsequent paths see updated values.
-        propagateEnergy();
     }
-
-    // Propagate energy before Step 9b so boundary blocks have correct values.
-    propagateEnergy();
 
     // Step 9b: Analyze uncovered blocks (Python: find_and_analyse_not_fixed_paths).
     // For each block not yet analyzed, build a synthetic path:
@@ -472,10 +421,53 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         }
 
         updateSolutionFromIntervals(result);
-    }
 
-    // Fix 2: Propagate energy AFTER Step 9b before Step 10.
-    propagateEnergy();
+        // Per-checkpoint energy propagation for uncovered block path
+        {
+            struct SeedCkpt {
+                llvm::BasicBlock *bbBefore;
+                llvm::BasicBlock *bbAfter;
+                bool isVirtual;
+            };
+            std::vector<SeedCkpt> ckpts;
+            ckpts.push_back({startBound, synPath.front(), /*isVirtual=*/true});
+            for (const auto &ckptEdge : result.selectedCheckpoints)
+                ckpts.push_back({ckptEdge.src, ckptEdge.dst, /*isVirtual=*/false});
+            ckpts.push_back({synPath.back(), endBound, /*isVirtual=*/true});
+
+            for (const auto &ck : ckpts) {
+                if (ck.bbAfter) {
+                    double energyLeftStart;
+                    auto metaIt = solution.blockMeta.find(ck.bbAfter);
+                    if (ck.isVirtual && metaIt != solution.blockMeta.end() &&
+                        metaIt->second.E_left < std::numeric_limits<double>::max()) {
+                        energyLeftStart = metaIt->second.E_left + getBlockExecEnergy(ck.bbAfter);
+                    } else {
+                        energyLeftStart = params.capacity - params.E_pro -
+                                          params.N_reg * params.regRestoreEnergy -
+                                          getVarRestoreCost(ck.bbAfter);
+                    }
+                    CFGEdge fwdEdge{ck.bbBefore, ck.bbAfter};
+                    propagateEnergyLeft(fwdEdge, energyLeftStart, solution, *ctx.cfg, state, params,
+                                        LI, /*loopScope=*/nullptr);
+                }
+
+                if (ck.bbBefore) {
+                    double eToLeave;
+                    auto metaIt = solution.blockMeta.find(ck.bbBefore);
+                    if (metaIt != solution.blockMeta.end() && metaIt->second.E_to_leave != 0.0) {
+                        eToLeave = metaIt->second.E_to_leave - getBlockExecEnergy(ck.bbBefore);
+                    } else {
+                        eToLeave = params.E_epi + params.N_reg * params.regStoreEnergy +
+                                   getVarSaveCost(ck.bbBefore);
+                    }
+                    CFGEdge bwdEdge{ck.bbBefore, ck.bbAfter};
+                    propagateEnergyToLeave(bwdEdge, eToLeave, solution, *ctx.cfg, state, params, LI,
+                                           /*loopScope=*/nullptr);
+                }
+            }
+        }
+    }
 
     // Step 10: Single pass — resolve remaining potential edges (reference: schematic.py:468-502).
     for (const auto &[src, dst] : ctx.cfg->getEdges()) {
@@ -527,8 +519,13 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             // Insufficient energy or incompatible allocations → enable checkpoint.
             solution.enabledCheckpoints.insert(edge);
         } else {
-            // Sufficient energy, compatible allocations → propagate energy through.
-            propagateEnergy();
+            // Propagate energy through the disabled edge using existing block values
+            // (reference schematic.py:499-500)
+            CFGEdge disabledEdge{srcBB, dstBB};
+            propagateEnergyLeft(disabledEdge, srcMeta->second.E_left, solution, *ctx.cfg, state,
+                                params, LI, /*loopScope=*/nullptr);
+            propagateEnergyToLeave(disabledEdge, dstMeta->second.E_to_leave, solution, *ctx.cfg,
+                                   state, params, LI, /*loopScope=*/nullptr);
         }
     }
 
