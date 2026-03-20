@@ -33,7 +33,6 @@ class RCGSolver {
               const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
               const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>>
                   &blockAllocation,
-              llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock,
               VMAddressTracker *tracker);
 
     /// Top-level solve: calls the three functions below in sequence.
@@ -61,8 +60,6 @@ class RCGSolver {
     const SchematicParams &params_;
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta_;
     const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation_;
-    llvm::BasicBlock *startBoundaryBlock_;
-    llvm::BasicBlock *endBoundaryBlock_;
     VMAddressTracker *tracker_;
 
     std::vector<Node> nodes_;

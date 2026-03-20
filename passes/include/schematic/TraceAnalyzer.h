@@ -11,17 +11,11 @@
 
 namespace checkpoint {
 
-/// Segment extraction: split a trace into contiguous unanalyzed sub-paths.
-/// Returns segments + their start/end boundary blocks.
+/// Extract the subpaths of contiguous basic blocks not fixed following a trace.
 /// Reference: schematic.py:extract_not_fixed_bb_paths (line 315).
-struct ExtractedSegments {
-    std::vector<std::vector<llvm::BasicBlock *>> segments;
-    std::vector<llvm::BasicBlock *> startBoundaries;
-    std::vector<llvm::BasicBlock *> endBoundaries;
-};
-
-ExtractedSegments extractNotFixedBBPaths(const std::vector<llvm::BasicBlock *> &trace,
-                                         const SchematicSolution &solution);
+std::vector<std::vector<llvm::BasicBlock *>>
+extractNotFixedBBPaths(const std::vector<llvm::BasicBlock *> &trace,
+                       const SchematicSolution &solution);
 
 /// Analyze a single trace: extract segments, solve RCG for each, apply allocations.
 /// Reference: schematic.py:analyze_trace (line 351).
@@ -31,15 +25,11 @@ bool analyzeTrace(const std::vector<llvm::BasicBlock *> &trace, SchematicSolutio
                   const SchematicParams &params, VMAddressTracker *tracker, llvm::LoopInfo &LI,
                   llvm::Loop *loopScope, std::string &errorMessage);
 
-/// Build a synthetic trace starting from an unanalyzed block.
-/// Reference: schematic.py:extract_not_fixed_bb_trace (in find_and_analyse_not_fixed_paths).
-struct ExtractedTrace {
-    std::vector<llvm::BasicBlock *> blocks;
-    llvm::BasicBlock *startBoundary;
-    llvm::BasicBlock *endBoundary;
-};
-
-ExtractedTrace extractNotFixedBBTrace(llvm::BasicBlock *startBB, const SchematicSolution &solution);
+/// Extract a path of not fixed basic blocks from a given bb not fixed.
+/// Returns a trace with fixed predecessor prepended and fixed successor appended.
+/// Reference: schematic.py:extract_not_fixed_bb_trace (line 295).
+std::vector<llvm::BasicBlock *> extractNotFixedBBTrace(llvm::BasicBlock *startBB,
+                                                       const SchematicSolution &solution);
 
 /// Analyze all uncovered blocks by building synthetic traces and running analyzeTrace.
 /// Reference: schematic.py:find_and_analyse_not_fixed_paths (line 504).

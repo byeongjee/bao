@@ -9,42 +9,47 @@
 
 namespace checkpoint {
 
-ExtractedSegments extractNotFixedBBPaths(const std::vector<llvm::BasicBlock *> &trace,
-                                         const SchematicSolution &solution) {
-    ExtractedSegments result;
-    std::vector<llvm::BasicBlock *> currentSeg;
+std::vector<std::vector<llvm::BasicBlock *>>
+extractNotFixedBBPaths(const std::vector<llvm::BasicBlock *> &trace,
+                       const SchematicSolution &solution) {
+    // Extract the subpaths of contiguous basic blocks not fixed following a trace.
+    // Reference: schematic.py:315-349 (extract_not_fixed_bb_paths).
+    std::vector<std::vector<llvm::BasicBlock *>> paths;
+    std::vector<llvm::BasicBlock *> currentPath;
+    bool registeringPath = false;
+    llvm::BasicBlock *lastFixedBB = nullptr;
 
     for (unsigned i = 0; i < trace.size(); ++i) {
         llvm::BasicBlock *BB = trace[i];
         auto metaIt = solution.blockMeta.find(BB);
-        bool isAnalyzed = metaIt != solution.blockMeta.end() && metaIt->second.analyzed;
+        bool isFixed = metaIt != solution.blockMeta.end() && metaIt->second.analyzed;
 
-        if (!isAnalyzed) {
-            if (currentSeg.empty()) {
-                // Record start boundary (previous analyzed block).
-                llvm::BasicBlock *startBound = nullptr;
-                if (i > 0) {
-                    auto prevMeta = solution.blockMeta.find(trace[i - 1]);
-                    if (prevMeta != solution.blockMeta.end() && prevMeta->second.analyzed)
-                        startBound = trace[i - 1];
-                }
-                result.startBoundaries.push_back(startBound);
+        if (registeringPath) {
+            currentPath.push_back(BB);
+            if (isFixed) {
+                paths.push_back(std::move(currentPath));
+                currentPath.clear();
+                registeringPath = false;
             }
-            currentSeg.push_back(BB);
-        } else {
-            if (!currentSeg.empty()) {
-                result.endBoundaries.push_back(BB);
-                result.segments.push_back(std::move(currentSeg));
-                currentSeg.clear();
+        }
+        if (!registeringPath) {
+            if (isFixed) {
+                lastFixedBB = BB;
+            } else {
+                registeringPath = true;
+                if (lastFixedBB) {
+                    currentPath.push_back(lastFixedBB);
+                    lastFixedBB = nullptr;
+                }
+                currentPath.push_back(BB);
             }
         }
     }
-    if (!currentSeg.empty()) {
-        result.endBoundaries.push_back(nullptr);
-        result.segments.push_back(std::move(currentSeg));
+    if (registeringPath) {
+        paths.push_back(std::move(currentPath));
     }
 
-    return result;
+    return paths;
 }
 
 bool analyzeTrace(const std::vector<llvm::BasicBlock *> &trace, SchematicSolution &solution,
@@ -63,100 +68,11 @@ bool analyzeTrace(const std::vector<llvm::BasicBlock *> &trace, SchematicSolutio
     if (allAnalyzed)
         return true;
 
-    auto extracted = extractNotFixedBBPaths(trace, solution);
+    // Reference: schematic.py:351-379 (analyse_trace).
+    auto subTraces = extractNotFixedBBPaths(trace, solution);
 
-    for (unsigned s = 0; s < extracted.segments.size(); ++s) {
-        llvm::BasicBlock *startBound =
-            s < extracted.startBoundaries.size() ? extracted.startBoundaries[s] : nullptr;
-        llvm::BasicBlock *endBound =
-            s < extracted.endBoundaries.size() ? extracted.endBoundaries[s] : nullptr;
-
-        RCGSolver solver(extracted.segments[s], state, cfg, params, solution.blockMeta,
-                         solution.blockAllocation, startBound, endBound, tracker);
-        RCGResult result = solver.solve();
-
-        if (!result.feasible) {
-            errorMessage = result.errorMessage;
-            return false;
-        }
-
-        applyMemoryAllocation(result, extracted.segments[s], startBound, endBound, solution, cfg,
-                              state, params, LI, loopScope);
-    }
-
-    return true;
-}
-
-ExtractedTrace extractNotFixedBBTrace(llvm::BasicBlock *startBB,
-                                      const SchematicSolution &solution) {
-    ExtractedTrace result;
-    result.startBoundary = nullptr;
-    result.endBoundary = nullptr;
-
-    // Find an analyzed predecessor as the start boundary.
-    for (llvm::BasicBlock *pred : llvm::predecessors(startBB)) {
-        auto pMeta = solution.blockMeta.find(pred);
-        if (pMeta != solution.blockMeta.end() && pMeta->second.analyzed) {
-            result.startBoundary = pred;
-            break;
-        }
-    }
-
-    // Walk forward through unanalyzed blocks.
-    std::set<llvm::BasicBlock *> visited;
-    std::deque<llvm::BasicBlock *> toVisit;
-    toVisit.push_back(startBB);
-    while (!toVisit.empty()) {
-        llvm::BasicBlock *cur = toVisit.back();
-        toVisit.pop_back();
-        if (visited.count(cur))
-            continue;
-        auto curMeta = solution.blockMeta.find(cur);
-        if (curMeta != solution.blockMeta.end() && curMeta->second.analyzed)
-            continue;
-        visited.insert(cur);
-        result.blocks.push_back(cur);
-        // Follow one unanalyzed successor (greedy).
-        for (llvm::BasicBlock *succ : llvm::successors(cur)) {
-            auto sMeta = solution.blockMeta.find(succ);
-            if (sMeta == solution.blockMeta.end() || !sMeta->second.analyzed) {
-                toVisit.push_back(succ);
-                break;
-            }
-        }
-    }
-
-    // Find an analyzed successor as the end boundary.
-    if (!result.blocks.empty()) {
-        llvm::BasicBlock *lastBB = result.blocks.back();
-        for (llvm::BasicBlock *succ : llvm::successors(lastBB)) {
-            auto sMeta = solution.blockMeta.find(succ);
-            if (sMeta != solution.blockMeta.end() && sMeta->second.analyzed) {
-                result.endBoundary = succ;
-                break;
-            }
-        }
-    }
-
-    return result;
-}
-
-bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solution,
-                                 const SchematicStateAnalysis &state, const SchematicParams &params,
-                                 VMAddressTracker *tracker, llvm::LoopInfo &LI,
-                                 llvm::Loop *loopScope, std::string &errorMessage) {
-    for (const llvm::BasicBlock *constBB : cfg.getBlocks()) {
-        auto *BB = const_cast<llvm::BasicBlock *>(constBB);
-        auto metaIt = solution.blockMeta.find(BB);
-        if (metaIt != solution.blockMeta.end() && metaIt->second.analyzed)
-            continue;
-
-        auto extracted = extractNotFixedBBTrace(BB, solution);
-        if (extracted.blocks.empty())
-            continue;
-
-        RCGSolver solver(extracted.blocks, state, cfg, params, solution.blockMeta,
-                         solution.blockAllocation, extracted.startBoundary, extracted.endBoundary,
+    for (const auto &subPath : subTraces) {
+        RCGSolver solver(subPath, state, cfg, params, solution.blockMeta, solution.blockAllocation,
                          tracker);
         RCGResult result = solver.solve();
 
@@ -165,8 +81,86 @@ bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solu
             return false;
         }
 
-        applyMemoryAllocation(result, extracted.blocks, extracted.startBoundary,
-                              extracted.endBoundary, solution, cfg, state, params, LI, loopScope);
+        applyMemoryAllocation(result, subPath, nullptr, nullptr, solution, cfg, state, params, LI,
+                              loopScope);
+    }
+
+    return true;
+}
+
+std::vector<llvm::BasicBlock *> extractNotFixedBBTrace(llvm::BasicBlock *startBB,
+                                                       const SchematicSolution &solution) {
+    // Reference: schematic.py:295-313 (extract_not_fixed_bb_trace).
+    // trace = [predecessor_fixed_bb, unfixed_1, ..., unfixed_n, successor_fixed_bb]
+    std::vector<llvm::BasicBlock *> trace;
+
+    // Prepend fixed predecessor (ref: trace = [next(cfg.predecessors(start_bb))]).
+    for (llvm::BasicBlock *pred : llvm::predecessors(startBB)) {
+        auto pMeta = solution.blockMeta.find(pred);
+        if (pMeta != solution.blockMeta.end() && pMeta->second.analyzed) {
+            trace.push_back(pred);
+            break;
+        }
+    }
+
+    // Walk forward through unanalyzed blocks.
+    std::deque<llvm::BasicBlock *> toVisit;
+    toVisit.push_back(startBB);
+    std::set<llvm::BasicBlock *> visited;
+    llvm::BasicBlock *lastBB = nullptr;
+    while (!toVisit.empty()) {
+        llvm::BasicBlock *bb = toVisit.back();
+        toVisit.pop_back();
+        if (visited.count(bb))
+            continue;
+        auto curMeta = solution.blockMeta.find(bb);
+        if (curMeta != solution.blockMeta.end() && curMeta->second.analyzed)
+            continue;
+        visited.insert(bb);
+        trace.push_back(bb);
+        lastBB = bb;
+        for (llvm::BasicBlock *neighbor : llvm::successors(bb)) {
+            auto sMeta = solution.blockMeta.find(neighbor);
+            if (sMeta == solution.blockMeta.end() || !sMeta->second.analyzed) {
+                toVisit.push_back(neighbor);
+                break;
+            }
+        }
+    }
+
+    // Append fixed successor (ref: trace.append(next(cfg.neighbors(bb)))).
+    if (lastBB) {
+        for (llvm::BasicBlock *succ : llvm::successors(lastBB)) {
+            auto sMeta = solution.blockMeta.find(succ);
+            if (sMeta != solution.blockMeta.end() && sMeta->second.analyzed) {
+                trace.push_back(succ);
+                break;
+            }
+        }
+    }
+
+    return trace;
+}
+
+bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solution,
+                                 const SchematicStateAnalysis &state, const SchematicParams &params,
+                                 VMAddressTracker *tracker, llvm::LoopInfo &LI,
+                                 llvm::Loop *loopScope, std::string &errorMessage) {
+    // Reference: schematic.py:504-518 (find_and_analyse_not_fixed_paths).
+    // When loopScope is set, iterate only loop blocks (Python passes loop_cfg
+    // whose .nodes contains only the loop's blocks).
+    for (const llvm::BasicBlock *constBB : cfg.getBlocks()) {
+        auto *BB = const_cast<llvm::BasicBlock *>(constBB);
+        if (loopScope && !loopScope->contains(BB))
+            continue;
+        auto metaIt = solution.blockMeta.find(BB);
+        if (metaIt != solution.blockMeta.end() && metaIt->second.analyzed)
+            continue;
+
+        auto trace = extractNotFixedBBTrace(BB, solution);
+        if (!analyzeTrace(trace, solution, state, cfg, params, tracker, LI, loopScope,
+                          errorMessage))
+            return false;
     }
 
     return true;

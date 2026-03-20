@@ -1,9 +1,10 @@
 #include "schematic/RCGSolver.h"
 #include "schematic/MemoryAllocator.h"
 
+#include "llvm/Support/ErrorHandling.h"
+
 #include <algorithm>
 #include <limits>
-#include <optional>
 #include <vector>
 
 namespace checkpoint {
@@ -13,12 +14,9 @@ RCGSolver::RCGSolver(
     const CFGAnalysis &cfg, const SchematicParams &params,
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
     const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
-    llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock,
     VMAddressTracker *tracker)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
-      existingMeta_(existingMeta), blockAllocation_(blockAllocation),
-      startBoundaryBlock_(startBoundaryBlock), endBoundaryBlock_(endBoundaryBlock),
-      tracker_(tracker) {}
+      existingMeta_(existingMeta), blockAllocation_(blockAllocation), tracker_(tracker) {}
 
 void RCGSolver::getCheckpointsFromTrace() {
     nodes_.clear();
@@ -40,36 +38,38 @@ void RCGSolver::getCheckpointsFromTrace() {
 }
 
 void RCGSolver::createReachableCheckpointGraph() {
+    // Reference: schematic.py:175-179.
+    if (pathBlocks_.size() < 3)
+        llvm::report_fatal_error("Malformed trace: A trace must be at least 3 basic blocks long");
+
     unsigned numNodes = nodes_.size();
     adj_.assign(numNodes, {});
 
-    // Look up boundary allocations from blockAllocation.
-    // Reference: trace[0].memory_allocation / trace[-1].memory_allocation
+    // Reference: schematic.py:183-187 (create_reachable_checkpoint_graph).
+    // energy_left = trace[0].energy_left if trace[0].energy_left else (budget - chkpt_restore)
+    // energy_to_leave = trace[-1].energy_to_leave if trace[-1].energy_to_leave else chkpt_save
     const RegionAllocation *startAlloc = nullptr;
     const RegionAllocation *endAlloc = nullptr;
-    if (startBoundaryBlock_) {
-        auto it = blockAllocation_.find(startBoundaryBlock_);
+    {
+        auto it = blockAllocation_.find(pathBlocks_.front());
         if (it != blockAllocation_.end())
             startAlloc = it->second.get();
     }
-    if (endBoundaryBlock_) {
-        auto it = blockAllocation_.find(endBoundaryBlock_);
+    {
+        auto it = blockAllocation_.find(pathBlocks_.back());
         if (it != blockAllocation_.end())
             endAlloc = it->second.get();
     }
 
-    // Read boundary energy values
-    double energyLeft = params_.capacity;
-    if (startBoundaryBlock_) {
-        auto it = existingMeta_.find(startBoundaryBlock_);
-        if (it != existingMeta_.end())
+    double energyLeft = params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+    {
+        auto it = existingMeta_.find(pathBlocks_.front());
+        if (it != existingMeta_.end() && it->second.E_left != std::numeric_limits<double>::max())
             energyLeft = it->second.E_left;
-    } else {
-        energyLeft = params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
     }
     double energyToLeave = params_.E_epi + params_.N_reg * params_.regStoreEnergy;
-    if (endBoundaryBlock_) {
-        auto it = existingMeta_.find(endBoundaryBlock_);
+    {
+        auto it = existingMeta_.find(pathBlocks_.back());
         if (it != existingMeta_.end() && it->second.E_to_leave != 0.0)
             energyToLeave = it->second.E_to_leave;
     }
@@ -247,19 +247,21 @@ RCGResult RCGSolver::solve() {
 
 std::pair<unsigned, unsigned> RCGSolver::getIntervalRange(unsigned nodeFrom,
                                                           unsigned nodeTo) const {
+    // Reference: schematic.py:212,243,261,270 — slicing logic.
+    // Start→ckpt: trace[1:j+1], ckpt→End: trace[i:len-1],
+    // Start→End: trace[1:len-1], ckpt→ckpt: trace[i+1:j+1].
     unsigned startIdx;
     if (nodes_[nodeFrom].kind == Node::Start) {
-        startIdx = 0;
+        startIdx = 1; // skip trace[0] (ref: trace[1:...])
     } else {
-        // CandidateEdge: interval begins at the block after the edge.
         startIdx = nodes_[nodeFrom].blockIndex;
     }
 
     unsigned endIdx;
     if (nodes_[nodeTo].kind == Node::End) {
-        endIdx = static_cast<unsigned>(pathBlocks_.size()) - 1;
+        endIdx =
+            static_cast<unsigned>(pathBlocks_.size()) - 2; // skip trace[-1] (ref: trace[:len-1])
     } else {
-        // CandidateEdge: interval ends at the block before the edge.
         endIdx = nodes_[nodeTo].blockIndex - 1;
     }
 

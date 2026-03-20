@@ -8,11 +8,9 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/IR/CFG.h"
 
 #include <cmath>
 #include <limits>
-#include <set>
 
 namespace checkpoint {
 
@@ -128,9 +126,11 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     solution.blockMeta[endSynth].analyzed = true;
     solution.decidedPlacements[endSynth] = {};
 
-    for (const auto &path : bodyPaths) {
+    for (auto path : bodyPaths) {
+        // Reference: schematic.py:544-545 — insert START_Loop and END_Loop into trace.
+        path.insert(path.begin(), startSynth);
+        path.push_back(endSynth);
         RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta, solution.blockAllocation,
-                         /*startBoundaryBlock=*/startSynth, /*endBoundaryBlock=*/endSynth,
                          tracker_);
         RCGResult result = solver.solve();
         if (!result.feasible) {
@@ -258,103 +258,13 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     // Step 3b: Analyze uncovered blocks within this loop (reference: schematic.py:554).
-    // Blocks not on any body path (e.g., preheaders created by LoopSimplify)
-    // must be analyzed here, within the loop context, before multi-iteration
-    // scaling is applied. The reference calls find_and_analyse_not_fixed_paths
-    // on the loop subgraph after analyzing loop traces.
     {
-        std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
-        for (llvm::BasicBlock *BB : loopBlocks) {
-            auto metaIt = solution.blockMeta.find(BB);
-            if (metaIt != solution.blockMeta.end() && metaIt->second.analyzed)
-                continue;
-
-            // Build synthetic path of contiguous unanalyzed blocks.
-            std::vector<llvm::BasicBlock *> synPath;
-            llvm::BasicBlock *sBound = nullptr;
-            llvm::BasicBlock *eBound = nullptr;
-
-            // Find an analyzed predecessor within the loop as start boundary.
-            for (llvm::BasicBlock *pred : predecessors(BB)) {
-                if (!L->contains(pred))
-                    continue;
-                auto pMeta = solution.blockMeta.find(pred);
-                if (pMeta != solution.blockMeta.end() && pMeta->second.analyzed) {
-                    sBound = pred;
-                    break;
-                }
-            }
-
-            // Walk forward through unanalyzed blocks within the loop.
-            std::set<llvm::BasicBlock *> visited;
-            std::vector<llvm::BasicBlock *> stack;
-            stack.push_back(BB);
-            while (!stack.empty()) {
-                llvm::BasicBlock *cur = stack.back();
-                stack.pop_back();
-                if (visited.count(cur))
-                    continue;
-                if (!L->contains(cur))
-                    continue;
-                auto curMeta = solution.blockMeta.find(cur);
-                if (curMeta != solution.blockMeta.end() && curMeta->second.analyzed)
-                    continue;
-                visited.insert(cur);
-                synPath.push_back(cur);
-                for (llvm::BasicBlock *succ : successors(cur)) {
-                    if (!L->contains(succ))
-                        continue;
-                    auto sMeta = solution.blockMeta.find(succ);
-                    if (sMeta == solution.blockMeta.end() || !sMeta->second.analyzed) {
-                        stack.push_back(succ);
-                        break; // greedy: follow one successor
-                    }
-                }
-            }
-
-            if (synPath.empty())
-                continue;
-
-            // Find an analyzed successor within the loop as end boundary.
-            llvm::BasicBlock *lastBB = synPath.back();
-            for (llvm::BasicBlock *succ : successors(lastBB)) {
-                if (!L->contains(succ))
-                    continue;
-                auto sMeta = solution.blockMeta.find(succ);
-                if (sMeta != solution.blockMeta.end() && sMeta->second.analyzed) {
-                    eBound = succ;
-                    break;
-                }
-            }
-
-            // Pass analyzed boundary blocks so the RCG uses their actual
-            // E_left/E_to_leave for budget (reference: extract_not_fixed_bb_trace
-            // at schematic.py:295-313 uses fixed predecessor/successor blocks,
-            // and create_reachable_checkpoint_graph reads trace[0].energy_left
-            // and trace[-1].energy_to_leave at schematic.py:184,187).
-            RCGSolver solver(synPath, state_, cfg_, params_, solution.blockMeta,
-                             solution.blockAllocation, sBound, eBound, tracker_);
-            RCGResult result = solver.solve();
-            if (!result.feasible) {
-                PLOGE << "SCHEMATIC infeasible: loop uncovered block '" << BB->getName()
-                      << "' in loop at '" << header->getName() << "': " << result.errorMessage;
-                return false;
-            }
-
-            for (const auto &ckpt : result.selectedCheckpoints)
-                solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
-            for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
-                const auto &blocks = result.intervalBlocks[i];
-                const auto &alloc = result.allocations[i];
-                auto sharedAlloc = std::make_shared<RegionAllocation>(alloc);
-                for (llvm::BasicBlock *B : blocks) {
-                    for (const auto &[gv, va] : alloc.vars)
-                        solution.decidedPlacements[B][gv] = va.placement;
-                    solution.blockMeta[B].analyzed = true;
-                    solution.blockAllocation[B] = sharedAlloc;
-                }
-                solution.regions.push_back({blocks, alloc});
-            }
+        std::string errorMsg;
+        if (!findAndAnalyzeNotFixedPaths(cfg_, solution, state_, params_, tracker_, LI_, L,
+                                         errorMsg)) {
+            PLOGE << "SCHEMATIC infeasible: uncovered block in loop at '" << header->getName()
+                  << "': " << errorMsg;
+            return false;
         }
     }
 
