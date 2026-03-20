@@ -154,74 +154,12 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
 
     // Step 9b: Analyze uncovered blocks (Python: find_and_analyse_not_fixed_paths).
-    // For each block not yet analyzed, build a synthetic path:
-    //   [analyzed predecessor] → unfixed blocks (greedy walk) → [analyzed successor]
-    // and run the same RCG analysis on it.
-    for (const BasicBlock *constBB : ctx.cfg->getBlocks()) {
-        auto *BB = const_cast<BasicBlock *>(constBB);
-        auto metaIt = solution.blockMeta.find(BB);
-        if (metaIt != solution.blockMeta.end() && metaIt->second.analyzed)
-            continue;
-
-        // Build synthetic path: start with an analyzed predecessor.
-        std::vector<BasicBlock *> synPath;
-
-        // Find an analyzed predecessor as the start boundary.
-        BasicBlock *startBound = nullptr;
-        for (BasicBlock *pred : predecessors(BB)) {
-            auto pMeta = solution.blockMeta.find(pred);
-            if (pMeta != solution.blockMeta.end() && pMeta->second.analyzed) {
-                startBound = pred;
-                break;
-            }
-        }
-
-        // Walk forward through unanalyzed blocks.
-        std::set<BasicBlock *> visited;
-        std::deque<BasicBlock *> toVisit;
-        toVisit.push_back(BB);
-        while (!toVisit.empty()) {
-            BasicBlock *cur = toVisit.back();
-            toVisit.pop_back();
-            if (visited.count(cur))
-                continue;
-            auto curMeta = solution.blockMeta.find(cur);
-            if (curMeta != solution.blockMeta.end() && curMeta->second.analyzed)
-                continue;
-            visited.insert(cur);
-            synPath.push_back(cur);
-            // Follow one unanalyzed successor (greedy).
-            for (BasicBlock *succ : successors(cur)) {
-                auto sMeta = solution.blockMeta.find(succ);
-                if (sMeta == solution.blockMeta.end() || !sMeta->second.analyzed) {
-                    toVisit.push_back(succ);
-                    break;
-                }
-            }
-        }
-
-        if (synPath.empty())
-            continue;
-
-        // Find an analyzed successor as the end boundary.
-        BasicBlock *endBound = nullptr;
-        BasicBlock *lastBB = synPath.back();
-        for (BasicBlock *succ : successors(lastBB)) {
-            auto sMeta = solution.blockMeta.find(succ);
-            if (sMeta != solution.blockMeta.end() && sMeta->second.analyzed) {
-                endBound = succ;
-                break;
-            }
-        }
-
-        // Run RCG on the synthetic path.
-        RCGSolver solver(synPath, state, *ctx.cfg, params, solution.blockMeta,
-                         solution.decidedPlacements, startBound, endBound, &vmTracker);
-        RCGResult result = solver.solve();
-
-        if (!result.feasible) {
+    {
+        std::string uncoveredError;
+        if (!findAndAnalyzeNotFixedPaths(*ctx.cfg, solution, state, params, &vmTracker, LI,
+                                         /*loopScope=*/nullptr, uncoveredError)) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '" << F.getName()
-                  << "', uncovered block '" << BB->getName() << "': " << result.errorMessage;
+                  << "', uncovered blocks: " << uncoveredError;
             if (!StatsJsonOpt.empty()) {
                 const auto totalEnd = std::chrono::steady_clock::now();
                 double totalMs =
@@ -245,9 +183,6 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
             }
             return PreservedAnalyses::all();
         }
-
-        applyMemoryAllocation(result, synPath, startBound, endBound, solution, *ctx.cfg, state,
-                              params, LI, /*loopScope=*/nullptr);
     }
 
     // Step 10: Single pass — resolve remaining potential edges (reference: schematic.py:468-502).

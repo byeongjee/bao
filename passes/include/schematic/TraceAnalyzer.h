@@ -31,4 +31,22 @@ bool analyzeTrace(const std::vector<llvm::BasicBlock *> &trace, SchematicSolutio
                   const SchematicParams &params, VMAddressTracker *tracker, llvm::LoopInfo &LI,
                   llvm::Loop *loopScope, std::string &errorMessage);
 
+/// Build a synthetic trace starting from an unanalyzed block.
+/// Reference: schematic.py:extract_not_fixed_bb_trace (in find_and_analyse_not_fixed_paths).
+struct ExtractedTrace {
+    std::vector<llvm::BasicBlock *> blocks;
+    llvm::BasicBlock *startBoundary;
+    llvm::BasicBlock *endBoundary;
+};
+
+ExtractedTrace extractNotFixedBBTrace(llvm::BasicBlock *startBB, const SchematicSolution &solution);
+
+/// Analyze all uncovered blocks by building synthetic traces and running analyzeTrace.
+/// Reference: schematic.py:find_and_analyse_not_fixed_paths (line 504).
+/// Returns true if all traces are feasible. On failure, errorMessage is set.
+bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solution,
+                                 const SchematicStateAnalysis &state, const SchematicParams &params,
+                                 VMAddressTracker *tracker, llvm::LoopInfo &LI,
+                                 llvm::Loop *loopScope, std::string &errorMessage);
+
 } // namespace checkpoint
