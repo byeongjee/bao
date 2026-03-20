@@ -38,9 +38,9 @@ std::optional<uint64_t> LoopAnalyzer::getMaxTripCount(llvm::Loop *L) const {
 RegionAllocation
 LoopAnalyzer::buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const {
     RegionAllocation alloc;
-    alloc.placement = placement;
     alloc.vmBytesUsed = 0;
     for (const auto &[gv, place] : placement) {
+        alloc.vars[gv].placement = place;
         if (place == Placement::VM) {
             alloc.vmOffsets[gv] = alloc.vmBytesUsed;
             alloc.vmBytesUsed += state_.getVarSizeBytes(gv);
@@ -131,8 +131,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             const auto &blocks = result.intervalBlocks[i];
             const auto &alloc = result.allocations[i];
             for (llvm::BasicBlock *BB : blocks) {
-                for (const auto &[gv, place] : alloc.placement)
-                    solution.decidedPlacements[BB][gv] = place;
+                for (const auto &[gv, va] : alloc.vars)
+                    solution.decidedPlacements[BB][gv] = va.placement;
                 solution.blockMeta[BB].analyzed = true;
             }
             solution.regions.push_back({blocks, alloc});
@@ -337,8 +337,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 const auto &blocks = result.intervalBlocks[i];
                 const auto &alloc = result.allocations[i];
                 for (llvm::BasicBlock *B : blocks) {
-                    for (const auto &[gv, place] : alloc.placement)
-                        solution.decidedPlacements[B][gv] = place;
+                    for (const auto &[gv, va] : alloc.vars)
+                        solution.decidedPlacements[B][gv] = va.placement;
                     solution.blockMeta[B].analyzed = true;
                 }
                 solution.regions.push_back({blocks, alloc});
@@ -443,13 +443,13 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             auto hdIt2 = solution.decidedPlacements.find(header);
             if (hdIt2 != solution.decidedPlacements.end())
                 fixed = hdIt2->second;
-            RegionAllocation newAlloc = chooseMemoryAllocation(
+            auto [newAlloc, _gain] = chooseMemoryAllocation(
                 loopBlocks, state_, params_, fixed, tracker_, nullptr, nullptr, scaledIters);
             bodyAlloc = newAlloc;
 
             for (llvm::BasicBlock *BB : loopBlocks) {
-                for (const auto &[gv, place] : bodyAlloc.placement)
-                    solution.decidedPlacements[BB][gv] = place;
+                for (const auto &[gv, va] : bodyAlloc.vars)
+                    solution.decidedPlacements[BB][gv] = va.placement;
                 solution.blockMeta[BB].analyzed = true;
             }
 
@@ -536,8 +536,8 @@ void LoopAnalyzer::propagateFromBoundaries(llvm::Loop *L, const RegionAllocation
     // Forward from startSynth (reference lines 599-603)
     double energyLeftStart =
         params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
-    for (const auto &[gv, place] : alloc.placement) {
-        if (place == Placement::VM)
+    for (const auto &[gv, va] : alloc.vars) {
+        if (va.placement == Placement::VM)
             energyLeftStart -= params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
     }
     CFGEdge fwdEdge{startSynth, header};
@@ -546,8 +546,8 @@ void LoopAnalyzer::propagateFromBoundaries(llvm::Loop *L, const RegionAllocation
     // Backward from endSynth (reference lines 604-606)
     double eToLeave =
         params_.E_epi + params_.N_reg * params_.regStoreEnergy + params_.loopIncrementCostNvm;
-    for (const auto &[gv, place] : alloc.placement) {
-        if (place == Placement::VM)
+    for (const auto &[gv, va] : alloc.vars) {
+        if (va.placement == Placement::VM)
             eToLeave += params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
     }
     if (latch) {

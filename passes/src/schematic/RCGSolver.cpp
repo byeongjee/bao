@@ -50,7 +50,8 @@ void RCGSolver::createReachableCheckpointGraph() {
         auto it = decidedPlacements_.find(startBoundaryBlock_);
         if (it != decidedPlacements_.end()) {
             RegionAllocation a;
-            a.placement = it->second;
+            for (const auto &[v, place] : it->second)
+                a.vars[v].placement = place;
             startConstraintAlloc = std::move(a);
         }
     }
@@ -58,7 +59,8 @@ void RCGSolver::createReachableCheckpointGraph() {
         auto it = decidedPlacements_.find(endBoundaryBlock_);
         if (it != decidedPlacements_.end()) {
             RegionAllocation a;
-            a.placement = it->second;
+            for (const auto &[v, place] : it->second)
+                a.vars[v].placement = place;
             endConstraintAlloc = std::move(a);
         }
     }

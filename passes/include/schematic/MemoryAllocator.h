@@ -47,7 +47,10 @@ double estimateEnergyGain(unsigned accessCount, unsigned varSizeBytes, bool need
 /// and exist in the constraint allocation are forced to NVM (reference lines 186-190).
 /// accessScale: multiplier for variable access counts (used by convergence loop to
 /// scale accesses by min(numIt, maxTripCount) iterations).
-RegionAllocation
+/// Returns (allocation, totalGain) where totalGain includes save/restore costs
+/// for constrained variables and access penalty minus save/restore for packed variables.
+/// Reference: memory_allocator.py:choose_memory_allocation (line 124).
+std::pair<RegionAllocation, double>
 chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                        const SchematicStateAnalysis &state, const SchematicParams &params,
                        const std::map<llvm::Value *, Placement> &fixedPlacements,
@@ -68,13 +71,6 @@ ComputeCostResult computeCost(const std::vector<llvm::BasicBlock *> &blocks,
                               const std::map<llvm::Value *, Placement> &fixedPlacements,
                               VMAddressTracker *tracker, const RegionAllocation *startConstraint,
                               const RegionAllocation *endConstraint);
-
-/// Compute total energy gain from a memory allocation.
-/// Reference: memory_allocator.py:compute_memory_allocation_gain.
-double computeMemoryAllocationGain(const RegionAllocation &alloc,
-                                   const std::vector<llvm::BasicBlock *> &blocks,
-                                   const SchematicStateAnalysis &state,
-                                   const SchematicParams &params);
 
 /// Compute cost to restore VM-placed variables at a block.
 /// Reference: memory_allocator.py:compute_allocation_restore_cost (line 68).

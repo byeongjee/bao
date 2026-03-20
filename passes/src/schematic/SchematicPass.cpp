@@ -184,8 +184,8 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
 
     // Step 11: Collect statistics.
     for (const auto &region : solution.regions) {
-        for (const auto &[gv, place] : region.allocation.placement) {
-            if (place == Placement::VM)
+        for (const auto &[gv, va] : region.allocation.vars) {
+            if (va.placement == Placement::VM)
                 solution.totalVmVariables++;
             else
                 solution.totalNvmVariables++;

@@ -59,13 +59,22 @@ inline CFGEdge resolveCheckpointEdge(const CFGEdge &edge) {
     return edge; // fallback: return original
 }
 
+/// Per-variable allocation info within a region.
+/// Reference: memory_allocation.py:54-105 (VariableAllocation class).
+struct VariableAllocation {
+    Placement placement = Placement::NVM;
+    bool rawNeedRestore = true;
+    bool rawNeedSave = true;
+
+    /// Reference: memory_allocation.py:100-101
+    bool needRestore() const { return rawNeedRestore && placement == Placement::VM; }
+    /// Reference: memory_allocation.py:104-105
+    bool needSave() const { return rawNeedSave && placement == Placement::VM; }
+};
+
 struct RegionAllocation {
-    std::map<llvm::Value *, Placement> placement;
+    std::map<llvm::Value *, VariableAllocation> vars;
     std::map<llvm::Value *, unsigned> vmOffsets; // byte offset in VM
-    /// Save/restore flags per variable: (needRestore, needSave).
-    /// needRestore=true means restore needed at interval start (first access is a load).
-    /// needSave=true means save needed at interval end (always true in reference algorithm).
-    std::map<llvm::Value *, std::pair<bool, bool>> livenessFlags;
     unsigned vmBytesUsed = 0;
     double intervalEnergy = 0.0;
 };

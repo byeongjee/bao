@@ -62,7 +62,7 @@ double estimateEnergyGain(unsigned accessCount, unsigned varSizeBytes, bool need
     return params.nvmAccessPenalty * accessCount - E_sr;
 }
 
-RegionAllocation
+std::pair<RegionAllocation, double>
 chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                        const SchematicStateAnalysis &state, const SchematicParams &params,
                        const std::map<llvm::Value *, Placement> &fixedPlacements,
@@ -70,18 +70,21 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                        const RegionAllocation *endConstraint, unsigned accessScale) {
 
     RegionAllocation result;
+    double totalGain = 0.0;
 
-    // Copy fixed placements and compute initial VM usage.
-    // Also compute livenessFlags for fixed placements — without these, the
-    // instrumenter skips save/restore memcpy, which can cause infinite loops
-    // when shadow variables go out of sync with their backing allocas.
-    result.placement = fixedPlacements;
+    // Copy fixed placements and subtract save/restore costs for constrained variables.
+    // Reference lines 167-170: needRestore()/needSave() fold in the VM check,
+    // so only VM-placed constrained variables contribute costs.
     result.vmBytesUsed = 0;
     for (const auto &[v, place] : fixedPlacements) {
         auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
-        result.livenessFlags[v] = {needRestore, needSave};
+        result.vars[v] = {place, needRestore, needSave};
+        unsigned size = state.getVarSizeBytes(v);
+        if (result.vars[v].needRestore())
+            totalGain -= params.memRestoreEnergyPerByte * size;
+        if (result.vars[v].needSave())
+            totalGain -= params.memStoreEnergyPerByte * size;
         if (place == Placement::VM) {
-            unsigned size = state.getVarSizeBytes(v);
             if (tracker) {
                 auto existing = tracker->getExistingAddress(v);
                 result.vmOffsets[v] = existing ? *existing : tracker->recordAllocation(v, size);
@@ -120,22 +123,6 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
 
         auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
 
-        // Reference lines 186-190: if startConstraint exists and variable
-        // needs restore, or endConstraint exists and variable needs save,
-        // force to NVM (skip as candidate).
-        bool forcedNvm = false;
-        if (startConstraint && needRestore) {
-            forcedNvm = true;
-        }
-        if (endConstraint && needSave) {
-            forcedNvm = true;
-        }
-        if (forcedNvm) {
-            result.placement[v] = Placement::NVM;
-            result.livenessFlags[v] = {needRestore, needSave};
-            continue;
-        }
-
         // Reference: memory_allocator.py:179-181 — force pointer-type variables to NVM.
         bool isPointerType = false;
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(v))
@@ -143,15 +130,23 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(v))
             isPointerType = AI->getAllocatedType()->isPointerTy();
         if (isPointerType) {
-            result.placement[v] = Placement::NVM;
-            result.livenessFlags[v] = {needRestore, needSave};
+            result.vars[v] = {Placement::NVM, needRestore, needSave};
             continue;
         }
 
         unsigned size = state.getVarSizeBytes(v);
         double gain = estimateEnergyGain(nR + nW, size, needRestore, needSave, params);
 
-        candidates.push_back({v, gain, size, needRestore, needSave});
+        // Reference lines 182-190: two-branch structure matching Python exactly.
+        if (!startConstraint && !endConstraint) {
+            candidates.push_back({v, gain, size, needRestore, needSave});
+        } else {
+            if ((needRestore && startConstraint) || (needSave && endConstraint)) {
+                result.vars[v] = {Placement::NVM, needRestore, needSave};
+            } else {
+                candidates.push_back({v, gain, size, needRestore, needSave});
+            }
+        }
     }
 
     // Sort positive-gain candidates by raw gain descending.
@@ -172,32 +167,31 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
             if (tracker) {
                 auto existing = tracker->getExistingAddress(c.v);
                 if (existing) {
-                    result.placement[c.v] = Placement::VM;
+                    result.vars[c.v] = {Placement::VM, c.needRestore, c.needSave};
                     result.vmOffsets[c.v] = *existing;
                     result.vmBytesUsed += c.size;
-                    result.livenessFlags[c.v] = {c.needRestore, c.needSave};
+                    totalGain += c.gain;
                     continue;
                 }
             }
 
             if (result.vmBytesUsed + c.size <= params.vmCapacityBytes) {
-                result.placement[c.v] = Placement::VM;
+                result.vars[c.v] = {Placement::VM, c.needRestore, c.needSave};
                 if (tracker) {
                     result.vmOffsets[c.v] = tracker->recordAllocation(c.v, c.size);
                 } else {
                     result.vmOffsets[c.v] = result.vmBytesUsed;
                 }
                 result.vmBytesUsed += c.size;
-                result.livenessFlags[c.v] = {c.needRestore, c.needSave};
+                totalGain += c.gain;
                 continue;
             }
         }
 
-        result.placement[c.v] = Placement::NVM;
-        result.livenessFlags[c.v] = {c.needRestore, c.needSave};
+        result.vars[c.v] = {Placement::NVM, c.needRestore, c.needSave};
     }
 
-    return result;
+    return {std::move(result), totalGain};
 }
 
 ComputeCostResult computeCost(const std::vector<llvm::BasicBlock *> &blocks,
@@ -212,28 +206,11 @@ ComputeCostResult computeCost(const std::vector<llvm::BasicBlock *> &blocks,
         energy += cfg.getBlockInfo(BB).energyCost;
 
     // Choose memory allocation and subtract gain
-    auto alloc = chooseMemoryAllocation(blocks, state, params, fixedPlacements, tracker,
-                                        startConstraint, endConstraint, 1);
-    double gain = computeMemoryAllocationGain(alloc, blocks, state, params);
+    auto [alloc, gain] = chooseMemoryAllocation(blocks, state, params, fixedPlacements, tracker,
+                                                startConstraint, endConstraint, 1);
     energy -= gain;
 
     return {std::move(alloc), energy};
-}
-
-double computeMemoryAllocationGain(const RegionAllocation &alloc,
-                                   const std::vector<llvm::BasicBlock *> &blocks,
-                                   const SchematicStateAnalysis &state,
-                                   const SchematicParams &params) {
-    double gain = 0.0;
-    for (const auto &[v, place] : alloc.placement) {
-        if (place != Placement::VM)
-            continue;
-        unsigned accesses = 0;
-        for (llvm::BasicBlock *BB : blocks)
-            accesses += state.getLoadCount(BB, v) + state.getStoreCount(BB, v);
-        gain += params.nvmAccessPenalty * accesses;
-    }
-    return gain;
 }
 
 double computeAllocationRestoreCost(
@@ -289,8 +266,8 @@ void applyMemoryAllocation(const RCGResult &result,
         for (llvm::BasicBlock *BB : blocks) {
             auto &meta = solution.blockMeta[BB];
             meta.analyzed = true;
-            for (const auto &[gv, place] : alloc.placement)
-                solution.decidedPlacements[BB][gv] = place;
+            for (const auto &[gv, va] : alloc.vars)
+                solution.decidedPlacements[BB][gv] = va.placement;
         }
 
         solution.regions.push_back({blocks, alloc});

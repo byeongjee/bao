@@ -41,15 +41,15 @@ void SchematicInstrumenter::createShadowGlobals(llvm::Function &F,
     // Collect all candidates (globals + allocas) that have Placement::VM in any region.
     std::set<llvm::Value *> vmPlacedVals;
     for (const auto &region : solution.regions) {
-        for (const auto &[v, place] : region.allocation.placement) {
-            if (place == Placement::VM)
+        for (const auto &[v, va] : region.allocation.vars) {
+            if (va.placement == Placement::VM)
                 vmPlacedVals.insert(v);
         }
     }
     // Also check loop decisions.
     for (const auto &[header, dec] : solution.loopDecisions) {
-        for (const auto &[v, place] : dec.bodyAllocation.placement) {
-            if (place == Placement::VM)
+        for (const auto &[v, va] : dec.bodyAllocation.vars) {
+            if (va.placement == Placement::VM)
                 vmPlacedVals.insert(v);
         }
     }
@@ -117,8 +117,8 @@ void SchematicInstrumenter::rewriteAccessesInRegion(const std::vector<llvm::Basi
                                                     const RegionAllocation &allocation) {
 
     for (llvm::BasicBlock *BB : blocks) {
-        for (const auto &[V, place] : allocation.placement) {
-            if (place != Placement::VM)
+        for (const auto &[V, va] : allocation.vars) {
+            if (va.placement != Placement::VM)
                 continue;
             auto shadowIt = shadowMap_.find(V);
             if (shadowIt == shadowMap_.end())
@@ -199,12 +199,9 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
     // For globals: memcpy shadow -> GV (SRAM -> FRAM).
     // For allocas: memcpy shadow -> alloca (SRAM -> FRAM stack).
     if (endingAlloc) {
-        for (const auto &[v, place] : endingAlloc->placement) {
-            if (place != Placement::VM)
+        for (const auto &[v, va] : endingAlloc->vars) {
+            if (!va.needSave())
                 continue;
-            auto flagIt = endingAlloc->livenessFlags.find(v);
-            if (flagIt == endingAlloc->livenessFlags.end() || !flagIt->second.second)
-                continue; // live_end = false
 
             auto shadowIt = shadowMap_.find(v);
             if (shadowIt == shadowMap_.end())
@@ -241,12 +238,9 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
     // For globals: memcpy GV -> shadow (FRAM -> SRAM).
     // For allocas: memcpy alloca -> shadow (FRAM stack -> SRAM).
     if (startingAlloc) {
-        for (const auto &[v, place] : startingAlloc->placement) {
-            if (place != Placement::VM)
+        for (const auto &[v, va] : startingAlloc->vars) {
+            if (!va.needRestore())
                 continue;
-            auto flagIt = startingAlloc->livenessFlags.find(v);
-            if (flagIt == startingAlloc->livenessFlags.end() || !flagIt->second.first)
-                continue; // live_start = false
 
             auto shadowIt = shadowMap_.find(v);
             if (shadowIt == shadowMap_.end())
