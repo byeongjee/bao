@@ -1,4 +1,6 @@
 #include "schematic/MemoryAllocator.h"
+#include "schematic/EnergyPropagation.h"
+#include "schematic/RCGSolver.h"
 
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
@@ -262,6 +264,86 @@ double computeAllocationSaveCost(
         }
     }
     return cost;
+}
+
+void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
+                          SchematicSolution &solution) {
+    for (const auto &ckpt : selectedCheckpoints)
+        solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
+}
+
+void applyMemoryAllocation(const RCGResult &result,
+                           const std::vector<llvm::BasicBlock *> &pathBlocks,
+                           llvm::BasicBlock *startBound, llvm::BasicBlock *endBound,
+                           SchematicSolution &solution, const CFGAnalysis &cfg,
+                           const SchematicStateAnalysis &state, const SchematicParams &params,
+                           llvm::LoopInfo &LI, llvm::Loop *loopScope) {
+    // 1. Mark checkpoints as enabled
+    updateCheckpointType(result.selectedCheckpoints, solution);
+
+    // 2. Record allocations and mark blocks as analyzed
+    for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
+        const auto &blocks = result.intervalBlocks[i];
+        const auto &alloc = result.allocations[i];
+
+        for (llvm::BasicBlock *BB : blocks) {
+            auto &meta = solution.blockMeta[BB];
+            meta.analyzed = true;
+            for (const auto &[gv, place] : alloc.placement)
+                solution.decidedPlacements[BB][gv] = place;
+        }
+
+        solution.regions.push_back({blocks, alloc});
+    }
+
+    // 3. Per-checkpoint energy propagation (reference: apply_memory_allocation lines 449-466)
+    struct SeedCkpt {
+        llvm::BasicBlock *bbBefore;
+        llvm::BasicBlock *bbAfter;
+        bool isVirtual;
+    };
+    std::vector<SeedCkpt> ckpts;
+    ckpts.push_back({startBound, pathBlocks.front(), /*isVirtual=*/true});
+    for (const auto &ckptEdge : result.selectedCheckpoints)
+        ckpts.push_back({ckptEdge.src, ckptEdge.dst, /*isVirtual=*/false});
+    ckpts.push_back({pathBlocks.back(), endBound, /*isVirtual=*/true});
+
+    for (const auto &ck : ckpts) {
+        if (ck.bbAfter) {
+            double energyLeftStart;
+            auto metaIt = solution.blockMeta.find(ck.bbAfter);
+            // Reference line 453: virtual checkpoint with existing value
+            if (ck.isVirtual && metaIt != solution.blockMeta.end() &&
+                metaIt->second.E_left < std::numeric_limits<double>::max()) {
+                energyLeftStart = metaIt->second.E_left +
+                                  getBlockExecEnergy(ck.bbAfter, solution, cfg, state, params);
+            } else {
+                energyLeftStart =
+                    params.capacity - params.E_pro - params.N_reg * params.regRestoreEnergy -
+                    computeAllocationRestoreCost(ck.bbAfter, solution.decidedPlacements, state,
+                                                 params);
+            }
+            CFGEdge fwdEdge{ck.bbBefore, ck.bbAfter};
+            propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg, state, params, LI,
+                                loopScope);
+        }
+
+        if (ck.bbBefore) {
+            double eToLeave;
+            auto metaIt = solution.blockMeta.find(ck.bbBefore);
+            // Reference line 461: existing nonzero value → undo block cost
+            if (metaIt != solution.blockMeta.end() && metaIt->second.E_to_leave != 0.0) {
+                eToLeave = metaIt->second.E_to_leave -
+                           getBlockExecEnergy(ck.bbBefore, solution, cfg, state, params);
+            } else {
+                eToLeave = params.E_epi + params.N_reg * params.regStoreEnergy +
+                           computeAllocationSaveCost(ck.bbBefore, solution.decidedPlacements, state,
+                                                     params);
+            }
+            CFGEdge bwdEdge{ck.bbBefore, ck.bbAfter};
+            propagateEnergyToLeave(bwdEdge, eToLeave, solution, cfg, state, params, LI, loopScope);
+        }
+    }
 }
 
 } // namespace checkpoint

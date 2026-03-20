@@ -12,6 +12,8 @@
 
 namespace checkpoint {
 
+struct RCGResult; // Forward declaration for applyMemoryAllocation
+
 /// Tracks VM address assignments across intervals within a function.
 /// Variables that were previously allocated in VM reuse their address.
 /// Matches reference: `already_allocated_variables` + `top_address`.
@@ -87,5 +89,19 @@ double computeAllocationSaveCost(
     llvm::BasicBlock *BB,
     const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
     const SchematicStateAnalysis &state, const SchematicParams &params);
+
+/// Mark selected checkpoints as enabled in the solution.
+/// Reference: cfg_modification.py:update_checkpoint_type (line 156).
+void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
+                          SchematicSolution &solution);
+
+/// Apply RCG result allocations to the solution and seed energy propagation.
+/// Reference: schematic.py:apply_memory_allocation (line 384).
+void applyMemoryAllocation(const RCGResult &result,
+                           const std::vector<llvm::BasicBlock *> &pathBlocks,
+                           llvm::BasicBlock *startBound, llvm::BasicBlock *endBound,
+                           SchematicSolution &solution, const CFGAnalysis &cfg,
+                           const SchematicStateAnalysis &state, const SchematicParams &params,
+                           llvm::LoopInfo &LI, llvm::Loop *loopScope);
 
 } // namespace checkpoint

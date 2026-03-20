@@ -9,6 +9,12 @@
 
 namespace checkpoint {
 
+/// Compute block execution energy adjusted for VM placement savings.
+/// Matches reference's bb.final_cost.
+double getBlockExecEnergy(llvm::BasicBlock *BB, const SchematicSolution &solution,
+                          const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
+                          const SchematicParams &params);
+
 /// Backward energy propagation (reference: cfg_modification.py:171-253).
 void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
                             SchematicSolution &solution, const CFGAnalysis &cfg,

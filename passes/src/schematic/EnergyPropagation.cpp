@@ -10,11 +10,9 @@
 
 namespace checkpoint {
 
-// Static helper: compute block execution energy adjusted for VM placement savings.
-// Matches reference's bb.final_cost. Must NOT be called on synthetic boundary blocks.
-static double getBlockExecEnergy(llvm::BasicBlock *BB, const SchematicSolution &solution,
-                                 const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
-                                 const SchematicParams &params) {
+double getBlockExecEnergy(llvm::BasicBlock *BB, const SchematicSolution &solution,
+                          const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
+                          const SchematicParams &params) {
     double E = cfg.getBlockInfo(BB).energyCost;
     auto allocIt = solution.decidedPlacements.find(BB);
     if (allocIt != solution.decidedPlacements.end()) {
