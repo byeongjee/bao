@@ -50,6 +50,27 @@ LoopAnalyzer::buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &
 bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     llvm::BasicBlock *header = L->getHeader();
 
+    // Create synthetic START_Loop/END_Loop boundary blocks (detached from function).
+    // These match the reference Python's zero-cost synthetic nodes used as RCG
+    // boundaries and energy anchor points.
+    llvm::BasicBlock *startSynth = llvm::BasicBlock::Create(header->getContext(), "START_Loop");
+    llvm::BasicBlock *endSynth = llvm::BasicBlock::Create(header->getContext(), "END_Loop");
+
+    // RAII cleanup: remove synthetic block entries and delete blocks on all exit paths.
+    auto cleanup = [&]() {
+        solution.blockMeta.erase(startSynth);
+        solution.blockMeta.erase(endSynth);
+        solution.decidedPlacements.erase(startSynth);
+        solution.decidedPlacements.erase(endSynth);
+        startSynth->deleteValue();
+        endSynth->deleteValue();
+    };
+    // Wrap all return paths: on scope exit, run cleanup.
+    struct ScopeGuard {
+        std::function<void()> fn;
+        ~ScopeGuard() { fn(); }
+    } guard{cleanup};
+
     // Step 1: Get max trip count.
     auto tcOpt = getMaxTripCount(L);
     if (!tcOpt) {
