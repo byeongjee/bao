@@ -1,5 +1,5 @@
 #include "schematic/RCGSolver.h"
-#include "schematic/IntervalAllocator.h"
+#include "schematic/MemoryAllocator.h"
 
 #include <algorithm>
 #include <limits>

@@ -1,4 +1,4 @@
-#include "schematic/IntervalAllocator.h"
+#include "schematic/MemoryAllocator.h"
 
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"

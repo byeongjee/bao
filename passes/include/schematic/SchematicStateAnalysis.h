@@ -21,7 +21,7 @@ namespace checkpoint {
 /// placement candidates (eligible for VM/NVM optimization). Only cross-block
 /// SSA values are ineligible.
 ///
-/// No liveness analysis is performed — IntervalAllocator computes
+/// No liveness analysis is performed — MemoryAllocator computes
 /// interval-local liveness via computeLivenessFlags().
 class SchematicStateAnalysis {
   public:

@@ -89,7 +89,7 @@ src/common/LoopTripCount.cpp
     src/schematic/SchematicParams.cpp
     src/schematic/SchematicPass.cpp
     src/schematic/SchematicStateAnalysis.cpp
-    src/schematic/IntervalAllocator.cpp
+    src/schematic/MemoryAllocator.cpp
 
     src/schematic/RCGSolver.cpp
     src/schematic/LoopAnalyzer.cpp

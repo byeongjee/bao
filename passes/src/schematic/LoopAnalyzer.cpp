@@ -2,7 +2,7 @@
 #include "common/Logger.h"
 #include "common/LoopTripCount.h"
 #include "schematic/EnergyPropagation.h"
-#include "schematic/IntervalAllocator.h"
+#include "schematic/MemoryAllocator.h"
 #include "schematic/RCGSolver.h"
 
 #include "llvm/ADT/DenseMap.h"

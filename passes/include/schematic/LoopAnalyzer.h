@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common/CFGAnalysis.h"
-#include "schematic/IntervalAllocator.h"
+#include "schematic/MemoryAllocator.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
 #include "schematic/SchematicStateAnalysis.h"
