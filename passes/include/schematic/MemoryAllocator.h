@@ -81,4 +81,18 @@ double computeMemoryAllocationGain(const RegionAllocation &alloc,
                                    const SchematicStateAnalysis &state,
                                    const SchematicParams &params);
 
+/// Compute cost to restore VM-placed variables at a block.
+/// Reference: memory_allocator.py:compute_allocation_restore_cost (line 68).
+double computeAllocationRestoreCost(
+    llvm::BasicBlock *BB,
+    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    const SchematicStateAnalysis &state, const SchematicParams &params);
+
+/// Compute cost to save VM-placed variables at a block.
+/// Reference: memory_allocator.py:compute_allocation_save_cost (line 81).
+double computeAllocationSaveCost(
+    llvm::BasicBlock *BB,
+    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    const SchematicStateAnalysis &state, const SchematicParams &params);
+
 } // namespace checkpoint

@@ -287,4 +287,34 @@ double computeMemoryAllocationGain(const RegionAllocation &alloc,
     return gain;
 }
 
+double computeAllocationRestoreCost(
+    llvm::BasicBlock *BB,
+    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    const SchematicStateAnalysis &state, const SchematicParams &params) {
+    double cost = 0.0;
+    auto allocIt = decidedPlacements.find(BB);
+    if (allocIt != decidedPlacements.end()) {
+        for (const auto &[gv, place] : allocIt->second) {
+            if (place == Placement::VM)
+                cost += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
+        }
+    }
+    return cost;
+}
+
+double computeAllocationSaveCost(
+    llvm::BasicBlock *BB,
+    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    const SchematicStateAnalysis &state, const SchematicParams &params) {
+    double cost = 0.0;
+    auto allocIt = decidedPlacements.find(BB);
+    if (allocIt != decidedPlacements.end()) {
+        for (const auto &[gv, place] : allocIt->second) {
+            if (place == Placement::VM)
+                cost += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
+        }
+    }
+    return cost;
+}
+
 } // namespace checkpoint
