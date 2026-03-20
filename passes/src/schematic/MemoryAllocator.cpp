@@ -134,29 +134,26 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
             continue;
         }
 
-        unsigned size = state.getVarSizeBytes(v);
-        double gain = estimateEnergyGain(nR + nW, size, needRestore, needSave, params);
-
         // Reference lines 182-190: two-branch structure matching Python exactly.
         if (!startConstraint && !endConstraint) {
+            unsigned size = state.getVarSizeBytes(v);
+            double gain = estimateEnergyGain(nR + nW, size, needRestore, needSave, params);
             candidates.push_back({v, gain, size, needRestore, needSave});
         } else {
             if ((needRestore && startConstraint) || (needSave && endConstraint)) {
                 result.vars[v] = {Placement::NVM, needRestore, needSave};
             } else {
+                unsigned size = state.getVarSizeBytes(v);
+                double gain = estimateEnergyGain(nR + nW, size, needRestore, needSave, params);
                 candidates.push_back({v, gain, size, needRestore, needSave});
             }
         }
     }
 
-    // Sort positive-gain candidates by raw gain descending.
-    // Tie-break: prefer smaller size (packs more variables into VM).
+    // Sort candidates by gain descending.
+    // Reference: Counter(energy_gains).most_common() (line 192).
     std::sort(candidates.begin(), candidates.end(),
-              [](const CandidateEntry &a, const CandidateEntry &b) {
-                  if (a.gain != b.gain)
-                      return a.gain > b.gain;
-                  return a.size < b.size;
-              });
+              [](const CandidateEntry &a, const CandidateEntry &b) { return a.gain > b.gain; });
 
     // Greedy pack into VM.
     for (const auto &c : candidates) {
