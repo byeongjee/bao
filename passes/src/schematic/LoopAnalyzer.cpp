@@ -251,7 +251,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         if (hdIt0 != solution.decidedPlacements.end())
             headerPlacement = hdIt0->second;
         RegionAllocation prelimAlloc = buildBoundaryAllocation(headerPlacement);
-        propagateLoopEnergy(L, prelimAlloc, solution, startSynth, endSynth);
+        propagateFromBoundaries(L, prelimAlloc, solution, startSynth, endSynth);
 
         std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
         for (llvm::BasicBlock *BB : loopBlocks) {
@@ -371,7 +371,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         decision.E_loop = 0.0;
         decision.bodyAllocation = buildBoundaryAllocation(headerAlloc);
         solution.loopDecisions[header] = decision;
-        propagateLoopEnergy(L, decision.bodyAllocation, solution, startSynth, endSynth);
+        propagateFromBoundaries(L, decision.bodyAllocation, solution, startSynth, endSynth);
         if (latch)
             solution.enabledCheckpoints.insert(CFGEdge{latch, header});
         return true;
@@ -384,7 +384,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     // Run initial energy propagation before computing E_loop — without this,
     // E_to_leave/E_left are at defaults (0.0 / max) since RCG does not set them.
-    propagateLoopEnergy(L, bodyAlloc, solution, startSynth, endSynth);
+    propagateFromBoundaries(L, bodyAlloc, solution, startSynth, endSynth);
 
     // Read E_loop from synthetic boundary blocks.
     // Reference: first_bb.E_to_leave - last_bb.E_to_leave + loop_increment (schematic.py:566-569).
@@ -453,7 +453,17 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 solution.blockMeta[BB].analyzed = true;
             }
 
-            propagateLoopEnergy(L, bodyAlloc, solution, startSynth, endSynth);
+            // Reset energy values before re-propagation (reference lines 594-596:
+            // bb.is_fixed = False; bb.set_memory_allocation(mem_alloc, allocator))
+            // getBlockExecEnergy reads decidedPlacements dynamically, so updating
+            // placements above is sufficient — no explicit final_cost recomputation.
+            for (llvm::BasicBlock *BB : loopBlocks) {
+                solution.blockMeta[BB].analyzed = false;
+                solution.blockMeta[BB].E_left = std::numeric_limits<double>::max();
+                solution.blockMeta[BB].E_to_leave = 0.0;
+            }
+
+            propagateFromBoundaries(L, bodyAlloc, solution, startSynth, endSynth);
 
             // Re-read from synthetic blocks after re-propagation.
             startEToLeave = solution.blockMeta[startSynth].E_to_leave;
@@ -514,6 +524,48 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     return true;
+}
+
+void LoopAnalyzer::propagateFromBoundaries(llvm::Loop *L, const RegionAllocation &alloc,
+                                           SchematicSolution &solution,
+                                           llvm::BasicBlock *startSynth,
+                                           llvm::BasicBlock *endSynth) {
+    llvm::BasicBlock *header = L->getHeader();
+    llvm::BasicBlock *latch = L->getLoopLatch();
+
+    // Forward from startSynth (reference lines 599-603)
+    double energyLeftStart =
+        params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+    for (const auto &[gv, place] : alloc.placement) {
+        if (place == Placement::VM)
+            energyLeftStart -= params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
+    }
+    CFGEdge fwdEdge{startSynth, header};
+    propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg_, state_, params_, LI_, L);
+
+    // Backward from endSynth (reference lines 604-606)
+    double eToLeave =
+        params_.E_epi + params_.N_reg * params_.regStoreEnergy + params_.loopIncrementCostNvm;
+    for (const auto &[gv, place] : alloc.placement) {
+        if (place == Placement::VM)
+            eToLeave += params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
+    }
+    if (latch) {
+        CFGEdge bwdEdge{latch, endSynth};
+        propagateEnergyToLeave(bwdEdge, eToLeave, solution, cfg_, state_, params_, LI_, L);
+    }
+
+    // Update synthetic boundary block metadata
+    solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[header].E_to_leave;
+    solution.blockMeta[startSynth].E_left = energyLeftStart;
+    solution.blockMeta[endSynth].E_to_leave = eToLeave;
+
+    // Update decidedPlacements for synthetic blocks to match current allocation
+    auto hdPlIt = solution.decidedPlacements.find(header);
+    if (hdPlIt != solution.decidedPlacements.end()) {
+        solution.decidedPlacements[startSynth] = hdPlIt->second;
+        solution.decidedPlacements[endSynth] = hdPlIt->second;
+    }
 }
 
 double LoopAnalyzer::getAdjustedBlockEnergy(llvm::BasicBlock *BB,

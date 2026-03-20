@@ -43,6 +43,12 @@ class LoopAnalyzer {
     RegionAllocation
     buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const;
 
+    /// Propagate energy from synthetic boundary nodes using the unified functions.
+    /// Called after each loop body RCG solve and during convergence.
+    void propagateFromBoundaries(llvm::Loop *L, const RegionAllocation &alloc,
+                                 SchematicSolution &solution, llvm::BasicBlock *startSynth,
+                                 llvm::BasicBlock *endSynth);
+
     /// Get block energy adjusted for VM placement savings.
     double getAdjustedBlockEnergy(llvm::BasicBlock *BB, const RegionAllocation &alloc) const;
 
