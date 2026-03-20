@@ -8,6 +8,7 @@
 
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -69,11 +70,20 @@ struct RegionAllocation {
     double intervalEnergy = 0.0;
 };
 
+/// Matches Python's bb.loop = Loop(loop_info, nb_iter, cost_one_it).
+/// Set after loop analysis; used by propagateEnergy() for multi-iteration scaling.
+struct LoopMark {
+    llvm::Loop *loop;
+    unsigned nbIter;  // iterations between checkpoints
+    double costOneIt; // energy cost of one iteration
+};
+
 /// Per-block metadata for multi-path overlap (spec §8.3)
 struct BlockMetadata {
     bool analyzed = false;
     double E_left = std::numeric_limits<double>::max(); // energy remaining after block
     double E_to_leave = 0.0;                            // min energy needed at entry
+    std::optional<LoopMark> loop; // set after loop analysis for multi-iteration scaling
 };
 
 struct LoopCheckpointDecision {
