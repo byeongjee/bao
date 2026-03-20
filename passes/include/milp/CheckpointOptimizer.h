@@ -26,21 +26,20 @@ enum class SolverStatus {
 
 /// Solution from the MILP optimizer.
 struct MILPSolution {
-    /// Nodes where is_region_start = 1.
-    std::set<NodeId> regionStarts;
+    /// r_b: nodes where region start = 1.
+    std::set<NodeId> r;
 
-    /// place_in_vm[b,v] values (eligible only).
-    std::map<std::pair<NodeId, llvm::GlobalVariable *>, bool> placeInVm;
+    /// m_{b,v}: VM placement for all tracked variables.
+    std::map<std::pair<NodeId, llvm::Value *>, bool> m;
 
-    /// need_restore[b,v] values (eligible only, for v in EligLiveIn(b)).
-    std::map<std::pair<NodeId, llvm::GlobalVariable *>, bool> needRestore;
+    /// r̂_{b,v}: need-restore indicator for all tracked variables.
+    std::map<std::pair<NodeId, llvm::Value *>, bool> rHat;
 
-    /// commit[b,v] values (for b != b0 and v in LiveIn(b)).
-    /// Uses Value* to handle both eligible globals and ineligible objects.
-    std::map<std::pair<NodeId, llvm::Value *>, bool> commit;
+    /// s_{b,v}: save indicator (for b != b0 and v in LiveIn(b)).
+    std::map<std::pair<NodeId, llvm::Value *>, bool> s;
 
-    /// energy_accumulated[b] values.
-    std::map<NodeId, double> energyAccumulated;
+    /// ε_accum[b]: accumulated energy at block b.
+    std::map<NodeId, double> eAccum;
 
     /// Objective function value.
     double objectiveValue = 0.0;
@@ -51,19 +50,19 @@ struct MILPSolution {
     /// MIP optimality gap (0.0 for optimal, >0 for feasible).
     double mipGap = 0.0;
 
-    /// Get all Value*s with commit=true at a given node.
-    std::set<llvm::Value *> getCommitVarsAt(NodeId node) const {
+    /// Get all Value*s with s=true at a given node.
+    std::set<llvm::Value *> getSaveVarsAt(NodeId node) const {
         std::set<llvm::Value *> result;
-        for (const auto &[key, enabled] : commit)
+        for (const auto &[key, enabled] : s)
             if (enabled && key.first == node)
                 result.insert(key.second);
         return result;
     }
 
-    /// Get all GlobalVariable*s with needRestore=true at a given node.
-    std::set<llvm::GlobalVariable *> getRestoreGVsAt(NodeId node) const {
-        std::set<llvm::GlobalVariable *> result;
-        for (const auto &[key, enabled] : needRestore)
+    /// Get all Value*s with rHat=true at a given node.
+    std::set<llvm::Value *> getRestoreVarsAt(NodeId node) const {
+        std::set<llvm::Value *> result;
+        for (const auto &[key, enabled] : rHat)
             if (enabled && key.first == node)
                 result.insert(key.second);
         return result;
@@ -92,7 +91,7 @@ class CheckpointOptimizer {
 
     const MILPSolution &getSolution() const { return solution_; }
 
-    std::set<NodeId> getCheckpoints() const { return solution_.regionStarts; }
+    std::set<NodeId> getCheckpoints() const { return solution_.r; }
 
     double getObjectiveValue() const { return solution_.objectiveValue; }
 

@@ -274,7 +274,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
 
     const auto &solution = optimizer.getSolution();
 
-    if (solution.regionStarts.empty()) {
+    if (solution.r.empty()) {
         PLOGI << "No region boundaries needed for function " << F.getName();
         if (!StatsJsonOpt.empty()) {
             const auto totalEnd = std::chrono::steady_clock::now();
@@ -304,8 +304,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     unsigned inserted = instrumenter.instrumentFunction(F, solution, *abstractCFG.model,
                                                         *abstractCFG.model, *ctx.stateAnalysis);
 
-    unsigned commitCount = MILPSolution::countEnabled(solution.commit);
-    unsigned restoreCount = MILPSolution::countEnabled(solution.needRestore);
+    unsigned commitCount = MILPSolution::countEnabled(solution.s);
+    unsigned restoreCount = MILPSolution::countEnabled(solution.rHat);
 
     const auto totalEnd = std::chrono::steady_clock::now();
     double totalExecutionTimeMs =
@@ -319,8 +319,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         common.basicBlocks = ctx.cfg->getBlocks().size();
         common.edges = ctx.cfg->getEdges().size();
         common.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
-        common.regions = solution.regionStarts.size();
-        common.regionBoundaries = solution.regionStarts.size();
+        common.regions = solution.r.size();
+        common.regionBoundaries = solution.r.size();
         common.runtimeCallsInserted = inserted;
         common.compilationTimeMs = totalExecutionTimeMs;
         common.peakRSSKb = getPeakRSSKb();
@@ -363,8 +363,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         c.basicBlocks = ctx.cfg->getBlocks().size();
         c.edges = ctx.cfg->getEdges().size();
         c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
-        c.regions = solution.regionStarts.size();
-        c.regionBoundaries = solution.regionStarts.size();
+        c.regions = solution.r.size();
+        c.regionBoundaries = solution.r.size();
         c.runtimeCallsInserted = inserted;
         c.compilationTimeMs = totalExecutionTimeMs;
         c.peakRSSKb = getPeakRSSKb();
