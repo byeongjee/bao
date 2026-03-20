@@ -136,7 +136,7 @@ LoopAnalyzer::buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &
 bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     llvm::BasicBlock *header = L->getHeader();
 
-    // 1. Get max trip count.
+    // Step 1: Get max trip count.
     auto tcOpt = getMaxTripCount(L);
     if (!tcOpt) {
         PLOGE << "SCHEMATIC: loop at " << header->getName()
@@ -145,45 +145,30 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
     uint64_t maxTripCount = *tcOpt;
 
-    // 2. Get loop body paths (header-to-latch).
+    // Step 2: Get loop body paths (header-to-latch).
     std::vector<std::vector<llvm::BasicBlock *>> bodyPaths;
-
-    // Check if we have loaded traces for this loop.
-    bool usedTraces = false;
     for (const auto &lt : loadedLoopTraces_) {
         if (lt.header == header) {
             for (const auto &ep : lt.iterationPaths) {
                 if (!ep.blocks.empty())
                     bodyPaths.push_back(ep.blocks);
             }
-            usedTraces = !bodyPaths.empty();
             break;
         }
     }
-    if (!usedTraces)
-        bodyPaths = enumerateLoopPathsWithoutBackEdges(L);
-
     if (bodyPaths.empty()) {
         PLOGE << "SCHEMATIC: loop at " << header->getName() << " has no analyzable body paths";
         return false;
     }
 
-    // 3. Run RCG solver on each path.
-    // Use header/latch as boundary blocks if they have existing placements.
-    llvm::BasicBlock *loopLatch = L->getLoopLatch();
-    llvm::BasicBlock *startBound = nullptr;
-    llvm::BasicBlock *endBound = nullptr;
-    if (solution.decidedPlacements.count(header))
-        startBound = header;
-    if (loopLatch && solution.decidedPlacements.count(loopLatch))
-        endBound = loopLatch;
-
-    BlockCostOverrides innerOverrides = computeInnerLoopCostOverrides(L, solution);
-    const BlockCostOverrides *overridesPtr = innerOverrides.empty() ? nullptr : &innerOverrides;
-
+    // Step 3: Run RCG solver on each body path.
+    // No startBound/endBound — loops are analyzed independently (reference uses
+    // synthetic START_Loop/END_Loop nodes with no prior placement constraints).
+    // No costOverrides — RCG uses single-iteration block costs.
     for (const auto &path : bodyPaths) {
         RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta,
-                         solution.decidedPlacements, startBound, endBound, tracker_, overridesPtr);
+                         solution.decidedPlacements,
+                         /*startBound=*/nullptr, /*endBound=*/nullptr, tracker_);
         RCGResult result = solver.solve();
         if (!result.feasible) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for loop at '"
@@ -198,26 +183,16 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
             const auto &blocks = result.intervalBlocks[i];
             const auto &alloc = result.allocations[i];
-
-            // Update decided placements and block metadata.
-            // NOTE: E_left/E_to_leave are not computed here because the
-            // energy propagation model (SchematicPass Step 9c) handles them
-            // separately. Setting values here could interfere with the
-            // fixed-point propagation loops.
             for (llvm::BasicBlock *BB : blocks) {
                 for (const auto &[gv, place] : alloc.placement)
                     solution.decidedPlacements[BB][gv] = place;
-
-                auto &meta = solution.blockMeta[BB];
-                meta.analyzed = true;
+                solution.blockMeta[BB].analyzed = true;
             }
-
-            // Store as region.
             solution.regions.push_back({blocks, alloc});
         }
     }
 
-    // 3b. Find uncovered blocks within this loop (reference: schematic.py:554).
+    // Step 3b: Analyze uncovered blocks within this loop (reference: schematic.py:554).
     // Blocks not on any body path (e.g., preheaders created by LoopSimplify)
     // must be analyzed here, within the loop context, before multi-iteration
     // scaling is applied. The reference calls find_and_analyse_not_fixed_paths
@@ -302,7 +277,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             (void)sBound;
             (void)eBound;
             RCGSolver solver(synPath, state_, cfg_, params_, solution.blockMeta,
-                             solution.decidedPlacements, nullptr, nullptr, tracker_, overridesPtr);
+                             solution.decidedPlacements, nullptr, nullptr, tracker_);
             RCGResult result = solver.solve();
             if (!result.feasible) {
                 PLOGE << "SCHEMATIC infeasible: loop uncovered block '" << BB->getName()
@@ -325,7 +300,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         }
     }
 
-    // 4. Get header and latch allocations from decided placements.
+    // Step 5: Get header and latch allocations from decided placements.
     std::map<llvm::Value *, Placement> headerAlloc;
     auto hdIt = solution.decidedPlacements.find(header);
     if (hdIt != solution.decidedPlacements.end())
@@ -342,31 +317,27 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     LoopCheckpointDecision decision;
     decision.loop = L;
 
-    // 5. Check if allocations differ at header vs latch.
+    // Step 6: Check if allocations differ at header vs latch.
     if (placementsDiffer(headerAlloc, latchAlloc)) {
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         decision.E_loop = 0.0;
         decision.bodyAllocation = buildBoundaryAllocation(headerAlloc);
         solution.loopDecisions[header] = decision;
-
-        // Propagate energy so outer loops see correct costs on loop blocks.
         propagateLoopEnergy(L, decision.bodyAllocation, solution);
-
-        // Add back-edge checkpoint.
         if (latch)
             solution.enabledCheckpoints.insert(CFGEdge{latch, header});
         return true;
     }
 
-    // 6. Allocations match — compute energy per iteration using reference formula:
-    //    E_loop = header.E_to_leave - latch.E_to_leave + latchCost + loop_increment_cost_nvm
+    // Step 7: Compute E_loop and nb_it_with_budget.
+    // E_loop = header.E_to_leave - latch.E_to_leave + latchCost + loop_increment_cost_nvm
     //
-    //    The reference uses synthetic zero-cost START_Loop/END_Loop boundary nodes,
-    //    so first_bb.E_to_leave - last_bb.E_to_leave captures ALL block costs
-    //    (header through latch inclusive). We use real blocks, so header.E_to_leave
-    //    already includes latch's cost in the accumulator, meaning the difference
-    //    misses the latch's own execution cost. We add it back explicitly.
+    // The reference uses synthetic zero-cost START_Loop/END_Loop boundary nodes,
+    // so first_bb.E_to_leave - last_bb.E_to_leave captures ALL block costs
+    // (header through latch inclusive). We use real blocks, so header.E_to_leave
+    // already includes latch's cost in the accumulator, meaning the difference
+    // misses the latch's own execution cost. We add it back explicitly (latchCost).
     RegionAllocation bodyAlloc = buildBoundaryAllocation(headerAlloc);
 
     // Run initial energy propagation before computing E_loop — without this,
@@ -385,22 +356,20 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 latchEToLeave = lMeta->second.E_to_leave;
         }
     }
+    // latchCost compensates for lack of synthetic nodes (see spec Step 7).
     double latchCost = latch ? getAdjustedBlockEnergy(latch, bodyAlloc) : 0.0;
     double E_loop = headerEToLeave - latchEToLeave + latchCost + params_.loopIncrementCostNvm;
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
 
     if (E_loop <= 0.0) {
-        // Degenerate case.
         decision.numIterationsPerCharge = 0;
         solution.loopDecisions[header] = decision;
         return true;
     }
 
-    // Reference: nb_it = (budget - latch.E_to_leave) // energy_one_it - 1
     double availableEnergy = params_.capacity - latchEToLeave;
     if (availableEnergy <= 0.0) {
-        // Can't fit one checkpoint + one iteration.
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         solution.loopDecisions[header] = decision;
@@ -412,7 +381,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     int rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
     auto numIt = static_cast<unsigned>(std::max(rawNumIt, 0));
 
-    // Convergence loop (reference lines 574-617): if loop has only disabled
+    // Step 8: Convergence loop (reference lines 574-617): if loop has only disabled
     // checkpoints and numIt > 1, re-estimate variable accesses scaled by
     // min(numIt, maxTripCount) iterations and re-compute allocation until
     // numIt converges.
@@ -427,22 +396,17 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         }
     }
 
-    // Convergence loop (reference lines 574-617): re-estimate variable accesses
-    // scaled by min(numIt, maxTripCount), re-allocate, re-propagate energy,
-    // and re-compute nb_it until convergence.
     if (!hasEnabledCheckpoints && numIt > 1) {
         std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
         unsigned oldNumIt = 0;
         for (unsigned iter = 0; iter < 15; ++iter) {
             if (oldNumIt != 0 && numIt >= oldNumIt)
-                break; // Converged
+                break;
             oldNumIt = numIt;
 
-            // 1. Scale access counts by min(numIt, maxTripCount).
             unsigned scaledIters =
                 static_cast<unsigned>(std::min(static_cast<uint64_t>(numIt), maxTripCount));
 
-            // 2. Re-compute allocation with scaled accesses.
             std::map<llvm::Value *, Placement> fixed;
             auto hdIt2 = solution.decidedPlacements.find(header);
             if (hdIt2 != solution.decidedPlacements.end())
@@ -451,17 +415,14 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 loopBlocks, state_, params_, fixed, tracker_, nullptr, nullptr, scaledIters);
             bodyAlloc = newAlloc;
 
-            // 3. Apply allocation to loop blocks.
             for (llvm::BasicBlock *BB : loopBlocks) {
                 for (const auto &[gv, place] : bodyAlloc.placement)
                     solution.decidedPlacements[BB][gv] = place;
                 solution.blockMeta[BB].analyzed = true;
             }
 
-            // 4. Re-compute E_to_leave/E_left through body paths.
             propagateLoopEnergy(L, bodyAlloc, solution);
 
-            // 5. Recompute E_loop (with latch cost correction).
             auto hMeta2 = solution.blockMeta.find(header);
             auto lMeta2 = latch ? solution.blockMeta.find(latch) : solution.blockMeta.end();
             headerEToLeave = (hMeta2 != solution.blockMeta.end()) ? hMeta2->second.E_to_leave : 0.0;
@@ -474,7 +435,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             if (E_loop <= 0.0)
                 break;
 
-            // 6. Recompute nb_it.
             // Reference uses header.E_to_leave here (not latch as in the
             // initial computation) because after re-propagation the header's
             // E_to_leave reflects the updated allocation costs.
@@ -486,6 +446,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         }
     }
 
+    // Step 9: Decide checkpoint type.
     if (numIt > maxTripCount) {
         // Entire loop fits — no checkpoint needed, but use maxTripCount for
         // energy scaling so propagation accounts for all iterations.
@@ -504,7 +465,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     solution.loopDecisions[header] = decision;
 
-    // Adjust E_left/E_to_leave for loop blocks when multiple iterations per charge.
+    // Step 10: Set LoopMark on blocks and adjust energy.
     // E_left may go negative after adjustment — this is expected and correctly
     // reflects that the block's remaining energy budget is consumed by subsequent
     // iterations. Downstream propagateEnergy() handles negative E_left correctly.
@@ -512,9 +473,11 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         unsigned adjIter = decision.numIterationsPerCharge;
         if (decision.loopFitsEntirely)
             adjIter = static_cast<unsigned>(maxTripCount);
+        LoopMark mark{L, adjIter, E_loop};
         double adj = (adjIter - 1) * E_loop;
         for (llvm::BasicBlock *BB : L->getBlocksVector()) {
             auto &meta = solution.blockMeta[BB];
+            meta.loop = mark;
             meta.E_to_leave += adj;
             meta.E_left -= adj;
         }
@@ -675,23 +638,6 @@ void LoopAnalyzer::propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &al
     }
 }
 
-BlockCostOverrides
-LoopAnalyzer::computeInnerLoopCostOverrides(llvm::Loop *L,
-                                            const SchematicSolution &solution) const {
-    BlockCostOverrides overrides;
-    for (llvm::Loop *sub : L->getSubLoops()) {
-        llvm::BasicBlock *header = sub->getHeader();
-        auto decIt = solution.loopDecisions.find(header);
-        if (decIt == solution.loopDecisions.end())
-            continue;
-        const auto &dec = decIt->second;
-        if (dec.E_loop <= 0.0)
-            continue;
-        overrides[header] = dec.numIterationsPerCharge * dec.E_loop;
-    }
-    return overrides;
-}
-
 bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
     // Process loops bottom-up (innermost first).
     auto loops = LI_.getLoopsInPreorder();
@@ -708,7 +654,7 @@ bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
     // from seeing inflated E_to_leave on loop boundary blocks (which would
     // make budget = capacity - E_to_leave go negative).
     // SchematicPass::propagateEnergy() will apply iteration scaling correctly
-    // via loopDecisions, producing the same final values as the reference.
+    // via blockMeta.loop, producing the same final values as the reference.
 
     // Phase 1: Reset E_to_leave/E_left on all loop blocks to defaults.
     for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
