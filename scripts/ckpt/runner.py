@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 
@@ -66,7 +67,9 @@ def run(
     if result.stdout:
         logger.debug("%s stdout:\n%s", step_name or "subprocess", result.stdout.rstrip())
     if result.stderr:
-        logger.debug("%s stderr:\n%s", step_name or "subprocess", result.stderr.rstrip())
+        sys.stderr.write(result.stderr)
+        if not result.stderr.endswith("\n"):
+            sys.stderr.write("\n")
 
     step = StepResult(
         returncode=result.returncode,
