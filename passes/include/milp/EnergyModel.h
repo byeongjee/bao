@@ -58,9 +58,6 @@ class EnergyModel {
     /// F_entry[b]: normalized profile entry frequency for block b.
     double getFEntry(const llvm::BasicBlock *BB) const;
 
-    /// q_reboot: uniform reboot probability (= q_reboot_prob parameter).
-    double getQReboot() const;
-
   private:
     const CFGAnalysis &cfg_;
     const StateAnalysis &state_;

@@ -559,7 +559,6 @@ GRBLinExpr CheckpointOptimizer::buildEBlk(NodeId block) {
 
 GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
     GRBLinExpr expr = 0;
-    double qb = energy_.getQReboot();
 
     // Ineligible restore cost: unconditional at region start (constant coeff).
     double ineligRestoreCost = 0;
@@ -568,7 +567,7 @@ GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
         if (eRestore > 0.0)
             ineligRestoreCost += eRestore;
     }
-    expr += (params_.E_pro + qb * ineligRestoreCost) * isRegionStart_[block];
+    expr += (params_.E_pro + ineligRestoreCost) * isRegionStart_[block];
 
     // Eligible restore cost: variable (depends on needRestore).
     for (llvm::GlobalVariable *GV : state_.getEligLiveIn(block)) {
@@ -577,7 +576,7 @@ GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
             continue;
         double eRestore = energy_.getERestore(GV);
         if (eRestore > 0.0) {
-            expr += qb * eRestore * it->second;
+            expr += eRestore * it->second;
         }
     }
 
