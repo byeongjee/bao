@@ -302,24 +302,21 @@ ComputeCostResult computeCost(
     const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
     VMAddressTracker *tracker, const RegionAllocation *startAlloc,
     const RegionAllocation *endAlloc) {
+    // Reference: memory_allocator.py:compute_cost lines 241-242.
+    if (blocks.empty())
+        return {RegionAllocation{}, 0.0};
+
     // Execution energy: sum of all blocks at all-NVM cost.
     // Reference: memory_allocator.py:compute_cost lines 248-250.
     double energy = 0.0;
-    for (llvm::BasicBlock *BB : blocks)
-        energy += cfg.getBlockInfo(BB).energyCost;
-
-    // Collect memory_allocations from blocks.
+    // Collect memory_allocations from blocks (no dedup — matches Python).
     // Reference: memory_allocator.py:compute_cost lines 247-252.
     std::vector<const RegionAllocation *> memoryAllocations;
     for (llvm::BasicBlock *BB : blocks) {
+        energy += cfg.getBlockInfo(BB).energyCost;
         auto it = blockAllocation.find(BB);
-        if (it != blockAllocation.end()) {
-            const RegionAllocation *ptr = it->second.get();
-            // Reference uses identity check: `not in memory_allocations`
-            if (std::find(memoryAllocations.begin(), memoryAllocations.end(), ptr) ==
-                memoryAllocations.end())
-                memoryAllocations.push_back(ptr);
-        }
+        if (it != blockAllocation.end())
+            memoryAllocations.push_back(it->second.get());
     }
 
     // Choose memory allocation and subtract gain.
