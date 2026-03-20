@@ -263,14 +263,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // scaling is applied. The reference calls find_and_analyse_not_fixed_paths
     // on the loop subgraph after analyzing loop traces.
     {
-        // Seed E_left/E_to_leave so boundary blocks have values for RCG budget.
-        std::map<llvm::Value *, Placement> headerPlacement;
-        auto hdIt0 = solution.decidedPlacements.find(header);
-        if (hdIt0 != solution.decidedPlacements.end())
-            headerPlacement = hdIt0->second;
-        RegionAllocation prelimAlloc = buildBoundaryAllocation(headerPlacement);
-        propagateFromBoundaries(L, prelimAlloc, solution, startSynth, endSynth);
-
         std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
         for (llvm::BasicBlock *BB : loopBlocks) {
             auto metaIt = solution.blockMeta.find(BB);
@@ -414,6 +406,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     double startEToLeave = solution.blockMeta[startSynth].E_to_leave;
     double endEToLeave = solution.blockMeta[endSynth].E_to_leave;
     double E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm;
+
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
 
@@ -469,22 +462,19 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                                        loopMemoryAllocations, tracker_, scaledIters);
             bodyAlloc = newAlloc;
 
+            // Reference: schematic.py:594-596 — reset then set in single loop:
+            //   bb.is_fixed = False
+            //   bb.set_memory_allocation(mem_alloc, allocator)
+            // set_memory_allocation sets is_fixed=True and recomputes final_cost.
             auto sharedAlloc = std::make_shared<RegionAllocation>(bodyAlloc);
-            for (llvm::BasicBlock *BB : loopBlocks) {
-                for (const auto &[gv, va] : bodyAlloc.vars)
-                    solution.decidedPlacements[BB][gv] = va.placement;
-                solution.blockMeta[BB].analyzed = true;
-                solution.blockAllocation[BB] = sharedAlloc;
-            }
-
-            // Reset energy values before re-propagation (reference lines 594-596:
-            // bb.is_fixed = False; bb.set_memory_allocation(mem_alloc, allocator))
-            // getBlockExecEnergy reads decidedPlacements dynamically, so updating
-            // placements above is sufficient — no explicit final_cost recomputation.
             for (llvm::BasicBlock *BB : loopBlocks) {
                 solution.blockMeta[BB].analyzed = false;
                 solution.blockMeta[BB].E_left = std::numeric_limits<double>::max();
                 solution.blockMeta[BB].E_to_leave = 0.0;
+                for (const auto &[gv, va] : bodyAlloc.vars)
+                    solution.decidedPlacements[BB][gv] = va.placement;
+                solution.blockMeta[BB].analyzed = true;
+                solution.blockAllocation[BB] = sharedAlloc;
             }
 
             propagateFromBoundaries(L, bodyAlloc, solution, startSynth, endSynth);
