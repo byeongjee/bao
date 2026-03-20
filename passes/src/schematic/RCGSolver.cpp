@@ -158,7 +158,7 @@ RCGResult RCGSolver::solve() {
         }
         const RegionAllocation *sc = startConstraintAlloc ? &*startConstraintAlloc : nullptr;
         const RegionAllocation *ec = endConstraintAlloc ? &*endConstraintAlloc : nullptr;
-        auto alloc = computeIntervalAllocation(blocks, state_, params_, fixed, tracker_, sc, ec);
+        auto alloc = chooseMemoryAllocation(blocks, state_, params_, fixed, tracker_, sc, ec, 1);
         double energy = computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, true, true);
         alloc.intervalEnergy = energy;
         double budget = getIntervalBudget(0, 1);
@@ -213,7 +213,7 @@ RCGResult RCGSolver::solve() {
             const RegionAllocation *ec =
                 (isLast && endConstraintAlloc) ? &*endConstraintAlloc : nullptr;
             auto alloc =
-                computeIntervalAllocation(blocks, state_, params_, fixed, tracker_, sc, ec);
+                chooseMemoryAllocation(blocks, state_, params_, fixed, tracker_, sc, ec, 1);
             double energy =
                 computeIntervalEnergy(blocks, alloc, state_, cfg_, params_, isFirst, isLast);
             alloc.intervalEnergy = energy;

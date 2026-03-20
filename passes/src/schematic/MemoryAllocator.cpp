@@ -53,12 +53,19 @@ std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
     return {needRestore, needSave};
 }
 
+double estimateEnergyGain(unsigned accessCount, unsigned varSizeBytes, bool needRestore,
+                          bool needSave, const SchematicParams &params) {
+    double E_sr = params.memRestoreEnergyPerByte * varSizeBytes * (needRestore ? 1.0 : 0.0) +
+                  params.memStoreEnergyPerByte * varSizeBytes * (needSave ? 1.0 : 0.0);
+    return params.nvmAccessPenalty * accessCount - E_sr;
+}
+
 RegionAllocation
-computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                          const SchematicStateAnalysis &state, const SchematicParams &params,
-                          const std::map<llvm::Value *, Placement> &fixedPlacements,
-                          VMAddressTracker *tracker, const RegionAllocation *startConstraint,
-                          const RegionAllocation *endConstraint, unsigned accessScale) {
+chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                       const SchematicStateAnalysis &state, const SchematicParams &params,
+                       const std::map<llvm::Value *, Placement> &fixedPlacements,
+                       VMAddressTracker *tracker, const RegionAllocation *startConstraint,
+                       const RegionAllocation *endConstraint, unsigned accessScale) {
 
     RegionAllocation result;
 
@@ -140,9 +147,7 @@ computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         }
 
         unsigned size = state.getVarSizeBytes(v);
-        double E_sr = params.memRestoreEnergyPerByte * size * (needRestore ? 1.0 : 0.0) +
-                      params.memStoreEnergyPerByte * size * (needSave ? 1.0 : 0.0);
-        double gain = params.nvmAccessPenalty * (nR + nW) - E_sr;
+        double gain = estimateEnergyGain(nR + nW, size, needRestore, needSave, params);
 
         candidates.push_back({v, gain, size, needRestore, needSave});
     }

@@ -34,17 +34,23 @@ std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
                                               const std::vector<llvm::BasicBlock *> &intervalBlocks,
                                               const SchematicStateAnalysis &state);
 
-/// Compute optimal greedy allocation for an interval (spec §6.2).
+/// Estimate energy gain from placing a variable in VM.
+/// Reference: memory_allocator.py:estimate_energy_gain (line 93).
+double estimateEnergyGain(unsigned accessCount, unsigned varSizeBytes, bool needRestore,
+                          bool needSave, const SchematicParams &params);
+
+/// Compute optimal greedy allocation for an interval.
+/// Reference: memory_allocator.py:choose_memory_allocation (line 142).
 /// startConstraint/endConstraint: if set, variables that need restore/save
 /// and exist in the constraint allocation are forced to NVM (reference lines 186-190).
 /// accessScale: multiplier for variable access counts (used by convergence loop to
 /// scale accesses by min(numIt, maxTripCount) iterations).
 RegionAllocation
-computeIntervalAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                          const SchematicStateAnalysis &state, const SchematicParams &params,
-                          const std::map<llvm::Value *, Placement> &fixedPlacements,
-                          VMAddressTracker *tracker, const RegionAllocation *startConstraint,
-                          const RegionAllocation *endConstraint, unsigned accessScale = 1);
+chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                       const SchematicStateAnalysis &state, const SchematicParams &params,
+                       const std::map<llvm::Value *, Placement> &fixedPlacements,
+                       VMAddressTracker *tracker, const RegionAllocation *startConstraint,
+                       const RegionAllocation *endConstraint, unsigned accessScale);
 
 /// Compute total interval energy (spec §7.2).
 double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBlocks,

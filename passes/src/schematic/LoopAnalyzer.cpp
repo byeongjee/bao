@@ -443,7 +443,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             auto hdIt2 = solution.decidedPlacements.find(header);
             if (hdIt2 != solution.decidedPlacements.end())
                 fixed = hdIt2->second;
-            RegionAllocation newAlloc = computeIntervalAllocation(
+            RegionAllocation newAlloc = chooseMemoryAllocation(
                 loopBlocks, state_, params_, fixed, tracker_, nullptr, nullptr, scaledIters);
             bodyAlloc = newAlloc;
 
