@@ -5,7 +5,6 @@
 #include "llvm/IR/CFG.h"
 
 #include <deque>
-#include <map>
 #include <set>
 
 namespace checkpoint {
@@ -173,6 +172,69 @@ bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solu
     return true;
 }
 
+/// Reference: memory_allocation.py:140-149 (interval_is_empty).
+/// Returns true if the given [startAddr, endAddr) interval does not overlap
+/// any VM-placed variable's address range in this allocation.
+static bool intervalIsEmpty(const RegionAllocation &alloc, unsigned startAddr, unsigned endAddr,
+                            const SchematicStateAnalysis &state) {
+    for (const auto &[v, va] : alloc.vars) {
+        if (va.placement != Placement::VM)
+            continue;
+        auto offIt = alloc.vmOffsets.find(v);
+        if (offIt == alloc.vmOffsets.end())
+            continue;
+        unsigned iStart = offIt->second;
+        unsigned iEnd = iStart + state.getVarSizeBytes(v);
+        if (startAddr < iEnd && iStart < endAddr)
+            return false;
+    }
+    return true;
+}
+
+/// Reference: memory_allocation.py:151-160 (_is_compatible_with).
+/// One-way compatibility: for each var in other, if not in self and VM-placed,
+/// check that its address range is free in self. If in both, check equality.
+static bool isCompatibleOneWay(const RegionAllocation &self, const RegionAllocation &other,
+                               const SchematicStateAnalysis &state) {
+    for (const auto &[v, varAlloc] : other.vars) {
+        auto selfIt = self.vars.find(v);
+        if (selfIt == self.vars.end()) {
+            // Reference: memory_allocation.py:154-156.
+            if (varAlloc.placement == Placement::VM) {
+                auto offIt = other.vmOffsets.find(v);
+                if (offIt == other.vmOffsets.end())
+                    continue;
+                unsigned startAddr = offIt->second;
+                unsigned endAddr = startAddr + state.getVarSizeBytes(v);
+                if (!intervalIsEmpty(self, startAddr, endAddr, state))
+                    return false;
+            }
+        } else {
+            // Reference: memory_allocation.py:158-159 (var_alloc != self.vars[name]).
+            // Python __eq__ compares: allocation, len(type), name, start_address, end_address.
+            // Same llvm::Value* ⇒ same name and type, so compare placement + VM offset.
+            if (varAlloc.placement != selfIt->second.placement)
+                return false;
+            if (varAlloc.placement == Placement::VM) {
+                auto selfOff = self.vmOffsets.find(v);
+                auto otherOff = other.vmOffsets.find(v);
+                unsigned selfAddr = (selfOff != self.vmOffsets.end()) ? selfOff->second : 0;
+                unsigned otherAddr = (otherOff != other.vmOffsets.end()) ? otherOff->second : 0;
+                if (selfAddr != otherAddr)
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+/// Reference: memory_allocation.py:162-166 (is_compatible_with).
+/// Bidirectional compatibility check.
+static bool isCompatibleWith(const RegionAllocation &a, const RegionAllocation &b,
+                             const SchematicStateAnalysis &state) {
+    return isCompatibleOneWay(a, b, state) && isCompatibleOneWay(b, a, state);
+}
+
 void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, SchematicSolution &solution,
                                                const SchematicStateAnalysis &state,
                                                const SchematicParams &params, llvm::LoopInfo &LI,
@@ -202,42 +264,32 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
         if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
             continue;
 
-        // Check if allocations differ (union-based: missing key = NVM).
-        auto srcAlloc = solution.decidedPlacements.find(srcBB);
-        auto dstAlloc = solution.decidedPlacements.find(dstBB);
-        bool allocsDiffer = false;
-        {
-            std::map<llvm::Value *, Placement> srcMap, dstMap;
-            if (srcAlloc != solution.decidedPlacements.end())
-                srcMap = srcAlloc->second;
-            if (dstAlloc != solution.decidedPlacements.end())
-                dstMap = dstAlloc->second;
-            std::set<llvm::Value *> allKeys;
-            for (const auto &[k, _] : srcMap)
-                allKeys.insert(k);
-            for (const auto &[k, _] : dstMap)
-                allKeys.insert(k);
-            for (llvm::Value *v : allKeys) {
-                Placement pS = srcMap.count(v) ? srcMap[v] : Placement::NVM;
-                Placement pD = dstMap.count(v) ? dstMap[v] : Placement::NVM;
-                if (pS != pD) {
-                    allocsDiffer = true;
-                    break;
-                }
-            }
-        }
+        // Reference: schematic.py:483-491 — both blocks must have memory_allocation.
+        auto srcAllocIt = solution.blockAllocation.find(srcBB);
+        auto dstAllocIt = solution.blockAllocation.find(dstBB);
+        if (srcAllocIt == solution.blockAllocation.end() || !srcAllocIt->second ||
+            dstAllocIt == solution.blockAllocation.end() || !dstAllocIt->second)
+            continue;
 
-        if (allocsDiffer || srcMeta->second.E_left <= dstMeta->second.E_to_leave) {
-            // Insufficient energy or incompatible allocations → enable checkpoint.
+        // Reference: schematic.py:494 — is_compatible_with (memory_allocation.py:162-166).
+        if (!isCompatibleWith(*srcAllocIt->second, *dstAllocIt->second, state)) {
+            // Not compatible → enable checkpoint (ACTIVE).
+            // Reference: schematic.py:495.
             solution.enabledCheckpoints.insert(edge);
         } else {
-            // Propagate energy through the disabled edge using existing block values
-            // (reference schematic.py:499-500)
-            CFGEdge disabledEdge{srcBB, dstBB};
-            propagateEnergyLeft(disabledEdge, srcMeta->second.E_left, solution, cfg, state, params,
-                                LI, loopScope);
-            propagateEnergyToLeave(disabledEdge, dstMeta->second.E_to_leave, solution, cfg, state,
-                                   params, LI, loopScope);
+            // Reference: schematic.py:497 — energy_left > energy_to_leave.
+            if (srcMeta->second.E_left > dstMeta->second.E_to_leave) {
+                // Compatible and enough energy → disabled, propagate.
+                // Reference: schematic.py:498-500.
+                propagateEnergyLeft(edge, srcMeta->second.E_left, solution, cfg, state, params, LI,
+                                    loopScope);
+                propagateEnergyToLeave(edge, dstMeta->second.E_to_leave, solution, cfg, state,
+                                       params, LI, loopScope);
+            } else {
+                // Compatible but insufficient energy → enable checkpoint (ACTIVE).
+                // Reference: schematic.py:502.
+                solution.enabledCheckpoints.insert(edge);
+            }
         }
     }
 }
