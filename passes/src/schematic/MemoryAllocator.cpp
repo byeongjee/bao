@@ -251,4 +251,40 @@ double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBloc
     return E_restore + E_exec + E_save;
 }
 
+ComputeCostResult computeCost(const std::vector<llvm::BasicBlock *> &blocks,
+                              const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
+                              const SchematicParams &params,
+                              const std::map<llvm::Value *, Placement> &fixedPlacements,
+                              VMAddressTracker *tracker, const RegionAllocation *startConstraint,
+                              const RegionAllocation *endConstraint) {
+    // Execution energy: sum of all blocks at all-NVM cost
+    double energy = 0.0;
+    for (llvm::BasicBlock *BB : blocks)
+        energy += cfg.getBlockInfo(BB).energyCost;
+
+    // Choose memory allocation and subtract gain
+    auto alloc = chooseMemoryAllocation(blocks, state, params, fixedPlacements, tracker,
+                                        startConstraint, endConstraint, 1);
+    double gain = computeMemoryAllocationGain(alloc, blocks, state, params);
+    energy -= gain;
+
+    return {std::move(alloc), energy};
+}
+
+double computeMemoryAllocationGain(const RegionAllocation &alloc,
+                                   const std::vector<llvm::BasicBlock *> &blocks,
+                                   const SchematicStateAnalysis &state,
+                                   const SchematicParams &params) {
+    double gain = 0.0;
+    for (const auto &[v, place] : alloc.placement) {
+        if (place != Placement::VM)
+            continue;
+        unsigned accesses = 0;
+        for (llvm::BasicBlock *BB : blocks)
+            accesses += state.getLoadCount(BB, v) + state.getStoreCount(BB, v);
+        gain += params.nvmAccessPenalty * accesses;
+    }
+    return gain;
+}
+
 } // namespace checkpoint

@@ -59,4 +59,26 @@ double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBloc
                              const SchematicParams &params, bool isFirstInterval,
                              bool isLastInterval);
 
+/// Result of computeCost: allocation + net energy cost.
+struct ComputeCostResult {
+    RegionAllocation allocation;
+    double energy;
+};
+
+/// Compute cost of an interval: execution energy minus VM placement gain.
+/// Reference: memory_allocator.py:compute_cost (line 229).
+ComputeCostResult computeCost(const std::vector<llvm::BasicBlock *> &blocks,
+                              const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
+                              const SchematicParams &params,
+                              const std::map<llvm::Value *, Placement> &fixedPlacements,
+                              VMAddressTracker *tracker, const RegionAllocation *startConstraint,
+                              const RegionAllocation *endConstraint);
+
+/// Compute total energy gain from a memory allocation.
+/// Reference: memory_allocator.py:compute_memory_allocation_gain.
+double computeMemoryAllocationGain(const RegionAllocation &alloc,
+                                   const std::vector<llvm::BasicBlock *> &blocks,
+                                   const SchematicStateAnalysis &state,
+                                   const SchematicParams &params);
+
 } // namespace checkpoint
