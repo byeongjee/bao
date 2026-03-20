@@ -90,6 +90,7 @@ src/common/LoopTripCount.cpp
     src/schematic/SchematicPass.cpp
     src/schematic/SchematicStateAnalysis.cpp
     src/schematic/MemoryAllocator.cpp
+    src/schematic/TraceAnalyzer.cpp
 
     src/schematic/RCGSolver.cpp
     src/schematic/LoopAnalyzer.cpp

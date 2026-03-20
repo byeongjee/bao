@@ -12,6 +12,7 @@
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
 #include "schematic/SchematicStateAnalysis.h"
+#include "schematic/TraceAnalyzer.h"
 #include "schematic/TraceLoader.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -122,95 +123,33 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     // Step 9: Analyze each path.
     for (const auto &ep : paths) {
         solution.pathsAnalyzed++;
-
-        // Skip if all blocks already analyzed.
-        bool allAnalyzed = true;
-        for (llvm::BasicBlock *BB : ep.blocks) {
-            auto it = solution.blockMeta.find(BB);
-            if (it == solution.blockMeta.end() || !it->second.analyzed) {
-                allAnalyzed = false;
-                break;
+        std::string traceError;
+        if (!analyzeTrace(ep.blocks, solution, state, *ctx.cfg, params, &vmTracker, LI,
+                          /*loopScope=*/nullptr, traceError)) {
+            PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '" << F.getName()
+                  << "', path #" << solution.pathsAnalyzed << ": " << traceError;
+            if (!StatsJsonOpt.empty()) {
+                const auto totalEnd = std::chrono::steady_clock::now();
+                double totalMs =
+                    std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+                CommonStats c;
+                c.passName = "SCHEMATIC";
+                c.functionName = F.getName().str();
+                c.basicBlocks = ctx.cfg->getBlocks().size();
+                c.edges = ctx.cfg->getEdges().size();
+                c.candidateGlobals = state.getCandidates().size();
+                c.compilationTimeMs = totalMs;
+                c.peakRSSKb = getPeakRSSKb();
+                json::Object root = commonStatsToJSON(c);
+                root["feasible"] = false;
+                root["infeasibility_reason"] = "energy capacity too small";
+                root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
+                root["enabled_checkpoints"] =
+                    static_cast<int64_t>(solution.enabledCheckpoints.size());
+                root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
+                writeStatsJSON(StatsJsonOpt, std::move(root));
             }
-        }
-        if (allAnalyzed)
-            continue;
-
-        // Extract contiguous unanalyzed segments.
-        std::vector<std::vector<llvm::BasicBlock *>> segments;
-        std::vector<llvm::BasicBlock *> currentSeg;
-        std::vector<llvm::BasicBlock *> startBoundaries;
-        std::vector<llvm::BasicBlock *> endBoundaries;
-
-        for (unsigned i = 0; i < ep.blocks.size(); ++i) {
-            llvm::BasicBlock *BB = ep.blocks[i];
-            auto metaIt = solution.blockMeta.find(BB);
-            bool isAnalyzed = metaIt != solution.blockMeta.end() && metaIt->second.analyzed;
-
-            if (!isAnalyzed) {
-                if (currentSeg.empty()) {
-                    // Record start boundary (previous analyzed block).
-                    llvm::BasicBlock *startBound = nullptr;
-                    if (i > 0) {
-                        auto prevMeta = solution.blockMeta.find(ep.blocks[i - 1]);
-                        if (prevMeta != solution.blockMeta.end() && prevMeta->second.analyzed)
-                            startBound = ep.blocks[i - 1];
-                    }
-                    startBoundaries.push_back(startBound);
-                }
-                currentSeg.push_back(BB);
-            } else {
-                if (!currentSeg.empty()) {
-                    endBoundaries.push_back(BB);
-                    segments.push_back(std::move(currentSeg));
-                    currentSeg.clear();
-                }
-            }
-        }
-        if (!currentSeg.empty()) {
-            endBoundaries.push_back(nullptr);
-            segments.push_back(std::move(currentSeg));
-        }
-
-        // Solve each segment with RCG.
-        for (unsigned s = 0; s < segments.size(); ++s) {
-            llvm::BasicBlock *startBound =
-                s < startBoundaries.size() ? startBoundaries[s] : nullptr;
-            llvm::BasicBlock *endBound = s < endBoundaries.size() ? endBoundaries[s] : nullptr;
-
-            RCGSolver solver(segments[s], state, *ctx.cfg, params, solution.blockMeta,
-                             solution.decidedPlacements, startBound, endBound, &vmTracker);
-            RCGResult result = solver.solve();
-
-            if (!result.feasible) {
-                PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '"
-                      << F.getName() << "', path #" << solution.pathsAnalyzed << ": "
-                      << result.errorMessage;
-                if (!StatsJsonOpt.empty()) {
-                    const auto totalEnd = std::chrono::steady_clock::now();
-                    double totalMs =
-                        std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
-                    CommonStats c;
-                    c.passName = "SCHEMATIC";
-                    c.functionName = F.getName().str();
-                    c.basicBlocks = ctx.cfg->getBlocks().size();
-                    c.edges = ctx.cfg->getEdges().size();
-                    c.candidateGlobals = state.getCandidates().size();
-                    c.compilationTimeMs = totalMs;
-                    c.peakRSSKb = getPeakRSSKb();
-                    json::Object root = commonStatsToJSON(c);
-                    root["feasible"] = false;
-                    root["infeasibility_reason"] = "energy capacity too small";
-                    root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
-                    root["enabled_checkpoints"] =
-                        static_cast<int64_t>(solution.enabledCheckpoints.size());
-                    root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
-                    writeStatsJSON(StatsJsonOpt, std::move(root));
-                }
-                return PreservedAnalyses::all();
-            }
-
-            applyMemoryAllocation(result, segments[s], startBound, endBound, solution, *ctx.cfg,
-                                  state, params, LI, /*loopScope=*/nullptr);
+            return PreservedAnalyses::all();
         }
     }
 
