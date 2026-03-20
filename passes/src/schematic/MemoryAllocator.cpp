@@ -198,59 +198,6 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
     return result;
 }
 
-double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                             const RegionAllocation &allocation,
-                             const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
-                             const SchematicParams &params, bool isFirstInterval,
-                             bool isLastInterval) {
-
-    // E_restore: checkpoint restore cost at interval start.
-    // Only charge variables where needRestore is true (first access is a load).
-    double E_restore = 0.0;
-    if (!isFirstInterval) {
-        E_restore = params.E_pro + params.N_reg * params.regRestoreEnergy;
-        for (const auto &[gv, place] : allocation.placement) {
-            if (place != Placement::VM)
-                continue;
-            auto flagIt = allocation.livenessFlags.find(gv);
-            bool needRestore =
-                flagIt != allocation.livenessFlags.end() ? flagIt->second.first : true;
-            if (needRestore)
-                E_restore += params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
-        }
-    }
-
-    // E_exec: execution energy minus NVM savings for VM-placed vars.
-    double E_exec = 0.0;
-    for (llvm::BasicBlock *BB : intervalBlocks) {
-        E_exec += cfg.getBlockInfo(BB).energyCost;
-        for (const auto &[gv, place] : allocation.placement) {
-            if (place != Placement::VM)
-                continue;
-            unsigned loads = state.getLoadCount(BB, gv);
-            unsigned stores = state.getStoreCount(BB, gv);
-            E_exec -= params.nvmAccessPenalty * (loads + stores);
-        }
-    }
-
-    // E_save: checkpoint save cost at interval end.
-    // Only charge variables where needSave is true.
-    double E_save = 0.0;
-    if (!isLastInterval) {
-        E_save = params.E_epi + params.N_reg * params.regStoreEnergy;
-        for (const auto &[gv, place] : allocation.placement) {
-            if (place != Placement::VM)
-                continue;
-            auto flagIt = allocation.livenessFlags.find(gv);
-            bool needSave = flagIt != allocation.livenessFlags.end() ? flagIt->second.second : true;
-            if (needSave)
-                E_save += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
-        }
-    }
-
-    return E_restore + E_exec + E_save;
-}
-
 ComputeCostResult computeCost(const std::vector<llvm::BasicBlock *> &blocks,
                               const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
                               const SchematicParams &params,

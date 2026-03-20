@@ -52,13 +52,6 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                        VMAddressTracker *tracker, const RegionAllocation *startConstraint,
                        const RegionAllocation *endConstraint, unsigned accessScale);
 
-/// Compute total interval energy (spec §7.2).
-double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                             const RegionAllocation &allocation,
-                             const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
-                             const SchematicParams &params, bool isFirstInterval,
-                             bool isLastInterval);
-
 /// Result of computeCost: allocation + net energy cost.
 struct ComputeCostResult {
     RegionAllocation allocation;
