@@ -7,10 +7,11 @@
  *
  * The optimizer prefers placeInVm[entry]=0 (one NVM access is cheaper
  * than restore) but placeInVm[loop]=1 (many accesses benefit from VM).
- * Without the merge-point consistency constraint, this creates divergent
- * placeInVm at the loop header boundary.
+ * EdgeSplitPass splits the incoming edges to the loop header, so each
+ * predecessor gets its own block where an independent region boundary
+ * (with its own save set) can be placed.
  *
- * Expected: the MILP constraint prevents this divergence.
+ * Expected: the optimizer handles divergent placement via split blocks.
  */
 
 int g_counter;
