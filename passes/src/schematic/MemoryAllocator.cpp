@@ -4,7 +4,6 @@
 
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
-
 #include <algorithm>
 #include <vector>
 
@@ -62,39 +61,142 @@ double estimateEnergyGain(unsigned accessCount, unsigned varSizeBytes, bool need
     return params.nvmAccessPenalty * accessCount - E_sr;
 }
 
-std::pair<RegionAllocation, double>
-chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
-                       const SchematicStateAnalysis &state, const SchematicParams &params,
-                       const std::map<llvm::Value *, Placement> &fixedPlacements,
-                       VMAddressTracker *tracker, const RegionAllocation *startConstraint,
-                       const RegionAllocation *endConstraint, unsigned accessScale) {
+std::optional<RegionAllocation>
+mergeAllocations(const std::vector<const RegionAllocation *> &allocations,
+                 const SchematicStateAnalysis &state, bool checkpointIncreaseAllowed) {
+    // Reference: memory_allocation.py:merge_allocations (line 217).
+    if (allocations.empty())
+        return RegionAllocation{};
 
-    RegionAllocation result;
-    double totalGain = 0.0;
+    // Start with a copy of the first allocation (reference: deepcopy(allocations[0]))
+    RegionAllocation result = *allocations[0];
+    if (allocations.size() == 1)
+        return result;
 
-    // Copy fixed placements and subtract save/restore costs for constrained variables.
-    // Reference lines 167-170: needRestore()/needSave() fold in the VM check,
-    // so only VM-placed constrained variables contribute costs.
-    result.vmBytesUsed = 0;
-    for (const auto &[v, place] : fixedPlacements) {
-        auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
-        result.vars[v] = {place, needRestore, needSave};
-        unsigned size = state.getVarSizeBytes(v);
-        if (result.vars[v].needRestore())
-            totalGain -= params.memRestoreEnergyPerByte * size;
-        if (result.vars[v].needSave())
-            totalGain -= params.memStoreEnergyPerByte * size;
-        if (place == Placement::VM) {
-            if (tracker) {
-                auto existing = tracker->getExistingAddress(v);
-                result.vmOffsets[v] = existing ? *existing : tracker->recordAllocation(v, size);
-            } else {
-                result.vmOffsets[v] = result.vmBytesUsed;
+    // Track occupied memory intervals for overlap detection.
+    // Reference: MemoryAllocation.occupied_memory
+    std::vector<std::pair<unsigned, unsigned>> occupied;
+    for (const auto &[v, va] : result.vars) {
+        if (va.placement == Placement::VM) {
+            auto offIt = result.vmOffsets.find(v);
+            if (offIt != result.vmOffsets.end()) {
+                unsigned size = state.getVarSizeBytes(v);
+                occupied.push_back({offIt->second, offIt->second + size});
             }
-            result.vmBytesUsed += size;
         }
     }
 
+    for (unsigned i = 1; i < allocations.size(); ++i) {
+        for (const auto &[v, va] : allocations[i]->vars) {
+            auto existIt = result.vars.find(v);
+            if (existIt != result.vars.end()) {
+                // Variable already in result — check compatibility.
+                // Reference: add_new_var_alloc: if var_alloc != self.vars[name]: raise
+                if (existIt->second.placement != va.placement)
+                    return std::nullopt;
+                if (va.placement == Placement::VM) {
+                    auto off1 = result.vmOffsets.find(v);
+                    auto off2 = allocations[i]->vmOffsets.find(v);
+                    if (off1 != result.vmOffsets.end() && off2 != allocations[i]->vmOffsets.end() &&
+                        off1->second != off2->second)
+                        return std::nullopt;
+                }
+            } else {
+                // Variable not yet in result.
+                // Reference: add_new_var_alloc lines 188-214.
+                if (va.placement == Placement::VM) {
+                    auto offIt = allocations[i]->vmOffsets.find(v);
+                    if (offIt != allocations[i]->vmOffsets.end()) {
+                        unsigned startAddr = offIt->second;
+                        unsigned size = state.getVarSizeBytes(v);
+                        unsigned endAddr = startAddr + size;
+
+                        // Check address interval is empty.
+                        // Reference: interval_is_empty (line 138).
+                        bool overlaps = false;
+                        for (const auto &[s, e] : occupied) {
+                            if (startAddr < e && s < endAddr) {
+                                overlaps = true;
+                                break;
+                            }
+                        }
+                        if (overlaps)
+                            return std::nullopt;
+
+                        // Check checkpoint increase.
+                        // Reference: add_new_var_alloc line 200.
+                        if ((va.needRestore() || va.needSave()) && !checkpointIncreaseAllowed)
+                            return std::nullopt;
+
+                        result.vars[v] = va;
+                        result.vmOffsets[v] = offIt->second;
+                        occupied.push_back({startAddr, endAddr});
+                    } else {
+                        if ((va.needRestore() || va.needSave()) && !checkpointIncreaseAllowed)
+                            return std::nullopt;
+                        result.vars[v] = va;
+                    }
+                } else {
+                    // NVM variable — just add it.
+                    result.vars[v] = va;
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+std::pair<RegionAllocation, double>
+chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                       const SchematicStateAnalysis &state, const SchematicParams &params,
+                       const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
+                       const std::vector<const RegionAllocation *> &memoryAllocations,
+                       VMAddressTracker *tracker, unsigned accessScale) {
+
+    // Step 1: Merge allocations (reference: memory_allocator.py:153-163).
+    RegionAllocation constrainedAlloc;
+    {
+        std::optional<RegionAllocation> merged;
+        if (!memoryAllocations.empty()) {
+            merged = mergeAllocations(memoryAllocations, state, /*checkpointIncreaseAllowed=*/true);
+            if (!merged) {
+                return {RegionAllocation{}, -99999.0};
+            }
+            constrainedAlloc = std::move(*merged);
+        }
+        if (startAlloc) {
+            std::vector<const RegionAllocation *> toMerge = {startAlloc, &constrainedAlloc};
+            merged = mergeAllocations(toMerge, state, /*checkpointIncreaseAllowed=*/false);
+            if (!merged) {
+                return {RegionAllocation{}, -99999.0};
+            }
+            constrainedAlloc = std::move(*merged);
+        }
+        if (endAlloc) {
+            std::vector<const RegionAllocation *> toMerge = {endAlloc, &constrainedAlloc};
+            merged = mergeAllocations(toMerge, state, /*checkpointIncreaseAllowed=*/false);
+            if (!merged) {
+                return {RegionAllocation{}, -99999.0};
+            }
+            constrainedAlloc = std::move(*merged);
+        }
+    }
+
+    RegionAllocation result = constrainedAlloc;
+    double totalGain = 0.0;
+
+    // Step 2: Subtract save/restore costs for constrained variables.
+    // Reference lines 167-170: use need_restore/need_save from merged allocation.
+    for (const auto &[v, va] : result.vars) {
+        unsigned size = state.getVarSizeBytes(v);
+        if (va.needRestore())
+            totalGain -= params.memRestoreEnergyPerByte * size;
+        if (va.needSave())
+            totalGain -= params.memStoreEnergyPerByte * size;
+    }
+
+    // Step 3: Evaluate candidates not in constrained allocation.
     // Candidate struct for greedy packing.
     struct CandidateEntry {
         llvm::Value *v;
@@ -106,7 +208,7 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
     std::vector<CandidateEntry> candidates;
 
     for (llvm::Value *v : state.getCandidates()) {
-        if (fixedPlacements.count(v))
+        if (result.vars.count(v))
             continue;
 
         // Accumulate access counts across interval, scaled by accessScale
@@ -135,12 +237,12 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         }
 
         // Reference lines 182-190: two-branch structure matching Python exactly.
-        if (!startConstraint && !endConstraint) {
+        if (!startAlloc && !endAlloc) {
             unsigned size = state.getVarSizeBytes(v);
             double gain = estimateEnergyGain(nR + nW, size, needRestore, needSave, params);
             candidates.push_back({v, gain, size, needRestore, needSave});
         } else {
-            if ((needRestore && startConstraint) || (needSave && endConstraint)) {
+            if ((needRestore && startAlloc) || (needSave && endAlloc)) {
                 result.vars[v] = {Placement::NVM, needRestore, needSave};
             } else {
                 unsigned size = state.getVarSizeBytes(v);
@@ -156,55 +258,74 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
               [](const CandidateEntry &a, const CandidateEntry &b) { return a.gain > b.gain; });
 
     // Greedy pack into VM.
+    // Reference lines 198-226: curr_address starts at tracker's top_address.
+    unsigned currAddress = tracker ? tracker->getTopAddress() : 0;
     for (const auto &c : candidates) {
+        VariableAllocation varAlloc{Placement::NVM, c.needRestore, c.needSave};
         if (c.gain > 0.0) {
-            // If tracker knows this variable, reuse its address (reference
-            // lines 206-213: previously allocated variables reuse their VM address,
-            // but only when gain > 0).
+            // Reference lines 208-213: reuse existing VM address.
             if (tracker) {
                 auto existing = tracker->getExistingAddress(c.v);
                 if (existing) {
-                    result.vars[c.v] = {Placement::VM, c.needRestore, c.needSave};
+                    varAlloc.placement = Placement::VM;
                     result.vmOffsets[c.v] = *existing;
-                    result.vmBytesUsed += c.size;
                     totalGain += c.gain;
+                    result.vars[c.v] = varAlloc;
                     continue;
                 }
             }
 
-            if (result.vmBytesUsed + c.size <= params.vmCapacityBytes) {
-                result.vars[c.v] = {Placement::VM, c.needRestore, c.needSave};
-                if (tracker) {
-                    result.vmOffsets[c.v] = tracker->recordAllocation(c.v, c.size);
-                } else {
-                    result.vmOffsets[c.v] = result.vmBytesUsed;
-                }
-                result.vmBytesUsed += c.size;
+            // Reference lines 215-221: allocate new VM address.
+            if (currAddress + c.size <= params.vmCapacityBytes) {
+                varAlloc.placement = Placement::VM;
+                result.vmOffsets[c.v] = currAddress;
+                currAddress += c.size;
+                if (tracker)
+                    tracker->recordAllocation(c.v, c.size);
                 totalGain += c.gain;
+                result.vars[c.v] = varAlloc;
                 continue;
             }
         }
-
-        result.vars[c.v] = {Placement::NVM, c.needRestore, c.needSave};
+        result.vars[c.v] = varAlloc;
     }
+
+    // Reference lines 224-226: update vmBytesUsed.
+    result.vmBytesUsed = currAddress;
 
     return {std::move(result), totalGain};
 }
 
-ComputeCostResult computeCost(const std::vector<llvm::BasicBlock *> &blocks,
-                              const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
-                              const SchematicParams &params,
-                              const std::map<llvm::Value *, Placement> &fixedPlacements,
-                              VMAddressTracker *tracker, const RegionAllocation *startConstraint,
-                              const RegionAllocation *endConstraint) {
-    // Execution energy: sum of all blocks at all-NVM cost
+ComputeCostResult computeCost(
+    const std::vector<llvm::BasicBlock *> &blocks, const SchematicStateAnalysis &state,
+    const CFGAnalysis &cfg, const SchematicParams &params,
+    const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
+    VMAddressTracker *tracker, const RegionAllocation *startAlloc,
+    const RegionAllocation *endAlloc) {
+    // Execution energy: sum of all blocks at all-NVM cost.
+    // Reference: memory_allocator.py:compute_cost lines 248-250.
     double energy = 0.0;
     for (llvm::BasicBlock *BB : blocks)
         energy += cfg.getBlockInfo(BB).energyCost;
 
-    // Choose memory allocation and subtract gain
-    auto [alloc, gain] = chooseMemoryAllocation(blocks, state, params, fixedPlacements, tracker,
-                                                startConstraint, endConstraint, 1);
+    // Collect memory_allocations from blocks.
+    // Reference: memory_allocator.py:compute_cost lines 247-252.
+    std::vector<const RegionAllocation *> memoryAllocations;
+    for (llvm::BasicBlock *BB : blocks) {
+        auto it = blockAllocation.find(BB);
+        if (it != blockAllocation.end()) {
+            const RegionAllocation *ptr = it->second.get();
+            // Reference uses identity check: `not in memory_allocations`
+            if (std::find(memoryAllocations.begin(), memoryAllocations.end(), ptr) ==
+                memoryAllocations.end())
+                memoryAllocations.push_back(ptr);
+        }
+    }
+
+    // Choose memory allocation and subtract gain.
+    // Reference: memory_allocator.py:compute_cost lines 260-263.
+    auto [alloc, gain] = chooseMemoryAllocation(blocks, state, params, startAlloc, endAlloc,
+                                                memoryAllocations, tracker, 1);
     energy -= gain;
 
     return {std::move(alloc), energy};
@@ -255,16 +376,19 @@ void applyMemoryAllocation(const RCGResult &result,
     // 1. Mark checkpoints as enabled
     updateCheckpointType(result.selectedCheckpoints, solution);
 
-    // 2. Record allocations and mark blocks as analyzed
+    // 2. Record allocations and mark blocks as analyzed.
+    // Reference: apply_memory_allocation sets bb.memory_allocation for each block.
     for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
         const auto &blocks = result.intervalBlocks[i];
         const auto &alloc = result.allocations[i];
+        auto sharedAlloc = std::make_shared<RegionAllocation>(alloc);
 
         for (llvm::BasicBlock *BB : blocks) {
             auto &meta = solution.blockMeta[BB];
             meta.analyzed = true;
             for (const auto &[gv, va] : alloc.vars)
                 solution.decidedPlacements[BB][gv] = va.placement;
+            solution.blockAllocation[BB] = sharedAlloc;
         }
 
         solution.regions.push_back({blocks, alloc});

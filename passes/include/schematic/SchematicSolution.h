@@ -8,6 +8,7 @@
 
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <vector>
@@ -117,6 +118,10 @@ struct SchematicSolution {
     /// Per-block decided variable placements from earlier analyses.
     /// Enforces allocation consistency across paths (spec §12.2).
     llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> decidedPlacements;
+    /// Per-block memory allocation, matching Python's bb.memory_allocation.
+    /// Multiple blocks in the same region share the same allocation object.
+    /// Reference: memory_allocation.py MemoryAllocation class.
+    llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> blockAllocation;
     unsigned pathsAnalyzed = 0;
     unsigned totalVmVariables = 0;
     unsigned totalNvmVariables = 0;

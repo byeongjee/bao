@@ -12,11 +12,11 @@ RCGSolver::RCGSolver(
     const std::vector<llvm::BasicBlock *> &pathBlocks, const SchematicStateAnalysis &state,
     const CFGAnalysis &cfg, const SchematicParams &params,
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
-    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
     llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock,
     VMAddressTracker *tracker)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
-      existingMeta_(existingMeta), decidedPlacements_(decidedPlacements),
+      existingMeta_(existingMeta), blockAllocation_(blockAllocation),
       startBoundaryBlock_(startBoundaryBlock), endBoundaryBlock_(endBoundaryBlock),
       tracker_(tracker) {}
 
@@ -43,26 +43,19 @@ void RCGSolver::createReachableCheckpointGraph() {
     unsigned numNodes = nodes_.size();
     adj_.assign(numNodes, {});
 
-    // Build constraint allocations from boundary blocks.
-    std::optional<RegionAllocation> startConstraintAlloc;
-    std::optional<RegionAllocation> endConstraintAlloc;
+    // Look up boundary allocations from blockAllocation.
+    // Reference: trace[0].memory_allocation / trace[-1].memory_allocation
+    const RegionAllocation *startAlloc = nullptr;
+    const RegionAllocation *endAlloc = nullptr;
     if (startBoundaryBlock_) {
-        auto it = decidedPlacements_.find(startBoundaryBlock_);
-        if (it != decidedPlacements_.end()) {
-            RegionAllocation a;
-            for (const auto &[v, place] : it->second)
-                a.vars[v].placement = place;
-            startConstraintAlloc = std::move(a);
-        }
+        auto it = blockAllocation_.find(startBoundaryBlock_);
+        if (it != blockAllocation_.end())
+            startAlloc = it->second.get();
     }
     if (endBoundaryBlock_) {
-        auto it = decidedPlacements_.find(endBoundaryBlock_);
-        if (it != decidedPlacements_.end()) {
-            RegionAllocation a;
-            for (const auto &[v, place] : it->second)
-                a.vars[v].placement = place;
-            endConstraintAlloc = std::move(a);
-        }
+        auto it = blockAllocation_.find(endBoundaryBlock_);
+        if (it != blockAllocation_.end())
+            endAlloc = it->second.get();
     }
 
     // Read boundary energy values
@@ -81,18 +74,6 @@ void RCGSolver::createReachableCheckpointGraph() {
             energyToLeave = it->second.E_to_leave;
     }
 
-    // Helper to collect fixed placements for a block range
-    auto collectFixed = [&](const std::vector<llvm::BasicBlock *> &blocks) {
-        std::map<llvm::Value *, Placement> fixed;
-        for (llvm::BasicBlock *BB : blocks) {
-            auto it = decidedPlacements_.find(BB);
-            if (it != decidedPlacements_.end())
-                for (const auto &[gv, place] : it->second)
-                    fixed[gv] = place;
-        }
-        return fixed;
-    };
-
     // Internal checkpoint indices (all CandidateEdge nodes)
     std::vector<unsigned> internalCkpts;
     for (unsigned i = 1; i + 1 < numNodes; ++i)
@@ -109,9 +90,8 @@ void RCGSolver::createReachableCheckpointGraph() {
             auto blocks = getIntervalBlocks(i, j);
             if (blocks.empty())
                 continue;
-            auto fixed = collectFixed(blocks);
-            auto [alloc, cost] =
-                computeCost(blocks, state_, cfg_, params_, fixed, tracker_, nullptr, nullptr);
+            auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_,
+                                             tracker_, nullptr, nullptr);
             cost += params_.E_pro + params_.N_reg * params_.regRestoreEnergy; // chkpt_restore
             cost += params_.E_epi + params_.N_reg * params_.regStoreEnergy;   // chkpt_save
             alloc.intervalEnergy = cost;
@@ -127,10 +107,8 @@ void RCGSolver::createReachableCheckpointGraph() {
         auto blocks = getIntervalBlocks(startNode, j);
         if (blocks.empty())
             continue;
-        auto fixed = collectFixed(blocks);
-        const RegionAllocation *sc = startConstraintAlloc ? &*startConstraintAlloc : nullptr;
-        auto [alloc, cost] =
-            computeCost(blocks, state_, cfg_, params_, fixed, tracker_, sc, nullptr);
+        auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_, tracker_,
+                                         startAlloc, nullptr);
         cost += params_.E_epi + params_.N_reg * params_.regStoreEnergy; // chkpt_save only
         alloc.intervalEnergy = cost;
         trackDiagnostics(blocks, cost, energyLeft);
@@ -144,10 +122,8 @@ void RCGSolver::createReachableCheckpointGraph() {
         auto blocks = getIntervalBlocks(i, endNode);
         if (blocks.empty())
             continue;
-        auto fixed = collectFixed(blocks);
-        const RegionAllocation *ec = endConstraintAlloc ? &*endConstraintAlloc : nullptr;
-        auto [alloc, cost] =
-            computeCost(blocks, state_, cfg_, params_, fixed, tracker_, nullptr, ec);
+        auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_, tracker_,
+                                         nullptr, endAlloc);
         cost += params_.E_pro + params_.N_reg * params_.regRestoreEnergy; // chkpt_restore only
         alloc.intervalEnergy = cost;
         trackDiagnostics(blocks, cost, params_.capacity - energyToLeave);
@@ -159,11 +135,8 @@ void RCGSolver::createReachableCheckpointGraph() {
     {
         auto blocks = getIntervalBlocks(startNode, endNode);
         if (!blocks.empty()) {
-            auto fixed = collectFixed(blocks);
-            const RegionAllocation *sc = startConstraintAlloc ? &*startConstraintAlloc : nullptr;
-            const RegionAllocation *ec = endConstraintAlloc ? &*endConstraintAlloc : nullptr;
-            auto [alloc, cost] =
-                computeCost(blocks, state_, cfg_, params_, fixed, tracker_, sc, ec);
+            auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_,
+                                             tracker_, startAlloc, endAlloc);
             alloc.intervalEnergy = cost;
             trackDiagnostics(blocks, cost, energyLeft);
             if (cost + energyToLeave < energyLeft)

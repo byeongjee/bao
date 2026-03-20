@@ -64,6 +64,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         solution.blockMeta.erase(endSynth);
         solution.decidedPlacements.erase(startSynth);
         solution.decidedPlacements.erase(endSynth);
+        solution.blockAllocation.erase(startSynth);
+        solution.blockAllocation.erase(endSynth);
         startSynth->deleteValue();
         endSynth->deleteValue();
     };
@@ -98,6 +100,19 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return false;
     }
 
+    // Collect existing memory allocations from loop blocks before analysis.
+    // Reference: schematic.py:533-537 — collected before loop trace analysis.
+    std::vector<const RegionAllocation *> loopMemoryAllocations;
+    for (llvm::BasicBlock *BB : L->getBlocksVector()) {
+        auto it = solution.blockAllocation.find(BB);
+        if (it != solution.blockAllocation.end()) {
+            const RegionAllocation *ptr = it->second.get();
+            if (std::find(loopMemoryAllocations.begin(), loopMemoryAllocations.end(), ptr) ==
+                loopMemoryAllocations.end())
+                loopMemoryAllocations.push_back(ptr);
+        }
+    }
+
     // Step 3: Run RCG solver on each body path.
     // Initialize synthetic boundary blocks with default energy values.
     // START_Loop: default restore budget (no VM costs since allocation is undecided).
@@ -113,9 +128,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     solution.decidedPlacements[endSynth] = {};
 
     for (const auto &path : bodyPaths) {
-        RCGSolver solver(
-            path, state_, cfg_, params_, solution.blockMeta, solution.decidedPlacements,
-            /*startBoundaryBlock=*/startSynth, /*endBoundaryBlock=*/endSynth, tracker_);
+        RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta, solution.blockAllocation,
+                         /*startBoundaryBlock=*/startSynth, /*endBoundaryBlock=*/endSynth,
+                         tracker_);
         RCGResult result = solver.solve();
         if (!result.feasible) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for loop at '"
@@ -130,10 +145,12 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
             const auto &blocks = result.intervalBlocks[i];
             const auto &alloc = result.allocations[i];
+            auto sharedAlloc = std::make_shared<RegionAllocation>(alloc);
             for (llvm::BasicBlock *BB : blocks) {
                 for (const auto &[gv, va] : alloc.vars)
                     solution.decidedPlacements[BB][gv] = va.placement;
                 solution.blockMeta[BB].analyzed = true;
+                solution.blockAllocation[BB] = sharedAlloc;
             }
             solution.regions.push_back({blocks, alloc});
         }
@@ -323,7 +340,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             // and create_reachable_checkpoint_graph reads trace[0].energy_left
             // and trace[-1].energy_to_leave at schematic.py:184,187).
             RCGSolver solver(synPath, state_, cfg_, params_, solution.blockMeta,
-                             solution.decidedPlacements, sBound, eBound, tracker_);
+                             solution.blockAllocation, sBound, eBound, tracker_);
             RCGResult result = solver.solve();
             if (!result.feasible) {
                 PLOGE << "SCHEMATIC infeasible: loop uncovered block '" << BB->getName()
@@ -336,10 +353,12 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
                 const auto &blocks = result.intervalBlocks[i];
                 const auto &alloc = result.allocations[i];
+                auto sharedAlloc = std::make_shared<RegionAllocation>(alloc);
                 for (llvm::BasicBlock *B : blocks) {
                     for (const auto &[gv, va] : alloc.vars)
                         solution.decidedPlacements[B][gv] = va.placement;
                     solution.blockMeta[B].analyzed = true;
+                    solution.blockAllocation[B] = sharedAlloc;
                 }
                 solution.regions.push_back({blocks, alloc});
             }
@@ -439,18 +458,19 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             unsigned scaledIters =
                 static_cast<unsigned>(std::min(static_cast<uint64_t>(numIt), maxTripCount));
 
-            std::map<llvm::Value *, Placement> fixed;
-            auto hdIt2 = solution.decidedPlacements.find(header);
-            if (hdIt2 != solution.decidedPlacements.end())
-                fixed = hdIt2->second;
-            auto [newAlloc, _gain] = chooseMemoryAllocation(
-                loopBlocks, state_, params_, fixed, tracker_, nullptr, nullptr, scaledIters);
+            // Reference: schematic.py:589-590 — pass None, None for start/end alloc,
+            // and memory_allocations collected before analysis.
+            auto [newAlloc, _gain] =
+                chooseMemoryAllocation(loopBlocks, state_, params_, nullptr, nullptr,
+                                       loopMemoryAllocations, tracker_, scaledIters);
             bodyAlloc = newAlloc;
 
+            auto sharedAlloc = std::make_shared<RegionAllocation>(bodyAlloc);
             for (llvm::BasicBlock *BB : loopBlocks) {
                 for (const auto &[gv, va] : bodyAlloc.vars)
                     solution.decidedPlacements[BB][gv] = va.placement;
                 solution.blockMeta[BB].analyzed = true;
+                solution.blockAllocation[BB] = sharedAlloc;
             }
 
             // Reset energy values before re-propagation (reference lines 594-596:

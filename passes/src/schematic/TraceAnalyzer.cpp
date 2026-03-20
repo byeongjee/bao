@@ -73,7 +73,7 @@ bool analyzeTrace(const std::vector<llvm::BasicBlock *> &trace, SchematicSolutio
             s < extracted.endBoundaries.size() ? extracted.endBoundaries[s] : nullptr;
 
         RCGSolver solver(extracted.segments[s], state, cfg, params, solution.blockMeta,
-                         solution.decidedPlacements, startBound, endBound, tracker);
+                         solution.blockAllocation, startBound, endBound, tracker);
         RCGResult result = solver.solve();
 
         if (!result.feasible) {
@@ -157,7 +157,7 @@ bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solu
             continue;
 
         RCGSolver solver(extracted.blocks, state, cfg, params, solution.blockMeta,
-                         solution.decidedPlacements, extracted.startBoundary, extracted.endBoundary,
+                         solution.blockAllocation, extracted.startBoundary, extracted.endBoundary,
                          tracker);
         RCGResult result = solver.solve();
 

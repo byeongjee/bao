@@ -8,7 +8,7 @@
 #include "llvm/ADT/DenseMap.h"
 
 #include <limits>
-#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -31,8 +31,8 @@ class RCGSolver {
               const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
               const SchematicParams &params,
               const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
-              const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>>
-                  &decidedPlacements,
+              const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>>
+                  &blockAllocation,
               llvm::BasicBlock *startBoundaryBlock, llvm::BasicBlock *endBoundaryBlock,
               VMAddressTracker *tracker);
 
@@ -60,8 +60,7 @@ class RCGSolver {
     const CFGAnalysis &cfg_;
     const SchematicParams &params_;
     const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta_;
-    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>>
-        &decidedPlacements_;
+    const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation_;
     llvm::BasicBlock *startBoundaryBlock_;
     llvm::BasicBlock *endBoundaryBlock_;
     VMAddressTracker *tracker_;

@@ -41,21 +41,24 @@ std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
 double estimateEnergyGain(unsigned accessCount, unsigned varSizeBytes, bool needRestore,
                           bool needSave, const SchematicParams &params);
 
+/// Merge multiple memory allocations into one, with conflict detection.
+/// Reference: memory_allocation.py:merge_allocations (line 217).
+/// Returns nullopt on incompatible allocations (equivalent to IncompatibleMemAllocException).
+std::optional<RegionAllocation>
+mergeAllocations(const std::vector<const RegionAllocation *> &allocations,
+                 const SchematicStateAnalysis &state, bool checkpointIncreaseAllowed);
+
 /// Compute optimal greedy allocation for an interval.
-/// Reference: memory_allocator.py:choose_memory_allocation (line 142).
-/// startConstraint/endConstraint: if set, variables that need restore/save
-/// and exist in the constraint allocation are forced to NVM (reference lines 186-190).
-/// accessScale: multiplier for variable access counts (used by convergence loop to
-/// scale accesses by min(numIt, maxTripCount) iterations).
-/// Returns (allocation, totalGain) where totalGain includes save/restore costs
-/// for constrained variables and access penalty minus save/restore for packed variables.
 /// Reference: memory_allocator.py:choose_memory_allocation (line 124).
+/// Merges memoryAllocations + startAlloc/endAlloc internally;
+/// returns (MemoryAllocation(), -99999) on incompatible allocations.
+/// accessScale: multiplier for variable access counts (convergence loop).
 std::pair<RegionAllocation, double>
 chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
                        const SchematicStateAnalysis &state, const SchematicParams &params,
-                       const std::map<llvm::Value *, Placement> &fixedPlacements,
-                       VMAddressTracker *tracker, const RegionAllocation *startConstraint,
-                       const RegionAllocation *endConstraint, unsigned accessScale);
+                       const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
+                       const std::vector<const RegionAllocation *> &memoryAllocations,
+                       VMAddressTracker *tracker, unsigned accessScale);
 
 /// Result of computeCost: allocation + net energy cost.
 struct ComputeCostResult {
@@ -65,12 +68,12 @@ struct ComputeCostResult {
 
 /// Compute cost of an interval: execution energy minus VM placement gain.
 /// Reference: memory_allocator.py:compute_cost (line 229).
-ComputeCostResult computeCost(const std::vector<llvm::BasicBlock *> &blocks,
-                              const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
-                              const SchematicParams &params,
-                              const std::map<llvm::Value *, Placement> &fixedPlacements,
-                              VMAddressTracker *tracker, const RegionAllocation *startConstraint,
-                              const RegionAllocation *endConstraint);
+ComputeCostResult computeCost(
+    const std::vector<llvm::BasicBlock *> &blocks, const SchematicStateAnalysis &state,
+    const CFGAnalysis &cfg, const SchematicParams &params,
+    const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
+    VMAddressTracker *tracker, const RegionAllocation *startAlloc,
+    const RegionAllocation *endAlloc);
 
 /// Compute cost to restore VM-placed variables at a block.
 /// Reference: memory_allocator.py:compute_allocation_restore_cost (line 68).
