@@ -20,7 +20,7 @@ from .errors import (
     InfeasibleError,
     ToolNotFoundError,
 )
-from .log import setup_logging
+from .log import python_to_cpp_log_level, setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ def main(ctx: click.Context, log_level: str) -> None:
     ctx.obj["env"] = env
     ctx.obj["tc"] = tc
     ctx.obj["log_level"] = log_level.lower()
+    ctx.obj["pass_log_level"] = python_to_cpp_log_level(log_level)
 
 
 # =========================================================================
@@ -218,7 +219,7 @@ def compile_milp_cmd(
             opt_level=opt_level,
             clang_opt_level=clang_opt_level,
             extra_includes=list(extra_includes),
-            pass_log_level=ctx.obj["log_level"],
+            pass_log_level=ctx.obj["pass_log_level"],
             debug=debug,
             link=link,
             halt_mode=halt_mode,
@@ -315,7 +316,7 @@ def compile_rockclimb_cmd(
             energy_config=energy_config_path,
             rockclimb_config=rockclimb_config_path,
             output=output_path,
-            pass_log_level=ctx.obj["log_level"],
+            pass_log_level=ctx.obj["pass_log_level"],
             clang_opt_level=clang_opt_level,
             opt_level=opt_level,
             precomputed_energy=not no_precomputed_energy,
@@ -389,7 +390,7 @@ def _compile_schematic_impl(
             schematic_config=schematic_config_path,
             output=output_path,
             estimator_mode=estimator_mode,
-            pass_log_level=ctx.obj["log_level"],
+            pass_log_level=ctx.obj["pass_log_level"],
             debug=debug,
             trace_only=trace_only,
             link=link,
