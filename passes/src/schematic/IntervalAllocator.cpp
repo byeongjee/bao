@@ -197,8 +197,7 @@ double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBloc
                              const RegionAllocation &allocation,
                              const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
                              const SchematicParams &params, bool isFirstInterval,
-                             bool isLastInterval,
-                             const llvm::DenseMap<llvm::BasicBlock *, double> *costOverrides) {
+                             bool isLastInterval) {
 
     // E_restore: checkpoint restore cost at interval start.
     // Only charge variables where needRestore is true (first access is a load).
@@ -219,15 +218,6 @@ double computeIntervalEnergy(const std::vector<llvm::BasicBlock *> &intervalBloc
     // E_exec: execution energy minus NVM savings for VM-placed vars.
     double E_exec = 0.0;
     for (llvm::BasicBlock *BB : intervalBlocks) {
-        if (costOverrides) {
-            auto it = costOverrides->find(BB);
-            if (it != costOverrides->end()) {
-                // Use override cost — already includes allocation-adjusted energy
-                // from the inner loop's E_loop computation.
-                E_exec += it->second;
-                continue;
-            }
-        }
         E_exec += cfg.getBlockInfo(BB).energyCost;
         for (const auto &[gv, place] : allocation.placement) {
             if (place != Placement::VM)
