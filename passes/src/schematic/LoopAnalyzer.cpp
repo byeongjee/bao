@@ -34,91 +34,6 @@ std::optional<uint64_t> LoopAnalyzer::getMaxTripCount(llvm::Loop *L) const {
     return std::nullopt;
 }
 
-std::vector<std::vector<llvm::BasicBlock *>>
-LoopAnalyzer::enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const {
-    llvm::BasicBlock *header = L->getHeader();
-    std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
-    std::set<llvm::BasicBlock *> loopBlockSet(loopBlocks.begin(), loopBlocks.end());
-
-    // Identify latch blocks.
-    std::set<llvm::BasicBlock *> latches;
-    if (llvm::BasicBlock *latch = L->getLoopLatch()) {
-        latches.insert(latch);
-    } else {
-        for (llvm::BasicBlock *pred : predecessors(header)) {
-            if (L->contains(pred))
-                latches.insert(pred);
-        }
-    }
-
-    // DFS from header to latch blocks, skipping back-edges and inner loop blocks.
-    std::vector<std::vector<llvm::BasicBlock *>> result;
-
-    // Self-latching (single-block) loops must still be analyzed as one-iteration
-    // paths. The single iteration path is [header].
-    if (latches.count(header))
-        result.push_back({header});
-
-    struct DFSState {
-        llvm::BasicBlock *BB;
-        std::vector<llvm::BasicBlock *> path;
-    };
-
-    std::vector<DFSState> stack;
-    stack.push_back({header, {header}});
-
-    while (!stack.empty()) {
-        auto [BB, path] = std::move(stack.back());
-        stack.pop_back();
-
-        // If this is a latch, record the path.
-        if (BB != header && latches.count(BB)) {
-            result.push_back(std::move(path));
-            continue;
-        }
-
-        for (llvm::BasicBlock *succ : successors(BB)) {
-            // Skip back-edges to header.
-            if (succ == header)
-                continue;
-            // Only visit blocks within this loop.
-            if (!loopBlockSet.count(succ))
-                continue;
-            // Skip blocks belonging to inner loops (except their headers,
-            // which act as summary nodes).
-            llvm::Loop *succLoop = LI_.getLoopFor(succ);
-            if (succLoop && succLoop != L && succ != succLoop->getHeader())
-                continue;
-
-            auto newPath = path;
-            newPath.push_back(succ);
-            stack.push_back({succ, std::move(newPath)});
-        }
-    }
-
-    return result;
-}
-
-bool LoopAnalyzer::placementsDiffer(const std::map<llvm::Value *, Placement> &a,
-                                    const std::map<llvm::Value *, Placement> &b) const {
-    // Check all keys in union.
-    std::set<llvm::Value *> allKeys;
-    for (const auto &[k, _] : a)
-        allKeys.insert(k);
-    for (const auto &[k, _] : b)
-        allKeys.insert(k);
-
-    for (llvm::Value *v : allKeys) {
-        auto itA = a.find(v);
-        auto itB = b.find(v);
-        Placement pA = (itA != a.end()) ? itA->second : Placement::NVM;
-        Placement pB = (itB != b.end()) ? itB->second : Placement::NVM;
-        if (pA != pB)
-            return true;
-    }
-    return false;
-}
-
 RegionAllocation
 LoopAnalyzer::buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const {
     RegionAllocation alloc;
@@ -168,7 +83,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     for (const auto &path : bodyPaths) {
         RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta,
                          solution.decidedPlacements,
-                         /*startBound=*/nullptr, /*endBound=*/nullptr, tracker_);
+                         /*startBoundaryBlock=*/nullptr, /*endBoundaryBlock=*/nullptr, tracker_);
         RCGResult result = solver.solve();
         if (!result.feasible) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for loop at '"
@@ -318,7 +233,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.loop = L;
 
     // Step 6: Check if allocations differ at header vs latch.
-    if (placementsDiffer(headerAlloc, latchAlloc)) {
+    bool allocationsDiffer = (headerAlloc != latchAlloc);
+    if (allocationsDiffer) {
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         decision.E_loop = 0.0;

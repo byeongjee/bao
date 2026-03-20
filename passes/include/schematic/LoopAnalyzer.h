@@ -40,12 +40,6 @@ class LoopAnalyzer {
     bool analyzeLoop(llvm::Loop *L, SchematicSolution &solution);
     std::optional<uint64_t> getMaxTripCount(llvm::Loop *L) const;
 
-    std::vector<std::vector<llvm::BasicBlock *>>
-    enumerateLoopPathsWithoutBackEdges(llvm::Loop *L) const;
-
-    bool placementsDiffer(const std::map<llvm::Value *, Placement> &a,
-                          const std::map<llvm::Value *, Placement> &b) const;
-
     RegionAllocation
     buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const;
 
