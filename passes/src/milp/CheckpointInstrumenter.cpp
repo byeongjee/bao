@@ -6,6 +6,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 
 #include <cassert>
@@ -221,11 +222,9 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
     }
 
     // Accumulated across all boundary blocks for SSAUpdater-based restore
-    // rewriting (non-PHI SSA values only).
+    // rewriting (all SSA values, unified path).
     std::map<llvm::Value *, std::vector<std::pair<llvm::BasicBlock *, llvm::Value *>>>
         ssaRestoreDefs;
-    // Track all commit-related instructions so SSAUpdater skips them.
-    std::set<llvm::Instruction *> allCommitInsts;
 
     for (llvm::BasicBlock &BB : F) {
         auto itNodeVec = nodesByBlock.find(&BB);
@@ -243,40 +242,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
 
         bool isEntryNode = nodeSet.count(entryNode) > 0;
 
-        // For b != b0, emit: commit stores -> region boundary -> restores
+        // For b != b0, emit: commit stores -> region boundary -> split -> restores
         if (!isEntryNode) {
-            // Step 1: Build PHI map — maps incoming values to their PHI nodes.
-            // When LCSSA/strip-mining produces PHIs at boundary blocks, commit
-            // variables from StateAnalysis arrive through these PHIs. We commit
-            // the PHI itself (the resolved value at the boundary) rather than
-            // the original def which may not dominate this point.
-            llvm::DenseMap<llvm::Value *, llvm::SmallVector<llvm::PHINode *, 2>> phiMap;
-            for (auto &PHI : BB.phis()) {
-                for (unsigned i = 0; i < PHI.getNumIncomingValues(); ++i)
-                    phiMap[PHI.getIncomingValue(i)].push_back(&PHI);
-            }
+            // --- Commit phase (all in BB, before boundary) ---
 
-            // SSA commits split into two categories:
-            // - PHI commits: committed value is a PHI in this block; restore
-            //   uses replaceUsesWithIf (PHI dominates all its uses, so the
-            //   restore load in the same block also dominates them).
-            // - Non-PHI commits: committed value is the original V which
-            //   dominates this block from elsewhere; restore uses SSAUpdater
-            //   (handles multi-block domination correctly).
-            struct PHICommitRecord {
-                llvm::SmallVector<llvm::PHINode *, 2> phis;
-                llvm::StoreInst *commitStore;
-                llvm::GlobalVariable *nvmBackup;
-            };
-            std::vector<PHICommitRecord> phiCommits;
-
-            struct NonPHICommitRecord {
-                llvm::Value *origVal;
-                llvm::GlobalVariable *nvmBackup;
-            };
-            std::vector<NonPHICommitRecord> nonPhiCommits;
-
-            // Step 2: Emit commit stores.
             std::set<llvm::Value *> commitVars;
             for (NodeId n : nodeSet)
                 for (llvm::Value *V : solution.getSaveVarsAt(n))
@@ -293,9 +262,8 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     auto shadowIt = shadowMap_.find(GV);
                     assert(shadowIt != shadowMap_.end() &&
                            "eligible global commit requires a VM shadow");
-                    auto *mc = builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
-                                                    shadowIt->second->getAlign(), size);
-                    allCommitInsts.insert(mc);
+                    builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
+                                         shadowIt->second->getAlign(), size);
                     if (addDebugMarkers_)
                         emitCounterIncrement(builder, cntStoreMemGV_);
                 } else if (llvm::isa<llvm::AllocaInst>(V)) {
@@ -305,85 +273,40 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     assert(backupIt != nvmBackupMap_.end() &&
                            "alloca commit requires an NVM backup");
                     auto *AI = llvm::cast<llvm::AllocaInst>(V);
-                    auto *mc = builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(),
-                                                    AI, AI->getAlign(), size);
-                    allCommitInsts.insert(mc);
+                    builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(), AI,
+                                         AI->getAlign(), size);
                     if (addDebugMarkers_)
                         emitCounterIncrement(builder, cntStoreMemGV_);
                 } else {
-                    // SSA value: commit through PHI if one exists.
+                    // SSA value: unified commit via GetValueInMiddleOfBlock.
                     auto backupIt = nvmBackupMap_.find(V);
                     assert(backupIt != nvmBackupMap_.end() && "SSA commit requires an NVM backup");
-                    auto phiIt = phiMap.find(V);
-                    if (phiIt != phiMap.end()) {
-                        // PHI case: store through the first PHI (all capture
-                        // the same runtime value of V from the same predecessor).
-                        // Record all PHIs so restore rewrites uses of each one.
-                        auto *commitStore =
-                            builder.CreateStore(phiIt->second.front(), backupIt->second);
-                        allCommitInsts.insert(commitStore);
-                        phiCommits.push_back({phiIt->second, commitStore, backupIt->second});
-                    } else {
-                        // Non-PHI case: resolve V's reaching definition at BB.
-                        // V may not dominate BB (e.g. at a merge point where V
-                        // was only computed on some paths).  SSAUpdater returns
-                        // V itself when V dominates BB, or inserts a PHI that
-                        // merges V with undef on non-dominating paths.  The
-                        // undef is safe: on those paths V was never computed,
-                        // so the NVM backup retains its prior valid value and
-                        // the stored undef is never read.
-                        auto *defInst = llvm::cast<llvm::Instruction>(V);
-                        llvm::SSAUpdater commitUpdater;
-                        commitUpdater.Initialize(V->getType(), "ssa.commit");
-                        commitUpdater.AddAvailableValue(defInst->getParent(), V);
-                        llvm::Value *reachingVal = commitUpdater.GetValueInMiddleOfBlock(&BB);
-
-                        // Protect any inserted PHI from the restore SSAUpdater.
-                        if (reachingVal != V) {
-                            if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(reachingVal))
-                                allCommitInsts.insert(PHI);
-                        }
-
-                        auto *commitStore = builder.CreateStore(reachingVal, backupIt->second);
-                        allCommitInsts.insert(commitStore);
-                        nonPhiCommits.push_back({V, backupIt->second});
-                    }
+                    auto *defInst = llvm::cast<llvm::Instruction>(V);
+                    llvm::SSAUpdater commitUpdater;
+                    commitUpdater.Initialize(V->getType(), "ssa.commit");
+                    commitUpdater.AddAvailableValue(defInst->getParent(), V);
+                    llvm::Value *reachingVal = commitUpdater.GetValueInMiddleOfBlock(&BB);
+                    builder.CreateStore(reachingVal, backupIt->second);
                     if (addDebugMarkers_)
                         emitCounterIncrement(builder, cntSaveVregGV_);
                 }
                 inserted++;
             }
 
-            // Step 3: Emit boundary call.
-            builder.CreateCall(boundaryFn_);
+            // Emit boundary call.
+            auto *boundaryCall = builder.CreateCall(boundaryFn_);
             inserted++;
 
-            // Step 4a: PHI restores — use replaceUsesWithIf.
-            // Each PHI is defined in BB, so the restore load (also in BB, after
-            // the boundary call) dominates all PHI uses. Safe to replace directly.
-            // When multiple PHIs capture the same incoming value, we emit one
-            // restore load and rewrite uses of every such PHI.
-            for (auto &rec : phiCommits) {
-                llvm::Value *restoreVal =
-                    builder.CreateLoad(rec.phis.front()->getType(), rec.nvmBackup);
-                if (addDebugMarkers_)
-                    emitCounterIncrement(builder, cntRestoreVregGV_);
-
-                for (llvm::PHINode *phi : rec.phis) {
-                    phi->replaceUsesWithIf(restoreVal, [&allCommitInsts](llvm::Use &U) {
-                        auto *I = llvm::dyn_cast<llvm::Instruction>(U.getUser());
-                        return !I || !allCommitInsts.count(I);
-                    });
-                }
-                inserted++;
-            }
-
-            // Non-PHI commits: no restore here.  The commit store writes the
-            // value to NVM; the ineligible restore path (below) handles
-            // restoration for values that are actually live-in at the
-            // boundary, using the same NVM slots via nvmBackupMap_.
+            // --- Split block after boundary call ---
+            // BB_bottom receives all instructions that were after the split point
+            // (the original block's remaining code). Restores go into BB_bottom.
+            llvm::BasicBlock *BB_bottom = llvm::SplitBlock(&BB, boundaryCall->getNextNode());
+            builder.SetInsertPoint(&*BB_bottom->getFirstInsertionPt());
         }
-        // Entry node: no boundary call at program start.
+        // Entry node: no boundary call, no split. Restores still emitted below.
+
+        // --- Restore phase (in BB_bottom for non-entry, in BB for entry) ---
+        // The builder is now positioned in the restore block.
 
         // Eligible restores (needRestore).
         std::set<llvm::GlobalVariable *> restoreGVs;
@@ -433,8 +356,9 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     emitCounterIncrement(builder, cntRestoreMemGV_);
                 inserted++;
             } else {
+                // SSA restore: load from NVM backup, record for SSAUpdater.
                 llvm::Value *restored = builder.CreateLoad(V->getType(), backupIt->second);
-                ssaRestoreDefs[V].emplace_back(&BB, restored);
+                ssaRestoreDefs[V].emplace_back(builder.GetInsertBlock(), restored);
                 if (addDebugMarkers_)
                     emitCounterIncrement(builder, cntRestoreVregGV_);
                 inserted++;
@@ -442,19 +366,17 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
         }
     }
 
-    // SSAUpdater pass: rewrite uses of non-PHI SSA values to pick up
-    // restore loads at boundary blocks. This handles values defined in
-    // one block with uses in blocks not dominated by the boundary.
+    // SSAUpdater pass: rewrite uses of SSA values to pick up restore loads.
+    // Each SSA value V has available definitions:
+    //   - V itself in its def block (original definition)
+    //   - restored value in each BB_bottom (after boundary)
+    // SSAUpdater selects the correct reaching definition for each use.
     for (auto &[origVal, defs] : ssaRestoreDefs) {
         llvm::SSAUpdater updater;
         updater.Initialize(origVal->getType(), origVal->getName());
 
-        auto *defInst = llvm::dyn_cast<llvm::Instruction>(origVal);
-        const llvm::BasicBlock *defBlock = nullptr;
-        if (defInst) {
-            defBlock = defInst->getParent();
-            updater.AddAvailableValue(defInst->getParent(), origVal);
-        }
+        auto *defInst = llvm::cast<llvm::Instruction>(origVal);
+        updater.AddAvailableValue(defInst->getParent(), origVal);
 
         for (auto &[block, restoredVal] : defs)
             updater.AddAvailableValue(block, restoredVal);
@@ -464,20 +386,9 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             auto *I = llvm::dyn_cast<llvm::Instruction>(U.getUser());
             if (!I)
                 continue;
-            if (allCommitInsts.count(I))
+            // Skip uses in the def block — they always see the original value.
+            if (I->getParent() == defInst->getParent())
                 continue;
-            if (defBlock) {
-                if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(I)) {
-                    // For PHI uses, the value flows from the incoming block,
-                    // not the PHI's parent.  Only skip if the incoming block
-                    // is the def block (where the original def dominates).
-                    llvm::BasicBlock *incomingBB = PHI->getIncomingBlock(U);
-                    if (incomingBB == defBlock)
-                        continue;
-                } else if (I->getParent() == defBlock) {
-                    continue;
-                }
-            }
             usesToRewrite.push_back(&U);
         }
 
