@@ -9,6 +9,5 @@
     "mem_store_energy_per_byte": 0.6,
     "mem_restore_energy_per_byte": 0.6,
     "vm_capacity_bytes": 16,
-    "q_reboot_probability": 1.0,
     "loop_strip_mining_enabled": false
 }

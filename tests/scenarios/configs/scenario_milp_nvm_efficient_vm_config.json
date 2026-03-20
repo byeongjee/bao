@@ -7,6 +7,5 @@
   "nvm_access_penalty": 2.0,
   "mem_store_energy_per_byte": 0.5,
   "mem_restore_energy_per_byte": 0.5,
-  "vm_capacity_bytes": 16,
-  "q_reboot_probability": 0.1
+  "vm_capacity_bytes": 16
 }
