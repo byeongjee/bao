@@ -82,10 +82,11 @@ void CheckpointInstrumenter::createShadowGlobals(llvm::Function &F, const MILPSo
 
     // Collect candidate GVs that have placeInVm=true for at least one node.
     std::set<llvm::GlobalVariable *> vmPlacedGVs;
-    for (const auto &[key, placed] : solution.placeInVm) {
-        if (placed && !state.isIneligible(key.second)) {
-            vmPlacedGVs.insert(key.second);
-        }
+    for (const auto &[key, placed] : solution.m) {
+        if (!placed)
+            continue;
+        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(key.second))
+            vmPlacedGVs.insert(GV);
     }
 
     for (llvm::GlobalVariable *GV : vmPlacedGVs) {
@@ -176,9 +177,9 @@ void CheckpointInstrumenter::rewriteAccessesInVMRegions(llvm::Function &F,
             continue;
 
         for (auto &[GV, shadow] : shadowMap_) {
-            auto key = std::make_pair(nodeId, GV);
-            auto pvIt = solution.placeInVm.find(key);
-            if (pvIt == solution.placeInVm.end() || !pvIt->second)
+            auto key = std::make_pair(nodeId, static_cast<llvm::Value *>(GV));
+            auto pvIt = solution.m.find(key);
+            if (pvIt == solution.m.end() || !pvIt->second)
                 continue;
 
             // Replace uses of GV in this block with shadow.
@@ -209,7 +210,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
     NodeId entryNode = cfg.getEntryBlock();
 
     llvm::DenseMap<llvm::BasicBlock *, std::vector<NodeId>> nodesByBlock;
-    for (NodeId node : solution.regionStarts) {
+    for (NodeId node : solution.r) {
         llvm::BasicBlock *BB = cfg.getNodeMap().getConcreteBlock(node);
         if (!BB || BB->getParent() != &F) {
             PLOGW << "CheckpointInstrumenter: unresolved region-start node "
@@ -278,7 +279,7 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             // Step 2: Emit commit stores.
             std::set<llvm::Value *> commitVars;
             for (NodeId n : nodeSet)
-                for (llvm::Value *V : solution.getCommitVarsAt(n))
+                for (llvm::Value *V : solution.getSaveVarsAt(n))
                     commitVars.insert(V);
 
             for (llvm::Value *V : commitVars) {
@@ -386,9 +387,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
 
         // Eligible restores (needRestore).
         std::set<llvm::GlobalVariable *> restoreGVs;
-        for (NodeId n : nodeSet)
-            for (llvm::GlobalVariable *GV : solution.getRestoreGVsAt(n))
-                restoreGVs.insert(GV);
+        for (NodeId n : nodeSet) {
+            for (llvm::Value *V : solution.getRestoreVarsAt(n)) {
+                if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
+                    restoreGVs.insert(GV);
+            }
+        }
 
         for (llvm::GlobalVariable *GV : restoreGVs) {
             unsigned sizeBytes = state.getVarSizeBytes(GV);

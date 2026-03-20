@@ -602,24 +602,27 @@ GRBLinExpr CheckpointOptimizer::buildEEnd(NodeId block) {
 void CheckpointOptimizer::extractSolution() {
     for (const auto &[block, var] : isRegionStart_) {
         if (var.get(GRB_DoubleAttr_X) > 0.5) {
-            solution_.regionStarts.insert(block);
+            solution_.r.insert(block);
         }
     }
 
     for (const auto &[key, var] : placeInVm_) {
-        solution_.placeInVm[key] = var.get(GRB_DoubleAttr_X) > 0.5;
+        // Convert BlockGVKey to BlockVarKey for solution
+        BlockVarKey solKey = std::make_pair(key.first, static_cast<llvm::Value *>(key.second));
+        solution_.m[solKey] = var.get(GRB_DoubleAttr_X) > 0.5;
     }
 
     for (const auto &[key, var] : needRestore_) {
-        solution_.needRestore[key] = var.get(GRB_DoubleAttr_X) > 0.5;
+        BlockVarKey solKey = std::make_pair(key.first, static_cast<llvm::Value *>(key.second));
+        solution_.rHat[solKey] = var.get(GRB_DoubleAttr_X) > 0.5;
     }
 
     for (const auto &[key, var] : commit_) {
-        solution_.commit[key] = var.get(GRB_DoubleAttr_X) > 0.5;
+        solution_.s[key] = var.get(GRB_DoubleAttr_X) > 0.5;
     }
 
     for (const auto &[block, var] : energyAccumulated_) {
-        solution_.energyAccumulated[block] = var.get(GRB_DoubleAttr_X);
+        solution_.eAccum[block] = var.get(GRB_DoubleAttr_X);
     }
 
     solution_.objectiveValue = model_.get(GRB_DoubleAttr_ObjVal);
