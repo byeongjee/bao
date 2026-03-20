@@ -119,7 +119,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
     std::vector<EnumeratedPath> paths = loadedTraces->functionPaths;
 
-    // Energy helper lambdas (used by propagateEnergy and interval processing).
+    // Energy helper lambdas (used by per-checkpoint propagation and interval processing).
     auto getBlockExecEnergy = [&](BasicBlock *BB) -> double {
         double E = ctx.cfg->getBlockInfo(BB).energyCost;
         auto allocIt = solution.decidedPlacements.find(BB);
