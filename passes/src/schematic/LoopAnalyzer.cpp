@@ -9,7 +9,6 @@
 #include "llvm/IR/CFG.h"
 
 #include <cmath>
-#include <limits>
 #include <set>
 
 namespace checkpoint {
@@ -560,37 +559,6 @@ bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
     for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
         if (!analyzeLoop(*it, solution))
             return false;
-    }
-
-    // Undo iteration-scaling adjustments and re-propagate at single-iteration
-    // scale. The adjustments were needed during bottom-up analysis so outer
-    // loops could see inner loop multi-iteration costs via the accumulator.
-    // Now that all loop decisions are final, we reset to single-iteration
-    // E_to_leave/E_left values. This prevents the function-level RCG solver
-    // from seeing inflated E_to_leave on loop boundary blocks (which would
-    // make budget = capacity - E_to_leave go negative).
-    // SchematicPass::propagateEnergy() will apply iteration scaling correctly
-    // via blockMeta.loop, producing the same final values as the reference.
-
-    // Phase 1: Reset E_to_leave/E_left on all loop blocks to defaults.
-    for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
-        llvm::Loop *L = *it;
-        for (llvm::BasicBlock *BB : L->getBlocksVector()) {
-            auto &meta = solution.blockMeta[BB];
-            meta.E_to_leave = 0.0;
-            meta.E_left = std::numeric_limits<double>::max();
-        }
-    }
-
-    // Phase 2: Re-propagate energy bottom-up at single-iteration scale.
-    for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
-        llvm::Loop *L = *it;
-        llvm::BasicBlock *header = L->getHeader();
-        auto decIt = solution.loopDecisions.find(header);
-        if (decIt == solution.loopDecisions.end())
-            continue;
-
-        propagateLoopEnergy(L, decIt->second.bodyAllocation, solution);
     }
 
     return true;

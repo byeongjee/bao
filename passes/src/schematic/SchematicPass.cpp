@@ -203,21 +203,6 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                     continue;
 
                 double dstExecEnergy = getBlockExecEnergy(dstBB);
-
-                // Loop-aware scaling (reference: cfg_modification.py:293-295).
-                // Apply scaling for each loop that this edge enters (dst is in
-                // the loop but src is not). Walk from innermost to outermost.
-                for (Loop *L = LI.getLoopFor(dstBB); L; L = L->getParentLoop()) {
-                    if (L->contains(srcBB))
-                        break; // src is in this loop and all parents
-                    auto headerIt = solution.blockMeta.find(L->getHeader());
-                    if (headerIt != solution.blockMeta.end() && headerIt->second.loop) {
-                        const auto &mark = *headerIt->second.loop;
-                        if (mark.nbIter > 1)
-                            dstExecEnergy += (mark.nbIter - 1) * mark.costOneIt;
-                    }
-                }
-
                 double newELeft = srcIt->second.E_left - dstExecEnergy;
                 if (newELeft < dstIt->second.E_left) {
                     solution.blockMeta[dstBB].E_left = newELeft;
@@ -261,22 +246,6 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                     continue;
 
                 double srcExecEnergy = getBlockExecEnergy(srcBB);
-
-                // Loop-aware scaling (reference: cfg_modification.py:232-234).
-                // Apply scaling for each loop that this edge exits (src is in
-                // the loop but dst is not). E_to_leave propagates backward, so
-                // exiting a loop forward means entering it backward.
-                for (Loop *L = LI.getLoopFor(srcBB); L; L = L->getParentLoop()) {
-                    if (L->contains(dstBB))
-                        break; // dst is in this loop and all parents
-                    auto headerIt = solution.blockMeta.find(L->getHeader());
-                    if (headerIt != solution.blockMeta.end() && headerIt->second.loop) {
-                        const auto &mark = *headerIt->second.loop;
-                        if (mark.nbIter > 1)
-                            srcExecEnergy += (mark.nbIter - 1) * mark.costOneIt;
-                    }
-                }
-
                 double newEToLeave = srcExecEnergy + dstIt->second.E_to_leave;
                 if (newEToLeave > srcIt->second.E_to_leave) {
                     solution.blockMeta[srcBB].E_to_leave = newEToLeave;
