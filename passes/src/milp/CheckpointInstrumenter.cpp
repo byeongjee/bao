@@ -386,8 +386,15 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
             auto *I = llvm::dyn_cast<llvm::Instruction>(U.getUser());
             if (!I)
                 continue;
+            // For PHI nodes, the "effective" block of the use is the incoming
+            // block, not the block containing the PHI.
+            llvm::BasicBlock *useBlock;
+            if (auto *PN = llvm::dyn_cast<llvm::PHINode>(I))
+                useBlock = PN->getIncomingBlock(U);
+            else
+                useBlock = I->getParent();
             // Skip uses in the def block — they always see the original value.
-            if (I->getParent() == defInst->getParent())
+            if (useBlock == defInst->getParent())
                 continue;
             usesToRewrite.push_back(&U);
         }
