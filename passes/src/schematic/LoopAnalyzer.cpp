@@ -97,13 +97,23 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     // Step 3: Run RCG solver on each body path.
-    // No startBound/endBound — loops are analyzed independently (reference uses
-    // synthetic START_Loop/END_Loop nodes with no prior placement constraints).
-    // No costOverrides — RCG uses single-iteration block costs.
+    // Initialize synthetic boundary blocks with default energy values.
+    // START_Loop: default restore budget (no VM costs since allocation is undecided).
+    solution.blockMeta[startSynth].E_left =
+        params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+    solution.blockMeta[startSynth].analyzed = true;
+    solution.decidedPlacements[startSynth] = {};
+
+    // END_Loop: basic save cost only (no VM costs, no loopIncrementCostNvm).
+    solution.blockMeta[endSynth].E_to_leave =
+        params_.E_epi + params_.N_reg * params_.regStoreEnergy;
+    solution.blockMeta[endSynth].analyzed = true;
+    solution.decidedPlacements[endSynth] = {};
+
     for (const auto &path : bodyPaths) {
-        RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta,
-                         solution.decidedPlacements,
-                         /*startBoundaryBlock=*/nullptr, /*endBoundaryBlock=*/nullptr, tracker_);
+        RCGSolver solver(
+            path, state_, cfg_, params_, solution.blockMeta, solution.decidedPlacements,
+            /*startBoundaryBlock=*/startSynth, /*endBoundaryBlock=*/endSynth, tracker_);
         RCGResult result = solver.solve();
         if (!result.feasible) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for loop at '"
@@ -139,7 +149,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         if (hdIt0 != solution.decidedPlacements.end())
             headerPlacement = hdIt0->second;
         RegionAllocation prelimAlloc = buildBoundaryAllocation(headerPlacement);
-        propagateLoopEnergy(L, prelimAlloc, solution);
+        propagateLoopEnergy(L, prelimAlloc, solution, startSynth, endSynth);
 
         std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
         for (llvm::BasicBlock *BB : loopBlocks) {
@@ -260,41 +270,26 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         decision.E_loop = 0.0;
         decision.bodyAllocation = buildBoundaryAllocation(headerAlloc);
         solution.loopDecisions[header] = decision;
-        propagateLoopEnergy(L, decision.bodyAllocation, solution);
+        propagateLoopEnergy(L, decision.bodyAllocation, solution, startSynth, endSynth);
         if (latch)
             solution.enabledCheckpoints.insert(CFGEdge{latch, header});
         return true;
     }
 
     // Step 7: Compute E_loop and nb_it_with_budget.
-    // E_loop = header.E_to_leave - latch.E_to_leave + latchCost + loop_increment_cost_nvm
-    //
-    // The reference uses synthetic zero-cost START_Loop/END_Loop boundary nodes,
-    // so first_bb.E_to_leave - last_bb.E_to_leave captures ALL block costs
-    // (header through latch inclusive). We use real blocks, so header.E_to_leave
-    // already includes latch's cost in the accumulator, meaning the difference
-    // misses the latch's own execution cost. We add it back explicitly (latchCost).
+    // E_loop = START_Loop.E_to_leave - END_Loop.E_to_leave + loop_increment_cost_nvm
+    // (reference schematic.py:566-569, using synthetic boundary nodes).
     RegionAllocation bodyAlloc = buildBoundaryAllocation(headerAlloc);
 
     // Run initial energy propagation before computing E_loop — without this,
     // E_to_leave/E_left are at defaults (0.0 / max) since RCG does not set them.
-    propagateLoopEnergy(L, bodyAlloc, solution);
+    propagateLoopEnergy(L, bodyAlloc, solution, startSynth, endSynth);
 
-    double headerEToLeave = 0.0;
-    double latchEToLeave = 0.0;
-    {
-        auto hMeta = solution.blockMeta.find(header);
-        if (hMeta != solution.blockMeta.end())
-            headerEToLeave = hMeta->second.E_to_leave;
-        if (latch) {
-            auto lMeta = solution.blockMeta.find(latch);
-            if (lMeta != solution.blockMeta.end())
-                latchEToLeave = lMeta->second.E_to_leave;
-        }
-    }
-    // latchCost compensates for lack of synthetic nodes (see spec Step 7).
-    double latchCost = latch ? getAdjustedBlockEnergy(latch, bodyAlloc) : 0.0;
-    double E_loop = headerEToLeave - latchEToLeave + latchCost + params_.loopIncrementCostNvm;
+    // Read E_loop from synthetic boundary blocks.
+    // Reference: first_bb.E_to_leave - last_bb.E_to_leave + loop_increment (schematic.py:566-569).
+    double startEToLeave = solution.blockMeta[startSynth].E_to_leave;
+    double endEToLeave = solution.blockMeta[endSynth].E_to_leave;
+    double E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm;
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
 
@@ -304,7 +299,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    double availableEnergy = params_.capacity - latchEToLeave;
+    double availableEnergy = params_.capacity - endEToLeave;
     if (availableEnergy <= 0.0) {
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
@@ -357,24 +352,22 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 solution.blockMeta[BB].analyzed = true;
             }
 
-            propagateLoopEnergy(L, bodyAlloc, solution);
+            propagateLoopEnergy(L, bodyAlloc, solution, startSynth, endSynth);
 
-            auto hMeta2 = solution.blockMeta.find(header);
-            auto lMeta2 = latch ? solution.blockMeta.find(latch) : solution.blockMeta.end();
-            headerEToLeave = (hMeta2 != solution.blockMeta.end()) ? hMeta2->second.E_to_leave : 0.0;
-            latchEToLeave = (lMeta2 != solution.blockMeta.end()) ? lMeta2->second.E_to_leave : 0.0;
-            latchCost = latch ? getAdjustedBlockEnergy(latch, bodyAlloc) : 0.0;
-            E_loop = headerEToLeave - latchEToLeave + latchCost + params_.loopIncrementCostNvm;
+            // Re-read from synthetic blocks after re-propagation.
+            startEToLeave = solution.blockMeta[startSynth].E_to_leave;
+            endEToLeave = solution.blockMeta[endSynth].E_to_leave;
+            E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm;
             decision.E_loop = E_loop;
             decision.bodyAllocation = bodyAlloc;
 
             if (E_loop <= 0.0)
                 break;
 
-            // Reference uses header.E_to_leave here (not latch as in the
-            // initial computation) because after re-propagation the header's
-            // E_to_leave reflects the updated allocation costs.
-            availableEnergy = params_.capacity - headerEToLeave;
+            // Convergence uses startEToLeave (not endEToLeave), matching reference
+            // schematic.py:614. After re-propagation, START_Loop's accumulated energy
+            // reflects the true worst-case cost to traverse the entire loop body.
+            availableEnergy = params_.capacity - startEToLeave;
             if (availableEnergy <= 0.0)
                 break;
             rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
@@ -436,7 +429,8 @@ double LoopAnalyzer::getAdjustedBlockEnergy(llvm::BasicBlock *BB,
 }
 
 void LoopAnalyzer::propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &alloc,
-                                       SchematicSolution &solution) {
+                                       SchematicSolution &solution, llvm::BasicBlock *startSynth,
+                                       llvm::BasicBlock *endSynth) {
     llvm::BasicBlock *header = L->getHeader();
     llvm::BasicBlock *latch = L->getLoopLatch();
 
@@ -571,6 +565,34 @@ void LoopAnalyzer::propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &al
                 }
             }
         }
+    }
+
+    // Update synthetic boundary block metadata after propagation.
+    if (startSynth) {
+        // START_Loop is zero-cost: E_to_leave = 0 + header.E_to_leave
+        auto hMeta = solution.blockMeta.find(header);
+        if (hMeta != solution.blockMeta.end())
+            solution.blockMeta[startSynth].E_to_leave = hMeta->second.E_to_leave;
+        // START_Loop E_left = fwdSeed (restore budget, no block execution)
+        solution.blockMeta[startSynth].E_left = fwdSeed;
+    }
+    if (endSynth) {
+        // END_Loop E_to_leave = bwdSeed (save cost only, no block execution).
+        // bwdSeed includes loopIncrementCostNvm, but E_loop's formula
+        // (startEToLeave - endEToLeave + loopIncrementCostNvm) cancels it:
+        // the subtraction removes it and the explicit term adds it back once.
+        solution.blockMeta[endSynth].E_to_leave = bwdSeed;
+    }
+    // Update decidedPlacements for synthetic blocks to match current allocation.
+    if (startSynth || endSynth) {
+        std::map<llvm::Value *, Placement> headerPlacement;
+        auto hdPlIt = solution.decidedPlacements.find(header);
+        if (hdPlIt != solution.decidedPlacements.end())
+            headerPlacement = hdPlIt->second;
+        if (startSynth)
+            solution.decidedPlacements[startSynth] = headerPlacement;
+        if (endSynth)
+            solution.decidedPlacements[endSynth] = headerPlacement;
     }
 }
 

@@ -34,8 +34,11 @@ SCENARIOS = [
         "scenario_loop.c",
         ENERGY_CONFIG,
         SCHEMATIC_CONFIG,
-        # Loop requires checkpoints: multiple boundaries, loop analysis must run.
-        {"exit": 0, "min_boundary": 2,
+        # Loop fits entirely in one charge (capacity=500, loop costs ~23 energy/iter,
+        # 10 iterations = ~230 total — well within budget). Loop analysis runs and
+        # determines loopFitsEntirely; no back-edge checkpoint is inserted.
+        # The loop body is analyzed as a single region (min_boundary=0 is correct).
+        {"exit": 0, "max_boundary": 0,
          "stderr_contains": "Loop decisions:                  1"},
     ),
     (

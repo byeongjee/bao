@@ -50,7 +50,8 @@ class LoopAnalyzer {
     /// Iterates over CFG edges within the loop (including inner loop bodies),
     /// propagating through disabled checkpoint chains only. Uses fixed-point iteration.
     void propagateLoopEnergy(llvm::Loop *L, const RegionAllocation &alloc,
-                             SchematicSolution &solution);
+                             SchematicSolution &solution, llvm::BasicBlock *startSynth = nullptr,
+                             llvm::BasicBlock *endSynth = nullptr);
 };
 
 } // namespace checkpoint
