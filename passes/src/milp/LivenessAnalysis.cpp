@@ -211,20 +211,17 @@ computeIneligSSALiveness(llvm::Function &F, const CFGAnalysis &cfg,
 
         const llvm::BasicBlock *defBlock = Inst->getParent();
 
-        // Collect PHI incoming edges and non-PHI use blocks.
-        // phiIncoming: PHI_block -> {incoming blocks that carry V}
-        llvm::DenseMap<const llvm::BasicBlock *, llvm::SmallPtrSet<const llvm::BasicBlock *, 4>>
-            phiIncoming;
+        // Collect use blocks.  A PHI in block B that uses V does not
+        // count as a use of V in B — the PHI is a separate value whose
+        // liveness is computed when it is processed as its own entry.
+        // V is used at the incoming block (not the PHI's block).
         llvm::SmallPtrSet<const llvm::BasicBlock *, 8> useBlocks;
         for (const llvm::User *U : Inst->users()) {
             if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
                 if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(UI)) {
-                    const llvm::BasicBlock *phiBlock = PHI->getParent();
                     for (unsigned i = 0; i < PHI->getNumIncomingValues(); ++i) {
-                        if (PHI->getIncomingValue(i) == Inst) {
-                            const llvm::BasicBlock *incBB = PHI->getIncomingBlock(i);
-                            phiIncoming[phiBlock].insert(incBB);
-                        }
+                        if (PHI->getIncomingValue(i) == Inst)
+                            useBlocks.insert(PHI->getIncomingBlock(i));
                     }
                 } else if (UI->getParent() != defBlock) {
                     useBlocks.insert(UI->getParent());
@@ -232,26 +229,14 @@ computeIneligSSALiveness(llvm::Function &F, const CFGAnalysis &cfg,
             }
         }
 
-        if (useBlocks.empty() && phiIncoming.empty())
+        if (useBlocks.empty())
             continue;
 
-        // Edge-aware backward dataflow.
-        //   phiLiveIn[S]:  V is live-in at S due to a PHI (doesn't
-        //                  propagate backward through all predecessors).
-        //   realLiveIn[B]: V is live-in at B due to non-PHI use or
-        //                  live-out (propagates backward normally).
-        //   liveOut[B]:    V is live-out at B if a successor has
-        //                  realLiveIn OR a successor's PHI receives V
-        //                  specifically from B.
-        llvm::DenseMap<const llvm::BasicBlock *, bool> realLiveIn, liveOut;
-        llvm::SmallPtrSet<const llvm::BasicBlock *, 8> phiLiveInBlocks;
-        for (const auto &[phiBlock, _] : phiIncoming)
-            phiLiveInBlocks.insert(phiBlock);
-
-        for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
-            realLiveIn[BB] = false;
-            liveOut[BB] = false;
-        }
+        // Standard backward dataflow.  V is live-in at B if B has a
+        // use of V or any successor of B has V live-in.
+        llvm::DenseMap<const llvm::BasicBlock *, bool> liveIn;
+        for (const llvm::BasicBlock *BB : cfg.getBlocks())
+            liveIn[BB] = false;
 
         bool changed = true;
         while (changed) {
@@ -259,45 +244,29 @@ computeIneligSSALiveness(llvm::Function &F, const CFGAnalysis &cfg,
             for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
                 if (BB == defBlock)
                     continue;
-
-                bool newLiveOut = false;
-                for (const llvm::BasicBlock *Succ : llvm::successors(BB)) {
-                    if (realLiveIn[Succ]) {
-                        newLiveOut = true;
-                        break;
-                    }
-                    // PHI edge: only propagate if PHI at Succ
-                    // receives V from this block.
-                    auto it = phiIncoming.find(Succ);
-                    if (it != phiIncoming.end() && it->second.count(BB)) {
-                        newLiveOut = true;
-                        break;
+                bool newLiveIn = useBlocks.count(BB) > 0;
+                if (!newLiveIn) {
+                    for (const llvm::BasicBlock *Succ : llvm::successors(BB)) {
+                        if (liveIn[Succ]) {
+                            newLiveIn = true;
+                            break;
+                        }
                     }
                 }
-
-                bool isUsed = useBlocks.count(BB) > 0;
-                bool newRealLiveIn = isUsed || newLiveOut;
-
-                if (newRealLiveIn != realLiveIn[BB] || newLiveOut != liveOut[BB]) {
-                    realLiveIn[BB] = newRealLiveIn;
-                    liveOut[BB] = newLiveOut;
+                if (newLiveIn != liveIn[BB]) {
+                    liveIn[BB] = newLiveIn;
                     changed = true;
                 }
             }
         }
 
-        // V is live-in if it has real or PHI liveness.
-        // Skip defBlock unless a PHI in defBlock receives V from a
-        // predecessor (self-loop back-edge).  In that case V is both
-        // defined and consumed-via-PHI in the same block, so it must
-        // be treated as live-in for checkpoint commit purposes.
         for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
             if (BB == defBlock) {
-                if (phiLiveInBlocks.count(BB))
+                if (llvm::isa<llvm::PHINode>(Inst))
                     result[BB].insert(V);
                 continue;
             }
-            if (realLiveIn[BB] || phiLiveInBlocks.count(BB))
+            if (liveIn[BB])
                 result[BB].insert(V);
         }
     }
