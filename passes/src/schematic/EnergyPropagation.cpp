@@ -146,7 +146,74 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSolution &solution,
                          const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
                          const SchematicParams &params, llvm::LoopInfo &LI, llvm::Loop *loopScope) {
-    // TODO: implement in Task 3
+    // Phase 1: Initialize seenLoops (reference lines 271-277)
+    std::set<llvm::BasicBlock *> seenLoops;
+    llvm::BasicBlock *bbAfter = seedEdge.dst;
+    if (bbAfter) {
+        auto metaIt = solution.blockMeta.find(bbAfter);
+        if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value())
+            seenLoops.insert(metaIt->second.loop->loop->getHeader());
+    }
+
+    // Priority queue: edge -> accumulated cost (reference: chkpt_cost)
+    std::map<CFGEdge, double> ckptCost;
+    ckptCost[seedEdge] = 0.0;
+    std::set<CFGEdge> visited;
+
+    // Phase 2: Priority queue loop -- max cost first (reference lines 279-316)
+    while (!ckptCost.empty()) {
+        // Select checkpoint with highest accumulated cost (reference line 281)
+        auto maxIt =
+            std::max_element(ckptCost.begin(), ckptCost.end(),
+                             [](const auto &a, const auto &b) { return a.second < b.second; });
+        CFGEdge ckpt = maxIt->first;
+        double cost = maxIt->second;
+
+        visited.insert(ckpt);
+        ckptCost.erase(maxIt);
+
+        llvm::BasicBlock *bb = ckpt.dst;
+        if (!bb)
+            continue;
+        if (loopScope && !loopScope->contains(bb))
+            continue;
+
+        // Inner-loop scaling (reference lines 293-295)
+        auto metaIt = solution.blockMeta.find(bb);
+        if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
+            llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
+            if (!seenLoops.count(loopHeader)) {
+                seenLoops.insert(loopHeader);
+                cost += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+            }
+        }
+
+        // Add block cost and compute energy_left (reference lines 298-302)
+        double blockCost = getBlockExecEnergy(bb, solution, cfg, state, params);
+        cost += blockCost;
+        double energyLeft = seedELeft - cost;
+        if (energyLeft < solution.blockMeta[bb].E_left)
+            solution.blockMeta[bb].E_left = energyLeft;
+
+        // Forward to successor disabled edges (reference lines 310-316)
+        for (llvm::BasicBlock *succ : llvm::successors(bb)) {
+            CFGEdge childEdge{bb, succ};
+
+            if (visited.count(childEdge))
+                continue;
+            if (solution.enabledCheckpoints.count(childEdge))
+                continue;
+            // Skip back-edges
+            if (llvm::Loop *dstLoop = LI.getLoopFor(succ))
+                if (dstLoop->getHeader() == succ && dstLoop->contains(bb))
+                    continue;
+            if (loopScope && !loopScope->contains(succ))
+                continue;
+
+            if (ckptCost.find(childEdge) == ckptCost.end() || cost < ckptCost[childEdge])
+                ckptCost[childEdge] = cost;
+        }
+    }
 }
 
 } // namespace checkpoint
