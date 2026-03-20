@@ -93,6 +93,7 @@ src/common/LoopTripCount.cpp
 
     src/schematic/RCGSolver.cpp
     src/schematic/LoopAnalyzer.cpp
+    src/schematic/EnergyPropagation.cpp
     src/schematic/SchematicInstrumenter.cpp
     src/schematic/TraceCollectorPass.cpp
     src/schematic/TraceLoader.cpp
