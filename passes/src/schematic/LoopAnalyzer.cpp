@@ -215,14 +215,13 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 }
             }
 
-            // Use nullptr boundaries so the RCG solver uses the full capacity
-            // as budget (reference: find_and_analyse_not_fixed_paths operates
-            // on the loop subgraph with synthetic Start/End nodes that default
-            // to energy_budget - chkpt_restore, not boundary block E_left).
-            (void)sBound;
-            (void)eBound;
+            // Pass analyzed boundary blocks so the RCG uses their actual
+            // E_left/E_to_leave for budget (reference: extract_not_fixed_bb_trace
+            // at schematic.py:295-313 uses fixed predecessor/successor blocks,
+            // and create_reachable_checkpoint_graph reads trace[0].energy_left
+            // and trace[-1].energy_to_leave at schematic.py:184,187).
             RCGSolver solver(synPath, state_, cfg_, params_, solution.blockMeta,
-                             solution.decidedPlacements, nullptr, nullptr, tracker_);
+                             solution.decidedPlacements, sBound, eBound, tracker_);
             RCGResult result = solver.solve();
             if (!result.feasible) {
                 PLOGE << "SCHEMATIC infeasible: loop uncovered block '" << BB->getName()
