@@ -175,10 +175,16 @@ bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solu
 
 void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, SchematicSolution &solution,
                                                const SchematicStateAnalysis &state,
-                                               const SchematicParams &params, llvm::LoopInfo &LI) {
+                                               const SchematicParams &params, llvm::LoopInfo &LI,
+                                               llvm::Loop *loopScope) {
     for (const auto &[src, dst] : cfg.getEdges()) {
         auto *srcBB = const_cast<llvm::BasicBlock *>(src);
         auto *dstBB = const_cast<llvm::BasicBlock *>(dst);
+
+        // When scoped to a loop, skip edges outside it.
+        if (loopScope && (!loopScope->contains(srcBB) || !loopScope->contains(dstBB)))
+            continue;
+
         CFGEdge edge{srcBB, dstBB};
         if (solution.enabledCheckpoints.count(edge))
             continue;
@@ -229,9 +235,9 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
             // (reference schematic.py:499-500)
             CFGEdge disabledEdge{srcBB, dstBB};
             propagateEnergyLeft(disabledEdge, srcMeta->second.E_left, solution, cfg, state, params,
-                                LI, /*loopScope=*/nullptr);
+                                LI, loopScope);
             propagateEnergyToLeave(disabledEdge, dstMeta->second.E_to_leave, solution, cfg, state,
-                                   params, LI, /*loopScope=*/nullptr);
+                                   params, LI, loopScope);
         }
     }
 }

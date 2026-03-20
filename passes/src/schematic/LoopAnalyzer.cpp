@@ -4,6 +4,7 @@
 #include "schematic/EnergyPropagation.h"
 #include "schematic/MemoryAllocator.h"
 #include "schematic/RCGSolver.h"
+#include "schematic/TraceAnalyzer.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
@@ -364,6 +365,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             }
         }
     }
+
+    // Step 3c: Resolve loop-internal edges (reference: schematic.py:555).
+    removePotentialCheckpointsBetweenFixedBBs(cfg_, solution, state_, params_, LI_, L);
 
     // Step 5: Get header and latch allocations from decided placements.
     std::map<llvm::Value *, Placement> headerAlloc;

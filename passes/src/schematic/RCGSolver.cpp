@@ -67,10 +67,10 @@ void RCGSolver::createReachableCheckpointGraph() {
     } else {
         energyLeft = params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
     }
-    double energyToLeave = 0.0;
+    double energyToLeave = params_.E_epi + params_.N_reg * params_.regStoreEnergy;
     if (endBoundaryBlock_) {
         auto it = existingMeta_.find(endBoundaryBlock_);
-        if (it != existingMeta_.end())
+        if (it != existingMeta_.end() && it->second.E_to_leave != 0.0)
             energyToLeave = it->second.E_to_leave;
     }
 

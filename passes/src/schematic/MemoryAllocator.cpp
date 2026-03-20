@@ -361,6 +361,21 @@ double computeAllocationSaveCost(
     return cost;
 }
 
+/// Extend allocation `target` with variables from `source` that are not yet present.
+/// Reference: memory_allocation.py:MemoryAllocation.extends (line 153).
+static void extendsAllocation(RegionAllocation &target, const RegionAllocation &source) {
+    for (const auto &[v, va] : source.vars) {
+        if (target.vars.find(v) == target.vars.end()) {
+            target.vars[v] = va;
+            if (va.placement == Placement::VM) {
+                auto offIt = source.vmOffsets.find(v);
+                if (offIt != source.vmOffsets.end())
+                    target.vmOffsets[v] = offIt->second;
+            }
+        }
+    }
+}
+
 void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
                           SchematicSolution &solution) {
     for (const auto &ckpt : selectedCheckpoints)
@@ -376,11 +391,67 @@ void applyMemoryAllocation(const RCGResult &result,
     // 1. Mark checkpoints as enabled
     updateCheckpointType(result.selectedCheckpoints, solution);
 
+    // 1b. Boundary allocation extension (reference: schematic.py:402-421).
+    // When no checkpoint separates a boundary from the adjacent interval,
+    // extend the boundary's allocation with the interval's variables.
+    // Work on a mutable copy of allocations since result is const.
+    std::vector<RegionAllocation> allocations = result.allocations;
+
+    if (!allocations.empty()) {
+        // Start boundary extension.
+        // Condition: startBound has allocation AND (no checkpoints OR first ckpt src !=
+        // startBound).
+        auto startAllocIt = solution.blockAllocation.find(startBound);
+        if (startBound && startAllocIt != solution.blockAllocation.end()) {
+            bool noSeparation = result.selectedCheckpoints.empty() ||
+                                result.selectedCheckpoints.front().src != startBound;
+            if (noSeparation) {
+                extendsAllocation(*startAllocIt->second, allocations.front());
+                // Use boundary's extended allocation as the interval allocation.
+                allocations.front() = *startAllocIt->second;
+            }
+        }
+
+        // End boundary extension.
+        // Condition: endBound has allocation AND (no checkpoints OR last ckpt dst != endBound).
+        auto endAllocIt = solution.blockAllocation.find(endBound);
+        if (endBound && endAllocIt != solution.blockAllocation.end()) {
+            bool noSeparation = result.selectedCheckpoints.empty() ||
+                                result.selectedCheckpoints.back().dst != endBound;
+            if (noSeparation) {
+                extendsAllocation(*endAllocIt->second, allocations.back());
+                allocations.back() = *endAllocIt->second;
+            }
+        }
+
+        // No checkpoints: unify start and end boundary allocations (reference: lines 414-421).
+        if (result.selectedCheckpoints.empty() && startBound && endBound) {
+            auto sIt = solution.blockAllocation.find(startBound);
+            auto eIt = solution.blockAllocation.find(endBound);
+            if (sIt != solution.blockAllocation.end())
+                extendsAllocation(*sIt->second, allocations.front());
+            if (eIt != solution.blockAllocation.end())
+                extendsAllocation(*eIt->second, allocations.front());
+            // Replace start boundary's allocation object with end boundary's
+            // so all blocks sharing the old object get unified.
+            if (sIt != solution.blockAllocation.end() && eIt != solution.blockAllocation.end()) {
+                auto oldAlloc = sIt->second;
+                auto newAlloc = eIt->second;
+                if (oldAlloc != newAlloc) {
+                    for (auto &[bb, allocPtr] : solution.blockAllocation) {
+                        if (allocPtr == oldAlloc)
+                            allocPtr = newAlloc;
+                    }
+                }
+            }
+        }
+    }
+
     // 2. Record allocations and mark blocks as analyzed.
     // Reference: apply_memory_allocation sets bb.memory_allocation for each block.
     for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
         const auto &blocks = result.intervalBlocks[i];
-        const auto &alloc = result.allocations[i];
+        const auto &alloc = allocations[i];
         auto sharedAlloc = std::make_shared<RegionAllocation>(alloc);
 
         for (llvm::BasicBlock *BB : blocks) {
