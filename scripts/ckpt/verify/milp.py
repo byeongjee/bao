@@ -30,6 +30,7 @@ def verify_milp(
     energy_config: Path | None,
     estimator_mode: str,
     cpu_freq: int,
+    pass_log_level: str,
 ) -> bool:
     """Verify semantic correctness of MILP checkpoint insertion."""
     from ..bench.config import default_energy_config
@@ -54,7 +55,7 @@ def verify_milp(
                 milp_config=cap_config,
                 output=workdir / "milp",
                 estimator_mode=estimator_mode,
-                pass_log_level="info",
+                pass_log_level=pass_log_level,
                 debug=False,
                 link=True,
                 device_debug=True,

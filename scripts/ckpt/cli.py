@@ -950,6 +950,7 @@ def verify_rockclimb_cmd(
         halt_mode=halt_mode,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        pass_log_level=ctx.obj["pass_log_level"],
     )
     if not success:
         raise SystemExit(1)
@@ -1005,6 +1006,7 @@ def verify_milp_cmd(
         energy_config=Path(energy_config) if energy_config else None,
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        pass_log_level=ctx.obj["pass_log_level"],
     )
     if not success:
         raise SystemExit(1)
@@ -1061,6 +1063,7 @@ def verify_schematic_cmd(
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
         clang_opt_level=0,
+        pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label="schematic",
     )
     if not success:
@@ -1118,6 +1121,7 @@ def verify_schematic_o3_cmd(
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
         clang_opt_level=3,
+        pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label="schematicO3",
     )
     if not success:

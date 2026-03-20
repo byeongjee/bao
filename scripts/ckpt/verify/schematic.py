@@ -31,6 +31,7 @@ def verify_schematic(
     estimator_mode: str,
     cpu_freq: int,
     clang_opt_level: int,
+    pass_log_level: str,
     algorithm_label: str,
 ) -> bool:
     """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
@@ -56,7 +57,7 @@ def verify_schematic(
                 schematic_config=cap_config,
                 output=workdir / "schematic",
                 estimator_mode=estimator_mode,
-                pass_log_level="info",
+                pass_log_level=pass_log_level,
                 debug=False,
                 trace_only=False,
                 link=True,
