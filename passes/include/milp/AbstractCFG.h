@@ -73,7 +73,6 @@ class AbstractCFG final : public ICFGView, public IStateView, public IEnergyView
     double getERestore(llvm::Value *v) const override;
     double getFEntry(NodeId block) const override;
     double getFBoundary(NodeId block) const override;
-    double getQReboot() const override;
 
   private:
     friend struct AbstractCFGBuildResult;

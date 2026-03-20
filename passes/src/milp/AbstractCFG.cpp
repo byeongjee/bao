@@ -378,10 +378,6 @@ double AbstractCFG::getFBoundary(NodeId block) const {
     return 1.0;
 }
 
-double AbstractCFG::getQReboot() const {
-    return 1.0; // Always 1.0 — hardcoded after config unification
-}
-
 AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
                                         llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
                                         const StateAnalysis &state, const EnergyModel &energy) {

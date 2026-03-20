@@ -58,10 +58,6 @@ double EnergyModel::getFEntry(const llvm::BasicBlock *BB) const {
     return 1.0;
 }
 
-double EnergyModel::getQReboot() const {
-    return 1.0; // Always 1.0 — hardcoded after config unification
-}
-
 // ---- Private implementation ----
 
 void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader, llvm::Function &F) {
@@ -206,8 +202,6 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
     // N_reg: optional shared field (default 16).
     if (config.contains("N_reg"))
         params.N_reg = config["N_reg"].get<unsigned>();
-
-    // q_reboot_probability: accepted but ignored (always 1.0).
 
     // MILP-specific fields: check "milp" section first, then root (backward compat).
     nlohmann::json milpSection;
