@@ -82,6 +82,7 @@ def run_rockclimb_benchmarks(
     halt_mode: str,
     energy_config: Path | None = None,
     cpu_freq: int,
+    pass_log_level: str,
 ) -> None:
     """Run RockClimb checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -134,7 +135,7 @@ def run_rockclimb_benchmarks(
                 energy_config=energy_config,
                 rockclimb_config=cap.config_path,
                 output=out_dir / bench_name,
-                pass_log_level="info",
+                pass_log_level=pass_log_level,
                 precomputed_energy=True,
                 link=True,
                 device_debug=device_debug,

@@ -101,6 +101,7 @@ def run_milp_benchmarks(
     estimator_mode: str,
     energy_config: Path | None = None,
     cpu_freq: int,
+    pass_log_level: str,
 ) -> None:
     """Run MILP checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -163,7 +164,7 @@ def run_milp_benchmarks(
                 milp_config=cap.config_path,
                 output=out_dir / bench_name,
                 estimator_mode=estimator_mode,
-                pass_log_level="info",
+                pass_log_level=pass_log_level,
                 debug=False,
                 link=True,
                 halt_mode=halt_mode,

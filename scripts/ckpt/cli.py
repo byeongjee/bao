@@ -678,6 +678,7 @@ def bench_milp_cmd(
         estimator_mode=estimator_mode,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        pass_log_level=ctx.obj["pass_log_level"],
     )
 
 
@@ -728,6 +729,7 @@ def bench_rockclimb_cmd(
         output_csv=Path(output) if output else None,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        pass_log_level=ctx.obj["pass_log_level"],
     )
 
 
@@ -794,6 +796,7 @@ def bench_schematic_cmd(
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
         clang_opt_level=0,
+        pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label="schematic",
     )
 
@@ -861,6 +864,7 @@ def bench_schematic_o3_cmd(
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
         clang_opt_level=3,
+        pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label="schematicO3",
     )
 

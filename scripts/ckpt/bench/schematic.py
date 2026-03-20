@@ -91,6 +91,7 @@ def _collect_trace(
     halt_mode: str,
     cpu_freq: int,
     clang_opt_level: int,
+    pass_log_level: str,
 ) -> tuple[Path, int]:
     """Collect a SCHEMATIC execution trace for one benchmark.
 
@@ -108,7 +109,7 @@ def _collect_trace(
         schematic_config=trace_config,
         output=workdir / bench_name,
         estimator_mode=estimator_mode,
-        pass_log_level="info",
+        pass_log_level=pass_log_level,
         debug=False,
         trace_only=True,
         link=False,
@@ -177,6 +178,7 @@ def run_schematic_benchmarks(
     estimator_mode: str,
     cpu_freq: int,
     clang_opt_level: int,
+    pass_log_level: str,
     algorithm_label: str,
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
@@ -245,6 +247,7 @@ def run_schematic_benchmarks(
                     halt_mode=halt_mode,
                     cpu_freq=cpu_freq,
                     clang_opt_level=clang_opt_level,
+                    pass_log_level=pass_log_level,
                 )
 
             trace_json, profiling_ms = trace_cache[bench_name]
@@ -258,7 +261,7 @@ def run_schematic_benchmarks(
                 schematic_config=cap.config_path,
                 output=out_dir / bench_name,
                 estimator_mode=estimator_mode,
-                pass_log_level="info",
+                pass_log_level=pass_log_level,
                 debug=False,
                 trace_only=False,
                 link=True,
