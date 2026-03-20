@@ -27,3 +27,18 @@ def setup_logging(level_name: str) -> None:
         handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(_Formatter())
         root.addHandler(handler)
+
+
+def python_to_cpp_log_level(python_level: str) -> str:
+    """Map Python log level name to C++ plog level name.
+
+    Python CRITICAL has no plog equivalent; map to 'error'.
+    """
+    _MAP = {
+        "debug": "debug",
+        "info": "info",
+        "warning": "warning",
+        "error": "error",
+        "critical": "error",
+    }
+    return _MAP[python_level.lower()]
