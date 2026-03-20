@@ -82,10 +82,13 @@ void RCGSolver::createReachableCheckpointGraph() {
     unsigned startNode = 0;
     unsigned endNode = numNodes - 1;
 
-    // Loop 1: ckpt→ckpt edges
+    // Loop 1: ckpt→ckpt edges (ref: schematic.py:199-218, early termination)
     for (unsigned ii = 0; ii < internalCkpts.size(); ++ii) {
+        unsigned i = internalCkpts[ii];
+        double prevCost = 0;
         for (unsigned jj = ii + 1; jj < internalCkpts.size(); ++jj) {
-            unsigned i = internalCkpts[ii];
+            if (prevCost >= params_.capacity)
+                break;
             unsigned j = internalCkpts[jj];
             auto blocks = getIntervalBlocks(i, j);
             if (blocks.empty())
@@ -98,37 +101,51 @@ void RCGSolver::createReachableCheckpointGraph() {
             trackDiagnostics(blocks, cost, params_.capacity);
             if (cost < params_.capacity)
                 adj_[i].push_back({i, j, cost, std::move(alloc), std::move(blocks)});
+            prevCost = cost;
         }
     }
 
-    // Loop 2: Start→ckpt edges
-    for (unsigned jj = 0; jj < internalCkpts.size(); ++jj) {
-        unsigned j = internalCkpts[jj];
-        auto blocks = getIntervalBlocks(startNode, j);
-        if (blocks.empty())
-            continue;
-        auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_, tracker_,
-                                         startAlloc, nullptr);
-        cost += params_.E_epi + params_.N_reg * params_.regStoreEnergy; // chkpt_save only
-        alloc.intervalEnergy = cost;
-        trackDiagnostics(blocks, cost, energyLeft);
-        if (cost < energyLeft)
-            adj_[startNode].push_back({startNode, j, cost, std::move(alloc), std::move(blocks)});
+    // Loop 2: Start→ckpt edges (ref: schematic.py:236-249, early termination)
+    {
+        double prevCost = 0;
+        for (unsigned jj = 0; jj < internalCkpts.size(); ++jj) {
+            if (prevCost >= energyLeft)
+                break;
+            unsigned j = internalCkpts[jj];
+            auto blocks = getIntervalBlocks(startNode, j);
+            if (blocks.empty())
+                continue;
+            auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_,
+                                             tracker_, startAlloc, nullptr);
+            cost += params_.E_epi + params_.N_reg * params_.regStoreEnergy; // chkpt_save only
+            alloc.intervalEnergy = cost;
+            trackDiagnostics(blocks, cost, energyLeft);
+            if (cost < energyLeft)
+                adj_[startNode].push_back(
+                    {startNode, j, cost, std::move(alloc), std::move(blocks)});
+            prevCost = cost;
+        }
     }
 
-    // Loop 3: ckpt→End edges
-    for (unsigned ii = 0; ii < internalCkpts.size(); ++ii) {
-        unsigned i = internalCkpts[ii];
-        auto blocks = getIntervalBlocks(i, endNode);
-        if (blocks.empty())
-            continue;
-        auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_, tracker_,
-                                         nullptr, endAlloc);
-        cost += params_.E_pro + params_.N_reg * params_.regRestoreEnergy; // chkpt_restore only
-        alloc.intervalEnergy = cost;
-        trackDiagnostics(blocks, cost, params_.capacity - energyToLeave);
-        if (cost + energyToLeave < params_.capacity)
-            adj_[i].push_back({i, endNode, cost, std::move(alloc), std::move(blocks)});
+    // Loop 3: ckpt→End edges (ref: schematic.py:254-268, backward + early termination)
+    {
+        double prevCost = 0;
+        for (int ii = static_cast<int>(internalCkpts.size()) - 1; ii >= 0; --ii) {
+            if (prevCost + energyToLeave >= params_.capacity)
+                break;
+            unsigned i = internalCkpts[ii];
+            auto blocks = getIntervalBlocks(i, endNode);
+            if (blocks.empty())
+                continue;
+            auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_,
+                                             tracker_, nullptr, endAlloc);
+            cost += params_.E_pro + params_.N_reg * params_.regRestoreEnergy; // chkpt_restore only
+            alloc.intervalEnergy = cost;
+            trackDiagnostics(blocks, cost, params_.capacity - energyToLeave);
+            if (cost + energyToLeave < params_.capacity)
+                adj_[i].push_back({i, endNode, cost, std::move(alloc), std::move(blocks)});
+            prevCost = cost;
+        }
     }
 
     // Loop 4: Start→End edge
