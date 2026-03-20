@@ -335,12 +335,9 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
 
         // Ineligible restores: unconditional at every region start where
         // the object is live-in.
-        for (llvm::Value *V : state.getIneligibleObjs()) {
+        for (llvm::Value *V : state.getIneligLiveIn(&BB)) {
             auto backupIt = nvmBackupMap_.find(V);
             if (backupIt == nvmBackupMap_.end())
-                continue;
-
-            if (!state.getIneligLiveIn(&BB).count(V))
                 continue;
 
             if (llvm::isa<llvm::AllocaInst>(V)) {
