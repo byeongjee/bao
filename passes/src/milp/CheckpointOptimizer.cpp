@@ -193,7 +193,7 @@ void CheckpointOptimizer::addVariables() {
             m_[key] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "m", block, V));
             d_[key] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "d", block, V));
             dHat_[key] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "dHat", block, V));
+                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "dHat", block, V));
         }
     }
 
@@ -202,7 +202,7 @@ void CheckpointOptimizer::addVariables() {
         for (llvm::Value *V : allTracked) {
             BlockVarKey key = std::make_pair(block, V);
             rHat_[key] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "rHat", block, V));
+                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "rHat", block, V));
         }
     }
 
