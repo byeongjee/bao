@@ -4,10 +4,8 @@
 #include "common/Logger.h"
 #include "common/PassStatistics.h"
 #include "milp/CheckpointContext.h"
-#include "schematic/EnergyPropagation.h"
 #include "schematic/LoopAnalyzer.h"
 #include "schematic/MemoryAllocator.h"
-#include "schematic/RCGSolver.h"
 #include "schematic/SchematicInstrumenter.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
@@ -18,16 +16,12 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
-#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
-
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include <chrono>
-#include <deque>
-#include <limits>
 #include <set>
 
 using namespace llvm;
@@ -185,65 +179,8 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         }
     }
 
-    // Step 10: Single pass — resolve remaining potential edges (reference: schematic.py:468-502).
-    for (const auto &[src, dst] : ctx.cfg->getEdges()) {
-        auto *srcBB = const_cast<BasicBlock *>(src);
-        auto *dstBB = const_cast<BasicBlock *>(dst);
-        CFGEdge edge{srcBB, dstBB};
-        if (solution.enabledCheckpoints.count(edge))
-            continue;
-
-        // Skip loop back-edges (handled by LoopAnalyzer).
-        if (Loop *L = LI.getLoopFor(dstBB)) {
-            if (dstBB == L->getHeader() && L->contains(srcBB))
-                continue;
-        }
-
-        auto srcMeta = solution.blockMeta.find(srcBB);
-        auto dstMeta = solution.blockMeta.find(dstBB);
-        if (srcMeta == solution.blockMeta.end() || !srcMeta->second.analyzed)
-            continue;
-        if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
-            continue;
-
-        // Check if allocations differ (union-based: missing key = NVM).
-        auto srcAlloc = solution.decidedPlacements.find(srcBB);
-        auto dstAlloc = solution.decidedPlacements.find(dstBB);
-        bool allocsDiffer = false;
-        {
-            std::map<llvm::Value *, Placement> srcMap, dstMap;
-            if (srcAlloc != solution.decidedPlacements.end())
-                srcMap = srcAlloc->second;
-            if (dstAlloc != solution.decidedPlacements.end())
-                dstMap = dstAlloc->second;
-            std::set<llvm::Value *> allKeys;
-            for (const auto &[k, _] : srcMap)
-                allKeys.insert(k);
-            for (const auto &[k, _] : dstMap)
-                allKeys.insert(k);
-            for (llvm::Value *v : allKeys) {
-                Placement pS = srcMap.count(v) ? srcMap[v] : Placement::NVM;
-                Placement pD = dstMap.count(v) ? dstMap[v] : Placement::NVM;
-                if (pS != pD) {
-                    allocsDiffer = true;
-                    break;
-                }
-            }
-        }
-
-        if (allocsDiffer || srcMeta->second.E_left <= dstMeta->second.E_to_leave) {
-            // Insufficient energy or incompatible allocations → enable checkpoint.
-            solution.enabledCheckpoints.insert(edge);
-        } else {
-            // Propagate energy through the disabled edge using existing block values
-            // (reference schematic.py:499-500)
-            CFGEdge disabledEdge{srcBB, dstBB};
-            propagateEnergyLeft(disabledEdge, srcMeta->second.E_left, solution, *ctx.cfg, state,
-                                params, LI, /*loopScope=*/nullptr);
-            propagateEnergyToLeave(disabledEdge, dstMeta->second.E_to_leave, solution, *ctx.cfg,
-                                   state, params, LI, /*loopScope=*/nullptr);
-        }
-    }
+    // Step 10: Resolve remaining potential edges (reference: schematic.py:468-502).
+    removePotentialCheckpointsBetweenFixedBBs(*ctx.cfg, solution, state, params, LI);
 
     // Step 11: Collect statistics.
     for (const auto &region : solution.regions) {

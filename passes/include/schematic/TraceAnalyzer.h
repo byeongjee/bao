@@ -49,4 +49,11 @@ bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solu
                                  VMAddressTracker *tracker, llvm::LoopInfo &LI,
                                  llvm::Loop *loopScope, std::string &errorMessage);
 
+/// Single pass over all CFG edges: enable checkpoints where allocations differ
+/// or energy is insufficient, propagate energy otherwise.
+/// Reference: schematic.py:remove_potential_checkpoints_between_fixed_bbs (line 468).
+void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, SchematicSolution &solution,
+                                               const SchematicStateAnalysis &state,
+                                               const SchematicParams &params, llvm::LoopInfo &LI);
+
 } // namespace checkpoint

@@ -1,9 +1,11 @@
 #include "schematic/TraceAnalyzer.h"
+#include "schematic/EnergyPropagation.h"
 #include "schematic/RCGSolver.h"
 
 #include "llvm/IR/CFG.h"
 
 #include <deque>
+#include <map>
 #include <set>
 
 namespace checkpoint {
@@ -169,6 +171,69 @@ bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solu
     }
 
     return true;
+}
+
+void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, SchematicSolution &solution,
+                                               const SchematicStateAnalysis &state,
+                                               const SchematicParams &params, llvm::LoopInfo &LI) {
+    for (const auto &[src, dst] : cfg.getEdges()) {
+        auto *srcBB = const_cast<llvm::BasicBlock *>(src);
+        auto *dstBB = const_cast<llvm::BasicBlock *>(dst);
+        CFGEdge edge{srcBB, dstBB};
+        if (solution.enabledCheckpoints.count(edge))
+            continue;
+
+        // Skip loop back-edges (handled by LoopAnalyzer).
+        if (llvm::Loop *L = LI.getLoopFor(dstBB)) {
+            if (dstBB == L->getHeader() && L->contains(srcBB))
+                continue;
+        }
+
+        auto srcMeta = solution.blockMeta.find(srcBB);
+        auto dstMeta = solution.blockMeta.find(dstBB);
+        if (srcMeta == solution.blockMeta.end() || !srcMeta->second.analyzed)
+            continue;
+        if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
+            continue;
+
+        // Check if allocations differ (union-based: missing key = NVM).
+        auto srcAlloc = solution.decidedPlacements.find(srcBB);
+        auto dstAlloc = solution.decidedPlacements.find(dstBB);
+        bool allocsDiffer = false;
+        {
+            std::map<llvm::Value *, Placement> srcMap, dstMap;
+            if (srcAlloc != solution.decidedPlacements.end())
+                srcMap = srcAlloc->second;
+            if (dstAlloc != solution.decidedPlacements.end())
+                dstMap = dstAlloc->second;
+            std::set<llvm::Value *> allKeys;
+            for (const auto &[k, _] : srcMap)
+                allKeys.insert(k);
+            for (const auto &[k, _] : dstMap)
+                allKeys.insert(k);
+            for (llvm::Value *v : allKeys) {
+                Placement pS = srcMap.count(v) ? srcMap[v] : Placement::NVM;
+                Placement pD = dstMap.count(v) ? dstMap[v] : Placement::NVM;
+                if (pS != pD) {
+                    allocsDiffer = true;
+                    break;
+                }
+            }
+        }
+
+        if (allocsDiffer || srcMeta->second.E_left <= dstMeta->second.E_to_leave) {
+            // Insufficient energy or incompatible allocations → enable checkpoint.
+            solution.enabledCheckpoints.insert(edge);
+        } else {
+            // Propagate energy through the disabled edge using existing block values
+            // (reference schematic.py:499-500)
+            CFGEdge disabledEdge{srcBB, dstBB};
+            propagateEnergyLeft(disabledEdge, srcMeta->second.E_left, solution, cfg, state, params,
+                                LI, /*loopScope=*/nullptr);
+            propagateEnergyToLeave(disabledEdge, dstMeta->second.E_to_leave, solution, cfg, state,
+                                   params, LI, /*loopScope=*/nullptr);
+        }
+    }
 }
 
 } // namespace checkpoint
