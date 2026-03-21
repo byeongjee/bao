@@ -131,8 +131,11 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
                 continue;
             }
 
-            // Parse operands (trim whitespace)
+            // Parse operands (strip trailing ';' comment, then trim whitespace)
             instr.operands = match[4].str();
+            auto semi = instr.operands.find(';');
+            if (semi != std::string::npos)
+                instr.operands.erase(semi);
             if (!instr.operands.empty()) {
                 instr.operands.erase(0, instr.operands.find_first_not_of(" \t"));
                 if (!instr.operands.empty()) {
