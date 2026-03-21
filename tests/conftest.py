@@ -344,7 +344,9 @@ def check_assertions(r: PassResult, expect: dict):
     if "min_boundary" in expect:
         n = count_calls(ir, "__region_boundary")
         assert n >= expect["min_boundary"], (
-            f"Expected >= {expect['min_boundary']} __region_boundary calls, got {n}"
+            f"Expected >= {expect['min_boundary']} __region_boundary calls, got {n}\n"
+            f"FULL STDERR:\n{r.stderr}\n"
+            f"OUTPUT IR (first 3000):\n{ir[:3000]}"
         )
 
     if "max_boundary" in expect:

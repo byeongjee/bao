@@ -14,7 +14,6 @@
 #include "llvm/Transforms/Scalar/LoopRotation.h"
 #include "llvm/Transforms/Utils/LCSSA.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
-#include "llvm/Transforms/Utils/Mem2Reg.h"
 
 using namespace llvm;
 
@@ -94,7 +93,6 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(checkpoint::SchematicPass());
-                        FPM.addPass(PromotePass()); // mem2reg: promote loop counter allocas to SSA
                         return true;
                     }
                     if (Name == "trace-collect") {
