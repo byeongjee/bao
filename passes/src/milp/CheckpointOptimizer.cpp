@@ -61,6 +61,54 @@ static std::map<NodeId, std::vector<NodeId>> buildPredecessorMap(const ICFGView 
     return preds;
 }
 
+static std::map<NodeId, std::vector<NodeId>> buildSuccessorMap(const ICFGView &cfg) {
+    std::map<NodeId, std::vector<NodeId>> succs;
+    for (NodeId block : cfg.getBlocks()) {
+        succs[block] = {};
+    }
+    for (const auto &[src, dst] : cfg.getEdges()) {
+        succs[src].push_back(dst);
+    }
+    return succs;
+}
+
+/// Compute Reach(v) for each variable: forward-reachable closure from definition sites.
+static std::map<llvm::Value *, std::set<NodeId>>
+computeReachableDefs(const ICFGView &cfg, const IStateView &state,
+                     const std::vector<llvm::Value *> &allTracked,
+                     const std::map<NodeId, std::vector<NodeId>> &succs) {
+    std::map<llvm::Value *, std::set<NodeId>> reach;
+    for (llvm::Value *V : allTracked) {
+        // BFS from definition sites.
+        std::set<NodeId> &reachSet = reach[V];
+        std::vector<NodeId> worklist;
+        for (NodeId block : cfg.getBlocks()) {
+            bool isDef = false;
+            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
+                isDef = state.getEligDefIndicator(block, GV);
+            if (!isDef)
+                isDef = state.getIneligDefIndicator(block, V);
+            if (isDef) {
+                reachSet.insert(block);
+                worklist.push_back(block);
+            }
+        }
+        while (!worklist.empty()) {
+            NodeId cur = worklist.back();
+            worklist.pop_back();
+            auto it = succs.find(cur);
+            if (it == succs.end())
+                continue;
+            for (NodeId succ : it->second) {
+                if (reachSet.insert(succ).second) {
+                    worklist.push_back(succ);
+                }
+            }
+        }
+    }
+    return reach;
+}
+
 } // namespace
 
 CheckpointOptimizer::CheckpointOptimizer(const MILPInput &input)
@@ -163,9 +211,21 @@ bool CheckpointOptimizer::solve() {
 }
 
 void CheckpointOptimizer::buildModel() {
+    predecessors_ = buildPredecessorMap(cfg_);
+    auto succs = buildSuccessorMap(cfg_);
+
+    // Build combined list of all tracked variables.
+    std::vector<llvm::Value *> allTracked;
+    for (llvm::GlobalVariable *GV : state_.getVMObjs())
+        allTracked.push_back(static_cast<llvm::Value *>(GV));
+    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
+                      state_.getIneligibleObjs().end());
+
+    // Precompute Reach(v) for scoping d[b,v] variables.
+    reachableDefs_ = computeReachableDefs(cfg_, state_, allTracked, succs);
+
     addVariables();
     addObjective();
-    predecessors_ = buildPredecessorMap(cfg_);
     addConstraints();
     model_.update();
 }
@@ -186,14 +246,16 @@ void CheckpointOptimizer::addVariables() {
     allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
                       state_.getIneligibleObjs().end());
 
-    // m_{b,v}, d_{b,v}, dHat_{b,v} for all (block, var).
+    // m_{b,v} for all (block, var).
+    // d_{b,v} only for (block, var) where b ∈ Reach(v).
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::Value *V : allTracked) {
             BlockVarKey key = std::make_pair(block, V);
             m_[key] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "m", block, V));
-            d_[key] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "d", block, V));
-            dHat_[key] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "dHat", block, V));
+            if (reachableDefs_[V].count(block)) {
+                d_[key] =
+                    model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "d", block, V));
+            }
         }
     }
 
@@ -272,7 +334,7 @@ void CheckpointOptimizer::addConstraints() {
     constrainVMCapacity();               // VM capacity
     constrainPlacementPropagation();     // C12, C13
     constrainDirtyPropagation();         // C4, C5, C6
-    constrainSaveAtRegionBoundary();     // C7, C8
+    constrainSaveAtRegionBoundary();     // C8 (dHat eliminated)
     constrainEnergyInitAtRegionStart();  // C9
     constrainEnergyPropagation();        // C10
     constrainEnergyWithinCapacity();     // C11
@@ -376,10 +438,11 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
     }
 }
 
-// C4:  d[b,v] >= D_{b,v}                              (∀ b, v)
-// C5:  d[succ,v] >= d[pred,v] - r[succ]               (∀ edge, v)
-// C5': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]           (∀ b, v)  [LP tightening]
-// C6:  d[b,v] <= D_{b,v} - r[b] + 1                   (∀ b, v)
+// C4:  d[b,v] >= D_{b,v}                              (∀ b ∈ Reach(v), v)
+// C5:  d[succ,v] >= d[pred,v] - r[succ]               (∀ edge, v where both in Reach(v))
+// C5': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]           (∀ b ∈ Reach(v), v)  [LP tightening]
+// C6:  d[b,v] <= D_{b,v} - r[b] + 1                   (∀ b ∈ Reach(v), v)
+// d[b,v] is not created for b ∉ Reach(v) (provably 0).
 void CheckpointOptimizer::constrainDirtyPropagation() {
     std::vector<llvm::Value *> allTracked;
     for (llvm::GlobalVariable *GV : state_.getVMObjs())
@@ -390,7 +453,11 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::Value *V : allTracked) {
             BlockVarKey key = std::make_pair(block, V);
-            GRBVar dVar = d_[key];
+            auto dIt = d_.find(key);
+            if (dIt == d_.end())
+                continue; // b ∉ Reach(v), d[b,v] = 0
+
+            GRBVar dVar = dIt->second;
 
             bool isDef = false;
             if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
@@ -405,9 +472,12 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
             model_.addConstr(dVar >= def, "C4_dirty_local_" + suffix);
 
             // C5': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]  [LP tightening]
+            // Predecessors outside Reach(v) contribute 0.
             GRBLinExpr predSum = 0;
             for (NodeId pred : predecessors_[block]) {
-                predSum += d_[std::make_pair(pred, V)];
+                auto predIt = d_.find(std::make_pair(pred, V));
+                if (predIt != d_.end())
+                    predSum += predIt->second;
             }
             model_.addConstr(dVar <= def + predSum, "C5p_dirty_upper_" + suffix);
 
@@ -416,39 +486,28 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
         }
     }
 
-    // C5: d[succ,v] >= d[pred,v] - r[succ]  (∀ edge, v)
+    // C5: d[succ,v] >= d[pred,v] - r[succ]  (∀ edge, v where both in Reach(v))
     unsigned idx = 0;
     for (const auto &[pred, succ] : cfg_.getEdges()) {
         for (llvm::Value *V : allTracked) {
-            model_.addConstr(d_[std::make_pair(succ, V)] >= d_[std::make_pair(pred, V)] - r_[succ],
+            auto predIt = d_.find(std::make_pair(pred, V));
+            auto succIt = d_.find(std::make_pair(succ, V));
+            if (predIt == d_.end() || succIt == d_.end())
+                continue; // One or both outside Reach(v), constraint is trivial.
+            model_.addConstr(succIt->second >= predIt->second - r_[succ],
                              "C5_dirty_edge_" + std::to_string(idx));
             idx++;
         }
     }
 }
 
-// C7:  dHat[b,v] = d[b,v] AND m[b,v]                  (via addGenConstrAnd)
-// C8:  s[succ,v] >= dHat[pred,v] + r[succ] - 1        (∀ edge, v)
-// C8': s[b,v] <= r[b]                                  (∀ b, v)  [LP tightening]
-// C8': s[b,v] <= Σ_pred dHat[pred,v]                   (∀ b, v)  [LP tightening]
+// C8:  s[succ,v] >= d[pred,v] + m[pred,v] + r[succ] - 2   (∀ edge, v)
+//      (eliminates dHat by substituting dHat >= d + m - 1)
+// C8': s[b,v] <= r[b]                                      (∀ b, v)  [LP tightening]
+// C8': s[b,v] <= Σ_pred d[pred,v]                           (∀ b, v)  [LP tightening]
+// C8': s[b,v] <= Σ_pred m[pred,v]                           (∀ b, v)  [LP tightening]
 void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
-    std::vector<llvm::Value *> allTracked;
-    for (llvm::GlobalVariable *GV : state_.getVMObjs())
-        allTracked.push_back(static_cast<llvm::Value *>(GV));
-    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
-                      state_.getIneligibleObjs().end());
-
-    // C7: dHat[b,v] = d[b,v] AND m[b,v]
-    for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::Value *V : allTracked) {
-            BlockVarKey key = std::make_pair(block, V);
-            GRBVar inputs[] = {d_[key], m_[key]};
-            model_.addGenConstrAnd(dHat_[key], inputs, 2,
-                                   "C7_dHat_and_" + nodeToken(cfg_, block) + "_" + valueToken(V));
-        }
-    }
-
-    // C8 + LP tightening for s variables.
+    // LP tightening for s variables.
     for (const auto &[key, sVar] : s_) {
         NodeId block = key.first;
         llvm::Value *V = key.second;
@@ -457,15 +516,25 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
         // C8': s[b,v] <= r[b]
         model_.addConstr(sVar <= r_[block], "C8p_save_le_r_" + suffix);
 
-        // C8': s[b,v] <= Σ_pred dHat[pred,v]
-        GRBLinExpr predDHatSum = 0;
+        // C8': s[b,v] <= Σ_pred d[pred,v]  (replaces dHat upper bound)
+        // Predecessors outside Reach(v) contribute 0.
+        GRBLinExpr predDirtySum = 0;
         for (NodeId pred : predecessors_[block]) {
-            predDHatSum += dHat_[std::make_pair(pred, V)];
+            auto predIt = d_.find(std::make_pair(pred, V));
+            if (predIt != d_.end())
+                predDirtySum += predIt->second;
         }
-        model_.addConstr(sVar <= predDHatSum, "C8p_save_le_preds_" + suffix);
+        model_.addConstr(sVar <= predDirtySum, "C8p_save_le_dirty_" + suffix);
+
+        // C8': s[b,v] <= Σ_pred m[pred,v]  (replaces dHat upper bound)
+        GRBLinExpr predPlaceSum = 0;
+        for (NodeId pred : predecessors_[block]) {
+            predPlaceSum += m_[std::make_pair(pred, V)];
+        }
+        model_.addConstr(sVar <= predPlaceSum, "C8p_save_le_place_" + suffix);
     }
 
-    // C8: s[succ,v] >= dHat[pred,v] + r[succ] - 1  (∀ edge, v where s exists)
+    // C8: s[succ,v] >= d[pred,v] + m[pred,v] + r[succ] - 2  (∀ edge, v where s exists)
     // Build per-block save variable lookup for efficiency.
     std::map<NodeId, std::vector<std::pair<llvm::Value *, GRBVar>>> saveByBlock;
     for (const auto &[key, sVar] : s_) {
@@ -478,7 +547,11 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
         if (it == saveByBlock.end())
             continue;
         for (const auto &[V, sVar] : it->second) {
-            model_.addConstr(sVar >= dHat_[std::make_pair(pred, V)] + r_[succ] - 1,
+            BlockVarKey predKey = std::make_pair(pred, V);
+            auto dIt = d_.find(predKey);
+            if (dIt == d_.end())
+                continue; // d[pred,v] = 0, so RHS = 0 + m + r - 2 <= 0, trivially satisfied.
+            model_.addConstr(sVar >= dIt->second + m_[predKey] + r_[succ] - 2,
                              "C8_save_edge_" + std::to_string(idx));
             idx++;
         }
