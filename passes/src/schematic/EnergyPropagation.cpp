@@ -111,9 +111,12 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 
         SchematicBlock *bb = ckpt.src;
         if (bb) {
-            // Inner-loop scaling — skip for nested inner loops when propagating
-            // within an outer loopScope. Inner loop energy is managed by its own
-            // checkpoint mechanism; re-applying seenLoops would double-count.
+            // Inner-loop scaling — skip inner loop LoopMarks when propagating
+            // within an outer loopScope. Python applies seenLoops for all loops
+            // unconditionally, but that relies on Step 10's direct E_to_leave/
+            // E_left adjustment which is semantically incorrect (see DEVIATION
+            // comment in LoopAnalyzer.cpp). Instead, inner loop costs are added
+            // to E_loop/availableEnergy locally in LoopAnalyzer.
             auto metaIt = solution.blockMeta.find(bb);
             if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
                 llvm::Loop *markLoop = metaIt->second.loop->loop;
@@ -187,8 +190,9 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
         if (loopScope && bb->getLLVMBlock() && !loopScope->contains(bb->getLLVMBlock()))
             continue;
 
-        // Inner-loop scaling (reference lines 293-295) — skip for nested inner
-        // loops when propagating within an outer loopScope.
+        // Inner-loop scaling (reference lines 293-295) — skip inner loop
+        // LoopMarks within an outer loopScope (see comment above in
+        // propagateEnergyToLeave for rationale).
         auto metaIt = solution.blockMeta.find(bb);
         if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
             llvm::Loop *markLoop = metaIt->second.loop->loop;

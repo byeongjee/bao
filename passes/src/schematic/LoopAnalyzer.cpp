@@ -248,12 +248,21 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     double E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm;
 
     // Account for inner loop multi-iteration costs.
-    // The propagation within the outer loop (with loopScope filter) only sees
-    // single-iteration costs for inner loops. Add the multi-iteration scaling
-    // here so E_loop reflects the true cost of one outer iteration.
-    // This is equivalent to Python's Step 10 direct adjustment + seenLoops
-    // mechanism, but avoids modifying blockMeta (which would break sub-path
-    // feasibility for the outer loop's trace analysis).
+    //
+    // DEVIATION FROM PYTHON REFERENCE (schematic.py:643-664):
+    // Python's Step 10 directly adjusts E_to_leave/E_left on all loop blocks:
+    //   bb.energy_to_leave += (nb_it - 1) * energy_one_it
+    //   bb.energy_left   -= (nb_it - 1) * energy_one_it
+    // This is semantically incorrect: it treats the inner loop as running
+    // nb_it iterations without any internal checkpoints, ignoring that inner
+    // loop checkpoints reset the energy budget. The deflated E_left values
+    // can cause false infeasibilities in the outer loop's sub-path RCG solver.
+    //
+    // Instead, we add innerLoopAdj to E_loop and availableEnergy locally,
+    // without modifying blockMeta. The seenLoops in propagation is filtered
+    // by loopScope to skip inner loop marks during outer loop sub-path
+    // analysis (see EnergyPropagation.cpp). At function level
+    // (loopScope=nullptr), all LoopMarks are applied, matching Python.
     double innerLoopAdj = 0.0;
     {
         std::set<llvm::Loop *> accountedInnerLoops;
@@ -477,10 +486,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             SchematicBlock *block = graph_.getOrCreate(BB);
             auto &meta = solution.blockMeta[block];
             meta.loop = mark;
-            // Do NOT directly adjust E_to_leave/E_left here.
-            // The LoopMark stores nbIter and costOneIt; the energy propagation
-            // functions (propagateEnergyToLeave/propagateEnergyLeft) apply the
-            // iteration scaling dynamically via seenLoops, matching Python.
+            // Do NOT directly adjust E_to_leave/E_left here — see the
+            // DEVIATION comment at innerLoopAdj above for why.
         }
     }
 
