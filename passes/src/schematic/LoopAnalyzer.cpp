@@ -247,39 +247,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     double endEToLeave = solution.blockMeta[endSynth].E_to_leave;
     double E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm;
 
-    // Account for inner loop multi-iteration costs.
-    //
-    // DEVIATION FROM PYTHON REFERENCE (schematic.py:643-664):
-    // Python's Step 10 directly adjusts E_to_leave/E_left on all loop blocks:
-    //   bb.energy_to_leave += (nb_it - 1) * energy_one_it
-    //   bb.energy_left   -= (nb_it - 1) * energy_one_it
-    // This is semantically incorrect: it treats the inner loop as running
-    // nb_it iterations without any internal checkpoints, ignoring that inner
-    // loop checkpoints reset the energy budget. The deflated E_left values
-    // can cause false infeasibilities in the outer loop's sub-path RCG solver.
-    //
-    // Instead, we add innerLoopAdj to E_loop and availableEnergy locally,
-    // without modifying blockMeta. The seenLoops in propagation is filtered
-    // by loopScope to skip inner loop marks during outer loop sub-path
-    // analysis (see EnergyPropagation.cpp). At function level
-    // (loopScope=nullptr), all LoopMarks are applied, matching Python.
-    double innerLoopAdj = 0.0;
-    {
-        std::set<llvm::Loop *> accountedInnerLoops;
-        for (llvm::BasicBlock *BB : L->getBlocksVector()) {
-            SchematicBlock *block = graph_.getOrCreate(BB);
-            auto metaIt = solution.blockMeta.find(block);
-            if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-                llvm::Loop *markLoop = metaIt->second.loop->loop;
-                if (markLoop != L && !accountedInnerLoops.count(markLoop)) {
-                    accountedInnerLoops.insert(markLoop);
-                    innerLoopAdj +=
-                        (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
-                }
-            }
-        }
-        E_loop += innerLoopAdj;
-    }
+    // Inner loop multi-iteration costs are handled by Step 10's direct
+    // E_to_leave/E_left adjustment on loop blocks (matching Python reference
+    // schematic.py:643-664) and by propagation's seenLoops scaling (which
+    // applies unconditionally, without loopScope filtering).
 
     // DEBUG Step 7
     PLOGI << "[DEBUG Step7] loop=" << header->getName()
@@ -296,7 +267,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
     PLOGI << "[DEBUG Step7] E_loop=" << E_loop << " = startEToLeave(" << startEToLeave
           << ") - endEToLeave(" << endEToLeave << ") + loopIncrementCostNvm("
-          << params_.loopIncrementCostNvm << ") + innerLoopAdj(" << innerLoopAdj << ")";
+          << params_.loopIncrementCostNvm << ")";
 
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
@@ -434,7 +405,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             // Re-read from synthetic blocks after re-propagation.
             startEToLeave = solution.blockMeta[startSynth].E_to_leave;
             endEToLeave = solution.blockMeta[endSynth].E_to_leave;
-            E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm + innerLoopAdj;
+            E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm;
             decision.E_loop = E_loop;
             decision.bodyAllocation = bodyAlloc;
 
@@ -442,11 +413,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 break;
 
             // Convergence uses startEToLeave (not endEToLeave), matching reference
-            // schematic.py:614. In Python, propagation applies seenLoops for all
-            // loops, so first_bb.energy_to_leave already includes inner loop scaling.
-            // In C++, the loopScope filter skips inner loop marks during propagation,
-            // so we add innerLoopAdj to match Python's effective startEToLeave.
-            availableEnergy = params_.capacity - (startEToLeave + innerLoopAdj);
+            // schematic.py:614. Propagation applies seenLoops for all loops
+            // unconditionally, so startEToLeave already includes inner loop scaling.
+            availableEnergy = params_.capacity - startEToLeave;
             if (availableEnergy <= 0.0)
                 break;
             rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
@@ -473,21 +442,23 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     solution.loopDecisions[headerBlock] = decision;
 
-    // Step 10: Set LoopMark on blocks and adjust energy.
-    // E_left may go negative after adjustment — this is expected and correctly
-    // reflects that the block's remaining energy budget is consumed by subsequent
-    // iterations. Downstream propagateEnergy() handles negative E_left correctly.
+    // Step 10: Set LoopMark on blocks and adjust energy (reference: schematic.py:643-664).
+    // Directly adjust E_to_leave/E_left on all loop blocks to account for
+    // multi-iteration cost. E_left may go negative — this is expected and
+    // correctly reflects that the block's remaining energy budget is consumed
+    // by subsequent iterations.
     if (decision.numIterationsPerCharge > 1) {
         unsigned adjIter = decision.numIterationsPerCharge;
         if (decision.loopFitsEntirely)
             adjIter = static_cast<unsigned>(maxTripCount);
         LoopMark mark{L, adjIter, E_loop};
+        double adjustment = (adjIter - 1) * E_loop;
         for (llvm::BasicBlock *BB : L->getBlocksVector()) {
             SchematicBlock *block = graph_.getOrCreate(BB);
             auto &meta = solution.blockMeta[block];
             meta.loop = mark;
-            // Do NOT directly adjust E_to_leave/E_left here — see the
-            // DEVIATION comment at innerLoopAdj above for why.
+            meta.E_to_leave += adjustment;
+            meta.E_left -= adjustment;
         }
     }
 
