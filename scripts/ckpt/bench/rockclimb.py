@@ -83,6 +83,7 @@ def run_rockclimb_benchmarks(
     energy_config: Path | None = None,
     cpu_freq: int,
     pass_log_level: str,
+    accumulate_keys_file: Path | None,
 ) -> None:
     """Run RockClimb checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -165,4 +166,5 @@ def run_rockclimb_benchmarks(
             csv_header=_CSV_HEADER,
             row_builder=_build_row,
             saleae_manager=saleae_manager,
+            accumulate_keys_file=accumulate_keys_file,
         )

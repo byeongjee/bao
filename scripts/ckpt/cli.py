@@ -165,6 +165,7 @@ def _resolve_algorithm_config(
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
 @click.option("--milp-gap", type=float, default=0.05, help="MIP optimality gap (default: 0.05 = 5%).")
 @click.option("--milp-log-file", type=click.Path(), default="", help="Gurobi log file path.")
+@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def compile_milp_cmd(
     ctx: click.Context,
@@ -185,6 +186,7 @@ def compile_milp_cmd(
     save_temps: bool,
     milp_gap: float,
     milp_log_file: str,
+    accumulate_keys: str | None,
 ) -> None:
     """Run the MILP checkpoint insertion compilation pipeline.
 
@@ -236,6 +238,12 @@ def compile_milp_cmd(
         ),
     )
 
+    if accumulate_keys:
+        from .bench.runner import accumulate_keys_to_file, extract_energy_params
+        ep = extract_energy_params(result.pass_output)
+        if ep is not None:
+            accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
+
     logger.info("Object: %s", result.object_file)
     logger.info("Assembly: %s", result.assembly_file)
     if result.elf_file:
@@ -273,6 +281,7 @@ def compile_milp_cmd(
     help="CPU frequency in MHz (default: 1).",
 )
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
+@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def compile_rockclimb_cmd(
     ctx: click.Context,
@@ -289,6 +298,7 @@ def compile_rockclimb_cmd(
     no_precomputed_energy: bool,
     cpu_freq: str,
     save_temps: bool,
+    accumulate_keys: str | None,
 ) -> None:
     """Run the RockClimb machine-level compilation pipeline.
 
@@ -334,6 +344,18 @@ def compile_rockclimb_cmd(
         ),
     )
 
+    if accumulate_keys:
+        import json as _json
+        from .bench.runner import accumulate_keys_to_file, extract_energy_params
+        ep = extract_energy_params(result.pass_output)
+        if ep is not None:
+            accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
+        elif result.stats_json is not None and result.stats_json.is_file():
+            data = _json.loads(result.stats_json.read_text())
+            req = data.get("required_energy_keys", [])
+            if req:
+                accumulate_keys_to_file(set(req), Path(accumulate_keys))
+
     logger.info("Assembly: %s", result.assembly_file)
     if result.elf_file:
         logger.info("ELF: %s", result.elf_file)
@@ -360,6 +382,7 @@ def _compile_schematic_impl(
     cpu_freq: str,
     save_temps: bool,
     algorithm_label: str,
+    accumulate_keys: str | None,
 ) -> None:
     from .bench.config import default_energy_config
     from .compile.schematic import SchematicCompileOptions, compile_schematic
@@ -411,6 +434,12 @@ def _compile_schematic_impl(
         ),
     )
 
+    if accumulate_keys:
+        from .bench.runner import accumulate_keys_to_file, extract_energy_params
+        ep = extract_energy_params(result.pass_output)
+        if ep is not None:
+            accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
+
     if result.object_file:
         logger.info("Object: %s", result.object_file)
     if result.assembly_file:
@@ -460,6 +489,7 @@ def _compile_schematic_impl(
     help="CPU frequency in MHz (default: 1).",
 )
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
+@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def compile_schematic_cmd(
     ctx: click.Context,
@@ -480,6 +510,7 @@ def compile_schematic_cmd(
     estimator_mode: str,
     cpu_freq: str,
     save_temps: bool,
+    accumulate_keys: str | None,
 ) -> None:
     """Run the SCHEMATIC trace-based compilation pipeline.
 
@@ -490,6 +521,7 @@ def compile_schematic_cmd(
         link, debug, device_debug, halt_mode, trace_file, trace_only,
         opt_level, clang_opt_level, extra_includes, estimator_mode,
         cpu_freq, save_temps, algorithm_label="schematic",
+        accumulate_keys=accumulate_keys,
     )
 
 
@@ -530,6 +562,7 @@ def compile_schematic_cmd(
     help="CPU frequency in MHz (default: 1).",
 )
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
+@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def compile_schematic_o3_cmd(
     ctx: click.Context,
@@ -550,6 +583,7 @@ def compile_schematic_o3_cmd(
     estimator_mode: str,
     cpu_freq: str,
     save_temps: bool,
+    accumulate_keys: str | None,
 ) -> None:
     """Run the SCHEMATIC-O3 trace-based compilation pipeline (clang -O3).
 
@@ -560,6 +594,7 @@ def compile_schematic_o3_cmd(
         link, debug, device_debug, halt_mode, trace_file, trace_only,
         opt_level, clang_opt_level, extra_includes, estimator_mode,
         cpu_freq, save_temps, algorithm_label="schematicO3",
+        accumulate_keys=accumulate_keys,
     )
 
 
@@ -658,6 +693,7 @@ def bench() -> None:
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def bench_milp_cmd(
     ctx: click.Context,
@@ -669,6 +705,7 @@ def bench_milp_cmd(
     estimator_mode: str,
     energy_config: str | None,
     cpu_freq: str,
+    accumulate_keys: str | None,
 ) -> None:
     """Run MILP benchmarks across programs and capacitor sizes."""
     from .bench.milp import run_milp_benchmarks
@@ -685,6 +722,7 @@ def bench_milp_cmd(
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
         pass_log_level=ctx.obj["pass_log_level"],
+        accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
     )
 
 
@@ -711,6 +749,7 @@ def bench_milp_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def bench_rockclimb_cmd(
     ctx: click.Context,
@@ -721,6 +760,7 @@ def bench_rockclimb_cmd(
     halt_mode: str,
     energy_config: str | None,
     cpu_freq: str,
+    accumulate_keys: str | None,
 ) -> None:
     """Run RockClimb benchmarks across programs and capacitor sizes."""
     from .bench.rockclimb import run_rockclimb_benchmarks
@@ -736,6 +776,7 @@ def bench_rockclimb_cmd(
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
         pass_log_level=ctx.obj["pass_log_level"],
+        accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
     )
 
 
@@ -773,6 +814,7 @@ def bench_rockclimb_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def bench_schematic_cmd(
     ctx: click.Context,
@@ -785,6 +827,7 @@ def bench_schematic_cmd(
     trace_config: str | None,
     estimator_mode: str,
     cpu_freq: str,
+    accumulate_keys: str | None,
 ) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -804,6 +847,7 @@ def bench_schematic_cmd(
         clang_opt_level=0,
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label="schematic",
+        accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
     )
 
 
@@ -841,6 +885,7 @@ def bench_schematic_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def bench_schematic_o3_cmd(
     ctx: click.Context,
@@ -853,6 +898,7 @@ def bench_schematic_o3_cmd(
     trace_config: str | None,
     estimator_mode: str,
     cpu_freq: str,
+    accumulate_keys: str | None,
 ) -> None:
     """Run SCHEMATIC-O3 benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -872,6 +918,7 @@ def bench_schematic_o3_cmd(
         clang_opt_level=3,
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label="schematicO3",
+        accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
     )
 
 
