@@ -276,8 +276,13 @@ void CheckpointOptimizer::addVariables() {
     }
 
     // s_{b,v} for b != entry, v in LiveIn(b).
+    // Skip when r[b]=0 is forced (merge points: s <= r = 0).
+    // Skip when no predecessor has d[pred,v] (s <= Σ_pred d = 0).
     for (NodeId block : cfg_.getBlocks()) {
         if (block == entry)
+            continue;
+        // Merge points have r[b]=0 forced, so s[b,v]=0 for all v.
+        if (predecessors_[block].size() > 1)
             continue;
         // Union of eligible and ineligible live-ins.
         std::set<llvm::Value *> liveIn;
@@ -286,6 +291,16 @@ void CheckpointOptimizer::addVariables() {
         for (llvm::Value *V : state_.getIneligLiveIn(block))
             liveIn.insert(V);
         for (llvm::Value *V : liveIn) {
+            // Skip if no predecessor is in Reach(v) (d[pred,v] = 0 for all preds).
+            bool hasDirtyPred = false;
+            for (NodeId pred : predecessors_[block]) {
+                if (d_.count(std::make_pair(pred, V))) {
+                    hasDirtyPred = true;
+                    break;
+                }
+            }
+            if (!hasDirtyPred)
+                continue;
             BlockVarKey key = std::make_pair(block, V);
             s_[key] =
                 model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "s", block, V));
