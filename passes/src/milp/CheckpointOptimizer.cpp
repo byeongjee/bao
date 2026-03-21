@@ -145,6 +145,12 @@ bool CheckpointOptimizer::solve() {
     buildModel();
     if (timeLimit_ > 0.0)
         model_.set(GRB_DoubleParam_TimeLimit, timeLimit_);
+    if (mipGap_ > 0.0)
+        model_.set(GRB_DoubleParam_MIPGap, mipGap_);
+    if (!logFile_.empty()) {
+        model_.set(GRB_IntParam_OutputFlag, 1);
+        model_.set(GRB_StringParam_LogFile, logFile_);
+    }
     model_.optimize();
     solved_ = true;
 
@@ -257,7 +263,7 @@ void CheckpointOptimizer::addVariables() {
             }
             if (reachableDefs_[V].count(block)) {
                 d_[key] =
-                    model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "d", block, V));
+                    model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "d", block, V));
             }
         }
     }
@@ -271,7 +277,7 @@ void CheckpointOptimizer::addVariables() {
                 continue;
             BlockVarKey key = std::make_pair(block, static_cast<llvm::Value *>(GV));
             rHat_[key] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "rHat", block, GV));
+                model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "rHat", block, GV));
         }
     }
 
@@ -405,15 +411,16 @@ void CheckpointOptimizer::constrainVMCapacity() {
 }
 
 // C3: rHat[b,v] = r[b] AND m[b,v]  (only for eligible + live-in pairs)
-// Not-live-in and ineligible cases are handled by not creating the variable.
+// McCormick linearization (exact when r,m are binary):
+//   rHat <= r,  rHat <= m,  rHat >= r + m - 1
 void CheckpointOptimizer::constrainNeedRestoreLinearization() {
     for (const auto &[key, rHatVar] : rHat_) {
         NodeId block = key.first;
         llvm::Value *V = key.second;
-        // All entries in rHat_ are eligible + live-in.
-        GRBVar inputs[] = {r_[block], m_[key]};
-        model_.addGenConstrAnd(rHatVar, inputs, 2,
-                               "C3_rHat_and_" + nodeToken(cfg_, block) + "_" + valueToken(V));
+        std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
+        model_.addConstr(rHatVar <= r_[block], "C3_rHat_le_r_" + suffix);
+        model_.addConstr(rHatVar <= m_[key], "C3_rHat_le_m_" + suffix);
+        model_.addConstr(rHatVar >= r_[block] + m_[key] - 1, "C3_rHat_ge_rm_" + suffix);
     }
 }
 
@@ -575,7 +582,6 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
 
 // At region starts, accumulated energy equals the startup cost:
 // Indicator: r_[b] = 1  →  eAccum_[b] = E_start(b)
-// Replaces big-M formulation with native Gurobi indicator constraints.
 void CheckpointOptimizer::constrainEnergyInitAtRegionStart() {
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr eStart = buildEStart(block);
@@ -585,7 +591,6 @@ void CheckpointOptimizer::constrainEnergyInitAtRegionStart() {
 }
 
 // Indicator: r_[dst] = 0  →  eAccum_[dst] >= eAccum_[src] + E_blk(src)
-// Replaces big-M formulation with native Gurobi indicator constraints.
 void CheckpointOptimizer::constrainEnergyPropagation() {
     unsigned edgeIdx = 0;
     for (const auto &[src, dst] : cfg_.getEdges()) {

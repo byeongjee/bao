@@ -163,6 +163,8 @@ def _resolve_algorithm_config(
     help="CPU frequency in MHz (default: 1).",
 )
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
+@click.option("--milp-gap", type=float, default=0.05, help="MIP optimality gap (default: 0.05 = 5%).")
+@click.option("--milp-log-file", type=click.Path(), default="", help="Gurobi log file path.")
 @click.pass_context
 def compile_milp_cmd(
     ctx: click.Context,
@@ -181,6 +183,8 @@ def compile_milp_cmd(
     extra_includes: tuple[str, ...],
     cpu_freq: str,
     save_temps: bool,
+    milp_gap: float,
+    milp_log_file: str,
 ) -> None:
     """Run the MILP checkpoint insertion compilation pipeline.
 
@@ -226,6 +230,8 @@ def compile_milp_cmd(
             device_debug=device_debug,
             estimator_mode=estimator_mode,
             cpu_freq=cpu_freq_hz,
+            milp_gap=milp_gap,
+            milp_log_file=milp_log_file,
             save_temps=save_temps,
         ),
     )

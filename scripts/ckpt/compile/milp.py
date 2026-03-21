@@ -46,6 +46,8 @@ class MilpCompileOptions:
     cpu_freq: int
     opt_level: int
     clang_opt_level: int
+    milp_gap: float
+    milp_log_file: str
     save_temps: bool = False
     extra_includes: list[str] = field(default_factory=list)
 
@@ -121,6 +123,9 @@ def compile_milp(
         if opts.device_debug:
             milp_extra_flags.append("-add-debug-markers")
         milp_extra_flags.append(f"-ckpt-log-level={opts.pass_log_level}")
+        milp_extra_flags.append(f"-milp-gap={opts.milp_gap}")
+        if opts.milp_log_file:
+            milp_extra_flags.append(f"-milp-log-file={opts.milp_log_file}")
 
         try:
             if opts.estimator_mode == "assembly":
@@ -338,7 +343,7 @@ def _run_milp_pass(
     cmd.append(f"-ckpt-stats-json={output_ll.parent / 'stats.json'}")
     cmd += ["-S", str(input_ll), "-o", str(output_ll)]
 
-    result = run(cmd, step_name=pass_name)
+    result = run(cmd, step_name=pass_name, timeout=660)
     return result.output
 
 

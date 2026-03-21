@@ -88,6 +88,8 @@ class CheckpointOptimizer {
 
     void setAcceptFeasible(bool accept) { acceptFeasible_ = accept; }
     void setTimeLimit(double seconds) { timeLimit_ = seconds; }
+    void setMIPGap(double gap) { mipGap_ = gap; }
+    void setLogFile(const std::string &path) { logFile_ = path; }
 
     const MILPSolution &getSolution() const { return solution_; }
 
@@ -113,6 +115,8 @@ class CheckpointOptimizer {
     bool solved_ = false;
     bool acceptFeasible_ = false;
     double timeLimit_ = 600.0;
+    double mipGap_ = 0.05;
+    std::string logFile_;
 
     using BlockVarKey = std::pair<NodeId, llvm::Value *>;
 

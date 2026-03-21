@@ -31,6 +31,8 @@ extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<std::string> MILPConfigOpt;
 extern cl::opt<bool> AcceptFeasibleOpt;
 extern cl::opt<double> MILPTimeLimitOpt;
+extern cl::opt<double> MILPGapOpt;
+extern cl::opt<std::string> MILPLogFileOpt;
 extern cl::opt<bool> AddDebugMarkersOpt;
 extern cl::opt<std::string> BBFreqFileOpt;
 
@@ -138,6 +140,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     CheckpointOptimizer optimizer(milpInput);
     optimizer.setAcceptFeasible(AcceptFeasibleOpt);
     optimizer.setTimeLimit(MILPTimeLimitOpt);
+    optimizer.setMIPGap(MILPGapOpt);
+    optimizer.setLogFile(MILPLogFileOpt);
 
     auto infeasible = optimizer.getInfeasibleBlocks();
     if (!infeasible.empty()) {
