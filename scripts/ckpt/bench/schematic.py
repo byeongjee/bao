@@ -180,6 +180,7 @@ def run_schematic_benchmarks(
     clang_opt_level: int,
     pass_log_level: str,
     algorithm_label: str,
+    accumulate_keys_file: Path | None,
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -295,4 +296,5 @@ def run_schematic_benchmarks(
             csv_header=_CSV_HEADER,
             row_builder=_build_row,
             saleae_manager=saleae_manager,
+            accumulate_keys_file=accumulate_keys_file,
         )

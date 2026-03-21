@@ -111,6 +111,24 @@ _ENERGY_PARAMS_RE = re.compile(
 )
 
 
+def accumulate_keys_to_file(keys: set[str], file_path: Path) -> None:
+    """Merge *keys* with any existing keys in *file_path* and write back.
+
+    The file is a single line of comma-separated unique identifiers, sorted.
+    """
+    existing: set[str] = set()
+    if file_path.is_file():
+        text = file_path.read_text().strip()
+        if text:
+            for k in text.split(","):
+                k = k.strip()
+                if k:
+                    existing.add(k)
+    merged = sorted(existing | keys)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(",".join(merged) + "\n")
+
+
 def extract_energy_params(text: str) -> tuple[list[str], list[str]] | None:
     """Extract required and missing energy parameter keys from pass output.
 
@@ -148,6 +166,7 @@ def run_benchmark_matrix(
     csv_header: list[str],
     row_builder: RowBuilder,
     saleae_manager: Manager | None,
+    accumulate_keys_file: Path | None,
 ) -> None:
     """Run compile + Saleae timing + optional NVM-read across benchmark x capacitor matrix.
 
@@ -334,6 +353,8 @@ def run_benchmark_matrix(
         logger.info("--- Energy parameters ---")
         logger.info("  Required (%d keys): %s", len(all_required_keys), ", ".join(sorted(all_required_keys)))
         logger.info("  Missing  (%d keys): %s", len(all_missing_keys), ", ".join(sorted(all_missing_keys)))
+        if accumulate_keys_file is not None:
+            accumulate_keys_to_file(all_required_keys, accumulate_keys_file)
 
     # ----- Final summary -----
     logger.info("")
