@@ -38,6 +38,14 @@ cl::opt<double> MILPTimeLimitOpt("milp-time-limit",
                                  cl::desc("Time limit for MILP solver in seconds (default: 600)"),
                                  cl::value_desc("seconds"), cl::init(600.0));
 
+cl::opt<double> MILPGapOpt("milp-gap",
+                           cl::desc("MIP optimality gap tolerance (default: 0.05 = 5%)"),
+                           cl::value_desc("fraction"), cl::init(0.05));
+
+cl::opt<std::string> MILPLogFileOpt("milp-log-file",
+                                    cl::desc("Gurobi log file path (empty = no logging)"),
+                                    cl::value_desc("path"), cl::init(""));
+
 cl::opt<bool> LoopStripMiningEnabledOpt("loop-strip-mining-enabled",
                                         cl::desc("Enable loop strip-mining before MILP passes"),
                                         cl::init(false));

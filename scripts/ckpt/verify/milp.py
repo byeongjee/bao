@@ -63,6 +63,8 @@ def verify_milp(
                 cpu_freq=cpu_freq,
                 opt_level=3,
                 clang_opt_level=3,
+                milp_gap=0.05,
+                milp_log_file="",
             ),
         )
         return InstrumentedOutput(
