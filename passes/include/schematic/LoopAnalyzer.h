@@ -2,6 +2,7 @@
 
 #include "common/CFGAnalysis.h"
 #include "schematic/MemoryAllocator.h"
+#include "schematic/SchematicBlock.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
 #include "schematic/SchematicStateAnalysis.h"
@@ -19,7 +20,7 @@ class LoopAnalyzer {
   public:
     LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
                  const SchematicStateAnalysis &state, const SchematicParams &params,
-                 VMAddressTracker *tracker);
+                 VMAddressTracker *tracker, SchematicGraph &graph);
 
     /// Set loaded loop traces from TraceLoader for trace-guided analysis.
     void setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces);
@@ -34,6 +35,7 @@ class LoopAnalyzer {
     const SchematicStateAnalysis &state_;
     const SchematicParams &params_;
     VMAddressTracker *tracker_;
+    SchematicGraph &graph_;
 
     std::vector<LoadedLoopTrace> loadedLoopTraces_;
 
@@ -42,12 +44,6 @@ class LoopAnalyzer {
 
     RegionAllocation
     buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &placement) const;
-
-    /// Propagate energy from synthetic boundary nodes using the unified functions.
-    /// Called after each loop body RCG solve and during convergence.
-    void propagateFromBoundaries(llvm::Loop *L, const RegionAllocation &alloc,
-                                 SchematicSolution &solution, llvm::BasicBlock *startSynth,
-                                 llvm::BasicBlock *endSynth);
 };
 
 } // namespace checkpoint

@@ -11,7 +11,7 @@ namespace checkpoint {
 
 /// Compute block execution energy adjusted for VM placement savings.
 /// Matches reference's bb.final_cost.
-double getBlockExecEnergy(llvm::BasicBlock *BB, const SchematicSolution &solution,
+double getBlockExecEnergy(SchematicBlock *block, const SchematicSolution &solution,
                           const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
                           const SchematicParams &params);
 

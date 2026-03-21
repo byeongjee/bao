@@ -6,7 +6,6 @@
 #include "schematic/RCGSolver.h"
 #include "schematic/TraceAnalyzer.h"
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 
 #include <cmath>
@@ -16,8 +15,9 @@ namespace checkpoint {
 
 LoopAnalyzer::LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
-                           VMAddressTracker *tracker)
-    : LI_(LI), SE_(SE), cfg_(cfg), state_(state), params_(params), tracker_(tracker) {}
+                           VMAddressTracker *tracker, SchematicGraph &graph)
+    : LI_(LI), SE_(SE), cfg_(cfg), state_(state), params_(params), tracker_(tracker),
+      graph_(graph) {}
 
 void LoopAnalyzer::setLoadedLoopTraces(const std::vector<LoadedLoopTrace> &traces) {
     loadedLoopTraces_ = traces;
@@ -50,14 +50,14 @@ LoopAnalyzer::buildBoundaryAllocation(const std::map<llvm::Value *, Placement> &
 
 bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     llvm::BasicBlock *header = L->getHeader();
+    SchematicBlock *headerBlock = graph_.getOrCreate(header);
 
-    // Create synthetic START_Loop/END_Loop boundary blocks (detached from function).
-    // These match the reference Python's zero-cost synthetic nodes used as RCG
-    // boundaries and energy anchor points.
-    llvm::BasicBlock *startSynth = llvm::BasicBlock::Create(header->getContext(), "START_Loop");
-    llvm::BasicBlock *endSynth = llvm::BasicBlock::Create(header->getContext(), "END_Loop");
+    // Create synthetic START_Loop/END_Loop boundary blocks.
+    SchematicBlock *startSynth = graph_.createSynthetic("START_Loop");
+    SchematicBlock *endSynth = graph_.createSynthetic("END_Loop");
 
-    // RAII cleanup: remove synthetic block entries and delete blocks on all exit paths.
+    // Cleanup: erase synthetic block entries from solution maps on all exit paths.
+    // Graph owns the synthetic blocks, so no delete needed.
     auto cleanup = [&]() {
         solution.blockMeta.erase(startSynth);
         solution.blockMeta.erase(endSynth);
@@ -65,10 +65,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         solution.decidedPlacements.erase(endSynth);
         solution.blockAllocation.erase(startSynth);
         solution.blockAllocation.erase(endSynth);
-        startSynth->deleteValue();
-        endSynth->deleteValue();
     };
-    // Wrap all return paths: on scope exit, run cleanup.
     struct ScopeGuard {
         std::function<void()> fn;
         ~ScopeGuard() { fn(); }
@@ -84,9 +81,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     uint64_t maxTripCount = *tcOpt;
 
     // Step 2: Get loop body paths (header-to-latch).
-    std::vector<std::vector<llvm::BasicBlock *>> bodyPaths;
+    std::vector<std::vector<SchematicBlock *>> bodyPaths;
     for (const auto &lt : loadedLoopTraces_) {
-        if (lt.header == header) {
+        if (lt.header == headerBlock) {
             for (const auto &ep : lt.iterationPaths) {
                 if (!ep.blocks.empty())
                     bodyPaths.push_back(ep.blocks);
@@ -103,7 +100,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // Reference: schematic.py:533-537 — collected before loop trace analysis.
     std::vector<const RegionAllocation *> loopMemoryAllocations;
     for (llvm::BasicBlock *BB : L->getBlocksVector()) {
-        auto it = solution.blockAllocation.find(BB);
+        SchematicBlock *block = graph_.getOrCreate(BB);
+        auto it = solution.blockAllocation.find(block);
         if (it != solution.blockAllocation.end()) {
             const RegionAllocation *ptr = it->second.get();
             if (std::find(loopMemoryAllocations.begin(), loopMemoryAllocations.end(), ptr) ==
@@ -131,6 +129,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         path.insert(path.begin(), startSynth);
         path.push_back(endSynth);
 
+        // Add trace edges so SchematicBlock predecessors/successors are populated.
+        graph_.addTraceEdges(path);
+
         std::string errorMsg;
         if (!analyzeTrace(path, solution, state_, cfg_, params_, tracker_, LI_, L, errorMsg)) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for loop at '"
@@ -142,7 +143,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // Step 3b: Analyze uncovered blocks within this loop (reference: schematic.py:554).
     {
         std::string errorMsg;
-        if (!findAndAnalyzeNotFixedPaths(cfg_, solution, state_, params_, tracker_, LI_, L,
+        if (!findAndAnalyzeNotFixedPaths(cfg_, solution, state_, params_, tracker_, LI_, L, graph_,
                                          errorMsg)) {
             PLOGE << "SCHEMATIC infeasible: uncovered block in loop at '" << header->getName()
                   << "': " << errorMsg;
@@ -151,18 +152,19 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     // Step 3c: Resolve loop-internal edges (reference: schematic.py:555).
-    removePotentialCheckpointsBetweenFixedBBs(cfg_, solution, state_, params_, LI_, L);
+    removePotentialCheckpointsBetweenFixedBBs(cfg_, solution, state_, params_, LI_, graph_, L);
 
     // Step 5: Get header and latch allocations from decided placements.
     std::map<llvm::Value *, Placement> headerAlloc;
-    auto hdIt = solution.decidedPlacements.find(header);
+    auto hdIt = solution.decidedPlacements.find(headerBlock);
     if (hdIt != solution.decidedPlacements.end())
         headerAlloc = hdIt->second;
 
     llvm::BasicBlock *latch = L->getLoopLatch();
+    SchematicBlock *latchBlock = latch ? graph_.getOrCreate(latch) : nullptr;
     std::map<llvm::Value *, Placement> latchAlloc;
-    if (latch) {
-        auto ltIt = solution.decidedPlacements.find(latch);
+    if (latchBlock) {
+        auto ltIt = solution.decidedPlacements.find(latchBlock);
         if (ltIt != solution.decidedPlacements.end())
             latchAlloc = ltIt->second;
     }
@@ -177,10 +179,39 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         decision.numIterationsPerCharge = 1;
         decision.E_loop = 0.0;
         decision.bodyAllocation = buildBoundaryAllocation(headerAlloc);
-        solution.loopDecisions[header] = decision;
-        propagateFromBoundaries(L, decision.bodyAllocation, solution, startSynth, endSynth);
-        if (latch)
-            solution.enabledCheckpoints.insert(CFGEdge{latch, header});
+        solution.loopDecisions[headerBlock] = decision;
+
+        // Propagate energy from synthetic boundaries directly.
+        double energyLeftStart =
+            params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+        for (const auto &[gv, va] : decision.bodyAllocation.vars) {
+            if (va.placement == Placement::VM)
+                energyLeftStart -= params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
+        }
+        SchematicBlock *fwdDst =
+            startSynth->successors().empty() ? nullptr : startSynth->successors()[0];
+        if (fwdDst) {
+            CFGEdge fwdEdge{startSynth, fwdDst};
+            propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg_, state_, params_, LI_, L);
+        }
+        double eToLeave =
+            params_.E_epi + params_.N_reg * params_.regStoreEnergy + params_.loopIncrementCostNvm;
+        for (const auto &[gv, va] : decision.bodyAllocation.vars) {
+            if (va.placement == Placement::VM)
+                eToLeave += params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
+        }
+        SchematicBlock *bwdSrc =
+            endSynth->predecessors().empty() ? nullptr : endSynth->predecessors()[0];
+        if (bwdSrc) {
+            CFGEdge bwdEdge{bwdSrc, endSynth};
+            propagateEnergyToLeave(bwdEdge, eToLeave, solution, cfg_, state_, params_, LI_, L);
+        }
+        solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[headerBlock].E_to_leave;
+        solution.blockMeta[startSynth].E_left = energyLeftStart;
+        solution.blockMeta[endSynth].E_to_leave = eToLeave;
+
+        if (latchBlock)
+            solution.enabledCheckpoints.insert(CFGEdge{latchBlock, headerBlock});
         return true;
     }
 
@@ -192,13 +223,13 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // Copy energy values from header/latch to synthetic boundary blocks.
     // In Python, the synthetic blocks are connected in the networkx graph, so
     // apply_memory_allocation's propagation reaches them directly. In C++, the
-    // synthetic blocks are detached LLVM blocks, so we manually copy.
+    // synthetic blocks now have proper edges via SchematicGraph.
     // Reference: Python's first_bb/last_bb in E_loop computation (schematic.py:566-569).
-    solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[header].E_to_leave;
-    solution.blockMeta[startSynth].E_left = solution.blockMeta[header].E_left;
-    if (latch) {
+    solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[headerBlock].E_to_leave;
+    solution.blockMeta[startSynth].E_left = solution.blockMeta[headerBlock].E_left;
+    if (latchBlock) {
         solution.blockMeta[endSynth].E_to_leave = solution.blockMeta[endSynth].E_to_leave;
-        solution.blockMeta[endSynth].E_left = solution.blockMeta[latch].E_left;
+        solution.blockMeta[endSynth].E_left = solution.blockMeta[latchBlock].E_left;
     }
 
     // Read E_loop from synthetic boundary blocks.
@@ -212,7 +243,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     if (E_loop <= 0.0) {
         decision.numIterationsPerCharge = 0;
-        solution.loopDecisions[header] = decision;
+        solution.loopDecisions[headerBlock] = decision;
         return true;
     }
 
@@ -220,9 +251,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     if (availableEnergy <= 0.0) {
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
-        solution.loopDecisions[header] = decision;
-        if (latch)
-            solution.enabledCheckpoints.insert(CFGEdge{latch, header});
+        solution.loopDecisions[headerBlock] = decision;
+        if (latchBlock)
+            solution.enabledCheckpoints.insert(CFGEdge{latchBlock, headerBlock});
         return true;
     }
 
@@ -238,14 +269,18 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         // Check if any enabled checkpoint is internal to this loop
         // (both src and dst within the loop). Reference checks all edges,
         // not just back-edges to the header.
-        if (L->contains(ckpt.src) && L->contains(ckpt.dst)) {
+        if (ckpt.src->getLLVMBlock() && L->contains(ckpt.src->getLLVMBlock()) &&
+            ckpt.dst->getLLVMBlock() && L->contains(ckpt.dst->getLLVMBlock())) {
             hasEnabledCheckpoints = true;
             break;
         }
     }
 
     if (!hasEnabledCheckpoints && numIt > 1) {
-        std::vector<llvm::BasicBlock *> loopBlocks = L->getBlocksVector();
+        std::vector<SchematicBlock *> loopBlocks;
+        for (llvm::BasicBlock *BB : L->getBlocksVector())
+            loopBlocks.push_back(graph_.getOrCreate(BB));
+
         unsigned oldNumIt = 0;
         for (unsigned iter = 0; iter < 15; ++iter) {
             if (oldNumIt != 0 && numIt >= oldNumIt)
@@ -267,17 +302,57 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             //   bb.set_memory_allocation(mem_alloc, allocator)
             // set_memory_allocation sets is_fixed=True and recomputes final_cost.
             auto sharedAlloc = std::make_shared<RegionAllocation>(bodyAlloc);
-            for (llvm::BasicBlock *BB : loopBlocks) {
-                solution.blockMeta[BB].analyzed = false;
-                solution.blockMeta[BB].E_left = std::numeric_limits<double>::max();
-                solution.blockMeta[BB].E_to_leave = 0.0;
+            for (SchematicBlock *block : loopBlocks) {
+                solution.blockMeta[block].analyzed = false;
+                solution.blockMeta[block].E_left = std::numeric_limits<double>::max();
+                solution.blockMeta[block].E_to_leave = 0.0;
                 for (const auto &[gv, va] : bodyAlloc.vars)
-                    solution.decidedPlacements[BB][gv] = va.placement;
-                solution.blockMeta[BB].analyzed = true;
-                solution.blockAllocation[BB] = sharedAlloc;
+                    solution.decidedPlacements[block][gv] = va.placement;
+                solution.blockMeta[block].analyzed = true;
+                solution.blockAllocation[block] = sharedAlloc;
             }
 
-            propagateFromBoundaries(L, bodyAlloc, solution, startSynth, endSynth);
+            // Direct energy propagation from synthetic boundaries.
+            // Forward seed from startSynth
+            double energyLeftStart =
+                params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
+            for (const auto &[gv, va] : bodyAlloc.vars) {
+                if (va.placement == Placement::VM)
+                    energyLeftStart -= params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
+            }
+            SchematicBlock *fwdDst =
+                startSynth->successors().empty() ? nullptr : startSynth->successors()[0];
+            if (fwdDst) {
+                CFGEdge fwdEdge{startSynth, fwdDst};
+                propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg_, state_, params_, LI_,
+                                    L);
+            }
+
+            // Backward seed from endSynth
+            double eToLeave = params_.E_epi + params_.N_reg * params_.regStoreEnergy +
+                              params_.loopIncrementCostNvm;
+            for (const auto &[gv, va] : bodyAlloc.vars) {
+                if (va.placement == Placement::VM)
+                    eToLeave += params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
+            }
+            SchematicBlock *bwdSrc =
+                endSynth->predecessors().empty() ? nullptr : endSynth->predecessors()[0];
+            if (bwdSrc) {
+                CFGEdge bwdEdge{bwdSrc, endSynth};
+                propagateEnergyToLeave(bwdEdge, eToLeave, solution, cfg_, state_, params_, LI_, L);
+            }
+
+            // Copy to synthetic blocks
+            solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[headerBlock].E_to_leave;
+            solution.blockMeta[startSynth].E_left = energyLeftStart;
+            solution.blockMeta[endSynth].E_to_leave = eToLeave;
+
+            // Update decidedPlacements for synthetic blocks to match current allocation
+            auto hdPlIt = solution.decidedPlacements.find(headerBlock);
+            if (hdPlIt != solution.decidedPlacements.end()) {
+                solution.decidedPlacements[startSynth] = hdPlIt->second;
+                solution.decidedPlacements[endSynth] = hdPlIt->second;
+            }
 
             // Re-read from synthetic blocks after re-propagation.
             startEToLeave = solution.blockMeta[startSynth].E_to_leave;
@@ -310,14 +385,14 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         // Too few iterations per charge — checkpoint every iteration.
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
-        if (latch)
-            solution.enabledCheckpoints.insert(CFGEdge{latch, header});
+        if (latchBlock)
+            solution.enabledCheckpoints.insert(CFGEdge{latchBlock, headerBlock});
     } else {
         // Conditional checkpoint every numIt iterations.
         decision.numIterationsPerCharge = numIt;
     }
 
-    solution.loopDecisions[header] = decision;
+    solution.loopDecisions[headerBlock] = decision;
 
     // Step 10: Set LoopMark on blocks and adjust energy.
     // E_left may go negative after adjustment — this is expected and correctly
@@ -330,7 +405,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         LoopMark mark{L, adjIter, E_loop};
         double adj = (adjIter - 1) * E_loop;
         for (llvm::BasicBlock *BB : L->getBlocksVector()) {
-            auto &meta = solution.blockMeta[BB];
+            SchematicBlock *block = graph_.getOrCreate(BB);
+            auto &meta = solution.blockMeta[block];
             meta.loop = mark;
             meta.E_to_leave += adj;
             meta.E_left -= adj;
@@ -338,48 +414,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     return true;
-}
-
-void LoopAnalyzer::propagateFromBoundaries(llvm::Loop *L, const RegionAllocation &alloc,
-                                           SchematicSolution &solution,
-                                           llvm::BasicBlock *startSynth,
-                                           llvm::BasicBlock *endSynth) {
-    llvm::BasicBlock *header = L->getHeader();
-    llvm::BasicBlock *latch = L->getLoopLatch();
-
-    // Forward from startSynth (reference lines 599-603)
-    double energyLeftStart =
-        params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
-    for (const auto &[gv, va] : alloc.vars) {
-        if (va.placement == Placement::VM)
-            energyLeftStart -= params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
-    }
-    CFGEdge fwdEdge{startSynth, header};
-    propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg_, state_, params_, LI_, L);
-
-    // Backward from endSynth (reference lines 604-606)
-    double eToLeave =
-        params_.E_epi + params_.N_reg * params_.regStoreEnergy + params_.loopIncrementCostNvm;
-    for (const auto &[gv, va] : alloc.vars) {
-        if (va.placement == Placement::VM)
-            eToLeave += params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
-    }
-    if (latch) {
-        CFGEdge bwdEdge{latch, endSynth};
-        propagateEnergyToLeave(bwdEdge, eToLeave, solution, cfg_, state_, params_, LI_, L);
-    }
-
-    // Update synthetic boundary block metadata
-    solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[header].E_to_leave;
-    solution.blockMeta[startSynth].E_left = energyLeftStart;
-    solution.blockMeta[endSynth].E_to_leave = eToLeave;
-
-    // Update decidedPlacements for synthetic blocks to match current allocation
-    auto hdPlIt = solution.decidedPlacements.find(header);
-    if (hdPlIt != solution.decidedPlacements.end()) {
-        solution.decidedPlacements[startSynth] = hdPlIt->second;
-        solution.decidedPlacements[endSynth] = hdPlIt->second;
-    }
 }
 
 bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {

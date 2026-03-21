@@ -1,5 +1,8 @@
 #include "schematic/SchematicBlock.h"
 
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Function.h"
+
 namespace checkpoint {
 
 SchematicBlock::SchematicBlock(llvm::BasicBlock *bb) : bb_(bb), name_(bb->getName().str()) {}
@@ -22,6 +25,17 @@ void SchematicGraph::addTraceEdges(const std::vector<SchematicBlock *> &trace) {
     for (unsigned i = 0; i + 1 < trace.size(); ++i) {
         trace[i]->addSuccessor(trace[i + 1]);
         trace[i + 1]->addPredecessor(trace[i]);
+    }
+}
+
+void SchematicGraph::addCFGEdges(llvm::Function &F) {
+    for (llvm::BasicBlock &BB : F) {
+        SchematicBlock *block = getOrCreate(&BB);
+        for (llvm::BasicBlock *succ : llvm::successors(&BB)) {
+            SchematicBlock *succBlock = getOrCreate(succ);
+            block->addSuccessor(succBlock);
+            succBlock->addPredecessor(block);
+        }
     }
 }
 

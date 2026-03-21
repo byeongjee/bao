@@ -50,6 +50,10 @@ class SchematicGraph {
     /// For trace [A, B, C], adds edges A->B and B->C.
     void addTraceEdges(const std::vector<SchematicBlock *> &trace);
 
+    /// Populate predecessor/successor edges from the real LLVM CFG.
+    /// Must be called after all real blocks are created (or lazily creates them).
+    void addCFGEdges(llvm::Function &F);
+
   private:
     llvm::DenseMap<llvm::BasicBlock *, std::unique_ptr<SchematicBlock>> realBlocks_;
     std::vector<std::unique_ptr<SchematicBlock>> syntheticBlocks_;

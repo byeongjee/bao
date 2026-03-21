@@ -296,7 +296,7 @@ SchematicInstrumenter::insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
     llvm::AllocaInst *counter = preBuilder.CreateAlloca(I32Ty, nullptr, "schematic_loop_counter");
     preBuilder.CreateStore(llvm::ConstantInt::get(I32Ty, 0), counter);
 
-    // Split the back-edge (latch → header) using SplitEdge.
+    // Split the back-edge (latch -> header) using SplitEdge.
     // This correctly updates PHI nodes in header, replacing the latch
     // predecessor with the new intermediate block.
     llvm::BasicBlock *checkBB = llvm::SplitEdge(latch, header);
@@ -402,11 +402,20 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
     // Map each block to its region allocation.
     llvm::DenseMap<llvm::BasicBlock *, const RegionAllocation *> blockToAlloc;
     for (const auto &region : solution.regions) {
-        for (llvm::BasicBlock *BB : region.blocks)
-            blockToAlloc[BB] = &region.allocation;
+        for (SchematicBlock *block : region.blocks) {
+            if (auto *BB = block->getLLVMBlock())
+                blockToAlloc[BB] = &region.allocation;
+        }
     }
 
     for (const CFGEdge &edge : solution.enabledCheckpoints) {
+        // Skip synthetic blocks — they have no real IR.
+        if (edge.src->isSynthetic() || edge.dst->isSynthetic())
+            continue;
+
+        llvm::BasicBlock *srcBB = edge.src->getLLVMBlock();
+        llvm::BasicBlock *dstBB = edge.dst->getLLVMBlock();
+
         // Skip only the true loop back-edge (latch -> header) when loop
         // checkpoint logic (mandatory or conditional) handles it in Step 7.
         bool isLoopBackEdge = false;
@@ -420,7 +429,8 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
             if (!latch)
                 continue;
 
-            if (edge.src == latch && edge.dst == header) {
+            llvm::BasicBlock *headerBB = header->getLLVMBlock();
+            if (srcBB == latch && dstBB == headerBB) {
                 isLoopBackEdge = true;
                 break;
             }
@@ -428,24 +438,29 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
         if (isLoopBackEdge)
             continue;
 
-        llvm::BasicBlock *ckptBB = splitEdge(edge.src, edge.dst);
+        llvm::BasicBlock *ckptBB = splitEdge(srcBB, dstBB);
         if (!ckptBB)
             continue;
 
-        const RegionAllocation *endingAlloc = blockToAlloc.lookup(edge.src);
-        const RegionAllocation *startingAlloc = blockToAlloc.lookup(edge.dst);
+        const RegionAllocation *endingAlloc = blockToAlloc.lookup(srcBB);
+        const RegionAllocation *startingAlloc = blockToAlloc.lookup(dstBB);
 
         inserted += insertCheckpointSequence(ckptBB, endingAlloc, startingAlloc, state);
     }
 
     // Step 7: Handle loop conditional checkpoints.
     for (const auto &[header, decision] : solution.loopDecisions) {
+        // Skip synthetic headers (shouldn't happen, but guard).
+        if (header->isSynthetic())
+            continue;
+        llvm::BasicBlock *headerBB = header->getLLVMBlock();
+
         if (decision.mandatoryBackEdge) {
             // Mandatory: checkpoint every iteration via back-edge.
             llvm::Loop *L = decision.loop;
             llvm::BasicBlock *latch = L ? L->getLoopLatch() : nullptr;
             if (latch) {
-                llvm::BasicBlock *ckptBB = splitEdge(latch, header);
+                llvm::BasicBlock *ckptBB = splitEdge(latch, headerBB);
                 if (ckptBB) {
                     inserted += insertCheckpointSequence(ckptBB, &decision.bodyAllocation,
                                                          &decision.bodyAllocation, state);
@@ -453,7 +468,7 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
             }
         } else if (decision.numIterationsPerCharge > 0 && !decision.loopFitsEntirely) {
             // Conditional: checkpoint every N iterations.
-            inserted += insertLoopConditionalCheckpoint(header, decision, state);
+            inserted += insertLoopConditionalCheckpoint(headerBB, decision, state);
         }
     }
 

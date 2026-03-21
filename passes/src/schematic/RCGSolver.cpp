@@ -10,10 +10,10 @@
 namespace checkpoint {
 
 RCGSolver::RCGSolver(
-    const std::vector<llvm::BasicBlock *> &pathBlocks, const SchematicStateAnalysis &state,
+    const std::vector<SchematicBlock *> &pathBlocks, const SchematicStateAnalysis &state,
     const CFGAnalysis &cfg, const SchematicParams &params,
-    const llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> &existingMeta,
-    const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
+    const std::unordered_map<SchematicBlock *, BlockMetadata> &existingMeta,
+    const std::unordered_map<SchematicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
     VMAddressTracker *tracker)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
       existingMeta_(existingMeta), blockAllocation_(blockAllocation), tracker_(tracker) {}
@@ -82,7 +82,7 @@ void RCGSolver::createReachableCheckpointGraph() {
     unsigned startNode = 0;
     unsigned endNode = numNodes - 1;
 
-    // Loop 1: ckpt→ckpt edges (ref: schematic.py:199-218, early termination)
+    // Loop 1: ckpt->ckpt edges (ref: schematic.py:199-218, early termination)
     for (unsigned ii = 0; ii < internalCkpts.size(); ++ii) {
         unsigned i = internalCkpts[ii];
         double prevCost = 0;
@@ -105,7 +105,7 @@ void RCGSolver::createReachableCheckpointGraph() {
         }
     }
 
-    // Loop 2: Start→ckpt edges (ref: schematic.py:236-249, early termination)
+    // Loop 2: Start->ckpt edges (ref: schematic.py:236-249, early termination)
     {
         double prevCost = 0;
         for (unsigned jj = 0; jj < internalCkpts.size(); ++jj) {
@@ -127,7 +127,7 @@ void RCGSolver::createReachableCheckpointGraph() {
         }
     }
 
-    // Loop 3: ckpt→End edges (ref: schematic.py:254-268, backward + early termination)
+    // Loop 3: ckpt->End edges (ref: schematic.py:254-268, backward + early termination)
     {
         double prevCost = 0;
         for (int ii = static_cast<int>(internalCkpts.size()) - 1; ii >= 0; --ii) {
@@ -148,7 +148,7 @@ void RCGSolver::createReachableCheckpointGraph() {
         }
     }
 
-    // Loop 4: Start→End edge
+    // Loop 4: Start->End edge
     {
         auto blocks = getIntervalBlocks(startNode, endNode);
         if (!blocks.empty()) {
@@ -223,7 +223,7 @@ RCGResult RCGSolver::getShortestPathInRCG() {
         result.allocations.push_back(edge.allocation);
         result.intervalBlocks.push_back(edge.blocks);
 
-        // The "to" node is a CandidateEdge → it becomes a checkpoint.
+        // The "to" node is a CandidateEdge -> it becomes a checkpoint.
         // But the last node (End) is not a checkpoint.
         if (nodes_[to].kind == Node::CandidateEdge) {
             result.selectedCheckpoints.push_back(nodes_[to].edge);
@@ -248,8 +248,8 @@ RCGResult RCGSolver::solve() {
 std::pair<unsigned, unsigned> RCGSolver::getIntervalRange(unsigned nodeFrom,
                                                           unsigned nodeTo) const {
     // Reference: schematic.py:212,243,261,270 — slicing logic.
-    // Start→ckpt: trace[1:j+1], ckpt→End: trace[i:len-1],
-    // Start→End: trace[1:len-1], ckpt→ckpt: trace[i+1:j+1].
+    // Start->ckpt: trace[1:j+1], ckpt->End: trace[i:len-1],
+    // Start->End: trace[1:len-1], ckpt->ckpt: trace[i+1:j+1].
     unsigned startIdx;
     if (nodes_[nodeFrom].kind == Node::Start) {
         startIdx = 1; // skip trace[0] (ref: trace[1:...])
@@ -268,17 +268,17 @@ std::pair<unsigned, unsigned> RCGSolver::getIntervalRange(unsigned nodeFrom,
     return {startIdx, endIdx};
 }
 
-std::vector<llvm::BasicBlock *> RCGSolver::getIntervalBlocks(unsigned nodeFrom,
-                                                             unsigned nodeTo) const {
+std::vector<SchematicBlock *> RCGSolver::getIntervalBlocks(unsigned nodeFrom,
+                                                           unsigned nodeTo) const {
     auto [startIdx, endIdx] = getIntervalRange(nodeFrom, nodeTo);
     if (startIdx > endIdx)
         return {};
 
-    return std::vector<llvm::BasicBlock *>(pathBlocks_.begin() + startIdx,
-                                           pathBlocks_.begin() + endIdx + 1);
+    return std::vector<SchematicBlock *>(pathBlocks_.begin() + startIdx,
+                                         pathBlocks_.begin() + endIdx + 1);
 }
 
-void RCGSolver::trackDiagnostics(const std::vector<llvm::BasicBlock *> &blocks, double energy,
+void RCGSolver::trackDiagnostics(const std::vector<SchematicBlock *> &blocks, double energy,
                                  double budget) {
     if (blocks.size() == 1 && energy < minSingleBlockEnergy_) {
         minSingleBlockEnergy_ = energy;

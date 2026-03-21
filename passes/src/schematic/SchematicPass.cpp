@@ -6,6 +6,7 @@
 #include "milp/CheckpointContext.h"
 #include "schematic/LoopAnalyzer.h"
 #include "schematic/MemoryAllocator.h"
+#include "schematic/SchematicBlock.h"
 #include "schematic/SchematicInstrumenter.h"
 #include "schematic/SchematicParams.h"
 #include "schematic/SchematicSolution.h"
@@ -85,20 +86,24 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         return PreservedAnalyses::all();
     }
 
+    // Create the SchematicGraph that owns all SchematicBlock instances.
+    SchematicGraph graph;
+    graph.addCFGEdges(F);
+
     SchematicSolution solution;
     VMAddressTracker vmTracker;
 
     // Step 6: Load traces (optional).
     std::optional<LoadedTraces> loadedTraces;
     if (!SchematicTraceOpt.getValue().empty()) {
-        TraceLoader loader(F, LI);
+        TraceLoader loader(F, LI, graph);
         loadedTraces = loader.load(SchematicTraceOpt.getValue());
         if (loadedTraces)
             PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
     }
 
     // Step 7: Loop analysis.
-    LoopAnalyzer loopAnalyzer(LI, SE, *ctx.cfg, state, params, &vmTracker);
+    LoopAnalyzer loopAnalyzer(LI, SE, *ctx.cfg, state, params, &vmTracker, graph);
     if (loadedTraces)
         loopAnalyzer.setLoadedLoopTraces(loadedTraces->loopTraces);
 
@@ -117,10 +122,8 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     // Create synthetic START_Func/END_Func boundary blocks for function traces.
     // These match the Python reference's %START_ / %END_ synthetic nodes that
     // are prepended/appended to every function trace (trace.py:288-289).
-    // Without these, extractNotFixedBBPaths produces sub-paths without fixed
-    // boundaries, causing the "trace must be at least 3 blocks" guard to fail.
-    BasicBlock *startFunc = BasicBlock::Create(F.getContext(), "START_Func");
-    BasicBlock *endFunc = BasicBlock::Create(F.getContext(), "END_Func");
+    SchematicBlock *startFunc = graph.createSynthetic("START_Func");
+    SchematicBlock *endFunc = graph.createSynthetic("END_Func");
 
     // Mark synthetic boundaries as analyzed with default energy values
     // (same pattern as LoopAnalyzer's START_Loop/END_Loop).
@@ -133,7 +136,8 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     solution.blockMeta[endFunc].analyzed = true;
     solution.decidedPlacements[endFunc] = {};
 
-    // RAII cleanup for synthetic blocks.
+    // Cleanup for synthetic blocks from solution maps on exit.
+    // Graph owns the blocks, so no delete needed.
     auto cleanupFunc = [&]() {
         solution.blockMeta.erase(startFunc);
         solution.blockMeta.erase(endFunc);
@@ -141,8 +145,6 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         solution.decidedPlacements.erase(endFunc);
         solution.blockAllocation.erase(startFunc);
         solution.blockAllocation.erase(endFunc);
-        startFunc->deleteValue();
-        endFunc->deleteValue();
     };
     struct FuncScopeGuard {
         std::function<void()> fn;
@@ -153,11 +155,14 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     for (const auto &ep : paths) {
         solution.pathsAnalyzed++;
         // Prepend/append synthetic boundary blocks (ref: trace.py:288-289).
-        std::vector<BasicBlock *> tracePath;
+        std::vector<SchematicBlock *> tracePath;
         tracePath.reserve(ep.blocks.size() + 2);
         tracePath.push_back(startFunc);
         tracePath.insert(tracePath.end(), ep.blocks.begin(), ep.blocks.end());
         tracePath.push_back(endFunc);
+
+        // Add trace edges so SchematicBlock predecessors/successors are populated.
+        graph.addTraceEdges(tracePath);
 
         std::string traceError;
         if (!analyzeTrace(tracePath, solution, state, *ctx.cfg, params, &vmTracker, LI,
@@ -193,7 +198,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     {
         std::string uncoveredError;
         if (!findAndAnalyzeNotFixedPaths(*ctx.cfg, solution, state, params, &vmTracker, LI,
-                                         /*loopScope=*/nullptr, uncoveredError)) {
+                                         /*loopScope=*/nullptr, graph, uncoveredError)) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '" << F.getName()
                   << "', uncovered blocks: " << uncoveredError;
             if (!StatsJsonOpt.empty()) {
@@ -222,7 +227,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
 
     // Step 10: Resolve remaining potential edges (reference: schematic.py:468-502).
-    removePotentialCheckpointsBetweenFixedBBs(*ctx.cfg, solution, state, params, LI);
+    removePotentialCheckpointsBetweenFixedBBs(*ctx.cfg, solution, state, params, LI, graph);
 
     // Step 11: Collect statistics.
     for (const auto &region : solution.regions) {

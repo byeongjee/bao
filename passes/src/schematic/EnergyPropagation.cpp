@@ -1,8 +1,6 @@
 // passes/src/schematic/EnergyPropagation.cpp
 #include "schematic/EnergyPropagation.h"
 
-#include "llvm/IR/CFG.h"
-
 #include <algorithm>
 #include <deque>
 #include <map>
@@ -10,11 +8,14 @@
 
 namespace checkpoint {
 
-double getBlockExecEnergy(llvm::BasicBlock *BB, const SchematicSolution &solution,
+double getBlockExecEnergy(SchematicBlock *block, const SchematicSolution &solution,
                           const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
                           const SchematicParams &params) {
+    auto *BB = block->getLLVMBlock();
+    if (!BB)
+        return 0.0;
     double E = cfg.getBlockInfo(BB).energyCost;
-    auto allocIt = solution.decidedPlacements.find(BB);
+    auto allocIt = solution.decidedPlacements.find(block);
     if (allocIt != solution.decidedPlacements.end()) {
         for (const auto &[gv, place] : allocIt->second) {
             if (place != Placement::VM)
@@ -33,7 +34,7 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
                             llvm::LoopInfo &LI, llvm::Loop *loopScope) {
     // Phase 1: Initialize seenLoops, pre-adding the seed block's loop
     std::set<llvm::BasicBlock *> seenLoops;
-    llvm::BasicBlock *bbBefore = seedEdge.src;
+    SchematicBlock *bbBefore = seedEdge.src;
     if (bbBefore) {
         auto metaIt = solution.blockMeta.find(bbBefore);
         if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value())
@@ -53,13 +54,13 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
             continue;
         visited.insert(ckpt);
 
-        llvm::BasicBlock *bb = ckpt.src;
+        SchematicBlock *bb = ckpt.src;
         if (!bb)
             continue;
-        if (loopScope && !loopScope->contains(bb))
+        if (loopScope && (!bb->getLLVMBlock() || !loopScope->contains(bb->getLLVMBlock())))
             continue;
 
-        for (llvm::BasicBlock *pred : llvm::predecessors(bb)) {
+        for (SchematicBlock *pred : bb->predecessors()) {
             CFGEdge childEdge{pred, bb};
 
             if (visited.count(childEdge))
@@ -68,10 +69,14 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
             if (solution.enabledCheckpoints.count(childEdge))
                 continue;
             // Skip back-edges
-            if (llvm::Loop *dstLoop = LI.getLoopFor(bb))
-                if (dstLoop->getHeader() == bb && dstLoop->contains(pred))
-                    continue;
-            if (loopScope && !loopScope->contains(pred))
+            if (auto *llvmBB = bb->getLLVMBlock()) {
+                if (llvm::Loop *dstLoop = LI.getLoopFor(llvmBB)) {
+                    if (dstLoop->getHeader() == llvmBB && pred->getLLVMBlock() &&
+                        dstLoop->contains(pred->getLLVMBlock()))
+                        continue;
+                }
+            }
+            if (loopScope && (!pred->getLLVMBlock() || !loopScope->contains(pred->getLLVMBlock())))
                 continue;
 
             dagAdj[childEdge]; // ensure node exists
@@ -104,7 +109,7 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
         double eToLeave = maxEToLeave.count(ckpt) ? maxEToLeave[ckpt] : 0.0;
         maxEToLeave.erase(ckpt);
 
-        llvm::BasicBlock *bb = ckpt.src;
+        SchematicBlock *bb = ckpt.src;
         if (bb) {
             // Inner-loop scaling
             auto metaIt = solution.blockMeta.find(bb);
@@ -146,7 +151,7 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
                          const SchematicParams &params, llvm::LoopInfo &LI, llvm::Loop *loopScope) {
     // Phase 1: Initialize seenLoops (reference lines 271-277)
     std::set<llvm::BasicBlock *> seenLoops;
-    llvm::BasicBlock *bbAfter = seedEdge.dst;
+    SchematicBlock *bbAfter = seedEdge.dst;
     if (bbAfter) {
         auto metaIt = solution.blockMeta.find(bbAfter);
         if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value())
@@ -170,10 +175,10 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
         visited.insert(ckpt);
         ckptCost.erase(maxIt);
 
-        llvm::BasicBlock *bb = ckpt.dst;
+        SchematicBlock *bb = ckpt.dst;
         if (!bb)
             continue;
-        if (loopScope && !loopScope->contains(bb))
+        if (loopScope && (!bb->getLLVMBlock() || !loopScope->contains(bb->getLLVMBlock())))
             continue;
 
         // Inner-loop scaling (reference lines 293-295)
@@ -194,7 +199,7 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
             solution.blockMeta[bb].E_left = energyLeft;
 
         // Forward to successor disabled edges (reference lines 310-316)
-        for (llvm::BasicBlock *succ : llvm::successors(bb)) {
+        for (SchematicBlock *succ : bb->successors()) {
             CFGEdge childEdge{bb, succ};
 
             if (visited.count(childEdge))
@@ -202,10 +207,14 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
             if (solution.enabledCheckpoints.count(childEdge))
                 continue;
             // Skip back-edges
-            if (llvm::Loop *dstLoop = LI.getLoopFor(succ))
-                if (dstLoop->getHeader() == succ && dstLoop->contains(bb))
-                    continue;
-            if (loopScope && !loopScope->contains(succ))
+            if (auto *llvmSucc = succ->getLLVMBlock()) {
+                if (llvm::Loop *dstLoop = LI.getLoopFor(llvmSucc)) {
+                    if (dstLoop->getHeader() == llvmSucc && bb->getLLVMBlock() &&
+                        dstLoop->contains(bb->getLLVMBlock()))
+                        continue;
+                }
+            }
+            if (loopScope && (!succ->getLLVMBlock() || !loopScope->contains(succ->getLLVMBlock())))
                 continue;
 
             if (ckptCost.find(childEdge) == ckptCost.end() || cost < ckptCost[childEdge])

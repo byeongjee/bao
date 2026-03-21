@@ -33,12 +33,15 @@ unsigned VMAddressTracker::getTopAddress() const {
 }
 
 std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
-                                              const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                                              const std::vector<SchematicBlock *> &intervalBlocks,
                                               const SchematicStateAnalysis &state) {
 
     // needRestore: true if the first access to v in the interval is a load.
     bool needRestore = false;
-    for (llvm::BasicBlock *BB : intervalBlocks) {
+    for (SchematicBlock *block : intervalBlocks) {
+        auto *BB = block->getLLVMBlock();
+        if (!BB)
+            continue;
         auto firstOp = state.getFirstOpIsLoad(BB, v);
         if (firstOp.has_value()) {
             needRestore = *firstOp; // true if first op is load
@@ -148,7 +151,7 @@ mergeAllocations(const std::vector<const RegionAllocation *> &allocations,
 }
 
 std::pair<RegionAllocation, double>
-chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
+chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
                        const SchematicStateAnalysis &state, const SchematicParams &params,
                        const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
                        const std::vector<const RegionAllocation *> &memoryAllocations,
@@ -214,7 +217,10 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
         // Accumulate access counts across interval, scaled by accessScale
         // (used by convergence loop to account for multiple iterations).
         unsigned nR = 0, nW = 0;
-        for (llvm::BasicBlock *BB : intervalBlocks) {
+        for (SchematicBlock *block : intervalBlocks) {
+            auto *BB = block->getLLVMBlock();
+            if (!BB)
+                continue;
             nR += state.getLoadCount(BB, v);
             nW += state.getStoreCount(BB, v);
         }
@@ -297,9 +303,9 @@ chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
 }
 
 ComputeCostResult computeCost(
-    const std::vector<llvm::BasicBlock *> &blocks, const SchematicStateAnalysis &state,
+    const std::vector<SchematicBlock *> &blocks, const SchematicStateAnalysis &state,
     const CFGAnalysis &cfg, const SchematicParams &params,
-    const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
+    const std::unordered_map<SchematicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
     VMAddressTracker *tracker, const RegionAllocation *startAlloc,
     const RegionAllocation *endAlloc) {
     // Reference: memory_allocator.py:compute_cost lines 241-242.
@@ -312,9 +318,10 @@ ComputeCostResult computeCost(
     // Collect memory_allocations from blocks (no dedup — matches Python).
     // Reference: memory_allocator.py:compute_cost lines 247-252.
     std::vector<const RegionAllocation *> memoryAllocations;
-    for (llvm::BasicBlock *BB : blocks) {
-        energy += cfg.getBlockInfo(BB).energyCost;
-        auto it = blockAllocation.find(BB);
+    for (SchematicBlock *block : blocks) {
+        if (auto *BB = block->getLLVMBlock())
+            energy += cfg.getBlockInfo(BB).energyCost;
+        auto it = blockAllocation.find(block);
         if (it != blockAllocation.end())
             memoryAllocations.push_back(it->second.get());
     }
@@ -329,11 +336,12 @@ ComputeCostResult computeCost(
 }
 
 double computeAllocationRestoreCost(
-    llvm::BasicBlock *BB,
-    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    SchematicBlock *block,
+    const std::unordered_map<SchematicBlock *, std::map<llvm::Value *, Placement>>
+        &decidedPlacements,
     const SchematicStateAnalysis &state, const SchematicParams &params) {
     double cost = 0.0;
-    auto allocIt = decidedPlacements.find(BB);
+    auto allocIt = decidedPlacements.find(block);
     if (allocIt != decidedPlacements.end()) {
         for (const auto &[gv, place] : allocIt->second) {
             if (place == Placement::VM)
@@ -344,11 +352,12 @@ double computeAllocationRestoreCost(
 }
 
 double computeAllocationSaveCost(
-    llvm::BasicBlock *BB,
-    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    SchematicBlock *block,
+    const std::unordered_map<SchematicBlock *, std::map<llvm::Value *, Placement>>
+        &decidedPlacements,
     const SchematicStateAnalysis &state, const SchematicParams &params) {
     double cost = 0.0;
-    auto allocIt = decidedPlacements.find(BB);
+    auto allocIt = decidedPlacements.find(block);
     if (allocIt != decidedPlacements.end()) {
         for (const auto &[gv, place] : allocIt->second) {
             if (place == Placement::VM)
@@ -379,7 +388,7 @@ void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
         solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
 }
 
-void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::BasicBlock *> &trace,
+void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicBlock *> &trace,
                            SchematicSolution &solution, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
                            llvm::LoopInfo &LI, llvm::Loop *loopScope) {
@@ -481,8 +490,8 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::Basi
 
     // 3. Per-checkpoint energy propagation (reference: apply_memory_allocation lines 449-466)
     struct SeedCkpt {
-        llvm::BasicBlock *bbBefore;
-        llvm::BasicBlock *bbAfter;
+        SchematicBlock *bbBefore;
+        SchematicBlock *bbAfter;
         bool isVirtual;
     };
     std::vector<SeedCkpt> ckpts;
@@ -508,14 +517,8 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::Basi
                                                  state, params);
             }
             CFGEdge fwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
-            // If bbAfter is a synthetic block (not in function), propagation via
-            // llvm::successors() won't find any successors. Skip over the synthetic
-            // block and seed from the next real block in the trace.
-            if (checkpoint.bbAfter->getParent() == nullptr) {
-                auto pos = std::find(trace.begin(), trace.end(), checkpoint.bbAfter);
-                if (pos != trace.end() && (pos + 1) != trace.end())
-                    fwdEdge = {checkpoint.bbAfter, *(pos + 1)};
-            }
+            // Synthetic blocks now have proper successors via SchematicGraph,
+            // so energy propagation via SchematicBlock's successors() works directly.
             propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg, state, params, LI,
                                 loopScope);
         }
@@ -523,7 +526,7 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::Basi
         if (checkpoint.bbBefore) {
             double energyToLeave;
             auto metaIt = solution.blockMeta.find(checkpoint.bbBefore);
-            // Reference line 461: existing nonzero value → undo block cost
+            // Reference line 461: existing nonzero value -> undo block cost
             if (metaIt != solution.blockMeta.end() && metaIt->second.E_to_leave != 0.0) {
                 energyToLeave =
                     metaIt->second.E_to_leave -
@@ -534,13 +537,8 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::Basi
                                     checkpoint.bbBefore, solution.decidedPlacements, state, params);
             }
             CFGEdge bwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
-            // If bbBefore is a synthetic block, skip over it and seed from the
-            // previous real block in the trace.
-            if (checkpoint.bbBefore->getParent() == nullptr) {
-                auto pos = std::find(trace.begin(), trace.end(), checkpoint.bbBefore);
-                if (pos != trace.begin())
-                    bwdEdge = {*(pos - 1), checkpoint.bbBefore};
-            }
+            // Synthetic blocks now have proper predecessors via SchematicGraph,
+            // so energy propagation via SchematicBlock's predecessors() works directly.
             propagateEnergyToLeave(bwdEdge, energyToLeave, solution, cfg, state, params, LI,
                                    loopScope);
         }

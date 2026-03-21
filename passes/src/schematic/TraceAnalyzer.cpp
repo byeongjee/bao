@@ -2,30 +2,28 @@
 #include "schematic/EnergyPropagation.h"
 #include "schematic/RCGSolver.h"
 
-#include "llvm/IR/CFG.h"
-
 #include <deque>
 #include <set>
 
 namespace checkpoint {
 
-std::vector<std::vector<llvm::BasicBlock *>>
-extractNotFixedBBPaths(const std::vector<llvm::BasicBlock *> &trace,
+std::vector<std::vector<SchematicBlock *>>
+extractNotFixedBBPaths(const std::vector<SchematicBlock *> &trace,
                        const SchematicSolution &solution) {
     // Extract the subpaths of contiguous basic blocks not fixed following a trace.
     // Reference: schematic.py:315-349 (extract_not_fixed_bb_paths).
-    std::vector<std::vector<llvm::BasicBlock *>> paths;
-    std::vector<llvm::BasicBlock *> currentPath;
+    std::vector<std::vector<SchematicBlock *>> paths;
+    std::vector<SchematicBlock *> currentPath;
     bool registeringPath = false;
-    llvm::BasicBlock *lastFixedBB = nullptr;
+    SchematicBlock *lastFixedBB = nullptr;
 
     for (unsigned i = 0; i < trace.size(); ++i) {
-        llvm::BasicBlock *BB = trace[i];
-        auto metaIt = solution.blockMeta.find(BB);
+        SchematicBlock *block = trace[i];
+        auto metaIt = solution.blockMeta.find(block);
         bool isFixed = metaIt != solution.blockMeta.end() && metaIt->second.analyzed;
 
         if (registeringPath) {
-            currentPath.push_back(BB);
+            currentPath.push_back(block);
             if (isFixed) {
                 paths.push_back(std::move(currentPath));
                 currentPath.clear();
@@ -34,14 +32,14 @@ extractNotFixedBBPaths(const std::vector<llvm::BasicBlock *> &trace,
         }
         if (!registeringPath) {
             if (isFixed) {
-                lastFixedBB = BB;
+                lastFixedBB = block;
             } else {
                 registeringPath = true;
                 if (lastFixedBB) {
                     currentPath.push_back(lastFixedBB);
                     lastFixedBB = nullptr;
                 }
-                currentPath.push_back(BB);
+                currentPath.push_back(block);
             }
         }
     }
@@ -52,14 +50,14 @@ extractNotFixedBBPaths(const std::vector<llvm::BasicBlock *> &trace,
     return paths;
 }
 
-bool analyzeTrace(const std::vector<llvm::BasicBlock *> &trace, SchematicSolution &solution,
+bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution &solution,
                   const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
                   const SchematicParams &params, VMAddressTracker *tracker, llvm::LoopInfo &LI,
                   llvm::Loop *loopScope, std::string &errorMessage) {
     // Skip if all blocks already analyzed.
     bool allAnalyzed = true;
-    for (llvm::BasicBlock *BB : trace) {
-        auto it = solution.blockMeta.find(BB);
+    for (SchematicBlock *block : trace) {
+        auto it = solution.blockMeta.find(block);
         if (it == solution.blockMeta.end() || !it->second.analyzed) {
             allAnalyzed = false;
             break;
@@ -87,14 +85,14 @@ bool analyzeTrace(const std::vector<llvm::BasicBlock *> &trace, SchematicSolutio
     return true;
 }
 
-std::vector<llvm::BasicBlock *> extractNotFixedBBTrace(llvm::BasicBlock *startBB,
-                                                       const SchematicSolution &solution) {
+std::vector<SchematicBlock *> extractNotFixedBBTrace(SchematicBlock *startBB,
+                                                     const SchematicSolution &solution) {
     // Reference: schematic.py:295-313 (extract_not_fixed_bb_trace).
     // trace = [predecessor_fixed_bb, unfixed_1, ..., unfixed_n, successor_fixed_bb]
-    std::vector<llvm::BasicBlock *> trace;
+    std::vector<SchematicBlock *> trace;
 
     // Prepend fixed predecessor (ref: trace = [next(cfg.predecessors(start_bb))]).
-    for (llvm::BasicBlock *pred : llvm::predecessors(startBB)) {
+    for (SchematicBlock *pred : startBB->predecessors()) {
         auto pMeta = solution.blockMeta.find(pred);
         if (pMeta != solution.blockMeta.end() && pMeta->second.analyzed) {
             trace.push_back(pred);
@@ -103,12 +101,12 @@ std::vector<llvm::BasicBlock *> extractNotFixedBBTrace(llvm::BasicBlock *startBB
     }
 
     // Walk forward through unanalyzed blocks.
-    std::deque<llvm::BasicBlock *> toVisit;
+    std::deque<SchematicBlock *> toVisit;
     toVisit.push_back(startBB);
-    std::set<llvm::BasicBlock *> visited;
-    llvm::BasicBlock *lastBB = nullptr;
+    std::set<SchematicBlock *> visited;
+    SchematicBlock *lastBB = nullptr;
     while (!toVisit.empty()) {
-        llvm::BasicBlock *bb = toVisit.back();
+        SchematicBlock *bb = toVisit.back();
         toVisit.pop_back();
         if (visited.count(bb))
             continue;
@@ -118,7 +116,7 @@ std::vector<llvm::BasicBlock *> extractNotFixedBBTrace(llvm::BasicBlock *startBB
         visited.insert(bb);
         trace.push_back(bb);
         lastBB = bb;
-        for (llvm::BasicBlock *neighbor : llvm::successors(bb)) {
+        for (SchematicBlock *neighbor : bb->successors()) {
             auto sMeta = solution.blockMeta.find(neighbor);
             if (sMeta == solution.blockMeta.end() || !sMeta->second.analyzed) {
                 toVisit.push_back(neighbor);
@@ -129,7 +127,7 @@ std::vector<llvm::BasicBlock *> extractNotFixedBBTrace(llvm::BasicBlock *startBB
 
     // Append fixed successor (ref: trace.append(next(cfg.neighbors(bb)))).
     if (lastBB) {
-        for (llvm::BasicBlock *succ : llvm::successors(lastBB)) {
+        for (SchematicBlock *succ : lastBB->successors()) {
             auto sMeta = solution.blockMeta.find(succ);
             if (sMeta != solution.blockMeta.end() && sMeta->second.analyzed) {
                 trace.push_back(succ);
@@ -144,7 +142,8 @@ std::vector<llvm::BasicBlock *> extractNotFixedBBTrace(llvm::BasicBlock *startBB
 bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solution,
                                  const SchematicStateAnalysis &state, const SchematicParams &params,
                                  VMAddressTracker *tracker, llvm::LoopInfo &LI,
-                                 llvm::Loop *loopScope, std::string &errorMessage) {
+                                 llvm::Loop *loopScope, SchematicGraph &graph,
+                                 std::string &errorMessage) {
     // Reference: schematic.py:504-518 (find_and_analyse_not_fixed_paths).
     // When loopScope is set, iterate only loop blocks (Python passes loop_cfg
     // whose .nodes contains only the loop's blocks).
@@ -152,11 +151,12 @@ bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solu
         auto *BB = const_cast<llvm::BasicBlock *>(constBB);
         if (loopScope && !loopScope->contains(BB))
             continue;
-        auto metaIt = solution.blockMeta.find(BB);
+        SchematicBlock *block = graph.getOrCreate(BB);
+        auto metaIt = solution.blockMeta.find(block);
         if (metaIt != solution.blockMeta.end() && metaIt->second.analyzed)
             continue;
 
-        auto trace = extractNotFixedBBTrace(BB, solution);
+        auto trace = extractNotFixedBBTrace(block, solution);
         if (!analyzeTrace(trace, solution, state, cfg, params, tracker, LI, loopScope,
                           errorMessage))
             return false;
@@ -205,7 +205,7 @@ static bool isCompatibleOneWay(const RegionAllocation &self, const RegionAllocat
         } else {
             // Reference: memory_allocation.py:158-159 (var_alloc != self.vars[name]).
             // Python __eq__ compares: allocation, len(type), name, start_address, end_address.
-            // Same llvm::Value* ⇒ same name and type, so compare placement + VM offset.
+            // Same llvm::Value* => same name and type, so compare placement + VM offset.
             if (varAlloc.placement != selfIt->second.placement)
                 return false;
             if (varAlloc.placement == Placement::VM) {
@@ -231,7 +231,7 @@ static bool isCompatibleWith(const RegionAllocation &a, const RegionAllocation &
 void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, SchematicSolution &solution,
                                                const SchematicStateAnalysis &state,
                                                const SchematicParams &params, llvm::LoopInfo &LI,
-                                               llvm::Loop *loopScope) {
+                                               SchematicGraph &graph, llvm::Loop *loopScope) {
     for (const auto &[src, dst] : cfg.getEdges()) {
         auto *srcBB = const_cast<llvm::BasicBlock *>(src);
         auto *dstBB = const_cast<llvm::BasicBlock *>(dst);
@@ -240,7 +240,10 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
         if (loopScope && (!loopScope->contains(srcBB) || !loopScope->contains(dstBB)))
             continue;
 
-        CFGEdge edge{srcBB, dstBB};
+        SchematicBlock *srcBlock = graph.getOrCreate(srcBB);
+        SchematicBlock *dstBlock = graph.getOrCreate(dstBB);
+
+        CFGEdge edge{srcBlock, dstBlock};
         if (solution.enabledCheckpoints.count(edge))
             continue;
 
@@ -250,36 +253,36 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
                 continue;
         }
 
-        auto srcMeta = solution.blockMeta.find(srcBB);
-        auto dstMeta = solution.blockMeta.find(dstBB);
+        auto srcMeta = solution.blockMeta.find(srcBlock);
+        auto dstMeta = solution.blockMeta.find(dstBlock);
         if (srcMeta == solution.blockMeta.end() || !srcMeta->second.analyzed)
             continue;
         if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
             continue;
 
         // Reference: schematic.py:483-491 — both blocks must have memory_allocation.
-        auto srcAllocIt = solution.blockAllocation.find(srcBB);
-        auto dstAllocIt = solution.blockAllocation.find(dstBB);
+        auto srcAllocIt = solution.blockAllocation.find(srcBlock);
+        auto dstAllocIt = solution.blockAllocation.find(dstBlock);
         if (srcAllocIt == solution.blockAllocation.end() || !srcAllocIt->second ||
             dstAllocIt == solution.blockAllocation.end() || !dstAllocIt->second)
             continue;
 
         // Reference: schematic.py:494 — is_compatible_with (memory_allocation.py:162-166).
         if (!isCompatibleWith(*srcAllocIt->second, *dstAllocIt->second, state)) {
-            // Not compatible → enable checkpoint (ACTIVE).
+            // Not compatible -> enable checkpoint (ACTIVE).
             // Reference: schematic.py:495.
             solution.enabledCheckpoints.insert(edge);
         } else {
             // Reference: schematic.py:497 — energy_left > energy_to_leave.
             if (srcMeta->second.E_left > dstMeta->second.E_to_leave) {
-                // Compatible and enough energy → disabled, propagate.
+                // Compatible and enough energy -> disabled, propagate.
                 // Reference: schematic.py:498-500.
                 propagateEnergyLeft(edge, srcMeta->second.E_left, solution, cfg, state, params, LI,
                                     loopScope);
                 propagateEnergyToLeave(edge, dstMeta->second.E_to_leave, solution, cfg, state,
                                        params, LI, loopScope);
             } else {
-                // Compatible but insufficient energy → enable checkpoint (ACTIVE).
+                // Compatible but insufficient energy -> enable checkpoint (ACTIVE).
                 // Reference: schematic.py:502.
                 solution.enabledCheckpoints.insert(edge);
             }

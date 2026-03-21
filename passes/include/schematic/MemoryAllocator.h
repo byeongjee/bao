@@ -7,6 +7,7 @@
 
 #include <map>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -33,7 +34,7 @@ class VMAddressTracker {
 /// needRestore: true if first access to v is a read (needs restore at interval start)
 /// needSave: always true (reference SCHEMATIC algorithm unconditionally saves)
 std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
-                                              const std::vector<llvm::BasicBlock *> &intervalBlocks,
+                                              const std::vector<SchematicBlock *> &intervalBlocks,
                                               const SchematicStateAnalysis &state);
 
 /// Estimate energy gain from placing a variable in VM.
@@ -54,7 +55,7 @@ mergeAllocations(const std::vector<const RegionAllocation *> &allocations,
 /// returns (MemoryAllocation(), -99999) on incompatible allocations.
 /// accessScale: multiplier for variable access counts (convergence loop).
 std::pair<RegionAllocation, double>
-chooseMemoryAllocation(const std::vector<llvm::BasicBlock *> &intervalBlocks,
+chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
                        const SchematicStateAnalysis &state, const SchematicParams &params,
                        const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
                        const std::vector<const RegionAllocation *> &memoryAllocations,
@@ -69,24 +70,26 @@ struct ComputeCostResult {
 /// Compute cost of an interval: execution energy minus VM placement gain.
 /// Reference: memory_allocator.py:compute_cost (line 229).
 ComputeCostResult computeCost(
-    const std::vector<llvm::BasicBlock *> &blocks, const SchematicStateAnalysis &state,
+    const std::vector<SchematicBlock *> &blocks, const SchematicStateAnalysis &state,
     const CFGAnalysis &cfg, const SchematicParams &params,
-    const llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
+    const std::unordered_map<SchematicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
     VMAddressTracker *tracker, const RegionAllocation *startAlloc,
     const RegionAllocation *endAlloc);
 
 /// Compute cost to restore VM-placed variables at a block.
 /// Reference: memory_allocator.py:compute_allocation_restore_cost (line 68).
 double computeAllocationRestoreCost(
-    llvm::BasicBlock *BB,
-    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    SchematicBlock *block,
+    const std::unordered_map<SchematicBlock *, std::map<llvm::Value *, Placement>>
+        &decidedPlacements,
     const SchematicStateAnalysis &state, const SchematicParams &params);
 
 /// Compute cost to save VM-placed variables at a block.
 /// Reference: memory_allocator.py:compute_allocation_save_cost (line 81).
 double computeAllocationSaveCost(
-    llvm::BasicBlock *BB,
-    const llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> &decidedPlacements,
+    SchematicBlock *block,
+    const std::unordered_map<SchematicBlock *, std::map<llvm::Value *, Placement>>
+        &decidedPlacements,
     const SchematicStateAnalysis &state, const SchematicParams &params);
 
 /// Mark selected checkpoints as enabled in the solution.
@@ -96,7 +99,7 @@ void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
 
 /// Apply RCG result allocations to the solution and seed energy propagation.
 /// Reference: schematic.py:apply_memory_allocation (line 384).
-void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::BasicBlock *> &trace,
+void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicBlock *> &trace,
                            SchematicSolution &solution, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
                            llvm::LoopInfo &LI, llvm::Loop *loopScope);

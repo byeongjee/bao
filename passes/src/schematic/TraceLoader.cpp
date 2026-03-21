@@ -10,11 +10,12 @@ using json = nlohmann::json;
 
 namespace checkpoint {
 
-TraceLoader::TraceLoader(Function &F, LoopInfo &LI) : F_(F), LI_(LI) {
-    // Build name -> BB* map
+TraceLoader::TraceLoader(Function &F, LoopInfo &LI, SchematicGraph &graph)
+    : F_(F), LI_(LI), graph_(graph) {
+    // Build name -> SchematicBlock* map
     for (BasicBlock &BB : F_) {
         if (BB.hasName())
-            nameToBlock_[BB.getName()] = &BB;
+            nameToBlock_[BB.getName()] = graph_.getOrCreate(&BB);
     }
 }
 
@@ -100,7 +101,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
 
             // Find matching LLVM Loop*
             for (Loop *L : LI_.getLoopsInPreorder()) {
-                if (L->getHeader() == llt.header) {
+                if (L->getHeader() == llt.header->getLLVMBlock()) {
                     llt.loop = L;
                     break;
                 }
@@ -144,7 +145,7 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
 
             // Fallback latch/depth from LLVM LoopInfo
             if (!llt.latch)
-                llt.latch = llt.loop->getLoopLatch();
+                llt.latch = graph_.getOrCreate(llt.loop->getLoopLatch());
             if (llt.depth == 0)
                 llt.depth = llt.loop->getLoopDepth();
 

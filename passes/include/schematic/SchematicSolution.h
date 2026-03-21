@@ -1,9 +1,9 @@
 #pragma once
 
-#include "llvm/ADT/DenseMap.h"
+#include "schematic/SchematicBlock.h"
+
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CFG.h"
 #include "llvm/IR/Value.h"
 
 #include <limits>
@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 namespace checkpoint {
@@ -18,8 +19,8 @@ namespace checkpoint {
 enum class Placement { VM, NVM };
 
 struct CFGEdge {
-    llvm::BasicBlock *src;
-    llvm::BasicBlock *dst;
+    SchematicBlock *src;
+    SchematicBlock *dst;
 
     bool operator<(const CFGEdge &o) const {
         if (src != o.src)
@@ -32,28 +33,28 @@ struct CFGEdge {
 
 /// Resolve a checkpoint edge to a real CFG edge.
 /// Function-level traces have loops collapsed, so RCG-selected checkpoints
-/// may reference edges (src→dst) where dst is not a direct CFG successor of
+/// may reference edges (src->dst) where dst is not a direct CFG successor of
 /// src (the loop body is between them).  The reference implementation uses a
 /// loop-collapsed CFG where these edges exist; we map them to the actual
-/// LLVM CFG edge: src → successor_of_src that can reach dst via BFS.
+/// LLVM CFG edge: src -> successor_of_src that can reach dst via BFS.
 /// Returns the resolved edge, or the original if already valid.
 inline CFGEdge resolveCheckpointEdge(const CFGEdge &edge) {
-    for (llvm::BasicBlock *succ : llvm::successors(edge.src)) {
+    for (SchematicBlock *succ : edge.src->successors()) {
         if (succ == edge.dst)
             return edge;
     }
     // BFS from each successor to find which one reaches dst.
-    for (llvm::BasicBlock *succ : llvm::successors(edge.src)) {
-        std::set<llvm::BasicBlock *> visited;
-        std::vector<llvm::BasicBlock *> worklist = {succ};
+    for (SchematicBlock *succ : edge.src->successors()) {
+        std::set<SchematicBlock *> visited;
+        std::vector<SchematicBlock *> worklist = {succ};
         while (!worklist.empty()) {
-            llvm::BasicBlock *cur = worklist.back();
+            SchematicBlock *cur = worklist.back();
             worklist.pop_back();
             if (cur == edge.dst)
                 return CFGEdge{edge.src, succ};
             if (!visited.insert(cur).second)
                 continue;
-            for (llvm::BasicBlock *s : llvm::successors(cur))
+            for (SchematicBlock *s : cur->successors())
                 worklist.push_back(s);
         }
     }
@@ -88,7 +89,7 @@ struct LoopMark {
     double costOneIt; // energy cost of one iteration
 };
 
-/// Per-block metadata for multi-path overlap (spec §8.3)
+/// Per-block metadata for multi-path overlap (spec S8.3)
 struct BlockMetadata {
     bool analyzed = false;
     double E_left = std::numeric_limits<double>::max(); // energy remaining after block
@@ -106,22 +107,22 @@ struct LoopCheckpointDecision {
 };
 
 struct RegionSolution {
-    std::vector<llvm::BasicBlock *> blocks;
+    std::vector<SchematicBlock *> blocks;
     RegionAllocation allocation;
 };
 
 struct SchematicSolution {
     std::set<CFGEdge> enabledCheckpoints;
     std::vector<RegionSolution> regions;
-    llvm::DenseMap<llvm::BasicBlock *, BlockMetadata> blockMeta;
-    llvm::DenseMap<llvm::BasicBlock *, LoopCheckpointDecision> loopDecisions;
+    std::unordered_map<SchematicBlock *, BlockMetadata> blockMeta;
+    std::unordered_map<SchematicBlock *, LoopCheckpointDecision> loopDecisions;
     /// Per-block decided variable placements from earlier analyses.
-    /// Enforces allocation consistency across paths (spec §12.2).
-    llvm::DenseMap<llvm::BasicBlock *, std::map<llvm::Value *, Placement>> decidedPlacements;
+    /// Enforces allocation consistency across paths (spec S12.2).
+    std::unordered_map<SchematicBlock *, std::map<llvm::Value *, Placement>> decidedPlacements;
     /// Per-block memory allocation, matching Python's bb.memory_allocation.
     /// Multiple blocks in the same region share the same allocation object.
     /// Reference: memory_allocation.py MemoryAllocation class.
-    llvm::DenseMap<llvm::BasicBlock *, std::shared_ptr<RegionAllocation>> blockAllocation;
+    std::unordered_map<SchematicBlock *, std::shared_ptr<RegionAllocation>> blockAllocation;
     unsigned pathsAnalyzed = 0;
     unsigned totalVmVariables = 0;
     unsigned totalNvmVariables = 0;
