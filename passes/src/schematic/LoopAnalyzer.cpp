@@ -127,133 +127,15 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     solution.decidedPlacements[endSynth] = {};
 
     for (auto path : bodyPaths) {
-        // Reference: schematic.py:544-545 — insert START_Loop and END_Loop into trace.
+        // Reference: schematic.py:544-546 — insert START_Loop and END_Loop, then analyse_trace.
         path.insert(path.begin(), startSynth);
         path.push_back(endSynth);
-        RCGSolver solver(path, state_, cfg_, params_, solution.blockMeta, solution.blockAllocation,
-                         tracker_);
-        RCGResult result = solver.solve();
-        if (!result.feasible) {
+
+        std::string errorMsg;
+        if (!analyzeTrace(path, solution, state_, cfg_, params_, tracker_, LI_, L, errorMsg)) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for loop at '"
-                  << header->getName() << "': " << result.errorMessage;
+                  << header->getName() << "': " << errorMsg;
             return false;
-        }
-
-        // Update solution from RCG result.
-        for (const auto &ckpt : result.selectedCheckpoints)
-            solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
-
-        for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
-            const auto &blocks = result.intervalBlocks[i];
-            const auto &alloc = result.allocations[i];
-            auto sharedAlloc = std::make_shared<RegionAllocation>(alloc);
-            for (llvm::BasicBlock *BB : blocks) {
-                for (const auto &[gv, va] : alloc.vars)
-                    solution.decidedPlacements[BB][gv] = va.placement;
-                solution.blockMeta[BB].analyzed = true;
-                solution.blockAllocation[BB] = sharedAlloc;
-            }
-            solution.regions.push_back({blocks, alloc});
-        }
-
-        // Per-checkpoint energy propagation after RCG solve (reference: apply_memory_allocation
-        // lines 449-466)
-        {
-            struct SeedCkpt {
-                llvm::BasicBlock *bbBefore;
-                llvm::BasicBlock *bbAfter;
-                bool isVirtual;
-            };
-            std::vector<SeedCkpt> ckpts;
-            ckpts.push_back({startSynth, path.front(), /*isVirtual=*/true});
-            for (const auto &ckptEdge : result.selectedCheckpoints)
-                ckpts.push_back({ckptEdge.src, ckptEdge.dst, /*isVirtual=*/false});
-            ckpts.push_back({path.back(), endSynth, /*isVirtual=*/true});
-
-            for (const auto &ck : ckpts) {
-                if (ck.bbAfter) {
-                    double energyLeftStart;
-                    auto metaIt = solution.blockMeta.find(ck.bbAfter);
-                    if (ck.isVirtual && metaIt != solution.blockMeta.end() &&
-                        metaIt->second.E_left < std::numeric_limits<double>::max()) {
-                        energyLeftStart =
-                            metaIt->second.E_left + cfg_.getBlockInfo(ck.bbAfter).energyCost;
-                        // Adjust for VM savings (same as getBlockExecEnergy but inline)
-                        auto allocIt = solution.decidedPlacements.find(ck.bbAfter);
-                        if (allocIt != solution.decidedPlacements.end()) {
-                            for (const auto &[gv, place] : allocIt->second) {
-                                if (place == Placement::VM)
-                                    energyLeftStart += params_.nvmAccessPenalty *
-                                                       (state_.getLoadCount(ck.bbAfter, gv) +
-                                                        state_.getStoreCount(ck.bbAfter, gv));
-                            }
-                        }
-                    } else {
-                        energyLeftStart = params_.capacity - params_.E_pro -
-                                          params_.N_reg * params_.regRestoreEnergy;
-                        auto allocIt = solution.decidedPlacements.find(ck.bbAfter);
-                        if (allocIt != solution.decidedPlacements.end()) {
-                            for (const auto &[gv, place] : allocIt->second) {
-                                if (place == Placement::VM)
-                                    energyLeftStart -= params_.memRestoreEnergyPerByte *
-                                                       state_.getVarSizeBytes(gv);
-                            }
-                        }
-                    }
-                    CFGEdge fwdEdge{ck.bbBefore, ck.bbAfter};
-                    propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg_, state_, params_,
-                                        LI_, /*loopScope=*/L);
-                }
-
-                if (ck.bbBefore) {
-                    double eToLeave;
-                    auto metaIt = solution.blockMeta.find(ck.bbBefore);
-                    if (metaIt != solution.blockMeta.end() && metaIt->second.E_to_leave != 0.0) {
-                        eToLeave =
-                            metaIt->second.E_to_leave - cfg_.getBlockInfo(ck.bbBefore).energyCost;
-                        auto allocIt = solution.decidedPlacements.find(ck.bbBefore);
-                        if (allocIt != solution.decidedPlacements.end()) {
-                            for (const auto &[gv, place] : allocIt->second) {
-                                if (place == Placement::VM)
-                                    eToLeave += params_.nvmAccessPenalty *
-                                                (state_.getLoadCount(ck.bbBefore, gv) +
-                                                 state_.getStoreCount(ck.bbBefore, gv));
-                            }
-                        }
-                    } else {
-                        eToLeave = params_.E_epi + params_.N_reg * params_.regStoreEnergy;
-                        auto allocIt = solution.decidedPlacements.find(ck.bbBefore);
-                        if (allocIt != solution.decidedPlacements.end()) {
-                            for (const auto &[gv, place] : allocIt->second) {
-                                if (place == Placement::VM)
-                                    eToLeave +=
-                                        params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
-                            }
-                        }
-                    }
-                    CFGEdge bwdEdge{ck.bbBefore, ck.bbAfter};
-                    propagateEnergyToLeave(bwdEdge, eToLeave, solution, cfg_, state_, params_, LI_,
-                                           /*loopScope=*/L);
-                }
-            }
-
-            // Update synthetic boundary block metadata after propagation
-            solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[header].E_to_leave;
-            solution.blockMeta[startSynth].E_left =
-                params_.capacity - params_.E_pro - params_.N_reg * params_.regRestoreEnergy;
-            for (const auto &[gv, place] : solution.decidedPlacements[startSynth]) {
-                if (place == Placement::VM)
-                    solution.blockMeta[startSynth].E_left -=
-                        params_.memRestoreEnergyPerByte * state_.getVarSizeBytes(gv);
-            }
-            solution.blockMeta[endSynth].E_to_leave = params_.E_epi +
-                                                      params_.N_reg * params_.regStoreEnergy +
-                                                      params_.loopIncrementCostNvm;
-            for (const auto &[gv, place] : solution.decidedPlacements[endSynth]) {
-                if (place == Placement::VM)
-                    solution.blockMeta[endSynth].E_to_leave +=
-                        params_.memStoreEnergyPerByte * state_.getVarSizeBytes(gv);
-            }
         }
     }
 
@@ -307,9 +189,17 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // (reference schematic.py:566-569, using synthetic boundary nodes).
     RegionAllocation bodyAlloc = buildBoundaryAllocation(headerAlloc);
 
-    // Run initial energy propagation before computing E_loop — without this,
-    // E_to_leave/E_left are at defaults (0.0 / max) since RCG does not set them.
-    propagateFromBoundaries(L, bodyAlloc, solution, startSynth, endSynth);
+    // Copy energy values from header/latch to synthetic boundary blocks.
+    // In Python, the synthetic blocks are connected in the networkx graph, so
+    // apply_memory_allocation's propagation reaches them directly. In C++, the
+    // synthetic blocks are detached LLVM blocks, so we manually copy.
+    // Reference: Python's first_bb/last_bb in E_loop computation (schematic.py:566-569).
+    solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[header].E_to_leave;
+    solution.blockMeta[startSynth].E_left = solution.blockMeta[header].E_left;
+    if (latch) {
+        solution.blockMeta[endSynth].E_to_leave = solution.blockMeta[endSynth].E_to_leave;
+        solution.blockMeta[endSynth].E_left = solution.blockMeta[latch].E_left;
+    }
 
     // Read E_loop from synthetic boundary blocks.
     // Reference: first_bb.E_to_leave - last_bb.E_to_leave + loop_increment (schematic.py:566-569).

@@ -508,6 +508,14 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::Basi
                                                  state, params);
             }
             CFGEdge fwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
+            // If bbAfter is a synthetic block (not in function), propagation via
+            // llvm::successors() won't find any successors. Skip over the synthetic
+            // block and seed from the next real block in the trace.
+            if (checkpoint.bbAfter->getParent() == nullptr) {
+                auto pos = std::find(trace.begin(), trace.end(), checkpoint.bbAfter);
+                if (pos != trace.end() && (pos + 1) != trace.end())
+                    fwdEdge = {checkpoint.bbAfter, *(pos + 1)};
+            }
             propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg, state, params, LI,
                                 loopScope);
         }
@@ -526,6 +534,13 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::Basi
                                     checkpoint.bbBefore, solution.decidedPlacements, state, params);
             }
             CFGEdge bwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
+            // If bbBefore is a synthetic block, skip over it and seed from the
+            // previous real block in the trace.
+            if (checkpoint.bbBefore->getParent() == nullptr) {
+                auto pos = std::find(trace.begin(), trace.end(), checkpoint.bbBefore);
+                if (pos != trace.begin())
+                    bwdEdge = {*(pos - 1), checkpoint.bbBefore};
+            }
             propagateEnergyToLeave(bwdEdge, energyToLeave, solution, cfg, state, params, LI,
                                    loopScope);
         }
