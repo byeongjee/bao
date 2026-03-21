@@ -121,11 +121,14 @@ class CheckpointOptimizer {
     std::map<BlockVarKey, GRBVar> m_;    // m_{b,v}: VM placement (all tracked)
     std::map<BlockVarKey, GRBVar> rHat_; // r̂_{b,v}: need-restore (all tracked)
     std::map<BlockVarKey, GRBVar> d_;    // d_{b,v}: dirty/pending (all tracked)
-    std::map<BlockVarKey, GRBVar> dHat_; // d̂_{b,v}: VM-dirty (all tracked)
     std::map<BlockVarKey, GRBVar> s_;    // s_{b,v}: save (all tracked)
     std::map<NodeId, GRBVar> eAccum_;    // ε_accum[b]: accumulated energy
 
     std::map<NodeId, std::vector<NodeId>> predecessors_;
+
+    /// Reach(v): set of blocks where d_{b,v} can be non-zero.
+    /// Computed as forward-reachable closure from {b : D_{b,v} = 1}.
+    std::map<llvm::Value *, std::set<NodeId>> reachableDefs_;
 
     void buildModel();
     void addVariables();
