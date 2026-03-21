@@ -96,9 +96,7 @@ void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
 
 /// Apply RCG result allocations to the solution and seed energy propagation.
 /// Reference: schematic.py:apply_memory_allocation (line 384).
-void applyMemoryAllocation(const RCGResult &result,
-                           const std::vector<llvm::BasicBlock *> &pathBlocks,
-                           llvm::BasicBlock *startBound, llvm::BasicBlock *endBound,
+void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::BasicBlock *> &trace,
                            SchematicSolution &solution, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
                            llvm::LoopInfo &LI, llvm::Loop *loopScope);

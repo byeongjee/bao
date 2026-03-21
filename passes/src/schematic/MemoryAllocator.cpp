@@ -379,12 +379,14 @@ void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
         solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
 }
 
-void applyMemoryAllocation(const RCGResult &result,
-                           const std::vector<llvm::BasicBlock *> &pathBlocks,
-                           llvm::BasicBlock *startBound, llvm::BasicBlock *endBound,
+void applyMemoryAllocation(const RCGResult &result, const std::vector<llvm::BasicBlock *> &trace,
                            SchematicSolution &solution, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
                            llvm::LoopInfo &LI, llvm::Loop *loopScope) {
+    // Reference: schematic.py:397-398.
+    if (trace.size() < 3)
+        llvm::report_fatal_error("Trace should be at least 3 bb long (start, bb and end)");
+
     // 1. Mark checkpoints as enabled
     updateCheckpointType(result.selectedCheckpoints, solution);
 
@@ -396,12 +398,12 @@ void applyMemoryAllocation(const RCGResult &result,
 
     if (!allocations.empty()) {
         // Start boundary extension.
-        // Condition: startBound has allocation AND (no checkpoints OR first ckpt src !=
-        // startBound).
-        auto startAllocIt = solution.blockAllocation.find(startBound);
-        if (startBound && startAllocIt != solution.blockAllocation.end()) {
+        // Condition: trace[0] has allocation AND (no checkpoints OR first ckpt src !=
+        // trace[0]).
+        auto startAllocIt = solution.blockAllocation.find(trace.front());
+        if (startAllocIt != solution.blockAllocation.end()) {
             bool noSeparation = result.selectedCheckpoints.empty() ||
-                                result.selectedCheckpoints.front().src != startBound;
+                                result.selectedCheckpoints.front().src != trace.front();
             if (noSeparation) {
                 extendsAllocation(*startAllocIt->second, allocations.front());
                 // Use boundary's extended allocation as the interval allocation.
@@ -410,11 +412,11 @@ void applyMemoryAllocation(const RCGResult &result,
         }
 
         // End boundary extension.
-        // Condition: endBound has allocation AND (no checkpoints OR last ckpt dst != endBound).
-        auto endAllocIt = solution.blockAllocation.find(endBound);
-        if (endBound && endAllocIt != solution.blockAllocation.end()) {
+        // Condition: trace[-1] has allocation AND (no checkpoints OR last ckpt dst != trace[-1]).
+        auto endAllocIt = solution.blockAllocation.find(trace.back());
+        if (endAllocIt != solution.blockAllocation.end()) {
             bool noSeparation = result.selectedCheckpoints.empty() ||
-                                result.selectedCheckpoints.back().dst != endBound;
+                                result.selectedCheckpoints.back().src != trace.back();
             if (noSeparation) {
                 extendsAllocation(*endAllocIt->second, allocations.back());
                 allocations.back() = *endAllocIt->second;
@@ -422,9 +424,9 @@ void applyMemoryAllocation(const RCGResult &result,
         }
 
         // No checkpoints: unify start and end boundary allocations (reference: lines 414-421).
-        if (result.selectedCheckpoints.empty() && startBound && endBound) {
-            auto sIt = solution.blockAllocation.find(startBound);
-            auto eIt = solution.blockAllocation.find(endBound);
+        if (result.selectedCheckpoints.empty()) {
+            auto sIt = solution.blockAllocation.find(trace.front());
+            auto eIt = solution.blockAllocation.find(trace.back());
             if (sIt != solution.blockAllocation.end())
                 extendsAllocation(*sIt->second, allocations.front());
             if (eIt != solution.blockAllocation.end())
@@ -445,21 +447,36 @@ void applyMemoryAllocation(const RCGResult &result,
     }
 
     // 2. Record allocations and mark blocks as analyzed.
-    // Reference: apply_memory_allocation sets bb.memory_allocation for each block.
-    for (unsigned i = 0; i < result.intervalBlocks.size(); ++i) {
-        const auto &blocks = result.intervalBlocks[i];
-        const auto &alloc = allocations[i];
-        auto sharedAlloc = std::make_shared<RegionAllocation>(alloc);
-
-        for (llvm::BasicBlock *BB : blocks) {
-            auto &meta = solution.blockMeta[BB];
+    // Reference: schematic.py:427-447 — walk entire trace applying allocations.
+    unsigned i = 0;
+    std::shared_ptr<RegionAllocation> memoryAlloc;
+    for (unsigned j = 0; j < allocations.size(); ++j) {
+        memoryAlloc = std::make_shared<RegionAllocation>(allocations[j]);
+        bool checkpointReached = false;
+        while (i < trace.size() - 1 && !checkpointReached) {
+            auto &meta = solution.blockMeta[trace[i]];
             meta.analyzed = true;
-            for (const auto &[gv, va] : alloc.vars)
-                solution.decidedPlacements[BB][gv] = va.placement;
-            solution.blockAllocation[BB] = sharedAlloc;
-        }
+            for (const auto &[gv, va] : allocations[j].vars)
+                solution.decidedPlacements[trace[i]][gv] = va.placement;
+            solution.blockAllocation[trace[i]] = memoryAlloc;
 
-        solution.regions.push_back({blocks, alloc});
+            // Reference: schematic.py:442 — check if edge matches next checkpoint.
+            if (j < result.selectedCheckpoints.size() &&
+                trace[i] == result.selectedCheckpoints[j].src &&
+                trace[i + 1] == result.selectedCheckpoints[j].dst) {
+                checkpointReached = true;
+            }
+            ++i;
+        }
+        solution.regions.push_back({result.intervalBlocks[j], allocations[j]});
+    }
+    // Handle the last basic block (reference: schematic.py:447).
+    if (memoryAlloc) {
+        auto &meta = solution.blockMeta[trace[i]];
+        meta.analyzed = true;
+        for (const auto &[gv, va] : memoryAlloc->vars)
+            solution.decidedPlacements[trace[i]][gv] = va.placement;
+        solution.blockAllocation[trace[i]] = memoryAlloc;
     }
 
     // 3. Per-checkpoint energy propagation (reference: apply_memory_allocation lines 449-466)
@@ -469,45 +486,48 @@ void applyMemoryAllocation(const RCGResult &result,
         bool isVirtual;
     };
     std::vector<SeedCkpt> ckpts;
-    ckpts.push_back({startBound, pathBlocks.front(), /*isVirtual=*/true});
+    ckpts.push_back({nullptr, trace.front(), /*isVirtual=*/true});
     for (const auto &ckptEdge : result.selectedCheckpoints)
         ckpts.push_back({ckptEdge.src, ckptEdge.dst, /*isVirtual=*/false});
-    ckpts.push_back({pathBlocks.back(), endBound, /*isVirtual=*/true});
+    ckpts.push_back({trace.back(), nullptr, /*isVirtual=*/true});
 
-    for (const auto &ck : ckpts) {
-        if (ck.bbAfter) {
+    for (const auto &checkpoint : ckpts) {
+        if (checkpoint.bbAfter) {
             double energyLeftStart;
-            auto metaIt = solution.blockMeta.find(ck.bbAfter);
+            auto metaIt = solution.blockMeta.find(checkpoint.bbAfter);
             // Reference line 453: virtual checkpoint with existing value
-            if (ck.isVirtual && metaIt != solution.blockMeta.end() &&
+            if (checkpoint.isVirtual && metaIt != solution.blockMeta.end() &&
                 metaIt->second.E_left < std::numeric_limits<double>::max()) {
-                energyLeftStart = metaIt->second.E_left +
-                                  getBlockExecEnergy(ck.bbAfter, solution, cfg, state, params);
+                energyLeftStart =
+                    metaIt->second.E_left +
+                    getBlockExecEnergy(checkpoint.bbAfter, solution, cfg, state, params);
             } else {
                 energyLeftStart =
                     params.capacity - params.E_pro - params.N_reg * params.regRestoreEnergy -
-                    computeAllocationRestoreCost(ck.bbAfter, solution.decidedPlacements, state,
-                                                 params);
+                    computeAllocationRestoreCost(checkpoint.bbAfter, solution.decidedPlacements,
+                                                 state, params);
             }
-            CFGEdge fwdEdge{ck.bbBefore, ck.bbAfter};
+            CFGEdge fwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
             propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg, state, params, LI,
                                 loopScope);
         }
 
-        if (ck.bbBefore) {
-            double eToLeave;
-            auto metaIt = solution.blockMeta.find(ck.bbBefore);
+        if (checkpoint.bbBefore) {
+            double energyToLeave;
+            auto metaIt = solution.blockMeta.find(checkpoint.bbBefore);
             // Reference line 461: existing nonzero value → undo block cost
             if (metaIt != solution.blockMeta.end() && metaIt->second.E_to_leave != 0.0) {
-                eToLeave = metaIt->second.E_to_leave -
-                           getBlockExecEnergy(ck.bbBefore, solution, cfg, state, params);
+                energyToLeave =
+                    metaIt->second.E_to_leave -
+                    getBlockExecEnergy(checkpoint.bbBefore, solution, cfg, state, params);
             } else {
-                eToLeave = params.E_epi + params.N_reg * params.regStoreEnergy +
-                           computeAllocationSaveCost(ck.bbBefore, solution.decidedPlacements, state,
-                                                     params);
+                energyToLeave = params.E_epi + params.N_reg * params.regStoreEnergy +
+                                computeAllocationSaveCost(
+                                    checkpoint.bbBefore, solution.decidedPlacements, state, params);
             }
-            CFGEdge bwdEdge{ck.bbBefore, ck.bbAfter};
-            propagateEnergyToLeave(bwdEdge, eToLeave, solution, cfg, state, params, LI, loopScope);
+            CFGEdge bwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
+            propagateEnergyToLeave(bwdEdge, energyToLeave, solution, cfg, state, params, LI,
+                                   loopScope);
         }
     }
 }

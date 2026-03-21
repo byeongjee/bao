@@ -81,8 +81,7 @@ bool analyzeTrace(const std::vector<llvm::BasicBlock *> &trace, SchematicSolutio
             return false;
         }
 
-        applyMemoryAllocation(result, subPath, nullptr, nullptr, solution, cfg, state, params, LI,
-                              loopScope);
+        applyMemoryAllocation(result, subPath, solution, cfg, state, params, LI, loopScope);
     }
 
     return true;
