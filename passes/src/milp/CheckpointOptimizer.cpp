@@ -262,12 +262,16 @@ void CheckpointOptimizer::addVariables() {
         }
     }
 
-    // rHat_{b,v} for all (block, var).
+    // rHat_{b,v} only for eligible + live-in pairs.
+    // Ineligible+live-in: rHat = r[b], substituted directly in buildEStart.
+    // Not live-in: rHat = 0, no variable needed.
     for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::Value *V : allTracked) {
-            BlockVarKey key = std::make_pair(block, V);
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            if (state_.getEligLiveIn(block).count(GV) == 0)
+                continue;
+            BlockVarKey key = std::make_pair(block, static_cast<llvm::Value *>(GV));
             rHat_[key] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "rHat", block, V));
+                model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "rHat", block, GV));
         }
     }
 
@@ -385,35 +389,16 @@ void CheckpointOptimizer::constrainVMCapacity() {
     }
 }
 
-// C3: rHat[b,v] = r[b] AND m[b,v] AND L_{b,v}
-//     When L_{b,v}=0: rHat[b,v] = 0
-//     When L_{b,v}=1: rHat[b,v] = r[b] AND m[b,v]  (via addGenConstrAnd)
+// C3: rHat[b,v] = r[b] AND m[b,v]  (only for eligible + live-in pairs)
+// Not-live-in and ineligible cases are handled by not creating the variable.
 void CheckpointOptimizer::constrainNeedRestoreLinearization() {
-    // Build live-in check.
-    auto isLiveIn = [&](NodeId block, llvm::Value *V) -> bool {
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
-            return state_.getEligLiveIn(block).count(GV) > 0;
-        return state_.getIneligLiveIn(block).count(V) > 0;
-    };
-
     for (const auto &[key, rHatVar] : rHat_) {
         NodeId block = key.first;
         llvm::Value *V = key.second;
-
-        if (!isLiveIn(block, V)) {
-            // L_{b,v} = 0: fix rHat = 0.
-            model_.addConstr(rHatVar == 0,
-                             "C3_rHat_not_live_" + nodeToken(cfg_, block) + "_" + valueToken(V));
-        } else if (state_.isIneligible(V)) {
-            // Ineligible + live-in: m=1, so rHat = r AND 1 = r.
-            model_.addConstr(rHatVar == r_[block],
-                             "C3_rHat_inelig_" + nodeToken(cfg_, block) + "_" + valueToken(V));
-        } else {
-            // Eligible + live-in: rHat = r AND m.
-            GRBVar inputs[] = {r_[block], m_[key]};
-            model_.addGenConstrAnd(rHatVar, inputs, 2,
-                                   "C3_rHat_and_" + nodeToken(cfg_, block) + "_" + valueToken(V));
-        }
+        // All entries in rHat_ are eligible + live-in.
+        GRBVar inputs[] = {r_[block], m_[key]};
+        model_.addGenConstrAnd(rHatVar, inputs, 2,
+                               "C3_rHat_and_" + nodeToken(cfg_, block) + "_" + valueToken(V));
     }
 }
 
@@ -631,8 +616,12 @@ GRBLinExpr CheckpointOptimizer::buildEBlk(NodeId block) {
 }
 
 // E_start(b) = E_pro * r[b] + Σ_v E_rst_v * rHat[b,v]
+// rHat_ only contains eligible+live-in entries.
+// Ineligible+live-in: rHat = r[b], so contribute E_rst_v * r[b].
 GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
     GRBLinExpr expr = params_.E_pro * r_[block];
+
+    // Eligible + live-in: use rHat variable.
     for (const auto &[key, rHatVar] : rHat_) {
         if (key.first != block)
             continue;
@@ -641,6 +630,15 @@ GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
             expr += eRestore * rHatVar;
         }
     }
+
+    // Ineligible + live-in: rHat = r[b], so E_rst_v * r[b].
+    for (llvm::Value *V : state_.getIneligLiveIn(block)) {
+        double eRestore = energy_.getERestore(V);
+        if (eRestore > 0.0) {
+            expr += eRestore * r_[block];
+        }
+    }
+
     return expr;
 }
 
@@ -679,6 +677,13 @@ void CheckpointOptimizer::extractSolution() {
 
     for (const auto &[key, var] : rHat_) {
         solution_.rHat[key] = var.get(GRB_DoubleAttr_X) > 0.5;
+    }
+    // Ineligible + live-in: rHat = r[b].
+    for (NodeId block : cfg_.getBlocks()) {
+        bool isRegionStart = solution_.r.count(block) > 0;
+        for (llvm::Value *V : state_.getIneligLiveIn(block)) {
+            solution_.rHat[std::make_pair(block, V)] = isRegionStart;
+        }
     }
 
     for (const auto &[key, var] : s_) {
