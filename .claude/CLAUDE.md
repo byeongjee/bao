@@ -102,16 +102,16 @@ The `scripts/ckpt/` package provides the compilation, benchmarking, and device i
 
 ```bash
 # Compilation pipelines (INPUT can be a benchmark name or path to .c file)
-ckpt compile milp           INPUT --cap CAP [--link] [--estimator-mode assembly|ir] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
-ckpt compile rockclimb      INPUT --cap CAP [--link] [--no-precomputed-energy] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
-ckpt compile schematic      INPUT --cap CAP [--link] [--trace-file FILE] [--trace-only] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
+ckpt compile milp           INPUT --cap CAP [--link] [--estimator-mode assembly|ir] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] ...
+ckpt compile rockclimb      INPUT --cap CAP [--link] [--no-precomputed-energy] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] ...
+ckpt compile schematic      INPUT --cap CAP [--link] [--trace-file FILE] [--trace-only] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] ...
 ckpt compile uninstrumented INPUT [--link] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
 # Explicit config paths also accepted: -e ENERGY_CONFIG -m/-c/-s ALGO_CONFIG
 
 # Benchmark runners (compile + flash + NVM readback → CSV)
-ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [-o CSV]
-ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [-o CSV]
-ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--trace-config] [-o CSV]
+ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--accumulate-keys FILE] [-o CSV]
+ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--accumulate-keys FILE] [-o CSV]
+ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--trace-config] [--accumulate-keys FILE] [-o CSV]
 ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [-o CSV]
 
 # Semantic verification (defaults to --halt-mode bor to exercise checkpoint/restore under resets)
@@ -126,6 +126,8 @@ ckpt analyze plot       CSV_DIR [--metric M] [--algorithms A...]
 # Device interaction
 ckpt device read-serial [--timeout N] [--end-marker M]
 ```
+
+`--accumulate-keys FILE` writes required energy keys (identifiers the energy estimator uses to look up instruction costs) to a file as a sorted comma-separated list. The file is read-merge-written on each invocation, so keys accumulate across multiple runs. Not available on `uninstrumented` commands (no energy pass).
 
 ### Package Layout
 
