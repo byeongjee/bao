@@ -4,6 +4,7 @@
 
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <vector>
 
@@ -95,14 +96,25 @@ mergeAllocations(const std::vector<const RegionAllocation *> &allocations,
             if (existIt != result.vars.end()) {
                 // Variable already in result — check compatibility.
                 // Reference: add_new_var_alloc: if var_alloc != self.vars[name]: raise
-                if (existIt->second.placement != va.placement)
+                if (existIt->second.placement != va.placement) {
+                    llvm::errs() << "[DEBUG merge] FAIL: placement mismatch for var '"
+                                 << v->getName() << "' (result="
+                                 << (existIt->second.placement == Placement::VM ? "VM" : "NVM")
+                                 << ", incoming=" << (va.placement == Placement::VM ? "VM" : "NVM")
+                                 << ") checkpointIncreaseAllowed=" << checkpointIncreaseAllowed
+                                 << "\n";
                     return std::nullopt;
+                }
                 if (va.placement == Placement::VM) {
                     auto off1 = result.vmOffsets.find(v);
                     auto off2 = allocations[i]->vmOffsets.find(v);
                     if (off1 != result.vmOffsets.end() && off2 != allocations[i]->vmOffsets.end() &&
-                        off1->second != off2->second)
+                        off1->second != off2->second) {
+                        llvm::errs() << "[DEBUG merge] FAIL: VM offset mismatch for var '"
+                                     << v->getName() << "' (result=" << off1->second
+                                     << ", incoming=" << off2->second << ")\n";
                         return std::nullopt;
+                    }
                 }
             } else {
                 // Variable not yet in result.
@@ -123,20 +135,37 @@ mergeAllocations(const std::vector<const RegionAllocation *> &allocations,
                                 break;
                             }
                         }
-                        if (overlaps)
+                        if (overlaps) {
+                            llvm::errs()
+                                << "[DEBUG merge] FAIL: VM overlap for var '" << v->getName()
+                                << "' addr=[" << startAddr << "," << endAddr << ")"
+                                << " checkpointIncreaseAllowed=" << checkpointIncreaseAllowed
+                                << "\n";
                             return std::nullopt;
+                        }
 
                         // Check checkpoint increase.
                         // Reference: add_new_var_alloc line 200.
-                        if ((va.needRestore() || va.needSave()) && !checkpointIncreaseAllowed)
+                        if ((va.needRestore() || va.needSave()) && !checkpointIncreaseAllowed) {
+                            llvm::errs() << "[DEBUG merge] FAIL: checkpoint increase for var '"
+                                         << v->getName() << "' needRestore=" << va.needRestore()
+                                         << " needSave=" << va.needSave()
+                                         << " checkpointIncreaseAllowed=false\n";
                             return std::nullopt;
+                        }
 
                         result.vars[v] = va;
                         result.vmOffsets[v] = offIt->second;
                         occupied.push_back({startAddr, endAddr});
                     } else {
-                        if ((va.needRestore() || va.needSave()) && !checkpointIncreaseAllowed)
+                        if ((va.needRestore() || va.needSave()) && !checkpointIncreaseAllowed) {
+                            llvm::errs() << "[DEBUG merge] FAIL: checkpoint increase (no offset) "
+                                         << "for var '" << v->getName()
+                                         << "' needRestore=" << va.needRestore()
+                                         << " needSave=" << va.needSave()
+                                         << " checkpointIncreaseAllowed=false\n";
                             return std::nullopt;
+                        }
                         result.vars[v] = va;
                     }
                 } else {
@@ -169,17 +198,45 @@ chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
             constrainedAlloc = std::move(*merged);
         }
         if (startAlloc) {
+            llvm::errs() << "[DEBUG chooseAlloc] merging startAlloc (" << startAlloc->vars.size()
+                         << " vars) with constrainedAlloc (" << constrainedAlloc.vars.size()
+                         << " vars)\n";
+            for (const auto &[v, va] : startAlloc->vars)
+                llvm::errs() << "[DEBUG chooseAlloc]   startAlloc var='" << v->getName()
+                             << "' placement=" << (va.placement == Placement::VM ? "VM" : "NVM")
+                             << " needRestore=" << va.needRestore() << " needSave=" << va.needSave()
+                             << "\n";
+            for (const auto &[v, va] : constrainedAlloc.vars)
+                llvm::errs() << "[DEBUG chooseAlloc]   constrainedAlloc var='" << v->getName()
+                             << "' placement=" << (va.placement == Placement::VM ? "VM" : "NVM")
+                             << " needRestore=" << va.needRestore() << " needSave=" << va.needSave()
+                             << "\n";
             std::vector<const RegionAllocation *> toMerge = {startAlloc, &constrainedAlloc};
             merged = mergeAllocations(toMerge, state, /*checkpointIncreaseAllowed=*/false);
             if (!merged) {
+                llvm::errs() << "[DEBUG chooseAlloc] FAIL: startAlloc merge failed\n";
                 return {RegionAllocation{}, -99999.0};
             }
             constrainedAlloc = std::move(*merged);
         }
         if (endAlloc) {
+            llvm::errs() << "[DEBUG chooseAlloc] merging endAlloc (" << endAlloc->vars.size()
+                         << " vars) with constrainedAlloc (" << constrainedAlloc.vars.size()
+                         << " vars)\n";
+            for (const auto &[v, va] : endAlloc->vars)
+                llvm::errs() << "[DEBUG chooseAlloc]   endAlloc var='" << v->getName()
+                             << "' placement=" << (va.placement == Placement::VM ? "VM" : "NVM")
+                             << " needRestore=" << va.needRestore() << " needSave=" << va.needSave()
+                             << "\n";
+            for (const auto &[v, va] : constrainedAlloc.vars)
+                llvm::errs() << "[DEBUG chooseAlloc]   constrainedAlloc var='" << v->getName()
+                             << "' placement=" << (va.placement == Placement::VM ? "VM" : "NVM")
+                             << " needRestore=" << va.needRestore() << " needSave=" << va.needSave()
+                             << "\n";
             std::vector<const RegionAllocation *> toMerge = {endAlloc, &constrainedAlloc};
             merged = mergeAllocations(toMerge, state, /*checkpointIncreaseAllowed=*/false);
             if (!merged) {
+                llvm::errs() << "[DEBUG chooseAlloc] FAIL: endAlloc merge failed\n";
                 return {RegionAllocation{}, -99999.0};
             }
             constrainedAlloc = std::move(*merged);

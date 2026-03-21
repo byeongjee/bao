@@ -129,6 +129,16 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         path.insert(path.begin(), startSynth);
         path.push_back(endSynth);
 
+        // DEBUG: print the trace path
+        {
+            std::string pathStr = "[DEBUG trace] loop=" + header->getName().str() + " path: ";
+            for (SchematicBlock *b : path) {
+                pathStr += b->getName().str();
+                pathStr += " -> ";
+            }
+            PLOGI << pathStr;
+        }
+
         // Add trace edges so SchematicBlock predecessors/successors are populated.
         graph_.addTraceEdges(path);
 
@@ -228,7 +238,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[headerBlock].E_to_leave;
     solution.blockMeta[startSynth].E_left = solution.blockMeta[headerBlock].E_left;
     if (latchBlock) {
-        solution.blockMeta[endSynth].E_to_leave = solution.blockMeta[endSynth].E_to_leave;
         solution.blockMeta[endSynth].E_left = solution.blockMeta[latchBlock].E_left;
     }
 
@@ -237,6 +246,48 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     double startEToLeave = solution.blockMeta[startSynth].E_to_leave;
     double endEToLeave = solution.blockMeta[endSynth].E_to_leave;
     double E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm;
+
+    // Account for inner loop multi-iteration costs.
+    // The propagation within the outer loop (with loopScope filter) only sees
+    // single-iteration costs for inner loops. Add the multi-iteration scaling
+    // here so E_loop reflects the true cost of one outer iteration.
+    // This is equivalent to Python's Step 10 direct adjustment + seenLoops
+    // mechanism, but avoids modifying blockMeta (which would break sub-path
+    // feasibility for the outer loop's trace analysis).
+    double innerLoopAdj = 0.0;
+    {
+        std::set<llvm::Loop *> accountedInnerLoops;
+        for (llvm::BasicBlock *BB : L->getBlocksVector()) {
+            SchematicBlock *block = graph_.getOrCreate(BB);
+            auto metaIt = solution.blockMeta.find(block);
+            if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
+                llvm::Loop *markLoop = metaIt->second.loop->loop;
+                if (markLoop != L && !accountedInnerLoops.count(markLoop)) {
+                    accountedInnerLoops.insert(markLoop);
+                    innerLoopAdj +=
+                        (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+                }
+            }
+        }
+        E_loop += innerLoopAdj;
+    }
+
+    // DEBUG Step 7
+    PLOGI << "[DEBUG Step7] loop=" << header->getName()
+          << " startSynth.E_to_leave=" << solution.blockMeta[startSynth].E_to_leave
+          << " startSynth.E_left=" << solution.blockMeta[startSynth].E_left
+          << " endSynth.E_to_leave=" << solution.blockMeta[endSynth].E_to_leave
+          << " endSynth.E_left=" << solution.blockMeta[endSynth].E_left
+          << " headerBlock.E_to_leave=" << solution.blockMeta[headerBlock].E_to_leave
+          << " headerBlock.E_left=" << solution.blockMeta[headerBlock].E_left;
+    if (latchBlock) {
+        PLOGI << "[DEBUG Step7] latchBlock=" << latch->getName()
+              << " latchBlock.E_to_leave=" << solution.blockMeta[latchBlock].E_to_leave
+              << " latchBlock.E_left=" << solution.blockMeta[latchBlock].E_left;
+    }
+    PLOGI << "[DEBUG Step7] E_loop=" << E_loop << " = startEToLeave(" << startEToLeave
+          << ") - endEToLeave(" << endEToLeave << ") + loopIncrementCostNvm("
+          << params_.loopIncrementCostNvm << ") + innerLoopAdj(" << innerLoopAdj << ")";
 
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
@@ -283,6 +334,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
         unsigned oldNumIt = 0;
         for (unsigned iter = 0; iter < 15; ++iter) {
+            PLOGI << "[DEBUG Step8] convergence iter=" << iter << " numIt=" << numIt
+                  << " oldNumIt=" << oldNumIt << " startEToLeave=" << startEToLeave
+                  << " endEToLeave=" << endEToLeave;
             if (oldNumIt != 0 && numIt >= oldNumIt)
                 break;
             oldNumIt = numIt;
@@ -354,10 +408,24 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 solution.decidedPlacements[endSynth] = hdPlIt->second;
             }
 
+            // DEBUG: print blockMeta after energy propagation in convergence loop
+            PLOGI << "[DEBUG Step8 after-prop] iter=" << iter
+                  << " startSynth.E_to_leave=" << solution.blockMeta[startSynth].E_to_leave
+                  << " startSynth.E_left=" << solution.blockMeta[startSynth].E_left
+                  << " endSynth.E_to_leave=" << solution.blockMeta[endSynth].E_to_leave
+                  << " endSynth.E_left=" << solution.blockMeta[endSynth].E_left
+                  << " headerBlock.E_to_leave=" << solution.blockMeta[headerBlock].E_to_leave
+                  << " headerBlock.E_left=" << solution.blockMeta[headerBlock].E_left;
+            if (latchBlock) {
+                PLOGI << "[DEBUG Step8 after-prop] latch=" << latch->getName()
+                      << " latchBlock.E_to_leave=" << solution.blockMeta[latchBlock].E_to_leave
+                      << " latchBlock.E_left=" << solution.blockMeta[latchBlock].E_left;
+            }
+
             // Re-read from synthetic blocks after re-propagation.
             startEToLeave = solution.blockMeta[startSynth].E_to_leave;
             endEToLeave = solution.blockMeta[endSynth].E_to_leave;
-            E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm;
+            E_loop = startEToLeave - endEToLeave + params_.loopIncrementCostNvm + innerLoopAdj;
             decision.E_loop = E_loop;
             decision.bodyAllocation = bodyAlloc;
 
@@ -365,9 +433,11 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                 break;
 
             // Convergence uses startEToLeave (not endEToLeave), matching reference
-            // schematic.py:614. After re-propagation, START_Loop's accumulated energy
-            // reflects the true worst-case cost to traverse the entire loop body.
-            availableEnergy = params_.capacity - startEToLeave;
+            // schematic.py:614. In Python, propagation applies seenLoops for all
+            // loops, so first_bb.energy_to_leave already includes inner loop scaling.
+            // In C++, the loopScope filter skips inner loop marks during propagation,
+            // so we add innerLoopAdj to match Python's effective startEToLeave.
+            availableEnergy = params_.capacity - (startEToLeave + innerLoopAdj);
             if (availableEnergy <= 0.0)
                 break;
             rawNumIt = static_cast<int>(std::floor(availableEnergy / E_loop)) - 1;
@@ -403,13 +473,14 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         if (decision.loopFitsEntirely)
             adjIter = static_cast<unsigned>(maxTripCount);
         LoopMark mark{L, adjIter, E_loop};
-        double adj = (adjIter - 1) * E_loop;
         for (llvm::BasicBlock *BB : L->getBlocksVector()) {
             SchematicBlock *block = graph_.getOrCreate(BB);
             auto &meta = solution.blockMeta[block];
             meta.loop = mark;
-            meta.E_to_leave += adj;
-            meta.E_left -= adj;
+            // Do NOT directly adjust E_to_leave/E_left here.
+            // The LoopMark stores nbIter and costOneIt; the energy propagation
+            // functions (propagateEnergyToLeave/propagateEnergyLeft) apply the
+            // iteration scaling dynamically via seenLoops, matching Python.
         }
     }
 

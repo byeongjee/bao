@@ -57,7 +57,7 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
         SchematicBlock *bb = ckpt.src;
         if (!bb)
             continue;
-        if (loopScope && (!bb->getLLVMBlock() || !loopScope->contains(bb->getLLVMBlock())))
+        if (loopScope && bb->getLLVMBlock() && !loopScope->contains(bb->getLLVMBlock()))
             continue;
 
         for (SchematicBlock *pred : bb->predecessors()) {
@@ -76,7 +76,7 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
                         continue;
                 }
             }
-            if (loopScope && (!pred->getLLVMBlock() || !loopScope->contains(pred->getLLVMBlock())))
+            if (loopScope && pred->getLLVMBlock() && !loopScope->contains(pred->getLLVMBlock()))
                 continue;
 
             dagAdj[childEdge]; // ensure node exists
@@ -111,13 +111,19 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 
         SchematicBlock *bb = ckpt.src;
         if (bb) {
-            // Inner-loop scaling
+            // Inner-loop scaling — skip for nested inner loops when propagating
+            // within an outer loopScope. Inner loop energy is managed by its own
+            // checkpoint mechanism; re-applying seenLoops would double-count.
             auto metaIt = solution.blockMeta.find(bb);
             if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-                llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
-                if (!seenLoops.count(loopHeader)) {
-                    seenLoops.insert(loopHeader);
-                    eToLeave += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+                llvm::Loop *markLoop = metaIt->second.loop->loop;
+                if (!loopScope || markLoop == loopScope) {
+                    llvm::BasicBlock *loopHeader = markLoop->getHeader();
+                    if (!seenLoops.count(loopHeader)) {
+                        seenLoops.insert(loopHeader);
+                        eToLeave +=
+                            (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+                    }
                 }
             }
 
@@ -178,16 +184,20 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
         SchematicBlock *bb = ckpt.dst;
         if (!bb)
             continue;
-        if (loopScope && (!bb->getLLVMBlock() || !loopScope->contains(bb->getLLVMBlock())))
+        if (loopScope && bb->getLLVMBlock() && !loopScope->contains(bb->getLLVMBlock()))
             continue;
 
-        // Inner-loop scaling (reference lines 293-295)
+        // Inner-loop scaling (reference lines 293-295) — skip for nested inner
+        // loops when propagating within an outer loopScope.
         auto metaIt = solution.blockMeta.find(bb);
         if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-            llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
-            if (!seenLoops.count(loopHeader)) {
-                seenLoops.insert(loopHeader);
-                cost += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+            llvm::Loop *markLoop = metaIt->second.loop->loop;
+            if (!loopScope || markLoop == loopScope) {
+                llvm::BasicBlock *loopHeader = markLoop->getHeader();
+                if (!seenLoops.count(loopHeader)) {
+                    seenLoops.insert(loopHeader);
+                    cost += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+                }
             }
         }
 
@@ -214,7 +224,7 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
                         continue;
                 }
             }
-            if (loopScope && (!succ->getLLVMBlock() || !loopScope->contains(succ->getLLVMBlock())))
+            if (loopScope && succ->getLLVMBlock() && !loopScope->contains(succ->getLLVMBlock()))
                 continue;
 
             if (ckptCost.find(childEdge) == ckptCost.end() || cost < ckptCost[childEdge])
