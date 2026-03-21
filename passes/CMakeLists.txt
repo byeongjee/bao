@@ -99,6 +99,7 @@ src/common/LoopTripCount.cpp
     src/schematic/SchematicInstrumenter.cpp
     src/schematic/TraceCollectorPass.cpp
     src/schematic/TraceLoader.cpp
+    src/schematic/SchematicBlock.cpp
 )
 
 # Use C++17 and disable RTTI/exceptions to match LLVM
