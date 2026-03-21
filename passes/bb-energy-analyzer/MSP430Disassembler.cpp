@@ -210,12 +210,6 @@ std::string MSP430Disassembler::parseOperandMode(const std::string &operand) {
 
     // Immediate: #N or #0xN
     if (operand[0] == '#') {
-        // Check for special immediate values like #1, #2, #4, #8 which have
-        // special encoding (commonly used with rlam)
-        std::string val = operand.substr(1);
-        if (val == "1" || val == "2" || val == "4" || val == "8") {
-            return "immediate_" + val;
-        }
         return "immediate";
     }
 

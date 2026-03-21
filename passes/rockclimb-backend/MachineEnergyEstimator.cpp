@@ -167,16 +167,8 @@ std::string MachineEnergyEstimator::mapSuffixChar(char c, const MachineInstr &MI
     switch (c) {
     case 'r':
         return "register";
-    case 'i': {
-        // Check for special immediate values (1, 2, 4, 8) used by constant
-        // generator in MSP430
-        if (operandIdx < MI.getNumOperands() && MI.getOperand(operandIdx).isImm()) {
-            int64_t val = MI.getOperand(operandIdx).getImm();
-            if (val == 1 || val == 2 || val == 4 || val == 8)
-                return "immediate_" + std::to_string(val);
-        }
+    case 'i':
         return "immediate";
-    }
     case 'c':
         // 6-bit constant — still an immediate for energy purposes
         return "immediate";
