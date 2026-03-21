@@ -246,12 +246,15 @@ void CheckpointOptimizer::addVariables() {
     allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
                       state_.getIneligibleObjs().end());
 
-    // m_{b,v} for all (block, var).
+    // m_{b,v} for eligible variables only (ineligibles have m=1 constant).
     // d_{b,v} only for (block, var) where b ∈ Reach(v).
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::Value *V : allTracked) {
             BlockVarKey key = std::make_pair(block, V);
-            m_[key] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "m", block, V));
+            if (!state_.isIneligible(V)) {
+                m_[key] =
+                    model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "m", block, V));
+            }
             if (reachableDefs_[V].count(block)) {
                 d_[key] =
                     model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "d", block, V));
@@ -348,38 +351,37 @@ void CheckpointOptimizer::constrainEntryAsRegionStart() {
     }
 }
 
-// C2: m[b,v] = 1 for ineligible variables (always in VM).
+// C2: Ineligible variables have m=1 (not modeled as Gurobi variables).
+// No constraints needed — handled by not creating m[b,v] for ineligibles
+// and substituting constant 1 wherever m would appear.
 void CheckpointOptimizer::constrainIneligiblePlacement() {
-    for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::Value *V : state_.getIneligibleObjs()) {
-            BlockVarKey key = std::make_pair(block, V);
-            model_.addConstr(m_[key] == 1,
-                             "inelig_m_" + nodeToken(cfg_, block) + "_" + valueToken(V));
-        }
-    }
+    // Intentionally empty: m[b,v] for ineligibles is not a Gurobi variable.
 }
 
 // Σ size(v) * m[b,v] <= VM_capacity  (∀ b)
+// Ineligible variables have m=1 (constant), moved to RHS as reduced capacity.
 void CheckpointOptimizer::constrainVMCapacity() {
-    std::vector<llvm::Value *> allTracked;
-    for (llvm::GlobalVariable *GV : state_.getVMObjs())
-        allTracked.push_back(static_cast<llvm::Value *>(GV));
-    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
-                      state_.getIneligibleObjs().end());
+    // Compute fixed VM usage from ineligible variables (m=1 always).
+    double ineligibleUsage = 0.0;
+    for (llvm::Value *V : state_.getIneligibleObjs()) {
+        if (!llvm::isa<llvm::GlobalVariable>(V) && !llvm::isa<llvm::AllocaInst>(V))
+            continue;
+        int sizeBytes = state_.getVarSizeBytes(V);
+        if (sizeBytes > 0)
+            ineligibleUsage += static_cast<double>(sizeBytes);
+    }
+    double reducedCapacity = static_cast<double>(params_.vmCapacityBytes) - ineligibleUsage;
 
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr vmUsage = 0;
-        for (llvm::Value *V : allTracked) {
-            // Only memory-backed objects consume VM capacity.
-            if (!llvm::isa<llvm::GlobalVariable>(V) && !llvm::isa<llvm::AllocaInst>(V))
-                continue;
-            int sizeBytes = state_.getVarSizeBytes(V);
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            int sizeBytes = state_.getVarSizeBytes(GV);
             if (sizeBytes <= 0)
                 continue;
-            vmUsage += static_cast<double>(sizeBytes) * m_[std::make_pair(block, V)];
+            vmUsage += static_cast<double>(sizeBytes) *
+                       m_[std::make_pair(block, static_cast<llvm::Value *>(GV))];
         }
-        model_.addConstr(vmUsage <= static_cast<double>(params_.vmCapacityBytes),
-                         "vm_capacity_" + nodeToken(cfg_, block));
+        model_.addConstr(vmUsage <= reducedCapacity, "vm_capacity_" + nodeToken(cfg_, block));
     }
 }
 
@@ -402,8 +404,12 @@ void CheckpointOptimizer::constrainNeedRestoreLinearization() {
             // L_{b,v} = 0: fix rHat = 0.
             model_.addConstr(rHatVar == 0,
                              "C3_rHat_not_live_" + nodeToken(cfg_, block) + "_" + valueToken(V));
+        } else if (state_.isIneligible(V)) {
+            // Ineligible + live-in: m=1, so rHat = r AND 1 = r.
+            model_.addConstr(rHatVar == r_[block],
+                             "C3_rHat_inelig_" + nodeToken(cfg_, block) + "_" + valueToken(V));
         } else {
-            // L_{b,v} = 1: rHat = r AND m.
+            // Eligible + live-in: rHat = r AND m.
             GRBVar inputs[] = {r_[block], m_[key]};
             model_.addGenConstrAnd(rHatVar, inputs, 2,
                                    "C3_rHat_and_" + nodeToken(cfg_, block) + "_" + valueToken(V));
@@ -527,11 +533,14 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
         model_.addConstr(sVar <= predDirtySum, "C8p_save_le_dirty_" + suffix);
 
         // C8': s[b,v] <= Σ_pred m[pred,v]  (replaces dHat upper bound)
-        GRBLinExpr predPlaceSum = 0;
-        for (NodeId pred : predecessors_[block]) {
-            predPlaceSum += m_[std::make_pair(pred, V)];
+        // For ineligibles, m=1 so s <= |preds|, trivially satisfied — skip.
+        if (!state_.isIneligible(V)) {
+            GRBLinExpr predPlaceSum = 0;
+            for (NodeId pred : predecessors_[block]) {
+                predPlaceSum += m_[std::make_pair(pred, V)];
+            }
+            model_.addConstr(sVar <= predPlaceSum, "C8p_save_le_place_" + suffix);
         }
-        model_.addConstr(sVar <= predPlaceSum, "C8p_save_le_place_" + suffix);
     }
 
     // C8: s[succ,v] >= d[pred,v] + m[pred,v] + r[succ] - 2  (∀ edge, v where s exists)
@@ -550,9 +559,15 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
             BlockVarKey predKey = std::make_pair(pred, V);
             auto dIt = d_.find(predKey);
             if (dIt == d_.end())
-                continue; // d[pred,v] = 0, so RHS = 0 + m + r - 2 <= 0, trivially satisfied.
-            model_.addConstr(sVar >= dIt->second + m_[predKey] + r_[succ] - 2,
-                             "C8_save_edge_" + std::to_string(idx));
+                continue; // d[pred,v] = 0, so RHS <= 0, trivially satisfied.
+            if (state_.isIneligible(V)) {
+                // m=1: s >= d + 1 + r - 2 = d + r - 1
+                model_.addConstr(sVar >= dIt->second + r_[succ] - 1,
+                                 "C8_save_edge_" + std::to_string(idx));
+            } else {
+                model_.addConstr(sVar >= dIt->second + m_[predKey] + r_[succ] - 2,
+                                 "C8_save_edge_" + std::to_string(idx));
+            }
             idx++;
         }
     }
@@ -654,6 +669,12 @@ void CheckpointOptimizer::extractSolution() {
 
     for (const auto &[key, var] : m_) {
         solution_.m[key] = var.get(GRB_DoubleAttr_X) > 0.5;
+    }
+    // Ineligible variables have m=1 (not modeled as Gurobi variables).
+    for (NodeId block : cfg_.getBlocks()) {
+        for (llvm::Value *V : state_.getIneligibleObjs()) {
+            solution_.m[std::make_pair(block, V)] = true;
+        }
     }
 
     for (const auto &[key, var] : rHat_) {
