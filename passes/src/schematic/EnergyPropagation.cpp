@@ -111,22 +111,15 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 
         SchematicBlock *bb = ckpt.src;
         if (bb) {
-            // Inner-loop scaling — skip inner loop LoopMarks when propagating
-            // within an outer loopScope. Python applies seenLoops for all loops
-            // unconditionally, but that relies on Step 10's direct E_to_leave/
-            // E_left adjustment which is semantically incorrect (see DEVIATION
-            // comment in LoopAnalyzer.cpp). Instead, inner loop costs are added
-            // to E_loop/availableEnergy locally in LoopAnalyzer.
+            // Inner-loop scaling — apply seenLoops for all loops unconditionally,
+            // matching Python reference (cfg_modification.py:232-234).
+            // Step 10 directly adjusts E_to_leave/E_left on loop blocks.
             auto metaIt = solution.blockMeta.find(bb);
             if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-                llvm::Loop *markLoop = metaIt->second.loop->loop;
-                if (!loopScope || markLoop == loopScope) {
-                    llvm::BasicBlock *loopHeader = markLoop->getHeader();
-                    if (!seenLoops.count(loopHeader)) {
-                        seenLoops.insert(loopHeader);
-                        eToLeave +=
-                            (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
-                    }
+                llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
+                if (!seenLoops.count(loopHeader)) {
+                    seenLoops.insert(loopHeader);
+                    eToLeave += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
                 }
             }
 
@@ -190,18 +183,14 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
         if (loopScope && bb->getLLVMBlock() && !loopScope->contains(bb->getLLVMBlock()))
             continue;
 
-        // Inner-loop scaling (reference lines 293-295) — skip inner loop
-        // LoopMarks within an outer loopScope (see comment above in
-        // propagateEnergyToLeave for rationale).
+        // Inner-loop scaling (reference lines 293-295) — apply seenLoops for
+        // all loops unconditionally, matching Python reference.
         auto metaIt = solution.blockMeta.find(bb);
         if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-            llvm::Loop *markLoop = metaIt->second.loop->loop;
-            if (!loopScope || markLoop == loopScope) {
-                llvm::BasicBlock *loopHeader = markLoop->getHeader();
-                if (!seenLoops.count(loopHeader)) {
-                    seenLoops.insert(loopHeader);
-                    cost += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
-                }
+            llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
+            if (!seenLoops.count(loopHeader)) {
+                seenLoops.insert(loopHeader);
+                cost += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
             }
         }
 
