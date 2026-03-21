@@ -114,11 +114,53 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
     std::vector<EnumeratedPath> paths = loadedTraces->functionPaths;
 
+    // Create synthetic START_Func/END_Func boundary blocks for function traces.
+    // These match the Python reference's %START_ / %END_ synthetic nodes that
+    // are prepended/appended to every function trace (trace.py:288-289).
+    // Without these, extractNotFixedBBPaths produces sub-paths without fixed
+    // boundaries, causing the "trace must be at least 3 blocks" guard to fail.
+    BasicBlock *startFunc = BasicBlock::Create(F.getContext(), "START_Func");
+    BasicBlock *endFunc = BasicBlock::Create(F.getContext(), "END_Func");
+
+    // Mark synthetic boundaries as analyzed with default energy values
+    // (same pattern as LoopAnalyzer's START_Loop/END_Loop).
+    solution.blockMeta[startFunc].E_left =
+        params.capacity - params.E_pro - params.N_reg * params.regRestoreEnergy;
+    solution.blockMeta[startFunc].analyzed = true;
+    solution.decidedPlacements[startFunc] = {};
+
+    solution.blockMeta[endFunc].E_to_leave = params.E_epi + params.N_reg * params.regStoreEnergy;
+    solution.blockMeta[endFunc].analyzed = true;
+    solution.decidedPlacements[endFunc] = {};
+
+    // RAII cleanup for synthetic blocks.
+    auto cleanupFunc = [&]() {
+        solution.blockMeta.erase(startFunc);
+        solution.blockMeta.erase(endFunc);
+        solution.decidedPlacements.erase(startFunc);
+        solution.decidedPlacements.erase(endFunc);
+        solution.blockAllocation.erase(startFunc);
+        solution.blockAllocation.erase(endFunc);
+        startFunc->deleteValue();
+        endFunc->deleteValue();
+    };
+    struct FuncScopeGuard {
+        std::function<void()> fn;
+        ~FuncScopeGuard() { fn(); }
+    } funcGuard{cleanupFunc};
+
     // Step 9: Analyze each path.
     for (const auto &ep : paths) {
         solution.pathsAnalyzed++;
+        // Prepend/append synthetic boundary blocks (ref: trace.py:288-289).
+        std::vector<BasicBlock *> tracePath;
+        tracePath.reserve(ep.blocks.size() + 2);
+        tracePath.push_back(startFunc);
+        tracePath.insert(tracePath.end(), ep.blocks.begin(), ep.blocks.end());
+        tracePath.push_back(endFunc);
+
         std::string traceError;
-        if (!analyzeTrace(ep.blocks, solution, state, *ctx.cfg, params, &vmTracker, LI,
+        if (!analyzeTrace(tracePath, solution, state, *ctx.cfg, params, &vmTracker, LI,
                           /*loopScope=*/nullptr, traceError)) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '" << F.getName()
                   << "', path #" << solution.pathsAnalyzed << ": " << traceError;
