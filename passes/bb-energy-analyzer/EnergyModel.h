@@ -20,6 +20,12 @@ class EnergyModel {
     /// @return Energy cost in configured units (typically nJ)
     double getEnergy(const std::string &mnemonic, const std::string &addrMode) const;
 
+    /// Get energy for a call instruction, using per-function key if target is known.
+    /// Fallback chain (each step logs WARNING):
+    ///   call_{function_name} -> call_{addrMode} -> call -> default
+    /// Returns 0.0 if callTarget is in ignored_call_targets whitelist.
+    double getCallEnergy(const std::string &addrMode, const std::string &callTarget) const;
+
     /// Get default energy for unknown instructions
     double getDefaultEnergy() const { return defaultEnergy_; }
 
@@ -38,6 +44,7 @@ class EnergyModel {
     double defaultEnergy_ = 1.0;
     mutable std::set<std::string> requiredKeys_;
     mutable std::set<std::string> missingKeys_;
+    std::set<std::string> ignoredCallTargets_;
 
     /// Build lookup key from mnemonic and addressing mode
     static std::string makeKey(const std::string &mnemonic, const std::string &addrMode);
