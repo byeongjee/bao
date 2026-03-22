@@ -155,7 +155,11 @@ int main(int argc, char **argv) {
                 for (size_t i = 0; i < instructions.size(); ++i) {
                     const auto &insn = instructions[i];
                     if (insn.address >= range.start && insn.address < range.end) {
-                        bbEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
+                        if (insn.mnemonic == "call") {
+                            bbEnergy += model.getCallEnergy(insn.addrMode, insn.callTarget);
+                        } else {
+                            bbEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
+                        }
                         instrCount++;
                         instructionMapped[i] = true;
                     }
@@ -214,7 +218,11 @@ int main(int argc, char **argv) {
             PLOGD << "warning: instruction at 0x" << Twine::utohexstr(insn.address) << " ("
                   << insn.mnemonic << ") not mapped to any BB";
             unmappedCount++;
-            unmappedEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
+            if (insn.mnemonic == "call") {
+                unmappedEnergy += model.getCallEnergy(insn.addrMode, insn.callTarget);
+            } else {
+                unmappedEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
+            }
         }
     }
 
