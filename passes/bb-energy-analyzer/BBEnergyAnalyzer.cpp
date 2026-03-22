@@ -16,6 +16,52 @@ using namespace llvm;
 using namespace bbanalyzer;
 using json = nlohmann::json;
 
+/// Look back up to 3 instructions from a `call memcpy` to find `mov #N, r14`,
+/// extracting the immediate size argument. Returns the decimal size string,
+/// or empty if not statically extractable.
+static std::string extractMemcpySizeArg(const std::vector<Instruction> &instructions,
+                                        size_t callIdx) {
+    size_t lookback = std::min(callIdx, static_cast<size_t>(3));
+    for (size_t j = 1; j <= lookback; ++j) {
+        const auto &prev = instructions[callIdx - j];
+        // If r14 is written by a non-immediate instruction, give up
+        if (prev.mnemonic == "mov" && prev.addrMode == "immediate_register") {
+            // Operands are like "#16, r14" or "#0x10, r14"
+            auto commaPos = prev.operands.find(',');
+            if (commaPos == std::string::npos)
+                continue;
+            std::string dst = prev.operands.substr(commaPos + 1);
+            // Trim leading whitespace/tabs (objdump uses tabs)
+            dst.erase(0, dst.find_first_not_of(" \t"));
+            if (dst != "r14")
+                continue;
+            std::string src = prev.operands.substr(0, commaPos);
+            src.erase(0, src.find_first_not_of(" \t"));
+            if (src.empty() || src[0] != '#')
+                continue;
+            std::string numStr = src.substr(1);
+            try {
+                unsigned long val = std::stoul(numStr, nullptr, 0);
+                return std::to_string(val);
+            } catch (...) {
+                return "";
+            }
+        }
+        // r14 written by non-mov or non-immediate mov — size is dynamic
+        if (prev.operands.find("r14") != std::string::npos) {
+            // Check if r14 appears as destination (after comma)
+            auto commaPos = prev.operands.find(',');
+            if (commaPos != std::string::npos) {
+                std::string dst = prev.operands.substr(commaPos + 1);
+                dst.erase(0, dst.find_first_not_of(" \t"));
+                if (dst == "r14")
+                    return "";
+            }
+        }
+    }
+    return "";
+}
+
 // Load BB mapping from JSON file (function -> BB index -> BB name)
 std::map<std::string, std::map<std::string, std::string>> loadBBMapping(const std::string &path) {
     std::map<std::string, std::map<std::string, std::string>> result;
@@ -156,7 +202,13 @@ int main(int argc, char **argv) {
                     const auto &insn = instructions[i];
                     if (insn.address >= range.start && insn.address < range.end) {
                         if (insn.mnemonic == "call") {
-                            bbEnergy += model.getCallEnergy(insn.addrMode, insn.callTarget);
+                            std::string effectiveTarget = insn.callTarget;
+                            if (effectiveTarget == "memcpy") {
+                                std::string size = extractMemcpySizeArg(instructions, i);
+                                if (!size.empty())
+                                    effectiveTarget = "memcpy_" + size;
+                            }
+                            bbEnergy += model.getCallEnergy(insn.addrMode, effectiveTarget);
                         } else {
                             bbEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
                         }
@@ -219,7 +271,13 @@ int main(int argc, char **argv) {
                   << insn.mnemonic << ") not mapped to any BB";
             unmappedCount++;
             if (insn.mnemonic == "call") {
-                unmappedEnergy += model.getCallEnergy(insn.addrMode, insn.callTarget);
+                std::string effectiveTarget = insn.callTarget;
+                if (effectiveTarget == "memcpy") {
+                    std::string size = extractMemcpySizeArg(instructions, i);
+                    if (!size.empty())
+                        effectiveTarget = "memcpy_" + size;
+                }
+                unmappedEnergy += model.getCallEnergy(insn.addrMode, effectiveTarget);
             } else {
                 unmappedEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
             }

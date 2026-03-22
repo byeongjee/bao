@@ -108,20 +108,25 @@ double EnergyModel::getCallEnergy(const std::string &addrMode,
             return it->second;
         }
 
-        // Fallback 1: call_{addrMode} (e.g., call_immediate)
-        std::string fallback1 = makeKey("call", addrMode);
-        it = costs_.find(fallback1);
-        if (it != costs_.end()) {
-            PLOGW << "WARNING: no energy cost for '" << primaryKey << "', falling back to '"
-                  << fallback1 << "' (" << it->second << ")";
-            return it->second;
+        // Fallback 1: base function name (e.g., call_memcpy_16 -> call_memcpy)
+        auto underscorePos = callTarget.rfind('_');
+        if (underscorePos != std::string::npos) {
+            std::string baseName = callTarget.substr(0, underscorePos);
+            std::string baseKey = "call_" + baseName;
+            it = costs_.find(baseKey);
+            if (it != costs_.end()) {
+                PLOGW << "WARNING: no energy cost for '" << primaryKey << "', falling back to '"
+                      << baseKey << "' (" << it->second << ")";
+                return it->second;
+            }
         }
 
-        // Fallback 2: bare "call"
-        it = costs_.find("call");
+        // Fallback 2: call_{addrMode} (e.g., call_immediate)
+        std::string fallback2 = makeKey("call", addrMode);
+        it = costs_.find(fallback2);
         if (it != costs_.end()) {
-            PLOGW << "WARNING: no energy cost for '" << primaryKey << "' or '" << fallback1
-                  << "', falling back to 'call' (" << it->second << ")";
+            PLOGW << "WARNING: no energy cost for '" << primaryKey << "', falling back to '"
+                  << fallback2 << "' (" << it->second << ")";
             return it->second;
         }
 
