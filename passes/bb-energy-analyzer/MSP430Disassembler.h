@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,15 @@ class MSP430Disassembler {
     /// @return Mode string: "register", "immediate", "indexed", "indirect",
     ///         "autoincrement", "absolute", "symbolic"
     std::string parseOperandMode(const std::string &operand);
+
+    /// Parse function labels from objdump output into offset->name map.
+    /// Matches lines like: 00000000 <timing_gpio_init>:
+    static std::map<uint64_t, std::string> parseFunctionLabels(const std::string &objdumpOutput);
+
+    /// Resolve section-relative call targets (e.g., .text+0x4a) to function
+    /// names using the offset->name map from parseFunctionLabels().
+    static void resolveCallTargets(std::vector<Instruction> &instructions,
+                                   const std::map<uint64_t, std::string> &offsetToFunc);
 };
 
 } // namespace bbanalyzer

@@ -161,8 +161,57 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
         }
     }
 
+    // Resolve section-relative call targets (.text+0xNN) to function names
+    auto funcLabels = parseFunctionLabels(output);
+    PLOGI << "Found " << funcLabels.size() << " function labels for relocation resolution";
+    resolveCallTargets(result, funcLabels);
+
     PLOGI << "Disassembled " << result.size() << " instructions";
     return result;
+}
+
+std::map<uint64_t, std::string>
+MSP430Disassembler::parseFunctionLabels(const std::string &objdumpOutput) {
+    std::map<uint64_t, std::string> result;
+    std::regex labelPattern(R"(^([0-9a-fA-F]+)\s+<([^>]+)>:\s*$)");
+    std::istringstream stream(objdumpOutput);
+    std::string line;
+    std::smatch match;
+
+    while (std::getline(stream, line)) {
+        if (std::regex_match(line, match, labelPattern)) {
+            uint64_t offset = std::stoull(match[1].str(), nullptr, 16);
+            result[offset] = match[2].str();
+        }
+    }
+    return result;
+}
+
+void MSP430Disassembler::resolveCallTargets(std::vector<Instruction> &instructions,
+                                            const std::map<uint64_t, std::string> &offsetToFunc) {
+    if (offsetToFunc.empty()) {
+        return;
+    }
+
+    for (auto &instr : instructions) {
+        if (instr.mnemonic != "call" || instr.callTarget.rfind(".text", 0) != 0) {
+            continue;
+        }
+
+        // Parse offset from .text+0xNN or bare .text (offset 0)
+        uint64_t offset = 0;
+        auto plusPos = instr.callTarget.find('+');
+        if (plusPos != std::string::npos) {
+            offset = std::stoull(instr.callTarget.substr(plusPos + 1), nullptr, 0);
+        }
+
+        // Find containing function (largest label address <= offset)
+        auto it = offsetToFunc.upper_bound(offset);
+        if (it != offsetToFunc.begin()) {
+            --it;
+            instr.callTarget = it->second;
+        }
+    }
 }
 
 std::string MSP430Disassembler::determineAddressingMode(const std::string &mnemonic,
