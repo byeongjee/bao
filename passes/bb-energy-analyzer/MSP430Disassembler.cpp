@@ -66,8 +66,8 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
         return result;
     }
 
-    // Run objdump -d <elfPath>
-    StringRef args[] = {objdumpPath, "-d", elfPath};
+    // Run objdump -d -r <elfPath>
+    StringRef args[] = {objdumpPath, "-d", "-r", elfPath};
     std::optional<StringRef> redirects[] = {std::nullopt, StringRef(tempPath), std::nullopt};
 
     int rc = sys::ExecuteAndWait(objdumpPath, args, std::nullopt, redirects);
@@ -94,11 +94,22 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
     //    1236:       12 c3           clrc
     // Pattern: hex_addr: hex_bytes mnemonic operands
     std::regex instrPattern(R"(^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F ]+)\s+(\w+)(.*)$)");
+    std::regex relocPattern(R"(^\s*([0-9a-fA-F]+):\s+R_\S+\s+(\S+)\s*$)");
 
     std::istringstream stream(output);
     std::string line;
 
     while (std::getline(stream, line)) {
+        // Try relocation line first
+        std::smatch relocMatch;
+        if (!result.empty() && std::regex_match(line, relocMatch, relocPattern)) {
+            auto &lastInstr = result.back();
+            if (lastInstr.mnemonic == "call") {
+                lastInstr.callTarget = relocMatch[2].str();
+            }
+            continue;
+        }
+
         std::smatch match;
         if (std::regex_match(line, match, instrPattern)) {
             Instruction instr;
