@@ -16,11 +16,10 @@ using namespace llvm;
 using namespace bbanalyzer;
 using json = nlohmann::json;
 
-/// Look back up to 3 instructions from a `call memcpy` to find `mov #N, r14`,
-/// extracting the immediate size argument. Returns the decimal size string,
-/// or empty if not statically extractable.
-static std::string extractMemcpySizeArg(const std::vector<Instruction> &instructions,
-                                        size_t callIdx) {
+/// Look back up to 3 instructions from a `call memcpy/memset` to find
+/// `mov #N, r14`, extracting the immediate size argument. Returns the decimal
+/// size string, or empty if not statically extractable.
+static std::string extractSizeArg(const std::vector<Instruction> &instructions, size_t callIdx) {
     size_t lookback = std::min(callIdx, static_cast<size_t>(3));
     for (size_t j = 1; j <= lookback; ++j) {
         const auto &prev = instructions[callIdx - j];
@@ -203,10 +202,10 @@ int main(int argc, char **argv) {
                     if (insn.address >= range.start && insn.address < range.end) {
                         if (insn.mnemonic == "call") {
                             std::string effectiveTarget = insn.callTarget;
-                            if (effectiveTarget == "memcpy") {
-                                std::string size = extractMemcpySizeArg(instructions, i);
+                            if (effectiveTarget == "memcpy" || effectiveTarget == "memset") {
+                                std::string size = extractSizeArg(instructions, i);
                                 if (!size.empty())
-                                    effectiveTarget = "memcpy_" + size;
+                                    effectiveTarget = effectiveTarget + "_" + size;
                             }
                             bbEnergy += model.getCallEnergy(insn.addrMode, effectiveTarget);
                         } else {
@@ -272,10 +271,10 @@ int main(int argc, char **argv) {
             unmappedCount++;
             if (insn.mnemonic == "call") {
                 std::string effectiveTarget = insn.callTarget;
-                if (effectiveTarget == "memcpy") {
-                    std::string size = extractMemcpySizeArg(instructions, i);
+                if (effectiveTarget == "memcpy" || effectiveTarget == "memset") {
+                    std::string size = extractSizeArg(instructions, i);
                     if (!size.empty())
-                        effectiveTarget = "memcpy_" + size;
+                        effectiveTarget = effectiveTarget + "_" + size;
                 }
                 unmappedEnergy += model.getCallEnergy(insn.addrMode, effectiveTarget);
             } else {
