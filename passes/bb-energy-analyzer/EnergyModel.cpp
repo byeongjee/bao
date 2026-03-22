@@ -91,8 +91,8 @@ double EnergyModel::getEnergy(const std::string &mnemonic, const std::string &ad
     return defaultEnergy_;
 }
 
-double EnergyModel::getCallEnergy(const std::string &addrMode,
-                                  const std::string &callTarget) const {
+double EnergyModel::getCallEnergy(const std::string &addrMode, const std::string &callTarget,
+                                  std::optional<unsigned> sizeArg) const {
     // Whitelisted calls contribute zero energy
     if (!callTarget.empty() && ignoredCallTargets_.count(callTarget)) {
         return 0.0;
@@ -105,32 +105,44 @@ double EnergyModel::getCallEnergy(const std::string &addrMode,
 
         auto it = costs_.find(primaryKey);
         if (it != costs_.end()) {
-            return it->second;
+            double baseCost = it->second;
+
+            // For memcpy/memset with known size, add per-byte cost
+            if (sizeArg.has_value()) {
+                std::string perByteKey = primaryKey + "_bytes";
+                requiredKeys_.insert(perByteKey);
+                auto perByteIt = costs_.find(perByteKey);
+                if (perByteIt != costs_.end()) {
+                    return baseCost + sizeArg.value() * perByteIt->second;
+                }
+                PLOGW << "WARNING: no per-byte energy cost '" << perByteKey
+                      << "', using base cost only (" << baseCost << ")";
+                missingKeys_.insert(perByteKey);
+            }
+
+            return baseCost;
         }
 
-        // Fallback 1: base function name (e.g., call_memcpy_16 -> call_memcpy)
-        auto underscorePos = callTarget.rfind('_');
-        if (underscorePos != std::string::npos) {
-            std::string baseName = callTarget.substr(0, underscorePos);
-            std::string baseKey = "call_" + baseName;
-            it = costs_.find(baseKey);
-            if (it != costs_.end()) {
-                PLOGW << "WARNING: no energy cost for '" << primaryKey << "', falling back to '"
-                      << baseKey << "' (" << it->second << ")";
-                return it->second;
+        // If size was provided but base key is missing, still record per-byte key as required
+        if (sizeArg.has_value()) {
+            std::string perByteKey = primaryKey + "_bytes";
+            requiredKeys_.insert(perByteKey);
+            if (costs_.find(perByteKey) == costs_.end()) {
+                PLOGW << "WARNING: no per-byte energy cost '" << perByteKey << "'";
+                missingKeys_.insert(perByteKey);
             }
         }
 
-        // Fallback 2: call_{addrMode} (e.g., call_immediate)
-        std::string fallback2 = makeKey("call", addrMode);
-        it = costs_.find(fallback2);
+        // Fallback 1: call_{addrMode} (e.g., call_immediate)
+        std::string fallback1 = makeKey("call", addrMode);
+        it = costs_.find(fallback1);
         if (it != costs_.end()) {
             PLOGW << "WARNING: no energy cost for '" << primaryKey << "', falling back to '"
-                  << fallback2 << "' (" << it->second << ")";
+                  << fallback1 << "' (" << it->second << ")";
             return it->second;
         }
 
-        // Fallback 3: default energy
+        // Fallback 2: default energy
         PLOGW << "WARNING: no energy cost for '" << primaryKey
               << "', no fallback found, using default (" << defaultEnergy_ << ")";
         missingKeys_.insert(primaryKey);

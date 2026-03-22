@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -21,10 +22,12 @@ class EnergyModel {
     double getEnergy(const std::string &mnemonic, const std::string &addrMode) const;
 
     /// Get energy for a call instruction, using per-function key if target is known.
-    /// Fallback chain (each step logs WARNING):
-    ///   call_{function_name} -> call_{addrMode} -> call -> default
+    /// For memcpy/memset with a known size, computes:
+    ///   call_{func} + sizeArg * call_{func}_bytes
+    /// Otherwise fallback chain: call_{function_name} -> call_{addrMode} -> default
     /// Returns 0.0 if callTarget is in ignored_call_targets whitelist.
-    double getCallEnergy(const std::string &addrMode, const std::string &callTarget) const;
+    double getCallEnergy(const std::string &addrMode, const std::string &callTarget,
+                         std::optional<unsigned> sizeArg = std::nullopt) const;
 
     /// Get default energy for unknown instructions
     double getDefaultEnergy() const { return defaultEnergy_; }

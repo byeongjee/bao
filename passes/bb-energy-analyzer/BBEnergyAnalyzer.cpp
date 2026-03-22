@@ -11,15 +11,17 @@
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <optional>
 
 using namespace llvm;
 using namespace bbanalyzer;
 using json = nlohmann::json;
 
 /// Look back up to 3 instructions from a `call memcpy/memset` to find
-/// `mov #N, r14`, extracting the immediate size argument. Returns the decimal
-/// size string, or empty if not statically extractable.
-static std::string extractSizeArg(const std::vector<Instruction> &instructions, size_t callIdx) {
+/// `mov #N, r14`, extracting the immediate size argument. Returns the size
+/// in bytes, or std::nullopt if not statically extractable.
+static std::optional<unsigned> extractSizeArg(const std::vector<Instruction> &instructions,
+                                              size_t callIdx) {
     size_t lookback = std::min(callIdx, static_cast<size_t>(3));
     for (size_t j = 1; j <= lookback; ++j) {
         const auto &prev = instructions[callIdx - j];
@@ -41,9 +43,9 @@ static std::string extractSizeArg(const std::vector<Instruction> &instructions, 
             std::string numStr = src.substr(1);
             try {
                 unsigned long val = std::stoul(numStr, nullptr, 0);
-                return std::to_string(val);
+                return static_cast<unsigned>(val);
             } catch (...) {
-                return "";
+                return std::nullopt;
             }
         }
         // r14 written by non-mov or non-immediate mov — size is dynamic
@@ -54,11 +56,11 @@ static std::string extractSizeArg(const std::vector<Instruction> &instructions, 
                 std::string dst = prev.operands.substr(commaPos + 1);
                 dst.erase(0, dst.find_first_not_of(" \t"));
                 if (dst == "r14")
-                    return "";
+                    return std::nullopt;
             }
         }
     }
-    return "";
+    return std::nullopt;
 }
 
 // Load BB mapping from JSON file (function -> BB index -> BB name)
@@ -201,13 +203,18 @@ int main(int argc, char **argv) {
                     const auto &insn = instructions[i];
                     if (insn.address >= range.start && insn.address < range.end) {
                         if (insn.mnemonic == "call") {
-                            std::string effectiveTarget = insn.callTarget;
-                            if (effectiveTarget == "memcpy" || effectiveTarget == "memset") {
-                                std::string size = extractSizeArg(instructions, i);
-                                if (!size.empty())
-                                    effectiveTarget = effectiveTarget + "_" + size;
+                            std::optional<unsigned> sizeArg;
+                            if (insn.callTarget == "memcpy" || insn.callTarget == "memset") {
+                                sizeArg = extractSizeArg(instructions, i);
+                                if (!sizeArg.has_value()) {
+                                    PLOGW << "WARNING: could not extract constant size for "
+                                          << insn.callTarget << " at 0x"
+                                          << Twine::utohexstr(insn.address)
+                                          << ", using base cost only";
+                                }
                             }
-                            bbEnergy += model.getCallEnergy(insn.addrMode, effectiveTarget);
+                            bbEnergy +=
+                                model.getCallEnergy(insn.addrMode, insn.callTarget, sizeArg);
                         } else {
                             bbEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
                         }
@@ -270,13 +277,16 @@ int main(int argc, char **argv) {
                   << insn.mnemonic << ") not mapped to any BB";
             unmappedCount++;
             if (insn.mnemonic == "call") {
-                std::string effectiveTarget = insn.callTarget;
-                if (effectiveTarget == "memcpy" || effectiveTarget == "memset") {
-                    std::string size = extractSizeArg(instructions, i);
-                    if (!size.empty())
-                        effectiveTarget = effectiveTarget + "_" + size;
+                std::optional<unsigned> sizeArg;
+                if (insn.callTarget == "memcpy" || insn.callTarget == "memset") {
+                    sizeArg = extractSizeArg(instructions, i);
+                    if (!sizeArg.has_value()) {
+                        PLOGW << "WARNING: could not extract constant size for " << insn.callTarget
+                              << " at 0x" << Twine::utohexstr(insn.address)
+                              << ", using base cost only";
+                    }
                 }
-                unmappedEnergy += model.getCallEnergy(insn.addrMode, effectiveTarget);
+                unmappedEnergy += model.getCallEnergy(insn.addrMode, insn.callTarget, sizeArg);
             } else {
                 unmappedEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
             }
