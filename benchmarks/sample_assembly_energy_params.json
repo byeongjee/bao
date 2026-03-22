@@ -1,5 +1,9 @@
 {
     "default_energy": 1.0,
+    "ignored_call_targets": [
+        "timing_gpio_init", "timing_gpio_start", "timing_gpio_stop",
+        "_timing_delay_cycles", "bench_halt"
+    ],
     "parameters": {
         "mov_immediate_symbolic_symbolic": 3.05,
         "add_autoincrement_register": 1.2049640423643528,
