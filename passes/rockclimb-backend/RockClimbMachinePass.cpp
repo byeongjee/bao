@@ -53,7 +53,7 @@ struct MachineRockClimbParams {
     unsigned N_reg = 0;
     double reg_restore_energy = 0.0;
     bool distributedCheckpointing = true;
-    double reg_store_energy = 0.0;
+    double reg_store_energy = 0.0; // required, parsed from root
     bool addDebugMarkers = false;
 
     double calculateESafe() const { return capacity - N_reg * reg_restore_energy; }
@@ -101,6 +101,12 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
         return false;
     }
 
+    auto reg_store_energy = root->getNumber("reg_store_energy");
+    if (!reg_store_energy) {
+        PLOGE << "Error: Missing 'reg_store_energy' in config";
+        return false;
+    }
+
     auto reg_restore_energy = root->getNumber("reg_restore_energy");
     if (!reg_restore_energy) {
         PLOGE << "Error: Missing 'reg_restore_energy' in config";
@@ -109,6 +115,7 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
 
     params.capacity = *capacity;
     params.N_reg = static_cast<unsigned>(*N_reg);
+    params.reg_store_energy = *reg_store_energy;
     params.reg_restore_energy = *reg_restore_energy;
 
     // distributed_checkpointing: check rockclimb section first, then root
@@ -126,16 +133,6 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
             distributed = val;
     }
     params.distributedCheckpointing = distributed.value_or(true);
-
-    // reg_store_energy (optional, per-register store cost for inline overhead)
-    if (rcSection) {
-        if (auto v = rcSection->getNumber("reg_store_energy"))
-            params.reg_store_energy = *v;
-    }
-    if (params.reg_store_energy == 0.0) {
-        if (auto v = root->getNumber("reg_store_energy"))
-            params.reg_store_energy = *v;
-    }
 
     // add_debug_markers (optional, default false)
     if (auto val = root->getBoolean("add_debug_markers"))

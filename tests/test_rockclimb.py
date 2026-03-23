@@ -345,6 +345,7 @@ class TestMachinePassDistributedCkpt:
         low_cap_config.write_text(json.dumps({
             "capacity": 12.0,
             "N_reg": 1,
+            "reg_store_energy": 1.0,
             "reg_restore_energy": 1.0,
             "rockclimb": {"distributed_checkpointing": True},
         }))
@@ -396,6 +397,7 @@ class TestMachinePassDistributedCkpt:
         base_config.write_text(json.dumps({
             "capacity": 507.87,
             "N_reg": 16,
+            "reg_store_energy": 0.0,
             "reg_restore_energy": 2.0,
             "rockclimb": {"distributed_checkpointing": True},
         }))
@@ -409,10 +411,10 @@ class TestMachinePassDistributedCkpt:
         store_config.write_text(json.dumps({
             "capacity": 507.87,
             "N_reg": 16,
+            "reg_store_energy": 5.0,
             "reg_restore_energy": 2.0,
             "rockclimb": {
                 "distributed_checkpointing": True,
-                "reg_store_energy": 5.0,
             },
         }))
         store_result = run_rockclimb_machine(
