@@ -275,8 +275,8 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     auto &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
 
     // Algorithm 1: region partitioning
-    double ckptStoreEnergy = params.distributedCheckpointing ? params.reg_store_energy : 0.0;
-    RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe, ckptStoreEnergy);
+    double regStoreEnergy = params.distributedCheckpointing ? params.reg_store_energy : 0.0;
+    RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe, regStoreEnergy);
 
     MachineRockClimbResult result = optimizer.optimize();
     if (!result.feasible) {
