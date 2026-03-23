@@ -208,8 +208,13 @@ std::string MachineEnergyEstimator::classifyMemoryOperand(const MachineInstr &MI
 // Single-operand: just "mode". No suffix: empty string.
 std::string MachineEnergyEstimator::getAddressingMode(const MachineInstr &MI,
                                                       StringRef suffix) const {
-    if (suffix.empty())
+    if (suffix.empty()) {
+        // MSP430 branches (JMP, JCC) have no suffix in their opcode name,
+        // but always use PC-relative (symbolic) addressing.
+        if (MI.isBranch())
+            return "symbolic";
         return "";
+    }
 
     if (suffix.size() == 1) {
         // Single operand instruction (PUSH, POP, RRA, etc.)

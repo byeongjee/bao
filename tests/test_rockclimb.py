@@ -343,7 +343,7 @@ class TestMachinePassDistributedCkpt:
         """
         low_cap_config = tmp_path / "low_cap_rockclimb.json"
         low_cap_config.write_text(json.dumps({
-            "capacity": 12.0,
+            "capacity": 20.0,
             "E_pro": 0.0,
             "E_epi": 0.0,
             "N_reg": 16,
