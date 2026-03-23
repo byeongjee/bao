@@ -53,7 +53,7 @@ struct MachineRockClimbParams {
     unsigned N_reg = 0;
     double reg_restore_energy = 0.0;
     bool distributedCheckpointing = true;
-    double checkpoint_store_energy = 0.0;
+    double reg_store_energy = 0.0;
     bool addDebugMarkers = false;
 
     double calculateESafe() const { return capacity - N_reg * reg_restore_energy; }
@@ -127,14 +127,14 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
     }
     params.distributedCheckpointing = distributed.value_or(true);
 
-    // checkpoint_store_energy (optional)
+    // reg_store_energy (optional, per-register store cost for inline overhead)
     if (rcSection) {
-        if (auto v = rcSection->getNumber("checkpoint_store_energy"))
-            params.checkpoint_store_energy = *v;
+        if (auto v = rcSection->getNumber("reg_store_energy"))
+            params.reg_store_energy = *v;
     }
-    if (params.checkpoint_store_energy == 0.0) {
-        if (auto v = root->getNumber("checkpoint_store_energy"))
-            params.checkpoint_store_energy = *v;
+    if (params.reg_store_energy == 0.0) {
+        if (auto v = root->getNumber("reg_store_energy"))
+            params.reg_store_energy = *v;
     }
 
     // add_debug_markers (optional, default false)
@@ -278,7 +278,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     auto &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
 
     // Algorithm 1: region partitioning
-    double ckptStoreEnergy = params.distributedCheckpointing ? params.checkpoint_store_energy : 0.0;
+    double ckptStoreEnergy = params.distributedCheckpointing ? params.reg_store_energy : 0.0;
     RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe, ckptStoreEnergy);
 
     MachineRockClimbResult result = optimizer.optimize();

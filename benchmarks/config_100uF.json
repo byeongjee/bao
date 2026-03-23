@@ -15,7 +15,7 @@
   },
   "rockclimb": {
     "distributed_checkpointing": true,
-    "checkpoint_store_energy": 0.0
+    "reg_store_energy": 0.0
   },
   "schematic": {
     "max_paths": 10,

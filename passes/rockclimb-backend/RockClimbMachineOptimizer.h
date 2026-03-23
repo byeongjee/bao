@@ -34,7 +34,7 @@ class RockClimbMachineOptimizer {
   public:
     RockClimbMachineOptimizer(llvm::MachineFunction &MF, llvm::MachineLoopInfo &MLI,
                               const MachineEnergyEstimator &estimator, double E_safe,
-                              double checkpoint_store_energy);
+                              double reg_store_energy);
 
     MachineRockClimbResult optimize();
 
@@ -59,7 +59,7 @@ class RockClimbMachineOptimizer {
     /// Blocks in reverse post-order
     std::vector<llvm::MachineBasicBlock *> topoOrder_;
 
-    double checkpointStoreEnergy_;
+    double regStoreEnergy_;
     llvm::DenseMap<const llvm::MachineBasicBlock *, llvm::SmallSet<llvm::MCPhysReg, 12>> liveIn_;
     llvm::SmallSet<llvm::MCPhysReg, 12> defsInRegion_;
 

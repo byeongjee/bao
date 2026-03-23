@@ -273,7 +273,7 @@ Fields: `capacity`, `E_pro`, `E_epi`, `reg_store_energy`, `reg_restore_energy`, 
 
 ### RockClimb Config (`-rockclimb-config`, machine pass via llc)
 
-Fields: `capacity` (or `E_input`), `N_reg`, `reg_restore_energy`, `distributed_checkpointing`. Optional: `checkpoint_store_energy`, `add_debug_markers`.
+Fields: `capacity` (or `E_input`), `N_reg`, `reg_restore_energy`, `distributed_checkpointing`. Optional: `reg_store_energy`, `add_debug_markers`.
 
 Sample configs are in `benchmarks/` and `tests/`.
 

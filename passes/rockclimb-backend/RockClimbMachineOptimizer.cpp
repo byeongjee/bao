@@ -37,9 +37,9 @@ static bool blockHasMachineCallSite(const MachineBasicBlock &MBB) {
 
 RockClimbMachineOptimizer::RockClimbMachineOptimizer(MachineFunction &MF, MachineLoopInfo &MLI,
                                                      const MachineEnergyEstimator &estimator,
-                                                     double E_safe, double checkpoint_store_energy)
+                                                     double E_safe, double reg_store_energy)
     : MF_(MF), MLI_(MLI), estimator_(estimator), E_safe_(E_safe),
-      checkpointStoreEnergy_(checkpoint_store_energy) {
+      regStoreEnergy_(reg_store_energy) {
     // Compute per-block energy costs
     for (MachineBasicBlock &MBB : MF_)
         energyCosts_[&MBB] = estimator_.estimateBlock(MBB);
@@ -48,7 +48,7 @@ RockClimbMachineOptimizer::RockClimbMachineOptimizer(MachineFunction &MF, Machin
     identifyPostCallBlocks();
     computeTopologicalOrder();
 
-    if (checkpointStoreEnergy_ > 0) {
+    if (regStoreEnergy_ > 0) {
         const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
         liveIn_ = computeBulkLiveIn(MF_, TRI);
     }
@@ -130,7 +130,7 @@ void RockClimbMachineOptimizer::collectBlockDefs(MachineBasicBlock *MBB) {
 }
 
 double RockClimbMachineOptimizer::computeCkptOverhead(MachineBasicBlock *MBB) const {
-    if (checkpointStoreEnergy_ <= 0)
+    if (regStoreEnergy_ <= 0)
         return 0.0;
     auto it = liveIn_.find(MBB);
     if (it == liveIn_.end())
@@ -140,7 +140,7 @@ double RockClimbMachineOptimizer::computeCkptOverhead(MachineBasicBlock *MBB) co
         if (defsInRegion_.count(reg))
             ++count;
     }
-    return count * checkpointStoreEnergy_;
+    return count * regStoreEnergy_;
 }
 
 std::vector<MachineBasicBlock *> RockClimbMachineOptimizer::getInfeasibleBlocks() const {
