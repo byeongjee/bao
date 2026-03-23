@@ -50,13 +50,18 @@ namespace checkpoint {
 /// Mirrors RockClimbParams from the IR-level pass.
 struct MachineRockClimbParams {
     double capacity = 0.0;
+    double E_pro = 0.0;
+    double E_epi = 0.0;
     unsigned N_reg = 0;
     double reg_restore_energy = 0.0;
     bool distributedCheckpointing = true;
     double reg_store_energy = 0.0; // required, parsed from root
     bool addDebugMarkers = false;
 
-    double calculateESafe() const { return capacity - N_reg * reg_restore_energy; }
+    double calculateESafe() const {
+        // N_reg - 2: PC and SP restore cost is already included in E_pro
+        return capacity - E_pro - E_epi - (N_reg - 2) * reg_restore_energy;
+    }
 };
 
 /// Parse rockclimb config from JSON. Same format as IR-level pass.
@@ -113,7 +118,26 @@ static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbPa
         return false;
     }
 
+    auto E_pro = root->getNumber("E_pro");
+    if (!E_pro) {
+        PLOGE << "Error: Missing 'E_pro' in config";
+        return false;
+    }
+
+    auto E_epi = root->getNumber("E_epi");
+    if (!E_epi) {
+        PLOGE << "Error: Missing 'E_epi' in config";
+        return false;
+    }
+
+    if (*N_reg < 2) {
+        PLOGE << "Error: N_reg must be >= 2 (must include at least PC and SP)";
+        return false;
+    }
+
     params.capacity = *capacity;
+    params.E_pro = *E_pro;
+    params.E_epi = *E_epi;
     params.N_reg = static_cast<unsigned>(*N_reg);
     params.reg_store_energy = *reg_store_energy;
     params.reg_restore_energy = *reg_restore_energy;
@@ -217,6 +241,8 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
 
     PLOGI << "=== RockClimb Machine Pass on " << MF.getName() << " ===";
     PLOGI << "  Capacity: " << params.capacity;
+    PLOGI << "  E_pro: " << params.E_pro;
+    PLOGI << "  E_epi: " << params.E_epi;
     PLOGI << "  E_safe: " << E_safe;
     PLOGI << "  N_reg: " << params.N_reg;
     PLOGI << "  Distributed checkpointing: "
