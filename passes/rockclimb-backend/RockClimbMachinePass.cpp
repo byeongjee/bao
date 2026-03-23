@@ -278,7 +278,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     auto &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
 
     // Algorithm 1: region partitioning
-    RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe);
+    RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe, 0.0);
 
     // If checkpoint_store_energy > 0 and distributed checkpointing enabled,
     // do preliminary partition → compute extra costs → re-run
@@ -299,7 +299,8 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
             if (ckpt.afterInst)
                 ckptCosts[ckpt.afterInst->getParent()] += params.checkpoint_store_energy;
         }
-        optimizer.setExtraBlockCosts(ckptCosts);
+        // TODO(Task3): setExtraBlockCosts removed; two-phase block will be replaced
+        (void)ckptCosts;
     }
 
     MachineRockClimbResult result = optimizer.optimize();

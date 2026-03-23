@@ -2,9 +2,11 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/MC/MCRegister.h"
 
 #include <string>
 #include <vector>
@@ -31,12 +33,10 @@ struct MachineRockClimbResult {
 class RockClimbMachineOptimizer {
   public:
     RockClimbMachineOptimizer(llvm::MachineFunction &MF, llvm::MachineLoopInfo &MLI,
-                              const MachineEnergyEstimator &estimator, double E_safe);
+                              const MachineEnergyEstimator &estimator, double E_safe,
+                              double checkpoint_store_energy);
 
     MachineRockClimbResult optimize();
-
-    /// Add extra energy costs to specific blocks (for CkptCycles feedback)
-    void setExtraBlockCosts(const llvm::DenseMap<llvm::MachineBasicBlock *, double> &costs);
 
     /// Get blocks whose individual cost exceeds E_safe
     std::vector<llvm::MachineBasicBlock *> getInfeasibleBlocks() const;
@@ -59,10 +59,17 @@ class RockClimbMachineOptimizer {
     /// Blocks in reverse post-order
     std::vector<llvm::MachineBasicBlock *> topoOrder_;
 
+    double checkpointStoreEnergy_;
+    llvm::DenseMap<const llvm::MachineBasicBlock *, llvm::SmallSet<llvm::MCPhysReg, 12>> liveIn_;
+    llvm::SmallSet<llvm::MCPhysReg, 12> defsInRegion_;
+
     void identifyLoopHeaders();
     void identifyPostCallBlocks();
     void computeTopologicalOrder();
     double getBlockCost(llvm::MachineBasicBlock *MBB) const;
+
+    void collectBlockDefs(llvm::MachineBasicBlock *MBB);
+    double computeCkptOverhead(llvm::MachineBasicBlock *MBB) const;
 
     MachineRockClimbResult partitionRegions();
 };

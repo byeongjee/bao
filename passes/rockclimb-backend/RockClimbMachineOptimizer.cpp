@@ -1,8 +1,11 @@
 #include "RockClimbMachineOptimizer.h"
+#include "MSP430Opcodes.h"
 #include "MachineEnergyEstimator.h"
+#include "MachineLivenessAnalysis.h"
 
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 
 #include <algorithm>
 #include <queue>
@@ -34,16 +37,21 @@ static bool blockHasMachineCallSite(const MachineBasicBlock &MBB) {
 
 RockClimbMachineOptimizer::RockClimbMachineOptimizer(MachineFunction &MF, MachineLoopInfo &MLI,
                                                      const MachineEnergyEstimator &estimator,
-                                                     double E_safe)
-    : MF_(MF), MLI_(MLI), estimator_(estimator), E_safe_(E_safe) {
+                                                     double E_safe, double checkpoint_store_energy)
+    : MF_(MF), MLI_(MLI), estimator_(estimator), E_safe_(E_safe),
+      checkpointStoreEnergy_(checkpoint_store_energy) {
     // Compute per-block energy costs
-    for (MachineBasicBlock &MBB : MF_) {
+    for (MachineBasicBlock &MBB : MF_)
         energyCosts_[&MBB] = estimator_.estimateBlock(MBB);
-    }
 
     identifyLoopHeaders();
     identifyPostCallBlocks();
     computeTopologicalOrder();
+
+    if (checkpointStoreEnergy_ > 0) {
+        const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
+        liveIn_ = computeBulkLiveIn(MF_, TRI);
+    }
 }
 
 void RockClimbMachineOptimizer::identifyLoopHeaders() {
@@ -101,10 +109,38 @@ double RockClimbMachineOptimizer::getBlockCost(MachineBasicBlock *MBB) const {
     return (it != energyCosts_.end()) ? it->second : 0.0;
 }
 
-void RockClimbMachineOptimizer::setExtraBlockCosts(
-    const DenseMap<MachineBasicBlock *, double> &costs) {
-    for (const auto &entry : costs)
-        energyCosts_[entry.first] += entry.second;
+void RockClimbMachineOptimizer::collectBlockDefs(MachineBasicBlock *MBB) {
+    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
+    const MachineRegisterInfo &MRI = MF_.getRegInfo();
+    for (const MachineInstr &MI : *MBB) {
+        for (const MachineOperand &MO : MI.operands()) {
+            if (!MO.isReg() || !MO.isDef() || !MO.getReg().isPhysical())
+                continue;
+            MCPhysReg reg = MO.getReg().asMCReg();
+            if (MRI.isReserved(reg))
+                continue;
+            for (unsigned r = msp430::R4; r <= msp430::R15; ++r) {
+                if (TRI->regsOverlap(reg, r)) {
+                    defsInRegion_.insert(static_cast<MCPhysReg>(r));
+                    break;
+                }
+            }
+        }
+    }
+}
+
+double RockClimbMachineOptimizer::computeCkptOverhead(MachineBasicBlock *MBB) const {
+    if (checkpointStoreEnergy_ <= 0)
+        return 0.0;
+    auto it = liveIn_.find(MBB);
+    if (it == liveIn_.end())
+        return 0.0;
+    unsigned count = 0;
+    for (MCPhysReg reg : it->second) {
+        if (defsInRegion_.count(reg))
+            ++count;
+    }
+    return count * checkpointStoreEnergy_;
 }
 
 std::vector<MachineBasicBlock *> RockClimbMachineOptimizer::getInfeasibleBlocks() const {
@@ -137,12 +173,14 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
     MachineBasicBlock *entryMBB = topoOrder_[0];
     boundarySet.insert(entryMBB);
 
+    defsInRegion_.clear();
+
     // Process blocks in topological order
     for (size_t i = 0; i < topoOrder_.size(); ++i) {
         MachineBasicBlock *MBB = topoOrder_[i];
         double Cycle_bbi = getBlockCost(MBB);
 
-        // Mandatory boundaries: loop headers and call sites
+        // Mandatory boundaries: loop headers and post-call blocks
         if (MBB != entryMBB) {
             if (loopHeaders_.count(MBB) || postCallBlocks_.count(MBB))
                 boundarySet.insert(MBB);
@@ -152,18 +190,23 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
 
         double accum_cycle;
         if (isBoundary) {
+            defsInRegion_.clear();
             accum_cycle = Cycle_bbi;
         } else {
-            accum_cycle = Cycle_bbi + incomeCycle[MBB];
+            double candidate = Cycle_bbi + incomeCycle[MBB];
+            double ckptOverhead = computeCkptOverhead(MBB);
+
+            if (candidate + ckptOverhead >= E_safe_) {
+                boundarySet.insert(MBB);
+                isBoundary = true;
+                defsInRegion_.clear();
+                accum_cycle = Cycle_bbi;
+            } else {
+                accum_cycle = candidate;
+            }
         }
 
-        // Place boundary if accumulated energy exceeds threshold
-        if (accum_cycle >= E_safe_ && !isBoundary) {
-            boundarySet.insert(MBB);
-            accum_cycle = Cycle_bbi;
-        }
-
-        // Fail if a single block exceeds E_safe (block splitting not implemented)
+        // Single-block infeasibility check
         if (accum_cycle >= E_safe_) {
             result.feasible = false;
             result.errorMessage = "Block '" + std::string(MBB->getName()) + "' (BB#" +
@@ -171,6 +214,8 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
                                   std::to_string(E_safe_) + "); block splitting is not implemented";
             return result;
         }
+
+        collectBlockDefs(MBB);
 
         // Propagate to successors
         for (MachineBasicBlock *succ : MBB->successors()) {
