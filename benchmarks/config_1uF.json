@@ -9,7 +9,8 @@
   "mem_store_energy_per_byte": 0.95,
   "mem_restore_energy_per_byte": 0.95,
   "vm_capacity_bytes": 2048,
-  "loop_increment_cost_nvm": 4.0,
+  "loop_increment_cost_nvm_O0": 4.0,
+  "loop_increment_cost_nvm_O3": 4.0,
   "milp": {
     "loop_strip_mining_enabled": true
   },

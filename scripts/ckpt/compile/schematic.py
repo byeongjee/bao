@@ -6,6 +6,7 @@ profiling, then use the SCHEMATIC pass to insert checkpoints.
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -275,6 +276,51 @@ def _collect_or_reuse_trace(
 # SCHEMATIC pass invocation
 # ---------------------------------------------------------------------------
 
+def _resolve_schematic_config(config_path: Path, clang_opt_level: int, tmp: Path) -> Path:
+    """Resolve opt-level-dependent fields in the SCHEMATIC config.
+
+    If the config contains ``loop_increment_cost_nvm_O0`` /
+    ``loop_increment_cost_nvm_O3`` keys, select the appropriate value based on
+    *clang_opt_level* and write a resolved config (with a single
+    ``loop_increment_cost_nvm``) into *tmp*.  If only the legacy
+    ``loop_increment_cost_nvm`` key is present, return the original path
+    unchanged.
+    """
+    with open(config_path) as f:
+        config = json.load(f)
+
+    key_o0 = "loop_increment_cost_nvm_O0"
+    key_o3 = "loop_increment_cost_nvm_O3"
+
+    has_per_opt = key_o0 in config or key_o3 in config
+    if not has_per_opt:
+        return config_path
+
+    if clang_opt_level == 0:
+        if key_o0 not in config:
+            raise CompilationError(
+                "schematic-config",
+                StepResult(1, "", f"Missing '{key_o0}' in {config_path}", 0),
+            )
+        resolved_value = config[key_o0]
+    else:
+        if key_o3 not in config:
+            raise CompilationError(
+                "schematic-config",
+                StepResult(1, "", f"Missing '{key_o3}' in {config_path}", 0),
+            )
+        resolved_value = config[key_o3]
+
+    config["loop_increment_cost_nvm"] = resolved_value
+    config.pop(key_o0, None)
+    config.pop(key_o3, None)
+
+    resolved_path = tmp / "schematic_config_resolved.json"
+    with open(resolved_path, "w") as f:
+        json.dump(config, f, indent=2)
+    return resolved_path
+
+
 def _run_schematic_pass(
     tc: Toolchain,
     env: ProjectEnv,
@@ -287,12 +333,16 @@ def _run_schematic_pass(
 ) -> str:
     """Run the SCHEMATIC opt pass and return its captured output."""
     cfg = energy_config or opts.energy_config
+    assert opts.schematic_config is not None, "schematic_config required for pass"
+    schematic_cfg = _resolve_schematic_config(
+        opts.schematic_config, opts.clang_opt_level, tmp,
+    )
     cmd: list[str] = [
         tc.opt,
         f"-load-pass-plugin={env.pass_lib}",
         "-passes=tripcount-annotation,schematic",
         f"-energy-config={cfg}",
-        f"-schematic-config={opts.schematic_config}",
+        f"-schematic-config={schematic_cfg}",
         f"-schematic-trace={trace_json}",
         f"-ckpt-log-level={opts.pass_log_level}",
     ]
