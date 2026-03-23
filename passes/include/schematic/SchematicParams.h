@@ -17,7 +17,10 @@ struct SchematicParams {
     double memStoreEnergyPerByte;   // Energy per byte for VM->FRAM copy
     double memRestoreEnergyPerByte; // Energy per byte for FRAM->VM copy
     unsigned vmCapacityBytes;       // VM (SRAM) capacity in bytes
-    double loopIncrementCostNvm;    // Energy of loop counter increment in NVM
+    double loopIncrementCostNvm;    // Per-iteration energy of the conditional checkpoint
+                                    // counter logic inserted by SCHEMATIC on loop back-edges:
+                                    // load counter, compare against threshold, increment, store.
+                                    // Differs by opt level (O0: memory-resident; O3: register).
     unsigned maxPaths;              // Maximum paths to enumerate
     bool addDebugMarkers = false;   // Emit debug marker calls
 };
