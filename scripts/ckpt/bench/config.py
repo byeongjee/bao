@@ -16,8 +16,8 @@ from ..errors import ConfigError
 _DEFAULT_CAPS = ["1uF", "10uF", "100uF"]
 
 _ENERGY_CONFIG_MAP: dict[str, str] = {
-    "milp": "sample_assembly_energy_params.json",
-    "rockclimb": "sample_assembly_energy_params.json",
+    "milp": "assembly_params.json",
+    "rockclimb": "assembly_params.json",
     "schematic": "sample_energy_config_ir.json",
     "schematicO3": "sample_energy_config_ir.json",
 }
@@ -98,7 +98,7 @@ def discover_capacitors(
 def default_energy_config(env: ProjectEnv, algorithm: str) -> Path:
     """Return the default energy config path for an algorithm.
 
-    - milp / rockclimb: ``sample_assembly_energy_params.json``
+    - milp / rockclimb: ``assembly_params.json``
     - schematic: ``sample_energy_config_ir.json``
     """
     filename = _ENERGY_CONFIG_MAP.get(algorithm)

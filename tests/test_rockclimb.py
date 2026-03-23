@@ -19,7 +19,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = TESTS_DIR.parent
 MACHINE_PASS_LIB = PROJECT_DIR / "passes" / "build" / "rockclimb-backend" / "RockClimbMachinePass.so"
 ROCKCLIMB_PARAMS = TESTS_DIR / "rockclimb_params.json"
-ASSEMBLY_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "sample_assembly_energy_params.json"
+ASSEMBLY_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "assembly_params.json"
 
 # ---------------------------------------------------------------------------
 # Module-wide mark
