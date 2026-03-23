@@ -18,8 +18,8 @@ _DEFAULT_CAPS = ["1uF", "10uF", "100uF"]
 _ENERGY_CONFIG_MAP: dict[str, str] = {
     "milp": "assembly_params.json",
     "rockclimb": "assembly_params.json",
-    "schematic": "sample_energy_config_ir.json",
-    "schematicO3": "sample_energy_config_ir.json",
+    "schematic": "assembly_params.json",
+    "schematicO3": "assembly_params.json",
 }
 
 
@@ -98,8 +98,7 @@ def discover_capacitors(
 def default_energy_config(env: ProjectEnv, algorithm: str) -> Path:
     """Return the default energy config path for an algorithm.
 
-    - milp / rockclimb: ``assembly_params.json``
-    - schematic: ``sample_energy_config_ir.json``
+    - milp / rockclimb / schematic: ``assembly_params.json``
     """
     filename = _ENERGY_CONFIG_MAP.get(algorithm)
     if filename is None:
