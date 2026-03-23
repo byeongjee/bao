@@ -1,6 +1,9 @@
 #pragma once
 
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/MCRegister.h"
 
@@ -30,5 +33,11 @@ RegScanResult scanBlockForReg(const llvm::MachineBasicBlock *MBB, llvm::MCPhysRe
 /// nor defined) by continuing BFS to successors.
 bool isRegLiveFromBlock(const llvm::MachineBasicBlock *startMBB, llvm::MCPhysReg reg,
                         const llvm::TargetRegisterInfo *TRI);
+
+/// Precompute liveIn sets for all blocks in the function.
+/// Only tracks checkpointable physical registers (R4–R15).
+/// Uses standard backward dataflow: iterate until fixed point.
+llvm::DenseMap<const llvm::MachineBasicBlock *, llvm::SmallSet<llvm::MCPhysReg, 12>>
+computeBulkLiveIn(const llvm::MachineFunction &MF, const llvm::TargetRegisterInfo *TRI);
 
 } // namespace checkpoint

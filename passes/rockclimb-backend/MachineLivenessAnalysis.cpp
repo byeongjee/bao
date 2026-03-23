@@ -1,8 +1,10 @@
 #include "MachineLivenessAnalysis.h"
 
+#include "MSP430Opcodes.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 
 using namespace llvm;
 
@@ -55,6 +57,70 @@ bool isRegLiveFromBlock(const MachineBasicBlock *startMBB, MCPhysReg reg,
             worklist.push_back(succ);
     }
     return false;
+}
+
+DenseMap<const MachineBasicBlock *, SmallSet<MCPhysReg, 12>>
+computeBulkLiveIn(const MachineFunction &MF, const TargetRegisterInfo *TRI) {
+    const MachineRegisterInfo &MRI = MF.getRegInfo();
+
+    // Per-block use-before-def and def sets (checkpointable regs only)
+    DenseMap<const MachineBasicBlock *, SmallSet<MCPhysReg, 12>> useSet, defSet;
+    for (const MachineBasicBlock &MBB : MF) {
+        auto &uses = useSet[&MBB];
+        auto &defs = defSet[&MBB];
+        for (const MachineInstr &MI : MBB) {
+            for (const MachineOperand &MO : MI.operands()) {
+                if (!MO.isReg() || !MO.getReg().isPhysical())
+                    continue;
+                MCPhysReg reg = MO.getReg().asMCReg();
+                if (MRI.isReserved(reg))
+                    continue;
+                // Normalize sub-regs to their 16-bit GPR
+                MCPhysReg gpr = 0;
+                for (unsigned r = msp430::R4; r <= msp430::R15; ++r) {
+                    if (TRI->regsOverlap(reg, r)) {
+                        gpr = static_cast<MCPhysReg>(r);
+                        break;
+                    }
+                }
+                if (!gpr)
+                    continue;
+                if (MO.isUse() && !MO.isUndef() && !defs.count(gpr))
+                    uses.insert(gpr);
+                if (MO.isDef())
+                    defs.insert(gpr);
+            }
+        }
+    }
+
+    // Initialize liveIn from use sets
+    DenseMap<const MachineBasicBlock *, SmallSet<MCPhysReg, 12>> liveIn;
+    for (const MachineBasicBlock &MBB : MF)
+        liveIn[&MBB] = useSet[&MBB];
+
+    // Iterate until fixed point
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const MachineBasicBlock &MBB : MF) {
+            // liveOut = union of successor liveIns
+            SmallSet<MCPhysReg, 12> liveOut;
+            for (const MachineBasicBlock *succ : MBB.successors())
+                for (MCPhysReg reg : liveIn[succ])
+                    liveOut.insert(reg);
+
+            // liveIn = use ∪ (liveOut \ def)
+            auto &li = liveIn[&MBB];
+            for (MCPhysReg reg : liveOut) {
+                if (!defSet[&MBB].count(reg)) {
+                    if (li.insert(reg).second)
+                        changed = true;
+                }
+            }
+        }
+    }
+
+    return liveIn;
 }
 
 } // namespace checkpoint
