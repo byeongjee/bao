@@ -162,11 +162,14 @@ def _precomputed_pipeline(
     tmp: Path,
     annotated_ll: Path,
 ) -> str:
-    """Pipeline with assembly-based pre-computed BB energy.
+    """Pipeline with assembly-based pre-computed BB energy at MIR granularity.
+
+    Uses assign-mir-bb-debuginfo to map MIR BBs to assembly via DWARF,
+    so bb-energy-analyzer produces energy at MIR BB granularity (not IR BB).
 
     Returns pass_output (including bb-energy-analyzer stderr).
     """
-    # Step 2: Assign BB debug info
+    # Step 2: Assign IR-level BB debug info (provides DISubprogram infrastructure)
     bbinfo_ll = tmp / "bbinfo.ll"
     bb_mapping = tmp / "bb_mapping.json"
     run(
@@ -193,25 +196,41 @@ def _precomputed_pipeline(
         step_name="llc-to-mir",
     )
 
-    # Step 3b: IR -> object file (for energy analysis)
+    # Step 3b: Assign MIR-level BB debug info (overwrites DebugLoc per MIR BB)
+    mir_bb_mapping = tmp / "mir_bb_mapping.json"
+    labeled_mir = tmp / "labeled.mir"
+    run(
+        [
+            tc.llc, "-march=msp430",
+            f"-load={env.machine_pass_lib}",
+            "-run-pass=assign-mir-bb-debuginfo",
+            f"-mir-bb-mapping={mir_bb_mapping}",
+            str(mir_file),
+            "-o", str(labeled_mir),
+        ],
+        step_name="assign-mir-bb-debuginfo",
+    )
+
+    # Step 3c: Labeled MIR -> object file (for energy analysis)
     energy_obj = tmp / "energy.o"
     run(
         [
             tc.llc, "-march=msp430",
+            "-start-after=virtregrewriter",
             "-filetype=obj",
-            str(bbinfo_ll),
+            str(labeled_mir),
             "-o", str(energy_obj),
         ],
         step_name="llc-energy-obj",
     )
 
-    # Step 3c: bb-energy-analyzer
+    # Step 3d: bb-energy-analyzer (using MIR BB mapping)
     bb_energy = tmp / "bb_energy.json"
     result = run(
         [
             str(env.bb_analyzer),
             "--energy-params", str(opts.energy_config),
-            "--bb-mapping", str(bb_mapping),
+            "--bb-mapping", str(mir_bb_mapping),
             f"-ckpt-log-level={opts.pass_log_level}",
             str(energy_obj),
         ],
@@ -220,7 +239,7 @@ def _precomputed_pipeline(
     bb_energy.write_text(result.stdout)
     analyzer_stderr = result.stderr
 
-    # Step 4: RockClimb machine pass with pre-computed energy
+    # Step 4: RockClimb machine pass with pre-computed MIR BB energy
     pass_output = _run_rockclimb_pass(
         tc, env, opts, tmp, mir_file,
         energy_flag=("-rockclimb-energy-data", str(bb_energy)),

@@ -6,6 +6,7 @@
 
 add_library(RockClimbMachinePass MODULE
     RockClimbMachinePass.cpp
+    AssignMIRBBDebugInfoPass.cpp
     MachineEnergyEstimator.cpp
     RockClimbMachineOptimizer.cpp
     MachineDistributedCheckpointing.cpp

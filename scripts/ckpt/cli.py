@@ -272,7 +272,7 @@ def compile_milp_cmd(
 @click.option(
     "--no-precomputed-energy",
     is_flag=True,
-    help="Use MIR-level estimation instead of assembly-based.",
+    help="Disable assembly-based pre-computed BB energy; use MIR-level estimation instead.",
 )
 @click.option(
     "--cpu-freq",

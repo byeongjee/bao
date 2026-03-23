@@ -70,14 +70,8 @@ double MachineEnergyEstimator::lookupPrecomputed(const MachineBasicBlock &MBB) c
     if (funcIt == precomputedEnergy_.end())
         return -1.0;
 
-    // Try the MBB name first
-    std::string bbName;
-    if (MBB.hasName()) {
-        bbName = MBB.getName().str();
-    } else {
-        // Match assign-bb-debuginfo convention: "bb" + 0-based index
-        bbName = "bb" + std::to_string(MBB.getNumber());
-    }
+    // Match assign-mir-bb-debuginfo convention: "mirbb" + MBB number
+    std::string bbName = "mirbb" + std::to_string(MBB.getNumber());
 
     auto bbIt = funcIt->second.find(bbName);
     if (bbIt != funcIt->second.end())
