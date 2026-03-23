@@ -382,6 +382,56 @@ class TestMachinePassDistributedCkpt:
                 f"MIR has {saves_mir} saves but assembly has no __nvm_regs references"
             )
 
+    def test_checkpoint_store_energy_creates_more_boundaries(
+        self, run_rockclimb_machine, tmp_path
+    ):
+        """With checkpoint_store_energy > 0, inline overhead estimation should
+        produce equal or more region boundaries than without."""
+        src = _write_src(tmp_path, SIMPLE_LOOP)
+        (tmp_path / "base").mkdir()
+        (tmp_path / "store").mkdir()
+
+        # Run without checkpoint_store_energy
+        base_config = tmp_path / "base_config.json"
+        base_config.write_text(json.dumps({
+            "capacity": 507.87,
+            "N_reg": 16,
+            "reg_restore_energy": 2.0,
+            "rockclimb": {"distributed_checkpointing": True},
+        }))
+        base_result = run_rockclimb_machine(
+            src, ASSEMBLY_ENERGY_CONFIG, base_config, tmp_path / "base",
+        )
+        assert base_result.exit_code == 0
+
+        # Run with checkpoint_store_energy
+        store_config = tmp_path / "store_config.json"
+        store_config.write_text(json.dumps({
+            "capacity": 507.87,
+            "N_reg": 16,
+            "reg_restore_energy": 2.0,
+            "rockclimb": {
+                "distributed_checkpointing": True,
+                "checkpoint_store_energy": 5.0,
+            },
+        }))
+        store_result = run_rockclimb_machine(
+            src, ASSEMBLY_ENERGY_CONFIG, store_config, tmp_path / "store",
+        )
+        assert store_result.exit_code == 0
+
+        # Parse boundary counts
+        base_match = re.search(r"Region boundaries:\s+(\d+)", base_result.stderr)
+        store_match = re.search(r"Region boundaries:\s+(\d+)", store_result.stderr)
+        assert base_match and store_match
+        base_boundaries = int(base_match.group(1))
+        store_boundaries = int(store_match.group(1))
+
+        assert store_boundaries >= base_boundaries, (
+            f"With checkpoint_store_energy, expected >= {base_boundaries} "
+            f"boundaries, got {store_boundaries}"
+        )
+
 
 class TestMachinePassStatistics:
     """Verify pass statistics output."""
