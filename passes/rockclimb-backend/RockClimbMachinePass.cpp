@@ -278,30 +278,8 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     auto &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
 
     // Algorithm 1: region partitioning
-    RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe, 0.0);
-
-    // If checkpoint_store_energy > 0 and distributed checkpointing enabled,
-    // do preliminary partition → compute extra costs → re-run
-    if (params.checkpoint_store_energy > 0 && params.distributedCheckpointing) {
-        auto prelimResult = optimizer.optimize();
-        if (!prelimResult.feasible) {
-            PLOGE << "Region partitioning failed: " << prelimResult.errorMessage;
-            writeInfeasibleJSON(MF, totalStart, prelimResult.errorMessage);
-            return false;
-        }
-
-        MachineDistributedCheckpointing prelimCkpt(prelimResult.regions, MF);
-        auto prelimPoints = prelimCkpt.analyze();
-
-        // Compute per-block extra energy from checkpoint stores
-        DenseMap<MachineBasicBlock *, double> ckptCosts;
-        for (const auto &ckpt : prelimPoints) {
-            if (ckpt.afterInst)
-                ckptCosts[ckpt.afterInst->getParent()] += params.checkpoint_store_energy;
-        }
-        // TODO(Task3): setExtraBlockCosts removed; two-phase block will be replaced
-        (void)ckptCosts;
-    }
+    double ckptStoreEnergy = params.distributedCheckpointing ? params.checkpoint_store_energy : 0.0;
+    RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe, ckptStoreEnergy);
 
     MachineRockClimbResult result = optimizer.optimize();
     if (!result.feasible) {
