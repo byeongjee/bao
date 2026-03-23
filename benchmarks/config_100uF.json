@@ -1,7 +1,7 @@
 {
   "capacity": 486000.0,
-  "E_pro": 12.0,
-  "E_epi": 10.0,
+  "E_pro": 43.886124298491924,
+  "E_epi": 35.482127300247587,
   "N_reg": 16,
   "reg_store_energy": 4.712573998475123,
   "reg_restore_energy": 1.90,
