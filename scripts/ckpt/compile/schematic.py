@@ -180,11 +180,13 @@ def compile_schematic(
             shutil.copy2(out_o, opts.output.with_suffix(".o"))
             shutil.copy2(out_s, opts.output.with_suffix(".s"))
 
-            tmp_out = env.project_dir / "tmp"
+            import uuid
+            run_id = uuid.uuid4().hex[:8]
+            tmp_out = env.project_dir / "tmp" / f"schematic_{opts.output.stem}_{run_id}"
             tmp_out.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(out_o, tmp_out / (opts.output.stem + ".o"))
-            shutil.copy2(out_s, tmp_out / (opts.output.stem + ".s"))
-            shutil.copy2(ckpt_ll, tmp_out / (opts.output.stem + ".ll"))
+            for src in sorted(tmp.iterdir()):
+                if src.is_file():
+                    shutil.copy2(src, tmp_out / src.name)
 
             if opts.link or opts.device_debug:
                 elf_file = _link_schematic(tc, env, opts)

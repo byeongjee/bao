@@ -136,9 +136,13 @@ def compile_rockclimb(
             _strip_cfi_directives(raw_s, clean_s)
             shutil.copy2(clean_s, output.with_suffix(".s"))
 
-            tmp_out = env.project_dir / "tmp"
+            import uuid
+            run_id = uuid.uuid4().hex[:8]
+            tmp_out = env.project_dir / "tmp" / f"rockclimb_{output.stem}_{run_id}"
             tmp_out.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(clean_s, tmp_out / (output.stem + ".s"))
+            for src in sorted(tmp.iterdir()):
+                if src.is_file():
+                    shutil.copy2(src, tmp_out / src.name)
 
             if link:
                 elf_file = _link_rockclimb(tc, env, opts)
