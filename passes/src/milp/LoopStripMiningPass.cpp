@@ -968,16 +968,20 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
     }
 
     // ── Phase 6: Add chunk.counter PHI to header ──
-    Type *I64Ty = Type::getInt64Ty(Ctx);
-    PHINode *ChunkCounter = PHINode::Create(I64Ty, 2, "chunk.counter", Header->getFirstNonPHIIt());
+    // Use the target's pointer-sized integer for the counter.  Using i64 on
+    // 16-bit targets (MSP430) generates broken multi-word arithmetic in the
+    // LLVM backend, causing the counter comparison to never succeed.
+    const DataLayout &DL = F->getParent()->getDataLayout();
+    Type *CtrTy = DL.getIntPtrType(Ctx);
+    PHINode *ChunkCounter = PHINode::Create(CtrTy, 2, "chunk.counter", Header->getFirstNonPHIIt());
 
     // ── Phase 7: Redirect latch backedge: Latch → CounterCheck ──
     LatchBr->setSuccessor(backedgeIdx, CounterCheck);
 
     // ── Phase 8: Build counter.check — increment counter, branch ──
     IRBuilder<> CCB(CounterCheck);
-    Value *CounterNext = CCB.CreateAdd(ChunkCounter, ConstantInt::get(I64Ty, 1), "counter.next");
-    Value *CounterDone = CCB.CreateICmpEQ(CounterNext, ConstantInt::get(I64Ty, K), "counter.done");
+    Value *CounterNext = CCB.CreateAdd(ChunkCounter, ConstantInt::get(CtrTy, 1), "counter.next");
+    Value *CounterDone = CCB.CreateICmpEQ(CounterNext, ConstantInt::get(CtrTy, K), "counter.done");
     CCB.CreateCondBr(CounterDone, OuterLatch, Header);
 
     // ── Phase 9: Update header PHIs — incoming block Latch → CounterCheck ──
@@ -989,7 +993,7 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
     }
 
     // Complete chunk counter PHI
-    ChunkCounter->addIncoming(ConstantInt::get(I64Ty, 0), OuterHeader);
+    ChunkCounter->addIncoming(ConstantInt::get(CtrTy, 0), OuterHeader);
     ChunkCounter->addIncoming(CounterNext, CounterCheck);
 
     // ── Phase 10: Build outer.latch — forward loop-carried values ──
