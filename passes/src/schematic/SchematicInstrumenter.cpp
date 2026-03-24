@@ -1,10 +1,12 @@
 #include "schematic/SchematicInstrumenter.h"
 
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 #include <cassert>
+#include <queue>
 #include <set>
 
 namespace checkpoint {
@@ -438,14 +440,56 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
         if (isLoopBackEdge)
             continue;
 
-        llvm::BasicBlock *ckptBB = splitEdge(srcBB, dstBB);
-        if (!ckptBB)
-            continue;
-
         const RegionAllocation *endingAlloc = blockToAlloc.lookup(srcBB);
         const RegionAllocation *startingAlloc = blockToAlloc.lookup(dstBB);
 
-        inserted += insertCheckpointSequence(ckptBB, endingAlloc, startingAlloc, state);
+        // Check if srcBB → dstBB is a direct LLVM CFG edge.
+        bool isDirect = false;
+        for (llvm::BasicBlock *succ : llvm::successors(srcBB)) {
+            if (succ == dstBB) {
+                isDirect = true;
+                break;
+            }
+        }
+
+        if (isDirect) {
+            llvm::BasicBlock *ckptBB = splitEdge(srcBB, dstBB);
+            if (ckptBB)
+                inserted += insertCheckpointSequence(ckptBB, endingAlloc, startingAlloc, state);
+        } else {
+            // Non-adjacent edge (from loop-collapsed trace).  The checkpoint
+            // logically belongs at the entry to dstBB.  Split every predecessor
+            // edge of dstBB that comes from a block reachable from srcBB
+            // (i.e., intermediate blocks in the collapsed region).
+            llvm::SmallSetVector<llvm::BasicBlock *, 4> reachable;
+            std::queue<llvm::BasicBlock *> bfsQueue;
+            bfsQueue.push(srcBB);
+            reachable.insert(srcBB);
+            while (!bfsQueue.empty()) {
+                llvm::BasicBlock *cur = bfsQueue.front();
+                bfsQueue.pop();
+                for (llvm::BasicBlock *succ : llvm::successors(cur)) {
+                    if (succ == dstBB || reachable.count(succ))
+                        continue;
+                    reachable.insert(succ);
+                    bfsQueue.push(succ);
+                }
+            }
+
+            // Collect predecessors first (splitting modifies the predecessor list).
+            llvm::SmallVector<llvm::BasicBlock *, 4> predsToSplit;
+            for (llvm::BasicBlock *pred : llvm::predecessors(dstBB)) {
+                if (reachable.count(pred))
+                    predsToSplit.push_back(pred);
+            }
+            for (llvm::BasicBlock *pred : predsToSplit) {
+                llvm::BasicBlock *ckptBB = splitEdge(pred, dstBB);
+                if (ckptBB) {
+                    const RegionAllocation *predAlloc = blockToAlloc.lookup(pred);
+                    inserted += insertCheckpointSequence(ckptBB, predAlloc, startingAlloc, state);
+                }
+            }
+        }
     }
 
     // Step 7: Handle loop conditional checkpoints.
