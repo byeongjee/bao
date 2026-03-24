@@ -136,6 +136,10 @@ def compile_rockclimb(
             _strip_cfi_directives(raw_s, clean_s)
             shutil.copy2(clean_s, output.with_suffix(".s"))
 
+            tmp_out = env.project_dir / "tmp"
+            tmp_out.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(clean_s, tmp_out / (output.stem + ".s"))
+
             if link:
                 elf_file = _link_rockclimb(tc, env, opts)
         except CompilationError as exc:
