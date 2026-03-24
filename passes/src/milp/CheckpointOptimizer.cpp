@@ -287,13 +287,9 @@ void CheckpointOptimizer::addVariables() {
     }
 
     // s_{b,v} for b != entry, v in LiveIn(b).
-    // Skip when r[b]=0 is forced (merge points: s <= r = 0).
     // Skip when no predecessor has d[pred,v] (s <= Σ_pred d = 0).
     for (NodeId block : cfg_.getBlocks()) {
         if (block == entry)
-            continue;
-        // Merge points have r[b]=0 forced, so s[b,v]=0 for all v.
-        if (predecessors_[block].size() > 1)
             continue;
         // Union of eligible and ineligible live-ins.
         std::set<llvm::Value *> liveIn;
@@ -445,13 +441,26 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
         }
     }
 
-    // Forbid region boundaries at merge points.
+    // At merge points, force consistent placement across all predecessors:
+    // m[pred,v] = m[pred',v] for every pair of predecessors of a merge block.
+    unsigned mergeIdx = 0;
     for (NodeId block : cfg_.getBlocks()) {
         if (block == cfg_.getEntryBlock())
             continue;
         const auto &preds = predecessors_[block];
-        if (preds.size() > 1) {
-            model_.addConstr(r_[block] == 0, "no_boundary_merge_" + std::to_string(block));
+        if (preds.size() <= 1)
+            continue;
+        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+            auto *V = static_cast<llvm::Value *>(GV);
+            // Constrain all predecessors to match the first predecessor's placement.
+            NodeId firstPred = preds[0];
+            BlockVarKey firstKey = std::make_pair(firstPred, V);
+            for (size_t i = 1; i < preds.size(); ++i) {
+                BlockVarKey otherKey = std::make_pair(preds[i], V);
+                model_.addConstr(m_[firstKey] == m_[otherKey],
+                                 "merge_placement_eq_" + std::to_string(mergeIdx));
+                mergeIdx++;
+            }
         }
     }
 }
