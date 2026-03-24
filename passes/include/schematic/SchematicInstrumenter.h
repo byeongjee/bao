@@ -14,7 +14,7 @@ class SchematicInstrumenter {
   public:
     SchematicInstrumenter(llvm::Module &M, bool addDebugMarkers);
 
-    unsigned instrumentFunction(llvm::Function &F, const SchematicSolution &solution,
+    unsigned instrumentFunction(llvm::Function &F, SchematicSolution &solution,
                                 const SchematicStateAnalysis &state);
 
     /// Per-type insertion counts (populated after instrumentFunction).

@@ -424,9 +424,7 @@ double computeAllocationSaveCost(
     return cost;
 }
 
-/// Extend allocation `target` with variables from `source` that are not yet present.
-/// Reference: memory_allocation.py:MemoryAllocation.extends (line 153).
-static void extendsAllocation(RegionAllocation &target, const RegionAllocation &source) {
+void extendsAllocation(RegionAllocation &target, const RegionAllocation &source) {
     for (const auto &[v, va] : source.vars) {
         if (target.vars.find(v) == target.vars.end()) {
             target.vars[v] = va;
@@ -514,6 +512,9 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
 
     // 2. Record allocations and mark blocks as analyzed.
     // Reference: schematic.py:427-447 — walk entire trace applying allocations.
+    // When a block already has an allocation (from a previous trace or loop analysis),
+    // EXTEND it (add missing variables only) rather than replacing it.
+    // Reference: basic_block.py:set_memory_allocation — extends existing allocation.
     unsigned i = 0;
     std::shared_ptr<RegionAllocation> memoryAlloc;
     for (unsigned j = 0; j < allocations.size(); ++j) {
@@ -522,9 +523,17 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
         while (i < trace.size() - 1 && !checkpointReached) {
             auto &meta = solution.blockMeta[trace[i]];
             meta.analyzed = true;
-            for (const auto &[gv, va] : allocations[j].vars)
-                solution.decidedPlacements[trace[i]][gv] = va.placement;
-            solution.blockAllocation[trace[i]] = memoryAlloc;
+            auto &placements = solution.decidedPlacements[trace[i]];
+            for (const auto &[gv, va] : allocations[j].vars) {
+                if (placements.find(gv) == placements.end())
+                    placements[gv] = va.placement;
+            }
+            auto existingIt = solution.blockAllocation.find(trace[i]);
+            if (existingIt != solution.blockAllocation.end()) {
+                extendsAllocation(*existingIt->second, *memoryAlloc);
+            } else {
+                solution.blockAllocation[trace[i]] = memoryAlloc;
+            }
 
             // Reference: schematic.py:442 — check if edge matches next checkpoint.
             if (j < result.selectedCheckpoints.size() &&
@@ -540,9 +549,17 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
     if (memoryAlloc) {
         auto &meta = solution.blockMeta[trace[i]];
         meta.analyzed = true;
-        for (const auto &[gv, va] : memoryAlloc->vars)
-            solution.decidedPlacements[trace[i]][gv] = va.placement;
-        solution.blockAllocation[trace[i]] = memoryAlloc;
+        auto &placements = solution.decidedPlacements[trace[i]];
+        for (const auto &[gv, va] : memoryAlloc->vars) {
+            if (placements.find(gv) == placements.end())
+                placements[gv] = va.placement;
+        }
+        auto existingIt = solution.blockAllocation.find(trace[i]);
+        if (existingIt != solution.blockAllocation.end()) {
+            extendsAllocation(*existingIt->second, *memoryAlloc);
+        } else {
+            solution.blockAllocation[trace[i]] = memoryAlloc;
+        }
     }
 
     // 3. Per-checkpoint energy propagation (reference: apply_memory_allocation lines 449-466)

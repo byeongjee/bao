@@ -92,6 +92,10 @@ double computeAllocationSaveCost(
         &decidedPlacements,
     const SchematicStateAnalysis &state, const SchematicParams &params);
 
+/// Extend allocation `target` with variables from `source` that are not yet present.
+/// Reference: memory_allocation.py:MemoryAllocation.extends (line 153).
+void extendsAllocation(RegionAllocation &target, const RegionAllocation &source);
+
 /// Mark selected checkpoints as enabled in the solution.
 /// Reference: cfg_modification.py:update_checkpoint_type (line 156).
 void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,

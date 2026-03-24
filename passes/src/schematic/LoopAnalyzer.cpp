@@ -335,15 +335,25 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             //   bb.is_fixed = False
             //   bb.set_memory_allocation(mem_alloc, allocator)
             // set_memory_allocation sets is_fixed=True and recomputes final_cost.
+            // Reference: schematic.py:594-596 — set_memory_allocation extends
+            // existing allocation (adds missing variables, keeps existing placements).
             auto sharedAlloc = std::make_shared<RegionAllocation>(bodyAlloc);
             for (SchematicBlock *block : loopBlocks) {
                 solution.blockMeta[block].analyzed = false;
                 solution.blockMeta[block].E_left = std::numeric_limits<double>::max();
                 solution.blockMeta[block].E_to_leave = 0.0;
-                for (const auto &[gv, va] : bodyAlloc.vars)
-                    solution.decidedPlacements[block][gv] = va.placement;
+                auto &placements = solution.decidedPlacements[block];
+                for (const auto &[gv, va] : bodyAlloc.vars) {
+                    if (placements.find(gv) == placements.end())
+                        placements[gv] = va.placement;
+                }
                 solution.blockMeta[block].analyzed = true;
-                solution.blockAllocation[block] = sharedAlloc;
+                auto existingIt = solution.blockAllocation.find(block);
+                if (existingIt != solution.blockAllocation.end()) {
+                    extendsAllocation(*existingIt->second, *sharedAlloc);
+                } else {
+                    solution.blockAllocation[block] = sharedAlloc;
+                }
             }
 
             // Direct energy propagation from synthetic boundaries.
