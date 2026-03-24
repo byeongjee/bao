@@ -259,6 +259,9 @@ unsigned char P3DIR, P3OUT;
 unsigned char CSCTL0_H;
 unsigned int CSCTL1, CSCTL2, CSCTL3;
 unsigned int PM5CTL0;
+unsigned int FRCTL0;
+#define FRCTLPW 0
+#define NWAITS_1 0
 """
 
 
