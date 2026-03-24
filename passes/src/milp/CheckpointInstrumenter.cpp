@@ -291,7 +291,19 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     auto *defInst = llvm::cast<llvm::Instruction>(V);
                     llvm::SSAUpdater commitUpdater;
                     commitUpdater.Initialize(V->getType(), "ssa.commit");
-                    commitUpdater.AddAvailableValue(defInst->getParent(), V);
+                    // For PHI nodes, register incoming values at predecessor
+                    // blocks.  AddAvailableValue(BB, V) marks V at BB's EXIT,
+                    // but GetValueInMiddleOfBlock(BB) queries BB's ENTRY (from
+                    // predecessors).  A PHI defined at BB's entry is not
+                    // reachable from predecessors via its own SSA name — only
+                    // the incoming operands are.
+                    if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(defInst)) {
+                        for (unsigned i = 0; i < PHI->getNumIncomingValues(); ++i)
+                            commitUpdater.AddAvailableValue(PHI->getIncomingBlock(i),
+                                                            PHI->getIncomingValue(i));
+                    } else {
+                        commitUpdater.AddAvailableValue(defInst->getParent(), V);
+                    }
                     llvm::Value *reachingVal = commitUpdater.GetValueInMiddleOfBlock(&BB);
                     builder.CreateStore(reachingVal, backupIt->second);
                     if (addDebugMarkers_)

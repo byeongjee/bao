@@ -2,6 +2,7 @@
 
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 
 #include <map>
 
@@ -149,6 +150,18 @@ computeIneligGlobalAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const 
                             seenMustStore = true;
                         }
                     }
+                    if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
+                        llvm::Value *dst = MI->getRawDest()->stripPointerCasts();
+                        if (dst == AI) {
+                            info.hasMustStore = true;
+                            seenMustStore = true;
+                        }
+                        if (auto *MT = llvm::dyn_cast<llvm::MemTransferInst>(MI)) {
+                            llvm::Value *src = MT->getRawSource()->stripPointerCasts();
+                            if (src == AI && !seenMustStore)
+                                info.loadBeforeMustStore = true;
+                        }
+                    }
                 }
             }
 
@@ -229,7 +242,7 @@ computeIneligSSALiveness(llvm::Function &F, const CFGAnalysis &cfg,
             }
         }
 
-        if (useBlocks.empty())
+        if (useBlocks.empty() && !llvm::isa<llvm::PHINode>(Inst))
             continue;
 
         // Standard backward dataflow.  V is live-in at B if B has a

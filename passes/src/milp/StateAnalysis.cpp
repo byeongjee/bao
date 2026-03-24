@@ -230,18 +230,26 @@ void StateAnalysis::identifyIneligibleSSAValues() {
             if (!I.getType()->isSized())
                 continue;
 
-            // Check if any user is in a different block (cross-block use).
-            bool hasCrossBlockUse = false;
-            for (const llvm::User *U : I.users()) {
-                if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
-                    if (llvm::isa<llvm::PHINode>(UI) || UI->getParent() != &BB) {
-                        hasCrossBlockUse = true;
-                        break;
+            // Check if any user is in a different block (cross-block use),
+            // or if this is a PHI with same-block users.  PHI values are
+            // defined before the boundary insertion point; when a region
+            // boundary splits the block, same-block users end up in the
+            // split-off block, making the use effectively cross-block.
+            bool needsTracking = false;
+            if (llvm::isa<llvm::PHINode>(&I)) {
+                needsTracking = !I.use_empty();
+            } else {
+                for (const llvm::User *U : I.users()) {
+                    if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
+                        if (llvm::isa<llvm::PHINode>(UI) || UI->getParent() != &BB) {
+                            needsTracking = true;
+                            break;
+                        }
                     }
                 }
             }
 
-            if (!hasCrossBlockUse)
+            if (!needsTracking)
                 continue;
 
             ineligibleObjs_.push_back(&I);
@@ -422,6 +430,12 @@ void StateAnalysis::computeAccessMaps() {
             if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(U)) {
                 if (SI->getPointerOperand()->stripPointerCasts() == AI) {
                     const llvm::BasicBlock *BBKey = SI->getParent();
+                    ineligDefVars_[BBKey].insert(AI);
+                }
+            }
+            if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(U)) {
+                if (MI->getRawDest()->stripPointerCasts() == AI) {
+                    const llvm::BasicBlock *BBKey = MI->getParent();
                     ineligDefVars_[BBKey].insert(AI);
                 }
             }
