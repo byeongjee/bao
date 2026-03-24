@@ -1109,6 +1109,14 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         return PreservedAnalyses::all();
     }
 
+    // Skip benchmark infrastructure functions — same filter as MILPCheckpointPass.
+    StringRef name = F.getName();
+    if (name.starts_with("timing_gpio") || name.starts_with("_timing_delay") ||
+        name.starts_with("debug_") || name.starts_with("uart_")) {
+        PLOGD << "LoopStripMiningPass: skipping benchmark infrastructure function " << name;
+        return PreservedAnalyses::all();
+    }
+
     if (MILPConfigOpt.getValue().empty()) {
         if (LoopStripMiningEnabledOpt) {
             PLOGE << "LoopStripMiningPass: missing -milp-config; skipping " << F.getName();
