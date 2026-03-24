@@ -63,10 +63,11 @@ class RCGSolver {
     std::vector<Node> nodes_;
     std::vector<std::vector<RCGEdge>> adj_;
 
-    // Diagnostic tracking
-    double minSingleBlockEnergy_ = std::numeric_limits<double>::infinity();
-    double minSingleBlockBudget_ = 0.0;
-    SchematicBlock *minSingleBlockBB_ = nullptr;
+    // Diagnostic tracking: smallest rejected interval (any size)
+    double minRejectedEnergy_ = std::numeric_limits<double>::infinity();
+    double minRejectedBudget_ = 0.0;
+    std::vector<SchematicBlock *> minRejectedBlocks_;
+    std::string minRejectedLoopKind_; // "ckpt->ckpt", "start->ckpt", etc.
 
     /// Reference: get_checkpoints_from_trace — build candidate checkpoint nodes.
     void getCheckpointsFromTrace();
