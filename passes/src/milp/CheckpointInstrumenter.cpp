@@ -251,6 +251,13 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 for (llvm::Value *V : solution.getSaveVarsAt(n))
                     commitVars.insert(V);
 
+            // Ineligible live-in values must also be committed so that the
+            // restore loads after the boundary read correct values.  The MILP
+            // solver only tracks eligible (global) objects in its save set;
+            // ineligible SSA values and allocas are handled here.
+            for (llvm::Value *V : state.getIneligLiveIn(&BB))
+                commitVars.insert(V);
+
             for (llvm::Value *V : commitVars) {
                 unsigned sizeBytes = state.getVarSizeBytes(V);
                 if (sizeBytes == 0)
