@@ -78,6 +78,18 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
             }
             if (loopScope && pred->getLLVMBlock() && !loopScope->contains(pred->getLLVMBlock()))
                 continue;
+            // Treat inner loop headers as POTENTIAL checkpoint barriers.
+            // The Python reference starts all edges as POTENTIAL; propagation
+            // only traverses DISABLED edges.  Inner loop headers that haven't
+            // been converted to DISABLED/ACTIVE remain POTENTIAL, blocking
+            // propagation.  We replicate this by skipping predecessors that
+            // are headers of loops strictly nested inside loopScope.
+            if (auto *predLLVM = pred->getLLVMBlock()) {
+                llvm::Loop *predLoop = LI.getLoopFor(predLLVM);
+                if (predLoop && predLoop->getHeader() == predLLVM && predLoop != loopScope &&
+                    (!loopScope || loopScope->contains(predLLVM)))
+                    continue;
+            }
 
             dagAdj[childEdge]; // ensure node exists
             dagAdj[ckpt].push_back(childEdge);
@@ -219,6 +231,14 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
             }
             if (loopScope && succ->getLLVMBlock() && !loopScope->contains(succ->getLLVMBlock()))
                 continue;
+            // Treat inner loop headers as POTENTIAL checkpoint barriers
+            // (symmetric with propagateEnergyToLeave — see comment there).
+            if (auto *llvmSucc = succ->getLLVMBlock()) {
+                llvm::Loop *succLoop = LI.getLoopFor(llvmSucc);
+                if (succLoop && succLoop->getHeader() == llvmSucc && succLoop != loopScope &&
+                    (!loopScope || loopScope->contains(llvmSucc)))
+                    continue;
+            }
 
             if (ckptCost.find(childEdge) == ckptCost.end() || cost < ckptCost[childEdge])
                 ckptCost[childEdge] = cost;
