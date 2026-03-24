@@ -96,20 +96,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return false;
     }
 
-    // Collect existing memory allocations from loop blocks before analysis.
-    // Reference: schematic.py:533-537 — collected before loop trace analysis.
-    std::vector<const RegionAllocation *> loopMemoryAllocations;
-    for (llvm::BasicBlock *BB : L->getBlocksVector()) {
-        SchematicBlock *block = graph_.getOrCreate(BB);
-        auto it = solution.blockAllocation.find(block);
-        if (it != solution.blockAllocation.end()) {
-            const RegionAllocation *ptr = it->second.get();
-            if (std::find(loopMemoryAllocations.begin(), loopMemoryAllocations.end(), ptr) ==
-                loopMemoryAllocations.end())
-                loopMemoryAllocations.push_back(ptr);
-        }
-    }
-
     // Step 3: Run RCG solver on each body path.
     // Initialize synthetic boundary blocks with default energy values.
     // START_Loop: default restore budget (no VM costs since allocation is undecided).
@@ -128,16 +114,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         // Reference: schematic.py:544-546 — insert START_Loop and END_Loop, then analyse_trace.
         path.insert(path.begin(), startSynth);
         path.push_back(endSynth);
-
-        // DEBUG: print the trace path
-        {
-            std::string pathStr = "[DEBUG trace] loop=" + header->getName().str() + " path: ";
-            for (SchematicBlock *b : path) {
-                pathStr += b->getName().str();
-                pathStr += " -> ";
-            }
-            PLOGI << pathStr;
-        }
 
         // Add trace edges so SchematicBlock predecessors/successors are populated.
         graph_.addTraceEdges(path);
@@ -183,7 +159,52 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.loop = L;
 
     // Step 6: Check if allocations differ at header vs latch.
-    bool allocationsDiffer = (headerAlloc != latchAlloc);
+    // Match Python reference: only variables present in BOTH maps with different
+    // placements constitute a real conflict.  Extra NVM variables in one map but
+    // not the other are implicitly compatible (NVM is the default/unplaced state).
+    // VM variables absent from the other map conflict only if they would overlap
+    // an existing VM allocation, but since we don't track addresses here we
+    // conservatively treat any VM-in-one-but-absent-in-other as a conflict.
+    bool allocationsDiffer = false;
+    for (const auto &[gv, place] : headerAlloc) {
+        auto it = latchAlloc.find(gv);
+        if (it != latchAlloc.end()) {
+            if (it->second != place) {
+                allocationsDiffer = true;
+                break;
+            }
+        } else if (place == Placement::VM) {
+            allocationsDiffer = true;
+            break;
+        }
+    }
+    if (!allocationsDiffer) {
+        for (const auto &[gv, place] : latchAlloc) {
+            if (headerAlloc.find(gv) == headerAlloc.end() && place == Placement::VM) {
+                allocationsDiffer = true;
+                break;
+            }
+        }
+    }
+
+    // Merge: extend both maps so subsequent steps see a consistent variable set.
+    // Variables absent from one side are added with the other side's placement.
+    // This mirrors Python's extends_memory_allocation which merges missing vars.
+    if (!allocationsDiffer) {
+        for (const auto &[gv, place] : latchAlloc) {
+            if (headerAlloc.find(gv) == headerAlloc.end())
+                headerAlloc[gv] = place;
+        }
+        for (const auto &[gv, place] : headerAlloc) {
+            if (latchAlloc.find(gv) == latchAlloc.end())
+                latchAlloc[gv] = place;
+        }
+        // Update decidedPlacements with the merged maps.
+        solution.decidedPlacements[headerBlock] = headerAlloc;
+        if (latchBlock)
+            solution.decidedPlacements[latchBlock] = latchAlloc;
+    }
+
     if (allocationsDiffer) {
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
@@ -252,23 +273,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // schematic.py:643-664) and by propagation's seenLoops scaling (which
     // applies unconditionally, without loopScope filtering).
 
-    // DEBUG Step 7
-    PLOGI << "[DEBUG Step7] loop=" << header->getName()
-          << " startSynth.E_to_leave=" << solution.blockMeta[startSynth].E_to_leave
-          << " startSynth.E_left=" << solution.blockMeta[startSynth].E_left
-          << " endSynth.E_to_leave=" << solution.blockMeta[endSynth].E_to_leave
-          << " endSynth.E_left=" << solution.blockMeta[endSynth].E_left
-          << " headerBlock.E_to_leave=" << solution.blockMeta[headerBlock].E_to_leave
-          << " headerBlock.E_left=" << solution.blockMeta[headerBlock].E_left;
-    if (latchBlock) {
-        PLOGI << "[DEBUG Step7] latchBlock=" << latch->getName()
-              << " latchBlock.E_to_leave=" << solution.blockMeta[latchBlock].E_to_leave
-              << " latchBlock.E_left=" << solution.blockMeta[latchBlock].E_left;
-    }
-    PLOGI << "[DEBUG Step7] E_loop=" << E_loop << " = startEToLeave(" << startEToLeave
-          << ") - endEToLeave(" << endEToLeave << ") + loopIncrementCostNvm("
-          << params_.loopIncrementCostNvm << ")";
-
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
 
@@ -308,15 +312,28 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     if (!hasEnabledCheckpoints && numIt > 1) {
+        // Collect memory allocations from loop blocks now (after Steps 3-3c).
+        // Must be collected here (not before Step 3) because RCG analysis and
+        // edge resolution can modify blockAllocation, invalidating earlier pointers.
+        // Reference: schematic.py:533-537.
+        std::vector<const RegionAllocation *> loopMemoryAllocations;
+        for (llvm::BasicBlock *BB : L->getBlocksVector()) {
+            SchematicBlock *block = graph_.getOrCreate(BB);
+            auto it = solution.blockAllocation.find(block);
+            if (it != solution.blockAllocation.end()) {
+                const RegionAllocation *ptr = it->second.get();
+                if (std::find(loopMemoryAllocations.begin(), loopMemoryAllocations.end(), ptr) ==
+                    loopMemoryAllocations.end())
+                    loopMemoryAllocations.push_back(ptr);
+            }
+        }
+
         std::vector<SchematicBlock *> loopBlocks;
         for (llvm::BasicBlock *BB : L->getBlocksVector())
             loopBlocks.push_back(graph_.getOrCreate(BB));
 
         unsigned oldNumIt = 0;
         for (unsigned iter = 0; iter < 15; ++iter) {
-            PLOGI << "[DEBUG Step8] convergence iter=" << iter << " numIt=" << numIt
-                  << " oldNumIt=" << oldNumIt << " startEToLeave=" << startEToLeave
-                  << " endEToLeave=" << endEToLeave;
             if (oldNumIt != 0 && numIt >= oldNumIt)
                 break;
             oldNumIt = numIt;
@@ -396,20 +413,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             if (hdPlIt != solution.decidedPlacements.end()) {
                 solution.decidedPlacements[startSynth] = hdPlIt->second;
                 solution.decidedPlacements[endSynth] = hdPlIt->second;
-            }
-
-            // DEBUG: print blockMeta after energy propagation in convergence loop
-            PLOGI << "[DEBUG Step8 after-prop] iter=" << iter
-                  << " startSynth.E_to_leave=" << solution.blockMeta[startSynth].E_to_leave
-                  << " startSynth.E_left=" << solution.blockMeta[startSynth].E_left
-                  << " endSynth.E_to_leave=" << solution.blockMeta[endSynth].E_to_leave
-                  << " endSynth.E_left=" << solution.blockMeta[endSynth].E_left
-                  << " headerBlock.E_to_leave=" << solution.blockMeta[headerBlock].E_to_leave
-                  << " headerBlock.E_left=" << solution.blockMeta[headerBlock].E_left;
-            if (latchBlock) {
-                PLOGI << "[DEBUG Step8 after-prop] latch=" << latch->getName()
-                      << " latchBlock.E_to_leave=" << solution.blockMeta[latchBlock].E_to_leave
-                      << " latchBlock.E_left=" << solution.blockMeta[latchBlock].E_left;
             }
 
             // Re-read from synthetic blocks after re-propagation.
