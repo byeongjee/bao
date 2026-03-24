@@ -13,7 +13,7 @@ from pathlib import Path
 from ..env import ProjectEnv
 from ..errors import ConfigError
 
-_DEFAULT_CAPS = ["1uF", "10uF", "100uF"]
+_DEFAULT_CAPS = ["1uF", "5uF", "10uF", "100uF"]
 
 _ENERGY_CONFIG_MAP: dict[str, str] = {
     "milp": "assembly_params.json",

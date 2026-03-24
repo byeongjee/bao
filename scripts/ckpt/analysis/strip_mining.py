@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 CAPACITY_MAP = {
     "1uF": 4860.0,
+    "5uF": 24300.0,
     "10uF": 48600.0,
     "100uF": 486000.0,
 }
