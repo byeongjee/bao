@@ -466,10 +466,18 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 }
 
 bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
-    // Process loops bottom-up (innermost first).
-    auto loops = LI_.getLoopsInPreorder();
-    for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
-        if (!analyzeLoop(*it, solution))
+    // Process only loops that have trace data, sorted by depth (innermost first).
+    // Reference: schematic.py:675-684 — iterates over f_traces.loop_traces.values()
+    // sorted by depth descending, NOT over all loops in the IR.
+    // Loops not executed at runtime have no trace and are implicitly skipped.
+    std::vector<LoadedLoopTrace> sorted = loadedLoopTraces_;
+    std::sort(sorted.begin(), sorted.end(), [](const LoadedLoopTrace &a, const LoadedLoopTrace &b) {
+        return a.depth > b.depth; // innermost first
+    });
+    for (const auto &lt : sorted) {
+        if (!lt.loop)
+            continue;
+        if (!analyzeLoop(lt.loop, solution))
             return false;
     }
 
