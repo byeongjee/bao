@@ -1,8 +1,10 @@
 #include "schematic/TraceAnalyzer.h"
 #include "schematic/EnergyPropagation.h"
+#include "schematic/MemoryAllocator.h"
 #include "schematic/RCGSolver.h"
 
 #include <deque>
+#include <limits>
 #include <set>
 
 namespace checkpoint {
@@ -50,6 +52,69 @@ extractNotFixedBBPaths(const std::vector<SchematicBlock *> &trace,
     return paths;
 }
 
+/// Reference: memory_allocation.py:140-149 (interval_is_empty).
+/// Returns true if the given [startAddr, endAddr) interval does not overlap
+/// any VM-placed variable's address range in this allocation.
+static bool intervalIsEmpty(const RegionAllocation &alloc, unsigned startAddr, unsigned endAddr,
+                            const SchematicStateAnalysis &state) {
+    for (const auto &[v, va] : alloc.vars) {
+        if (va.placement != Placement::VM)
+            continue;
+        auto offIt = alloc.vmOffsets.find(v);
+        if (offIt == alloc.vmOffsets.end())
+            continue;
+        unsigned iStart = offIt->second;
+        unsigned iEnd = iStart + state.getVarSizeBytes(v);
+        if (startAddr < iEnd && iStart < endAddr)
+            return false;
+    }
+    return true;
+}
+
+/// Reference: memory_allocation.py:151-160 (_is_compatible_with).
+/// One-way compatibility: for each var in other, if not in self and VM-placed,
+/// check that its address range is free in self. If in both, check equality.
+static bool isCompatibleOneWay(const RegionAllocation &self, const RegionAllocation &other,
+                               const SchematicStateAnalysis &state) {
+    for (const auto &[v, varAlloc] : other.vars) {
+        auto selfIt = self.vars.find(v);
+        if (selfIt == self.vars.end()) {
+            // Reference: memory_allocation.py:154-156.
+            if (varAlloc.placement == Placement::VM) {
+                auto offIt = other.vmOffsets.find(v);
+                if (offIt == other.vmOffsets.end())
+                    continue;
+                unsigned startAddr = offIt->second;
+                unsigned endAddr = startAddr + state.getVarSizeBytes(v);
+                if (!intervalIsEmpty(self, startAddr, endAddr, state))
+                    return false;
+            }
+        } else {
+            // Reference: memory_allocation.py:158-159 (var_alloc != self.vars[name]).
+            // Python __eq__ compares: allocation, len(type), name, start_address, end_address.
+            // Same llvm::Value* => same name and type, so compare placement + VM offset.
+            if (varAlloc.placement != selfIt->second.placement)
+                return false;
+            if (varAlloc.placement == Placement::VM) {
+                auto selfOff = self.vmOffsets.find(v);
+                auto otherOff = other.vmOffsets.find(v);
+                unsigned selfAddr = (selfOff != self.vmOffsets.end()) ? selfOff->second : 0;
+                unsigned otherAddr = (otherOff != other.vmOffsets.end()) ? otherOff->second : 0;
+                if (selfAddr != otherAddr)
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+/// Reference: memory_allocation.py:162-166 (is_compatible_with).
+/// Bidirectional compatibility check.
+static bool isCompatibleWith(const RegionAllocation &a, const RegionAllocation &b,
+                             const SchematicStateAnalysis &state) {
+    return isCompatibleOneWay(a, b, state) && isCompatibleOneWay(b, a, state);
+}
+
 bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution &solution,
                   const SchematicStateAnalysis &state, const CFGAnalysis &cfg,
                   const SchematicParams &params, VMAddressTracker *tracker, llvm::LoopInfo &LI,
@@ -69,7 +134,61 @@ bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution 
     // Reference: schematic.py:351-379 (analyse_trace).
     auto subTraces = extractNotFixedBBPaths(trace, solution);
 
-    for (const auto &subPath : subTraces) {
+    for (auto &subPath : subTraces) {
+        // When forceCheckpointOnIncompatibleLoops is enabled, check if the
+        // start and end block allocations are incompatible.  If so, force a
+        // checkpoint at the boundary and truncate the sub-trace so the RCG
+        // does not attempt to merge the incompatible end allocation.
+        // This mirrors the paper's lines 2-3 (back-edge checkpoint on
+        // allocation mismatch) but applies it to inner-loop boundaries.
+        if (params.forceCheckpointOnIncompatibleLoops && subPath.size() >= 3) {
+            auto *startBlock = subPath.front();
+            auto *endBlock = subPath.back();
+            auto sIt = solution.blockAllocation.find(startBlock);
+            auto eIt = solution.blockAllocation.find(endBlock);
+            if (sIt != solution.blockAllocation.end() && sIt->second &&
+                eIt != solution.blockAllocation.end() && eIt->second &&
+                (!mergeAllocations({sIt->second.get(), eIt->second.get()}, state,
+                                   /*checkpointIncreaseAllowed=*/false) ||
+                 !mergeAllocations({eIt->second.get(), sIt->second.get()}, state,
+                                   /*checkpointIncreaseAllowed=*/false))) {
+                // Force checkpoint at the edge entering the end block.
+                CFGEdge forced{subPath[subPath.size() - 2], endBlock};
+                solution.enabledCheckpoints.insert(forced);
+                // Reset E_left for all blocks in the current loop scope
+                // so that later sub-traces use a fresh energy budget
+                // (the forced checkpoint creates a new region boundary,
+                // invalidating energy accounting for downstream blocks).
+                for (auto &[block, meta] : solution.blockMeta) {
+                    if (llvm::BasicBlock *bb = block->getLLVMBlock()) {
+                        if (!loopScope || loopScope->contains(bb))
+                            meta.E_left = std::numeric_limits<double>::max();
+                    }
+                }
+                llvm::errs() << "[SCHEMATIC] Forced checkpoint at "
+                             << (forced.src->getLLVMBlock() ? forced.src->getLLVMBlock()->getName()
+                                                            : forced.src->getName())
+                             << " -> "
+                             << (forced.dst->getLLVMBlock() ? forced.dst->getLLVMBlock()->getName()
+                                                            : forced.dst->getName())
+                             << " due to incompatible loop allocations\n";
+                subPath.pop_back();
+
+                if (subPath.size() < 3) {
+                    // Only one unfixed block remains — assign start block's
+                    // allocation directly (no RCG needed).
+                    auto startAlloc = sIt->second;
+                    for (unsigned i = 1; i < subPath.size(); ++i) {
+                        solution.blockMeta[subPath[i]].analyzed = true;
+                        solution.blockAllocation[subPath[i]] = startAlloc;
+                        for (const auto &[gv, va] : startAlloc->vars)
+                            solution.decidedPlacements[subPath[i]][gv] = va.placement;
+                    }
+                    continue;
+                }
+            }
+        }
+
         RCGSolver solver(subPath, state, cfg, params, solution.blockMeta, solution.blockAllocation,
                          tracker);
         RCGResult result = solver.solve();
@@ -163,69 +282,6 @@ bool findAndAnalyzeNotFixedPaths(const CFGAnalysis &cfg, SchematicSolution &solu
     }
 
     return true;
-}
-
-/// Reference: memory_allocation.py:140-149 (interval_is_empty).
-/// Returns true if the given [startAddr, endAddr) interval does not overlap
-/// any VM-placed variable's address range in this allocation.
-static bool intervalIsEmpty(const RegionAllocation &alloc, unsigned startAddr, unsigned endAddr,
-                            const SchematicStateAnalysis &state) {
-    for (const auto &[v, va] : alloc.vars) {
-        if (va.placement != Placement::VM)
-            continue;
-        auto offIt = alloc.vmOffsets.find(v);
-        if (offIt == alloc.vmOffsets.end())
-            continue;
-        unsigned iStart = offIt->second;
-        unsigned iEnd = iStart + state.getVarSizeBytes(v);
-        if (startAddr < iEnd && iStart < endAddr)
-            return false;
-    }
-    return true;
-}
-
-/// Reference: memory_allocation.py:151-160 (_is_compatible_with).
-/// One-way compatibility: for each var in other, if not in self and VM-placed,
-/// check that its address range is free in self. If in both, check equality.
-static bool isCompatibleOneWay(const RegionAllocation &self, const RegionAllocation &other,
-                               const SchematicStateAnalysis &state) {
-    for (const auto &[v, varAlloc] : other.vars) {
-        auto selfIt = self.vars.find(v);
-        if (selfIt == self.vars.end()) {
-            // Reference: memory_allocation.py:154-156.
-            if (varAlloc.placement == Placement::VM) {
-                auto offIt = other.vmOffsets.find(v);
-                if (offIt == other.vmOffsets.end())
-                    continue;
-                unsigned startAddr = offIt->second;
-                unsigned endAddr = startAddr + state.getVarSizeBytes(v);
-                if (!intervalIsEmpty(self, startAddr, endAddr, state))
-                    return false;
-            }
-        } else {
-            // Reference: memory_allocation.py:158-159 (var_alloc != self.vars[name]).
-            // Python __eq__ compares: allocation, len(type), name, start_address, end_address.
-            // Same llvm::Value* => same name and type, so compare placement + VM offset.
-            if (varAlloc.placement != selfIt->second.placement)
-                return false;
-            if (varAlloc.placement == Placement::VM) {
-                auto selfOff = self.vmOffsets.find(v);
-                auto otherOff = other.vmOffsets.find(v);
-                unsigned selfAddr = (selfOff != self.vmOffsets.end()) ? selfOff->second : 0;
-                unsigned otherAddr = (otherOff != other.vmOffsets.end()) ? otherOff->second : 0;
-                if (selfAddr != otherAddr)
-                    return false;
-            }
-        }
-    }
-    return true;
-}
-
-/// Reference: memory_allocation.py:162-166 (is_compatible_with).
-/// Bidirectional compatibility check.
-static bool isCompatibleWith(const RegionAllocation &a, const RegionAllocation &b,
-                             const SchematicStateAnalysis &state) {
-    return isCompatibleOneWay(a, b, state) && isCompatibleOneWay(b, a, state);
 }
 
 void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, SchematicSolution &solution,

@@ -23,6 +23,9 @@ struct SchematicParams {
                                     // Differs by opt level (O0: memory-resident; O3: register).
     unsigned maxPaths;              // Maximum paths to enumerate
     bool addDebugMarkers = false;   // Emit debug marker calls
+    bool forceCheckpointOnIncompatibleLoops = false; // Force checkpoint at loop header
+                                                     // when inner loop allocation conflicts
+                                                     // with previously fixed allocations
 };
 
 /// Parse SCHEMATIC parameters from a JSON config file.
