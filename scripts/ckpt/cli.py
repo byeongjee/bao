@@ -690,8 +690,8 @@ def bench() -> None:
 @click.option(
     "--cpu-freq",
     type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
+    default="16",
+    help="CPU frequency in MHz (default: 16).",
 )
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
@@ -746,8 +746,8 @@ def bench_milp_cmd(
 @click.option(
     "--cpu-freq",
     type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
+    default="16",
+    help="CPU frequency in MHz (default: 16).",
 )
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
@@ -811,8 +811,8 @@ def bench_rockclimb_cmd(
 @click.option(
     "--cpu-freq",
     type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
+    default="16",
+    help="CPU frequency in MHz (default: 16).",
 )
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
@@ -882,8 +882,8 @@ def bench_schematic_cmd(
 @click.option(
     "--cpu-freq",
     type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
+    default="16",
+    help="CPU frequency in MHz (default: 16).",
 )
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
@@ -928,8 +928,8 @@ def bench_schematic_o3_cmd(
 @click.option(
     "--cpu-freq",
     type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
+    default="16",
+    help="CPU frequency in MHz (default: 16).",
 )
 @click.pass_context
 def bench_uninstrumented_cmd(
