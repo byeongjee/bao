@@ -55,6 +55,12 @@ cl::opt<bool> AddDebugMarkersOpt("add-debug-markers",
                                           "save/restore (for mock counter debugging)"),
                                  cl::init(false));
 
+cl::opt<bool> ForceCheckpointOnIncompatibleLoopsOpt(
+    "force-checkpoint-on-incompatible-loops",
+    cl::desc("Force checkpoint at loop header when inner loop allocation "
+             "conflicts with previously fixed allocations (SCHEMATIC)"),
+    cl::init(false));
+
 cl::opt<std::string> SchematicConfigOpt("schematic-config",
                                         cl::desc("Path to JSON SCHEMATIC configuration file"),
                                         cl::value_desc("filename"), cl::init(""));

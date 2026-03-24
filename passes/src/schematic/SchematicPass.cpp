@@ -32,6 +32,7 @@ extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<std::string> SchematicConfigOpt;
 extern cl::opt<std::string> SchematicTraceOpt;
 extern cl::opt<bool> AddDebugMarkersOpt;
+extern cl::opt<bool> ForceCheckpointOnIncompatibleLoopsOpt;
 
 namespace checkpoint {
 
@@ -61,9 +62,11 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     }
     SchematicParams params = *paramsOpt;
 
-    // Override debug markers from CLI.
+    // Override flags from CLI.
     if (AddDebugMarkersOpt.getValue())
         params.addDebugMarkers = true;
+    if (ForceCheckpointOnIncompatibleLoopsOpt.getValue())
+        params.forceCheckpointOnIncompatibleLoops = true;
 
     // Step 4: Hoist non-entry static allocas to the entry block.
     BasicBlock &entryBB = F.getEntryBlock();

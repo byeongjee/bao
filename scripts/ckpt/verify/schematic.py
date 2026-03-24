@@ -33,6 +33,7 @@ def verify_schematic(
     clang_opt_level: int,
     pass_log_level: str,
     algorithm_label: str,
+    force_checkpoint_on_incompatible_loops: bool,
 ) -> bool:
     """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
     from ..bench.config import default_energy_config
@@ -66,6 +67,7 @@ def verify_schematic(
                 cpu_freq=cpu_freq,
                 opt_level=3,
                 clang_opt_level=clang_opt_level,
+                force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
             ),
         )
         return InstrumentedOutput(

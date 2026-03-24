@@ -97,11 +97,6 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
         return std::nullopt;
     params.addDebugMarkers = *debugMarkers;
 
-    auto forceIncompat = readBool("force_checkpoint_on_incompatible_loops", false);
-    if (!forceIncompat)
-        return std::nullopt;
-    params.forceCheckpointOnIncompatibleLoops = *forceIncompat;
-
     return params;
 }
 
