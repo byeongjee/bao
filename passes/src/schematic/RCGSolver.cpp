@@ -230,12 +230,17 @@ RCGResult RCGSolver::getShortestPathInRCG() {
     if (dist[endNode] == INF) {
         result.feasible = false;
         std::string msg = "SCHEMATIC RCG: no feasible path from Start to End — "
-                          "energy capacity too small for this path";
-        if (minSingleBlockBB_) {
-            msg += " (smallest single-block interval: block '" +
-                   minSingleBlockBB_->getName().str() + "' requires energy " +
-                   std::to_string(minSingleBlockEnergy_) + " but budget is " +
-                   std::to_string(minSingleBlockBudget_) + ")";
+                          "every candidate interval exceeds energy budget";
+        if (!minRejectedBlocks_.empty()) {
+            msg += " (smallest rejected interval: [";
+            for (unsigned i = 0; i < minRejectedBlocks_.size(); ++i) {
+                if (i > 0)
+                    msg += " -> ";
+                auto *b = minRejectedBlocks_[i];
+                msg += b->getLLVMBlock() ? b->getLLVMBlock()->getName().str() : b->getName();
+            }
+            msg += "] requires energy " + std::to_string(minRejectedEnergy_) + " but budget is " +
+                   std::to_string(minRejectedBudget_) + ")";
         }
         result.errorMessage = msg;
         return result;
@@ -318,10 +323,11 @@ std::vector<SchematicBlock *> RCGSolver::getIntervalBlocks(unsigned nodeFrom,
 
 void RCGSolver::trackDiagnostics(const std::vector<SchematicBlock *> &blocks, double energy,
                                  double budget) {
-    if (blocks.size() == 1 && energy < minSingleBlockEnergy_) {
-        minSingleBlockEnergy_ = energy;
-        minSingleBlockBudget_ = budget;
-        minSingleBlockBB_ = blocks[0];
+    // Track the smallest rejected interval — shows why no RCG edges were created.
+    if (energy >= budget && energy < minRejectedEnergy_) {
+        minRejectedEnergy_ = energy;
+        minRejectedBudget_ = budget;
+        minRejectedBlocks_ = blocks;
     }
 }
 
