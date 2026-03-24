@@ -115,6 +115,11 @@ CheckpointOptimizer::CheckpointOptimizer(const MILPInput &input)
     : cfg_(input.cfg), state_(input.state), energy_(input.energy),
       params_(input.energy.getParams()), env_(), model_(env_) {
     model_.set(GRB_IntParam_OutputFlag, 0);
+    model_.set(GRB_IntParam_MIPFocus, 1);
+    model_.set(GRB_IntParam_Presolve, 2);
+    model_.set(GRB_IntParam_Cuts, 2);
+    model_.set(GRB_IntParam_Symmetry, 2);
+    model_.set(GRB_DoubleParam_Heuristics, 0.1);
 }
 
 int CheckpointOptimizer::getNumVars() const {
@@ -581,23 +586,33 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
 }
 
 // At region starts, accumulated energy equals the startup cost:
-// Indicator: r_[b] = 1  →  eAccum_[b] = E_start(b)
+//   r[b]=1  →  eAccum[b] = E_start(b)
+// Big-M reformulation (M = capacity, tight since eAccum ∈ [0, capacity]):
+//   eAccum[b] >= E_start(b) - capacity * (1 - r[b])
+//   eAccum[b] <= E_start(b) + capacity * (1 - r[b])
 void CheckpointOptimizer::constrainEnergyInitAtRegionStart() {
+    const double M = params_.capacity;
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr eStart = buildEStart(block);
-        model_.addGenConstrIndicator(r_[block], 1, eAccum_[block] - eStart, GRB_EQUAL, 0.0,
-                                     "C9_energy_init_" + nodeToken(cfg_, block));
+        std::string suffix = nodeToken(cfg_, block);
+        model_.addConstr(eAccum_[block] >= eStart - M * (1 - r_[block]),
+                         "C9_energy_init_lb_" + suffix);
+        model_.addConstr(eAccum_[block] <= eStart + M * (1 - r_[block]),
+                         "C9_energy_init_ub_" + suffix);
     }
 }
 
-// Indicator: r_[dst] = 0  →  eAccum_[dst] >= eAccum_[src] + E_blk(src)
+// Energy propagation along edges when not starting a new region:
+//   r[dst]=0  →  eAccum[dst] >= eAccum[src] + E_blk(src)
+// Big-M reformulation (M = capacity, tight since eAccum ∈ [0, capacity]):
+//   eAccum[dst] >= eAccum[src] + E_blk(src) - capacity * r[dst]
 void CheckpointOptimizer::constrainEnergyPropagation() {
+    const double M = params_.capacity;
     unsigned edgeIdx = 0;
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
-        model_.addGenConstrIndicator(r_[dst], 0, eAccum_[dst] - eAccum_[src] - eBlkSrc,
-                                     GRB_GREATER_EQUAL, 0.0,
-                                     "C10_energy_prop_" + std::to_string(edgeIdx++));
+        model_.addConstr(eAccum_[dst] >= eAccum_[src] + eBlkSrc - M * r_[dst],
+                         "C10_energy_prop_" + std::to_string(edgeIdx++));
     }
 }
 
