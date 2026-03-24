@@ -363,8 +363,7 @@ SchematicInstrumenter::insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
     return inserted;
 }
 
-unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
-                                                   const SchematicSolution &solution,
+unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicSolution &solution,
                                                    const SchematicStateAnalysis &state) {
 
     unsigned inserted = 0;
@@ -386,29 +385,54 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F,
     // Step 3: Create shadow globals.
     createShadowGlobals(F, solution, state);
 
-    // Step 4: Rewrite ALL accesses for variables that have shadow globals.
-    // If a shadow global was created for a variable (alloca or global), every
-    // access throughout the entire function must use the shadow — not just
-    // accesses in regions where that variable happens to be VM-placed.
-    // Without this, a variable may be initialized via its alloca (in a region
-    // where it is NVM-placed) but read via its shadow global (in a different
-    // region where it is VM-placed), causing the initial value to be lost.
-    rewriteAllShadowAccesses(F);
+    // Step 4: Build per-block allocation map from blockAllocation.
+    // Allocations were already extended during analysis (SchematicPass Step 9c)
+    // to contain all accessed candidate variables.
+    llvm::DenseMap<llvm::BasicBlock *, const RegionAllocation *> blockToAlloc;
+    for (const auto &[sblock, allocPtr] : solution.blockAllocation) {
+        if (sblock->isSynthetic() || !allocPtr)
+            continue;
+        if (auto *BB = sblock->getLLVMBlock())
+            blockToAlloc[BB] = allocPtr.get();
+    }
 
-    // Step 5: Entry block — no boundary call (consistent with RockClimb,
+    // Step 5: Rewrite accesses per-block based on each block's allocation.
+    // VM-placed variables get rewritten to use the shadow global.
+    // NVM-placed variables keep the original alloca/GV.
+    for (llvm::BasicBlock &BB : F) {
+        auto it = blockToAlloc.find(&BB);
+        if (it == blockToAlloc.end())
+            continue;
+        rewriteAccessesInRegion({&BB}, *it->second);
+    }
+
+    // Assertion: no two SchematicBlock* entries in blockAllocation should map to
+    // the same BasicBlock*. If they do, the last one wins in blockToAlloc and the
+    // rewriting/checkpoint logic may use inconsistent allocations.
+    {
+        llvm::DenseMap<llvm::BasicBlock *, const SchematicBlock *> seen;
+        for (const auto &[sblock, allocPtr] : solution.blockAllocation) {
+            if (sblock->isSynthetic() || !allocPtr)
+                continue;
+            auto *BB = sblock->getLLVMBlock();
+            if (!BB)
+                continue;
+            auto it = seen.find(BB);
+            if (it != seen.end()) {
+                llvm::errs() << "SCHEMATIC: duplicate blockAllocation for BB '" << BB->getName()
+                             << "': SchematicBlock '" << it->second->getName() << "' and '"
+                             << sblock->getName() << "'\n";
+                assert(false && "Duplicate BasicBlock in blockAllocation");
+            }
+            seen[BB] = sblock;
+        }
+    }
+
+    // Step 7: Entry block — no boundary call (consistent with RockClimb,
     // which skips the entry block boundary). The first region starts at
     // program entry without a checkpoint.
 
-    // Step 6: Insert checkpoints at enabled edges.
-    // Build a lookup from regions for ending/starting allocations.
-    // Map each block to its region allocation.
-    llvm::DenseMap<llvm::BasicBlock *, const RegionAllocation *> blockToAlloc;
-    for (const auto &region : solution.regions) {
-        for (SchematicBlock *block : region.blocks) {
-            if (auto *BB = block->getLLVMBlock())
-                blockToAlloc[BB] = &region.allocation;
-        }
-    }
+    // Step 8: Insert checkpoints at enabled edges.
 
     for (const CFGEdge &edge : solution.enabledCheckpoints) {
         // Skip synthetic blocks — they have no real IR.
