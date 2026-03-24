@@ -103,6 +103,22 @@ void RCGSolver::createReachableCheckpointGraph() {
                          << " restore=" << va.needRestore() << " save=" << va.needSave() << "\n";
     }
 
+    // Helper: compute interval cost, handling empty intervals (zero execution cost).
+    // Python reference calls compute_cost([]) which returns (MemoryAllocation(), 0).
+    // The C++ getIntervalBlocks returns empty when the checkpoint is adjacent to
+    // start/end, but we must still create the edge with just overhead costs.
+    // Helper: compute interval cost, handling empty intervals (zero execution cost).
+    // Python reference calls compute_cost([]) which returns (MemoryAllocation(), 0).
+    // The C++ getIntervalBlocks returns empty when the checkpoint is adjacent to
+    // start/end, but we must still create the edge with just overhead costs.
+    auto computeIntervalCost = [&](const std::vector<SchematicBlock *> &blocks,
+                                   const RegionAllocation *sa,
+                                   const RegionAllocation *ea) -> ComputeCostResult {
+        if (blocks.empty())
+            return {RegionAllocation{}, 0.0};
+        return computeCost(blocks, state_, cfg_, params_, blockAllocation_, tracker_, sa, ea);
+    };
+
     // Loop 1: ckpt->ckpt edges (ref: schematic.py:199-218, early termination)
     for (unsigned ii = 0; ii < internalCkpts.size(); ++ii) {
         unsigned i = internalCkpts[ii];
@@ -112,10 +128,7 @@ void RCGSolver::createReachableCheckpointGraph() {
                 break;
             unsigned j = internalCkpts[jj];
             auto blocks = getIntervalBlocks(i, j);
-            if (blocks.empty())
-                continue;
-            auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_,
-                                             tracker_, nullptr, nullptr);
+            auto [alloc, cost] = computeIntervalCost(blocks, nullptr, nullptr);
             cost += params_.E_pro + params_.N_reg * params_.regRestoreEnergy; // chkpt_restore
             cost += params_.E_epi + params_.N_reg * params_.regStoreEnergy;   // chkpt_save
             alloc.intervalEnergy = cost;
@@ -134,10 +147,7 @@ void RCGSolver::createReachableCheckpointGraph() {
                 break;
             unsigned j = internalCkpts[jj];
             auto blocks = getIntervalBlocks(startNode, j);
-            if (blocks.empty())
-                continue;
-            auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_,
-                                             tracker_, startAlloc, nullptr);
+            auto [alloc, cost] = computeIntervalCost(blocks, startAlloc, nullptr);
             cost += params_.E_epi + params_.N_reg * params_.regStoreEnergy; // chkpt_save only
             alloc.intervalEnergy = cost;
             trackDiagnostics(blocks, cost, energyLeft);
@@ -156,20 +166,9 @@ void RCGSolver::createReachableCheckpointGraph() {
                 break;
             unsigned i = internalCkpts[ii];
             auto blocks = getIntervalBlocks(i, endNode);
-            if (blocks.empty())
-                continue;
-            llvm::errs() << "[DEBUG RCG] Loop3 ckpt->End: ckpt=" << i << " blocks:";
-            for (auto *b : blocks)
-                llvm::errs() << " "
-                             << (b->getLLVMBlock() ? b->getLLVMBlock()->getName() : b->getName());
-            llvm::errs() << " endAlloc=" << (endAlloc ? "yes" : "no") << "\n";
-            auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_,
-                                             tracker_, nullptr, endAlloc);
+            auto [alloc, cost] = computeIntervalCost(blocks, nullptr, endAlloc);
             cost += params_.E_pro + params_.N_reg * params_.regRestoreEnergy; // chkpt_restore only
             alloc.intervalEnergy = cost;
-            llvm::errs() << "[DEBUG RCG] Loop3 ckpt->End: cost=" << cost
-                         << " energyToLeave=" << energyToLeave << " capacity=" << params_.capacity
-                         << " accepted=" << (cost + energyToLeave < params_.capacity) << "\n";
             trackDiagnostics(blocks, cost, params_.capacity - energyToLeave);
             if (cost + energyToLeave < params_.capacity)
                 adj_[i].push_back({i, endNode, cost, std::move(alloc), std::move(blocks)});
@@ -180,24 +179,12 @@ void RCGSolver::createReachableCheckpointGraph() {
     // Loop 4: Start->End edge
     {
         auto blocks = getIntervalBlocks(startNode, endNode);
-        if (!blocks.empty()) {
-            llvm::errs() << "[DEBUG RCG] Loop4 Start->End: blocks:";
-            for (auto *b : blocks)
-                llvm::errs() << " "
-                             << (b->getLLVMBlock() ? b->getLLVMBlock()->getName() : b->getName());
-            llvm::errs() << " startAlloc=" << (startAlloc ? "yes" : "no")
-                         << " endAlloc=" << (endAlloc ? "yes" : "no") << "\n";
-            auto [alloc, cost] = computeCost(blocks, state_, cfg_, params_, blockAllocation_,
-                                             tracker_, startAlloc, endAlloc);
-            alloc.intervalEnergy = cost;
-            llvm::errs() << "[DEBUG RCG] Loop4 Start->End: cost=" << cost
-                         << " energyToLeave=" << energyToLeave << " energyLeft=" << energyLeft
-                         << " accepted=" << (cost + energyToLeave < energyLeft) << "\n";
-            trackDiagnostics(blocks, cost, energyLeft);
-            if (cost + energyToLeave < energyLeft)
-                adj_[startNode].push_back(
-                    {startNode, endNode, cost, std::move(alloc), std::move(blocks)});
-        }
+        auto [alloc, cost] = computeIntervalCost(blocks, startAlloc, endAlloc);
+        alloc.intervalEnergy = cost;
+        trackDiagnostics(blocks, cost, energyLeft);
+        if (cost + energyToLeave < energyLeft)
+            adj_[startNode].push_back(
+                {startNode, endNode, cost, std::move(alloc), std::move(blocks)});
     }
 }
 
