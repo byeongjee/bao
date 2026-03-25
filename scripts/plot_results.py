@@ -37,8 +37,6 @@ ALG_STYLE = {
     "uninstrumented": {"label": "Uninstrumented", "color": "#9E9E9E"},
 }
 
-CAPACITORS = ["1uF", "10uF", "100uF"]
-
 # -- Metric definitions -----------------------------------------------------
 # Each metric specifies:
 #   source: "swbor" (device-debug CSVs) or "no-debug" (no-device-debug CSVs)
@@ -100,6 +98,50 @@ def parse_benchmark_cap(benchmark_field: str) -> tuple[str, str]:
     return benchmark_field, ""
 
 
+def resolve_algorithm_csv_path(result_dir: Path, algo: str, source: str) -> Path | None:
+    """Resolve current or legacy algorithm CSV naming."""
+    candidates = {
+        "swbor": [
+            result_dir / f"{algo}_debug.csv",
+            result_dir / f"{algo}-swbor.csv",
+        ],
+        "no-debug": [
+            result_dir / f"{algo}.csv",
+            result_dir / f"{algo}-swbor-no-debug.csv",
+        ],
+    }
+
+    for path in candidates[source]:
+        if path.exists():
+            return path
+    return None
+
+
+def discover_capacitors(result_dir: Path) -> list[str]:
+    """Discover capacitor labels across all available algorithm CSVs."""
+    capacitors: set[str] = set()
+    for algo in ALGORITHMS:
+        for source in ["swbor", "no-debug"]:
+            path = resolve_algorithm_csv_path(result_dir, algo, source)
+            if path is None:
+                continue
+            for row in read_csv(path):
+                bm = row.get("benchmark", "").strip()
+                if not bm:
+                    continue
+                _name, cap = parse_benchmark_cap(bm)
+                if cap:
+                    capacitors.add(cap)
+
+    def capacitor_sort_key(cap: str) -> tuple[float, str]:
+        try:
+            return float(cap.removesuffix("uF")), cap
+        except ValueError:
+            return float("inf"), cap
+
+    return sorted(capacitors, key=capacitor_sort_key)
+
+
 def load_algorithm_data(
     result_dir: Path,
     algo: str,
@@ -110,12 +152,8 @@ def load_algorithm_data(
 
     source: 'swbor' or 'no-debug'.
     """
-    if source == "swbor":
-        path = result_dir / f"{algo}-swbor.csv"
-    else:
-        path = result_dir / f"{algo}-swbor-no-debug.csv"
-
-    if not path.exists():
+    path = resolve_algorithm_csv_path(result_dir, algo, source)
+    if path is None:
         return {}
 
     data: dict[tuple[str, str], float] = {}
@@ -168,6 +206,7 @@ def plot_metric_for_cap(
     normalize: bool,
 ) -> plt.Figure:
     """Create a bar chart for one (metric, capacitor) combination."""
+    del metric_key
     include_uninst = metric_info["include_uninstrumented"] and uninst_data
 
     # Determine which algorithms have data for this cap
@@ -217,6 +256,15 @@ def plot_metric_for_cap(
 
     bar_width = 0.8 / n_algos
     x = np.arange(n_benchmarks)
+    positive_values = [
+        val
+        for algo_values in values.values()
+        for val in algo_values
+        if val is not None and val > 0
+    ]
+    use_symlog = False
+    if len(positive_values) >= 2:
+        use_symlog = max(positive_values) / min(positive_values) >= 100
 
     for i, algo in enumerate(active_algos):
         style = ALG_STYLE[algo]
@@ -253,11 +301,17 @@ def plot_metric_for_cap(
     if normalize and norm_algo:
         norm_label = ALG_STYLE[norm_algo]["label"]
         ax.set_ylabel(f"Normalized to {norm_label}")
-        ax.set_title(f"{metric_info['title']} — {cap} (normalized to {norm_label})")
+        title = f"{metric_info['title']} — {cap} (normalized to {norm_label})"
         ax.axhline(y=1.0, color="gray", linestyle="--", linewidth=0.8, alpha=0.7)
     else:
         ax.set_ylabel(metric_info["ylabel"])
-        ax.set_title(f"{metric_info['title']} — {cap}")
+        title = f"{metric_info['title']} — {cap}"
+
+    if use_symlog:
+        ax.set_yscale("symlog", linthresh=1.0)
+        title = f"{title} [symlog]"
+
+    ax.set_title(title)
 
     ax.legend(fontsize=8)
     ax.grid(axis="y", alpha=0.3)
@@ -303,14 +357,15 @@ def main() -> None:
     # Discover benchmarks from all available CSVs
     all_benchmarks: set[str] = set()
     for algo in ALGORITHMS:
-        for suffix in ["swbor", "swbor-no-debug"]:
-            path = result_dir / f"{algo}-{suffix}.csv"
-            if path.exists():
-                for row in read_csv(path):
-                    bm = row.get("benchmark", "").strip()
-                    if bm:
-                        name, _ = parse_benchmark_cap(bm)
-                        all_benchmarks.add(name)
+        for source in ["swbor", "no-debug"]:
+            path = resolve_algorithm_csv_path(result_dir, algo, source)
+            if path is None:
+                continue
+            for row in read_csv(path):
+                bm = row.get("benchmark", "").strip()
+                if bm:
+                    name, _ = parse_benchmark_cap(bm)
+                    all_benchmarks.add(name)
 
     uninst_path = result_dir / "uninstrumented.csv"
     if uninst_path.exists():
@@ -332,6 +387,8 @@ def main() -> None:
 
     print(f"Benchmarks: {benchmarks}")
     print(f"Metrics: {metrics_to_plot}")
+    capacitors = discover_capacitors(result_dir)
+    print(f"Capacitors: {capacitors}")
 
     for metric_key in metrics_to_plot:
         metric_info = METRICS[metric_key]
@@ -347,7 +404,7 @@ def main() -> None:
         if metric_info["include_uninstrumented"]:
             uninst_data = load_uninstrumented_data(result_dir, column)
 
-        for cap in CAPACITORS:
+        for cap in capacitors:
             fig = plot_metric_for_cap(
                 cap, metric_key, metric_info,
                 algo_data, uninst_data, benchmarks, args.normalize,
