@@ -1,1 +1,1 @@
-#define KEY_SIZE_BITS 128
+#define KEY_SIZE_BITS 256
