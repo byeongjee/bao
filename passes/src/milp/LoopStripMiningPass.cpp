@@ -4,6 +4,7 @@
 #include "common/Logger.h"
 #include "common/LoopTripCount.h"
 #include "common/LoopUtils.h"
+#include "common/PassStatistics.h"
 #include "estimator/EnergyEstimatorFactory.h"
 #include "milp/EnergyModel.h"
 #include "milp/EnergyPathUtils.h"
@@ -30,6 +31,7 @@
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
@@ -53,6 +55,11 @@ extern cl::opt<bool> LoopStripMiningEnabledOpt;
 
 namespace {
 
+cl::opt<std::string>
+    LoopStripMiningStatsJsonOpt("loop-strip-mining-stats-json",
+                                cl::desc("Path to write loop strip-mining diagnostics JSON"),
+                                cl::value_desc("filename"), cl::init(""));
+
 struct LoopRewritePlan {
     Loop *L = nullptr;
     uint64_t N = 0;
@@ -61,10 +68,53 @@ struct LoopRewritePlan {
     bool isChunking = false;
 };
 
+struct LoopStripMiningDetail {
+    std::string functionName;
+    std::string loopHeader;
+    std::string decision;
+    std::string skipReason;
+    std::string skipDetail;
+    bool isChunking = false;
+    bool tripCountKnown = false;
+    uint64_t tripCount = 0;
+    double budget = 0.0;
+    double iterEnergy = 0.0;
+    double perIterNvmPenalty = 0.0;
+    double restoreLiveInMargin = 0.0;
+    double commitDefMargin = 0.0;
+    double boundaryStateMargin = 0.0;
+    double budgetAfterBoundary = 0.0;
+    double perIterTotalEnergy = 0.0;
+    double strictBudget = 0.0;
+    double rawK = 0.0;
+    bool candidateKValid = false;
+    uint64_t candidateK = 0;
+    bool chosenKValid = false;
+    uint64_t chosenK = 0;
+    bool rewriteAttempted = false;
+    bool rewriteSucceeded = false;
+    std::string rewriteFailureReason;
+    bool postChunkReclampAttempted = false;
+    bool postChunkReclampSucceeded = false;
+    bool postChunkReclampApplied = false;
+    bool postChunkMaxKValid = false;
+    uint64_t postChunkMaxK = 0;
+    bool postChunkIterEnergyValid = false;
+    double postChunkIterEnergy = 0.0;
+    std::string postChunkReclampError;
+};
+
 struct PlanResult {
     std::optional<LoopRewritePlan> plan;
     std::string skipReason;
     std::string skipDetail;
+    LoopStripMiningDetail detail;
+};
+
+struct SelectedLoopPlan {
+    Loop *L = nullptr;
+    LoopRewritePlan plan;
+    size_t detailIndex = 0;
 };
 
 using checkpoint::WorstCasePathResult;
@@ -82,6 +132,17 @@ struct LoopStripMiningStats {
     unsigned loopsChunked = 0;
     std::map<std::string, unsigned> skippedReasons;
     std::vector<std::pair<std::string, uint64_t>> chosenKByHeader;
+    std::vector<LoopStripMiningDetail> loopDetails;
+};
+
+struct LoopStripMiningFunctionSnapshot {
+    unsigned loopsSeen = 0;
+    unsigned loopsEligible = 0;
+    unsigned loopsRewritten = 0;
+    unsigned loopsChunked = 0;
+    std::map<std::string, unsigned> skippedReasons;
+    std::vector<std::pair<std::string, uint64_t>> chosenKByHeader;
+    std::vector<LoopStripMiningDetail> loopDetails;
 };
 
 struct HeaderPhiInfo {
@@ -96,6 +157,149 @@ using checkpoint::getMarkerTripCount;
 using checkpoint::removeLoopTripCountMetadata;
 using checkpoint::setLoopTripCountMetadata;
 using checkpoint::setStripMinedLoopMetadata;
+
+static std::string getLoopHeaderName(const Loop *L) {
+    if (!L)
+        return "<unknown>";
+    const BasicBlock *Header = L->getHeader();
+    const Function *F = Header ? Header->getParent() : nullptr;
+    if (!Header || !F)
+        return "<unknown>";
+    return checkpoint::getBlockName(*Header, *F);
+}
+
+static std::string getLoopFunctionName(const Loop *L) {
+    if (!L)
+        return "<unknown>";
+    const BasicBlock *Header = L->getHeader();
+    const Function *F = Header ? Header->getParent() : nullptr;
+    return F ? F->getName().str() : "<unknown>";
+}
+
+static LoopStripMiningDetail buildInitialLoopDetail(const Loop *L) {
+    LoopStripMiningDetail detail;
+    detail.functionName = getLoopFunctionName(L);
+    detail.loopHeader = getLoopHeaderName(L);
+    detail.decision = "skipped";
+    return detail;
+}
+
+static json::Object loopDetailToJSON(const LoopStripMiningDetail &detail) {
+    json::Object obj;
+    obj["function"] = detail.functionName;
+    obj["loop_header"] = detail.loopHeader;
+    obj["decision"] = detail.decision;
+    obj["skip_reason"] = detail.skipReason;
+    obj["skip_detail"] = detail.skipDetail;
+    obj["is_chunking"] = detail.isChunking;
+    obj["trip_count_known"] = detail.tripCountKnown;
+    if (detail.tripCountKnown)
+        obj["trip_count"] = static_cast<int64_t>(detail.tripCount);
+    obj["budget"] = detail.budget;
+    obj["iter_energy"] = detail.iterEnergy;
+    obj["per_iter_nvm_penalty"] = detail.perIterNvmPenalty;
+    obj["restore_livein_margin"] = detail.restoreLiveInMargin;
+    obj["commit_def_margin"] = detail.commitDefMargin;
+    obj["boundary_state_margin"] = detail.boundaryStateMargin;
+    obj["budget_after_boundary"] = detail.budgetAfterBoundary;
+    obj["per_iter_total_energy"] = detail.perIterTotalEnergy;
+    obj["strict_budget"] = detail.strictBudget;
+    obj["raw_k"] = detail.rawK;
+    obj["candidate_k_valid"] = detail.candidateKValid;
+    if (detail.candidateKValid)
+        obj["candidate_k"] = static_cast<int64_t>(detail.candidateK);
+    obj["chosen_k_valid"] = detail.chosenKValid;
+    if (detail.chosenKValid)
+        obj["chosen_k"] = static_cast<int64_t>(detail.chosenK);
+    obj["rewrite_attempted"] = detail.rewriteAttempted;
+    obj["rewrite_succeeded"] = detail.rewriteSucceeded;
+    obj["rewrite_failure_reason"] = detail.rewriteFailureReason;
+    obj["post_chunk_reclamp_attempted"] = detail.postChunkReclampAttempted;
+    obj["post_chunk_reclamp_succeeded"] = detail.postChunkReclampSucceeded;
+    obj["post_chunk_reclamp_applied"] = detail.postChunkReclampApplied;
+    obj["post_chunk_max_k_valid"] = detail.postChunkMaxKValid;
+    if (detail.postChunkMaxKValid)
+        obj["post_chunk_max_k"] = static_cast<int64_t>(detail.postChunkMaxK);
+    obj["post_chunk_iter_energy_valid"] = detail.postChunkIterEnergyValid;
+    if (detail.postChunkIterEnergyValid)
+        obj["post_chunk_iter_energy"] = detail.postChunkIterEnergy;
+    obj["post_chunk_reclamp_error"] = detail.postChunkReclampError;
+    return obj;
+}
+
+static LoopStripMiningFunctionSnapshot snapshotFromStats(const LoopStripMiningStats &stats) {
+    LoopStripMiningFunctionSnapshot snapshot;
+    snapshot.loopsSeen = stats.loopsSeen;
+    snapshot.loopsEligible = stats.loopsEligible;
+    snapshot.loopsRewritten = stats.loopsRewritten;
+    snapshot.loopsChunked = stats.loopsChunked;
+    snapshot.skippedReasons = stats.skippedReasons;
+    snapshot.chosenKByHeader = stats.chosenKByHeader;
+    snapshot.loopDetails = stats.loopDetails;
+    return snapshot;
+}
+
+static json::Object functionSnapshotToJSON(const std::string &functionName,
+                                           const LoopStripMiningFunctionSnapshot &snapshot) {
+    json::Object summary;
+    summary["loops_seen"] = static_cast<int64_t>(snapshot.loopsSeen);
+    summary["loops_eligible"] = static_cast<int64_t>(snapshot.loopsEligible);
+    summary["loops_rewritten"] = static_cast<int64_t>(snapshot.loopsRewritten);
+    summary["loops_chunked"] = static_cast<int64_t>(snapshot.loopsChunked);
+
+    json::Object skippedReasons;
+    for (const auto &[reason, count] : snapshot.skippedReasons)
+        skippedReasons[reason] = static_cast<int64_t>(count);
+
+    json::Array chosenKValues;
+    for (const auto &[header, k] : snapshot.chosenKByHeader) {
+        json::Object item;
+        item["loop_header"] = header;
+        item["chosen_k"] = static_cast<int64_t>(k);
+        chosenKValues.emplace_back(std::move(item));
+    }
+
+    std::vector<LoopStripMiningDetail> sortedDetails = snapshot.loopDetails;
+    std::sort(sortedDetails.begin(), sortedDetails.end(),
+              [](const LoopStripMiningDetail &lhs, const LoopStripMiningDetail &rhs) {
+                  return lhs.loopHeader < rhs.loopHeader;
+              });
+
+    json::Array loopDetails;
+    loopDetails.reserve(sortedDetails.size());
+    for (const auto &detail : sortedDetails)
+        loopDetails.emplace_back(loopDetailToJSON(detail));
+
+    json::Object obj;
+    obj["function"] = functionName;
+    obj["summary"] = std::move(summary);
+    obj["skipped_reasons"] = std::move(skippedReasons);
+    obj["chosen_k_values"] = std::move(chosenKValues);
+    obj["loop_details"] = std::move(loopDetails);
+    return obj;
+}
+
+static std::map<std::string, LoopStripMiningFunctionSnapshot> &getLoopStripMiningStatsStore() {
+    static std::map<std::string, LoopStripMiningFunctionSnapshot> store;
+    return store;
+}
+
+static void writeLoopStripMiningStatsJSON(const Function &F, const LoopStripMiningStats &stats) {
+    if (LoopStripMiningStatsJsonOpt.empty())
+        return;
+
+    auto &store = getLoopStripMiningStatsStore();
+    store[F.getName().str()] = snapshotFromStats(stats);
+
+    json::Array functions;
+    functions.reserve(store.size());
+    for (const auto &[functionName, snapshot] : store)
+        functions.emplace_back(functionSnapshotToJSON(functionName, snapshot));
+
+    json::Object root;
+    root["functions"] = std::move(functions);
+    checkpoint::writeStatsJSON(LoopStripMiningStatsJsonOpt, std::move(root));
+}
 
 static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE,
                                                     const BasicBlock *ExitingBlock);
@@ -345,50 +549,62 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
                                    const checkpoint::StateAnalysis &state) {
     PlanResult result;
     result.skipReason = "unknown";
+    result.detail = buildInitialLoopDetail(L);
 
     // ── Common checks (both strip mining and chunking) ──
     if (!L->isLoopSimplifyForm()) {
         result.skipReason = "not-loop-simplify-form";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (!L->hasDedicatedExits()) {
         result.skipReason = "no-dedicated-exits";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (!L->getLoopPreheader()) {
         result.skipReason = "missing-preheader";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
     BasicBlock *Latch = L->getLoopLatch();
     if (!Latch) {
         result.skipReason = "missing-single-latch";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (containsInvoke(L)) {
         result.skipReason = "contains-invoke";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
 
     // ── Common: compute energy budget and K ──
     double budget = params.capacity - params.E_pro - params.E_epi;
+    result.detail.budget = budget;
     if (budget <= 0.0) {
         result.skipReason = "nonpositive-energy-budget";
         result.skipDetail = "capacity=" + std::to_string(params.capacity) +
                             ", E_pro=" + std::to_string(params.E_pro) +
                             ", E_epi=" + std::to_string(params.E_epi) +
                             ", budget=" + std::to_string(budget);
+        result.detail.skipReason = result.skipReason;
+        result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
     WorstCasePathResult iterEnergy = computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok) {
         result.skipReason = iterEnergy.error;
+        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (iterEnergy.energy <= 0.0) {
         result.skipReason = "nonpositive-iteration-energy";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
+    result.detail.iterEnergy = iterEnergy.energy;
 
     double perIterNvmPenalty = computeNvmAccessMarginOnPath(iterEnergy.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
@@ -396,6 +612,11 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     double boundaryStateMargin = computeBoundaryStateMarginOnPath(
         iterEnergy.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
     double budgetAfterBoundary = budget - boundaryStateMargin;
+    result.detail.perIterNvmPenalty = perIterNvmPenalty;
+    result.detail.restoreLiveInMargin = restoreLiveInMargin;
+    result.detail.commitDefMargin = commitDefMargin;
+    result.detail.boundaryStateMargin = boundaryStateMargin;
+    result.detail.budgetAfterBoundary = budgetAfterBoundary;
     if (budgetAfterBoundary <= 0.0) {
         result.skipReason = "nonpositive-effective-budget";
         result.skipDetail = "budget=" + std::to_string(budget) +
@@ -405,15 +626,20 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
                             ", commit-def-margin=" + std::to_string(commitDefMargin) +
                             ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
                             ", budget-after-boundary=" + std::to_string(budgetAfterBoundary);
+        result.detail.skipReason = result.skipReason;
+        result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
     double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty;
+    result.detail.perIterTotalEnergy = perIterTotalEnergy;
     if (perIterTotalEnergy <= 0.0) {
         result.skipReason = "nonpositive-per-iter-total-energy";
         result.skipDetail = "per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
                             ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
                             ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
+        result.detail.skipReason = result.skipReason;
+        result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
@@ -421,6 +647,8 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     double strictBudget =
         std::nextafter(budgetAfterBoundary, -std::numeric_limits<double>::infinity());
     double rawK = std::floor(strictBudget / perIterTotalEnergy);
+    result.detail.strictBudget = strictBudget;
+    result.detail.rawK = rawK;
     if (!std::isfinite(rawK) || rawK <= 0.0) {
         result.skipReason = "k-zero";
         result.skipDetail = "budget-after-boundary=" + std::to_string(budgetAfterBoundary) +
@@ -428,16 +656,22 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
                             ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
                             ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
                             ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
+        result.detail.skipReason = result.skipReason;
+        result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
     auto K = static_cast<uint64_t>(rawK);
+    result.detail.candidateKValid = true;
+    result.detail.candidateK = K;
     if (K <= 1) {
         result.skipReason = "k-not-beneficial";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (K > std::numeric_limits<unsigned>::max()) {
         result.skipReason = "k-too-large";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
 
@@ -446,22 +680,32 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     PHINode *IV = L->getCanonicalInductionVariable();
     SmallVector<BasicBlock *, 8> exitingBlocks;
     L->getExitingBlocks(exitingBlocks);
+    std::optional<uint64_t> exactTripCount;
+    if (exitingBlocks.size() == 1)
+        exactTripCount = getConstantTripCount(L, SE, exitingBlocks.front());
+    if (exactTripCount) {
+        result.detail.tripCountKnown = true;
+        result.detail.tripCount = *exactTripCount;
+    }
 
     if (IV && exitingBlocks.size() == 1) {
-        std::optional<uint64_t> tripCount = getConstantTripCount(L, SE, exitingBlocks.front());
-        if (tripCount && *tripCount >= 2) {
-            if (K >= *tripCount) {
+        if (exactTripCount && *exactTripCount >= 2) {
+            if (K >= *exactTripCount) {
                 result.skipReason = "k-covers-entire-loop";
+                result.detail.skipReason = result.skipReason;
                 return result;
             }
             LoopRewritePlan plan;
             plan.L = L;
-            plan.N = *tripCount;
+            plan.N = *exactTripCount;
             plan.K = K;
             plan.iterEnergy = iterEnergy.energy;
             plan.isChunking = false;
             result.plan = plan;
             result.skipReason.clear();
+            result.detail.isChunking = false;
+            result.detail.chosenKValid = true;
+            result.detail.chosenK = K;
             return result;
         }
     }
@@ -472,6 +716,7 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     auto *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
     if (!LatchBr) {
         result.skipReason = "latch-not-branch-inst";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
 
@@ -484,17 +729,23 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     }
     if (!hasBackedge) {
         result.skipReason = "latch-no-backedge-to-header";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
 
     // If we can determine trip count and K covers it, skip
     std::optional<uint64_t> knownTC;
-    if (exitingBlocks.size() == 1)
-        knownTC = getConstantTripCount(L, SE, exitingBlocks.front());
+    if (exactTripCount)
+        knownTC = exactTripCount;
     if (!knownTC)
         knownTC = getMarkerTripCount(L);
+    if (knownTC) {
+        result.detail.tripCountKnown = true;
+        result.detail.tripCount = *knownTC;
+    }
     if (knownTC && K >= *knownTC) {
         result.skipReason = "k-covers-entire-loop";
+        result.detail.skipReason = result.skipReason;
         return result;
     }
 
@@ -508,6 +759,9 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     plan.isChunking = true;
     result.plan = plan;
     result.skipReason.clear();
+    result.detail.isChunking = true;
+    result.detail.chosenKValid = true;
+    result.detail.chosenK = K;
     return result;
 }
 
@@ -644,17 +898,26 @@ static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
 static void selectInNest(Loop *L, ScalarEvolution &SE,
                          const DenseMap<const BasicBlock *, double> &blockEnergy,
                          const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
-                         const checkpoint::StateAnalysis &state,
-                         std::vector<std::pair<Loop *, LoopRewritePlan>> &out,
+                         const checkpoint::StateAnalysis &state, std::vector<SelectedLoopPlan> &out,
                          LoopStripMiningStats &stats) {
 
     stats.loopsSeen++;
     PlanResult pr = buildRewritePlan(L, SE, blockEnergy, params, LI, state);
 
     if (pr.plan) {
-        out.emplace_back(L, *pr.plan);
+        pr.detail.decision = "selected";
+        pr.detail.skipReason.clear();
+        pr.detail.skipDetail.clear();
+        size_t detailIndex = stats.loopDetails.size();
+        stats.loopDetails.push_back(pr.detail);
+        out.push_back({L, *pr.plan, detailIndex});
         return;
     }
+
+    pr.detail.skipReason = pr.skipReason;
+    pr.detail.skipDetail = pr.skipDetail;
+    pr.detail.decision = (pr.skipReason == "k-covers-entire-loop") ? "fits-entirely" : "skipped";
+    stats.loopDetails.push_back(pr.detail);
 
     {
         BasicBlock *Header = L->getHeader();
@@ -681,12 +944,12 @@ static void selectInNest(Loop *L, ScalarEvolution &SE,
     }
 }
 
-static std::vector<std::pair<Loop *, LoopRewritePlan>>
+static std::vector<SelectedLoopPlan>
 selectLoopsToStripMine(LoopInfo &LI, ScalarEvolution &SE,
                        const DenseMap<const BasicBlock *, double> &blockEnergy,
                        const checkpoint::MILPEnergyParams &params,
                        const checkpoint::StateAnalysis &state, LoopStripMiningStats &stats) {
-    std::vector<std::pair<Loop *, LoopRewritePlan>> selected;
+    std::vector<SelectedLoopPlan> selected;
     for (Loop *L : LI) {
         selectInNest(L, SE, blockEnergy, params, LI, state, selected, stats);
     }
@@ -1198,16 +1461,25 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     // Snapshot headers as WeakTrackingVH so we can detect invalidation
     // from prior rewrites that may restructure the CFG.
     auto selected = selectLoopsToStripMine(LI, SE, blockEnergy, *milpParamsOpt, state, stats);
-    std::vector<std::pair<WeakTrackingVH, LoopRewritePlan>> worklist;
+    struct LoopWorkItem {
+        WeakTrackingVH headerHandle;
+        LoopRewritePlan plan;
+        size_t detailIndex = 0;
+    };
+    std::vector<LoopWorkItem> worklist;
     worklist.reserve(selected.size());
-    for (auto &[L, plan] : selected) {
-        worklist.emplace_back(WeakTrackingVH(L->getHeader()), plan);
+    for (const auto &selectedPlan : selected) {
+        worklist.push_back({WeakTrackingVH(selectedPlan.L->getHeader()), selectedPlan.plan,
+                            selectedPlan.detailIndex});
     }
 
-    for (auto &[headerHandle, plan] : worklist) {
-        auto *Header = dyn_cast_or_null<BasicBlock>(headerHandle);
+    for (auto &item : worklist) {
+        auto &detail = stats.loopDetails[item.detailIndex];
+        auto *Header = dyn_cast_or_null<BasicBlock>(item.headerHandle);
         if (!Header) {
             stats.skippedReasons["loop-header-erased-after-prior-rewrite"]++;
+            detail.rewriteAttempted = true;
+            detail.rewriteFailureReason = "loop-header-erased-after-prior-rewrite";
             continue;
         }
 
@@ -1215,22 +1487,27 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         Loop *L = LI.getLoopFor(Header);
         if (!L || L->getHeader() != Header) {
             stats.skippedReasons["loop-unresolvable-from-header"]++;
+            detail.rewriteAttempted = true;
+            detail.rewriteFailureReason = "loop-unresolvable-from-header";
             continue;
         }
 
-        plan.L = L;
+        item.plan.L = L;
         stats.loopsEligible++;
+        detail.rewriteAttempted = true;
 
-        bool rewritten = plan.isChunking ? stripMineByChunkCounter(plan, LI, SE, DT)
-                                         : stripMineByExitRewrite(plan, LI, SE, DT, AC, AA, TTI);
+        bool rewritten = item.plan.isChunking
+                             ? stripMineByChunkCounter(item.plan, LI, SE, DT)
+                             : stripMineByExitRewrite(item.plan, LI, SE, DT, AC, AA, TTI);
         if (!rewritten) {
             stats.skippedReasons["rewrite-utility-failed"]++;
+            detail.rewriteFailureReason = "rewrite-utility-failed";
             PLOGW << "LoopStripMiningPass: rewrite failed " << F.getName() << "::" << headerName
-                  << " K=" << plan.K;
+                  << " K=" << item.plan.K;
             continue;
         }
 
-        if (plan.isChunking) {
+        if (item.plan.isChunking) {
             // Re-estimate on the transformed loop to include chunking overhead
             // (counter.check block) and clamp K in place if needed.
             refreshBlockEnergy(F, *estimator, blockEnergy);
@@ -1244,29 +1521,38 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
             } else {
                 reclampState = &postState;
             }
+            detail.postChunkReclampAttempted = true;
             ChunkBudgetResult reclamp =
                 recomputeChunkKWithOverhead(L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
             if (!reclamp.ok) {
                 stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
+                detail.postChunkReclampError = reclamp.error;
                 PLOGW << "LoopStripMiningPass: chunk K re-clamp unavailable " << F.getName()
                       << "::" << headerName << " reason=" << reclamp.error
-                      << " original-K=" << plan.K;
+                      << " original-K=" << item.plan.K;
             } else {
-                plan.iterEnergy = reclamp.iterEnergy;
-                uint64_t newK = std::min<uint64_t>(plan.K, reclamp.maxK);
-                if (newK != plan.K) {
+                detail.postChunkReclampSucceeded = true;
+                detail.postChunkMaxKValid = true;
+                detail.postChunkMaxK = reclamp.maxK;
+                detail.postChunkIterEnergyValid = true;
+                detail.postChunkIterEnergy = reclamp.iterEnergy;
+                item.plan.iterEnergy = reclamp.iterEnergy;
+                uint64_t newK = std::min<uint64_t>(item.plan.K, reclamp.maxK);
+                if (newK != item.plan.K) {
                     if (!updateChunkLoopBound(L, newK)) {
                         stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
+                        detail.postChunkReclampError = "chunk-k-reclamp-update-failed";
                         PLOGW << "LoopStripMiningPass: chunk K re-clamp update failed "
-                              << F.getName() << "::" << headerName << " original-K=" << plan.K
+                              << F.getName() << "::" << headerName << " original-K=" << item.plan.K
                               << " new-K=" << newK;
                     } else {
                         setLoopTripCountMetadata(L, newK);
                         SE.forgetLoop(L);
+                        detail.postChunkReclampApplied = true;
                         PLOGD << "LoopStripMiningPass: chunk K re-clamped " << F.getName()
-                              << "::" << headerName << " original-K=" << plan.K << " new-K=" << newK
-                              << " E_iter_wc_post=" << reclamp.iterEnergy;
-                        plan.K = newK;
+                              << "::" << headerName << " original-K=" << item.plan.K
+                              << " new-K=" << newK << " E_iter_wc_post=" << reclamp.iterEnergy;
+                        item.plan.K = newK;
                     }
                 }
             }
@@ -1274,12 +1560,15 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
 
         changed = true;
         stats.loopsRewritten++;
-        if (plan.isChunking)
+        if (item.plan.isChunking)
             stats.loopsChunked++;
-        stats.chosenKByHeader.emplace_back(headerName, plan.K);
-        PLOGD << "LoopStripMiningPass: " << (plan.isChunking ? "chunked " : "rewritten ")
-              << F.getName() << "::" << headerName << " N=" << plan.N << " K=" << plan.K
-              << " E_iter_wc=" << plan.iterEnergy;
+        detail.chosenKValid = true;
+        detail.chosenK = item.plan.K;
+        detail.rewriteSucceeded = true;
+        stats.chosenKByHeader.emplace_back(headerName, item.plan.K);
+        PLOGD << "LoopStripMiningPass: " << (item.plan.isChunking ? "chunked " : "rewritten ")
+              << F.getName() << "::" << headerName << " N=" << item.plan.N << " K=" << item.plan.K
+              << " E_iter_wc=" << item.plan.iterEnergy;
     }
 
     if (verifyFunction(F, &errs())) {
@@ -1287,6 +1576,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     }
 
     printSummary(F, stats);
+    writeLoopStripMiningStatsJSON(F, stats);
     return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 

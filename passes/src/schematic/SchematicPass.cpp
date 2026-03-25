@@ -38,6 +38,64 @@ extern cl::opt<bool> ForceCheckpointOnIncompatibleLoopsOpt;
 
 namespace checkpoint {
 
+static json::Array buildLoopDecisionDetails(const SchematicSolution &solution) {
+    struct LoopDecisionRow {
+        std::string headerName;
+        const LoopCheckpointDecision *decision;
+    };
+
+    std::vector<LoopDecisionRow> rows;
+    rows.reserve(solution.loopDecisions.size());
+    for (const auto &[block, decision] : solution.loopDecisions) {
+        if (!block)
+            continue;
+
+        std::string headerName;
+        if (llvm::BasicBlock *BB = block->getLLVMBlock()) {
+            headerName = BB->getName().str();
+        } else {
+            headerName = block->getName().str();
+        }
+
+        rows.push_back({headerName, &decision});
+    }
+
+    std::sort(rows.begin(), rows.end(), [](const LoopDecisionRow &lhs, const LoopDecisionRow &rhs) {
+        return lhs.headerName < rhs.headerName;
+    });
+
+    json::Array details;
+    details.reserve(rows.size());
+    for (const auto &row : rows) {
+        json::Object item;
+        item["loop_header"] = row.headerName;
+        item["mandatory_backedge"] = row.decision->mandatoryBackEdge;
+        item["loop_fits_entirely"] = row.decision->loopFitsEntirely;
+        item["num_iterations_per_charge"] =
+            static_cast<int64_t>(row.decision->numIterationsPerCharge);
+        item["e_loop"] = row.decision->E_loop;
+        item["body_path_count"] = static_cast<int64_t>(row.decision->bodyPathCount);
+        item["had_enabled_checkpoints"] = row.decision->hadEnabledCheckpoints;
+        item["convergence_applied"] = row.decision->convergenceApplied;
+        item["convergence_iterations"] = static_cast<int64_t>(row.decision->convergenceIterations);
+        item["initial_start_e_to_leave"] = row.decision->initialStartEToLeave;
+        item["initial_end_e_to_leave"] = row.decision->initialEndEToLeave;
+        item["initial_e_loop"] = row.decision->initialELoop;
+        item["initial_available_energy"] = row.decision->initialAvailableEnergy;
+        item["initial_raw_num_iterations"] =
+            static_cast<int64_t>(row.decision->initialRawNumIterations);
+        item["final_start_e_to_leave"] = row.decision->finalStartEToLeave;
+        item["final_end_e_to_leave"] = row.decision->finalEndEToLeave;
+        item["final_available_energy"] = row.decision->finalAvailableEnergy;
+        item["final_raw_num_iterations"] =
+            static_cast<int64_t>(row.decision->finalRawNumIterations);
+        item["body_vm_bytes_used"] = static_cast<int64_t>(row.decision->bodyAllocation.vmBytesUsed);
+        details.emplace_back(std::move(item));
+    }
+
+    return details;
+}
+
 PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     initLogging();
     const auto totalStart = std::chrono::steady_clock::now();
@@ -316,6 +374,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
         root["enabled_checkpoints"] = static_cast<int64_t>(solution.enabledCheckpoints.size());
         root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
+        root["loop_decision_details"] = buildLoopDecisionDetails(solution);
         writeStatsJSON(StatsJsonOpt, std::move(root));
     }
 

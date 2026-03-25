@@ -112,6 +112,19 @@ struct LoopCheckpointDecision {
     bool loopFitsEntirely = false;       // entire loop fits without checkpoint
     unsigned numIterationsPerCharge = 0; // conditional checkpoint interval
     double E_loop = 0.0;                 // per-iteration energy
+    unsigned bodyPathCount = 0;
+    bool hadEnabledCheckpoints = false;
+    bool convergenceApplied = false;
+    unsigned convergenceIterations = 0;
+    double initialStartEToLeave = 0.0;
+    double initialEndEToLeave = 0.0;
+    double initialELoop = 0.0;
+    double initialAvailableEnergy = 0.0;
+    int initialRawNumIterations = 0;
+    double finalStartEToLeave = 0.0;
+    double finalEndEToLeave = 0.0;
+    double finalAvailableEnergy = 0.0;
+    int finalRawNumIterations = 0;
     RegionAllocation bodyAllocation;
 };
 

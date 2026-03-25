@@ -7,6 +7,7 @@ Supports two estimator modes:
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -129,17 +130,19 @@ def compile_milp(
 
         try:
             if opts.estimator_mode == "assembly":
-                pass_output, profiling_ms = _assembly_mode(
+                pass_output, profiling_ms, strip_mining_stats_json = _assembly_mode(
                     tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
                 )
             else:
-                pass_output, profiling_ms = _ir_mode(
+                pass_output, profiling_ms, strip_mining_stats_json = _ir_mode(
                     tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
                 )
         except CompilationError:
             if opts.save_temps:
                 common.save_temps(tmp, opts.output.parent)
             raise
+
+        _merge_strip_mining_stats(tmp / "stats.json", strip_mining_stats_json)
 
         # Copy stats JSON if available
         stats_json: Path | None = None
@@ -202,7 +205,7 @@ def _assembly_mode(
     tmp: Path,
     milp_input_ll: Path,
     milp_extra_flags: list[str],
-) -> tuple[str, int]:
+) -> tuple[str, int, Path]:
     """Assembly-based two-pass energy estimation pipeline.
 
     Returns (pass_output, profiling_time_ms).
@@ -214,6 +217,7 @@ def _assembly_mode(
         tmp / "pre_energy_config.json",
         pre_bb_energy,
     )
+    strip_mining_stats_json = tmp / "strip_mining_stats.json"
 
     # Phase 3: Preprocessing (loop canonicalization + strip-mining)
     preprocessed_ll = tmp / "preprocessed.ll"
@@ -224,6 +228,7 @@ def _assembly_mode(
         f"-energy-config={pre_energy_config}",
         f"-milp-config={opts.milp_config}",
         f"-ckpt-log-level={opts.pass_log_level}",
+        f"-loop-strip-mining-stats-json={strip_mining_stats_json}",
     ]
     preprocess_cmd += ["-S", str(milp_input_ll), "-o", str(preprocessed_ll)]
 
@@ -265,10 +270,11 @@ def _assembly_mode(
         output_ll=tmp / "ckpt.ll",
         bb_freq_json=bb_freq_json,
         milp_extra_flags=milp_extra_flags,
+        strip_mining_stats_json=None,
     )
 
     pass_output = pre_stderr + post_stderr + pass_output
-    return pass_output, profiling_ms
+    return pass_output, profiling_ms, strip_mining_stats_json
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +288,7 @@ def _ir_mode(
     tmp: Path,
     milp_input_ll: Path,
     milp_extra_flags: list[str],
-) -> tuple[str, int]:
+) -> tuple[str, int, Path]:
     """IR-based single-pass energy estimation pipeline.
 
     Returns (pass_output, profiling_time_ms).
@@ -309,6 +315,7 @@ def _ir_mode(
     profiling_ms = now_ms() - profile_start
 
     # MILP pass
+    strip_mining_stats_json = tmp / "strip_mining_stats.json"
     pass_output = _run_milp_pass(
         tc, env, opts,
         pass_name="milp",
@@ -317,9 +324,10 @@ def _ir_mode(
         output_ll=tmp / "ckpt.ll",
         bb_freq_json=bb_freq_json,
         milp_extra_flags=milp_extra_flags,
+        strip_mining_stats_json=strip_mining_stats_json,
     )
 
-    return pass_output, profiling_ms
+    return pass_output, profiling_ms, strip_mining_stats_json
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +345,7 @@ def _run_milp_pass(
     output_ll: Path,
     bb_freq_json: Path,
     milp_extra_flags: list[str],
+    strip_mining_stats_json: Path | None,
 ) -> str:
     """Run a MILP opt pass and return its captured output."""
     cmd: list[str] = [
@@ -348,11 +357,53 @@ def _run_milp_pass(
         f"-bb-freq-file={bb_freq_json}",
     ]
     cmd += milp_extra_flags
+    if strip_mining_stats_json is not None:
+        cmd.append(f"-loop-strip-mining-stats-json={strip_mining_stats_json}")
     cmd.append(f"-ckpt-stats-json={output_ll.parent / 'stats.json'}")
     cmd += ["-S", str(input_ll), "-o", str(output_ll)]
 
     result = run(cmd, step_name=pass_name, timeout=660)
     return result.output
+
+
+def _merge_strip_mining_stats(stats_json: Path, strip_mining_stats_json: Path) -> None:
+    if not stats_json.is_file():
+        return
+    if not strip_mining_stats_json.is_file():
+        return
+
+    with open(stats_json) as f:
+        stats_data = json.load(f)
+    with open(strip_mining_stats_json) as f:
+        strip_data = json.load(f)
+
+    target_function = stats_data.get("function")
+    function_entries = strip_data.get("functions", [])
+    matching_entry: dict | None = None
+    for entry in function_entries:
+        if entry.get("function") == target_function:
+            matching_entry = entry
+            break
+    if matching_entry is None and len(function_entries) == 1:
+        matching_entry = function_entries[0]
+    if matching_entry is None:
+        return
+
+    summary = matching_entry.get("summary")
+    if summary is not None:
+        stats_data["strip_mining_summary"] = summary
+    skipped_reasons = matching_entry.get("skipped_reasons")
+    if skipped_reasons is not None:
+        stats_data["strip_mining_skipped_reasons"] = skipped_reasons
+    chosen_k_values = matching_entry.get("chosen_k_values")
+    if chosen_k_values is not None:
+        stats_data["strip_mining_chosen_k_values"] = chosen_k_values
+    loop_details = matching_entry.get("loop_details")
+    if loop_details is not None:
+        stats_data["strip_mining_details"] = loop_details
+
+    with open(stats_json, "w") as f:
+        json.dump(stats_data, f)
 
 
 # ---------------------------------------------------------------------------
