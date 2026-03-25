@@ -186,7 +186,35 @@ chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
                        const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
                        const std::vector<const RegionAllocation *> &memoryAllocations,
                        VMAddressTracker *tracker, unsigned accessScale) {
+    std::map<llvm::Value *, VariableAccessEstimate> variableAccesses;
+    for (llvm::Value *v : state.getCandidates()) {
+        unsigned nR = 0;
+        unsigned nW = 0;
+        for (SchematicBlock *block : intervalBlocks) {
+            auto *BB = block->getLLVMBlock();
+            if (!BB)
+                continue;
+            nR += state.getLoadCount(BB, v);
+            nW += state.getStoreCount(BB, v);
+        }
+        if (nR == 0 && nW == 0)
+            continue;
 
+        auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
+        variableAccesses[v] = {static_cast<unsigned>((nR + nW) * accessScale), needRestore,
+                               needSave};
+    }
+
+    return chooseMemoryAllocation(variableAccesses, state, params, startAlloc, endAlloc,
+                                  memoryAllocations, tracker);
+}
+
+std::pair<RegionAllocation, double>
+chooseMemoryAllocation(const std::map<llvm::Value *, VariableAccessEstimate> &variableAccesses,
+                       const SchematicStateAnalysis &state, const SchematicParams &params,
+                       const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
+                       const std::vector<const RegionAllocation *> &memoryAllocations,
+                       VMAddressTracker *tracker) {
     // Step 1: Merge allocations (reference: memory_allocator.py:153-163).
     RegionAllocation constrainedAlloc;
     {
@@ -272,22 +300,12 @@ chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
         if (result.vars.count(v))
             continue;
 
-        // Accumulate access counts across interval, scaled by accessScale
-        // (used by convergence loop to account for multiple iterations).
-        unsigned nR = 0, nW = 0;
-        for (SchematicBlock *block : intervalBlocks) {
-            auto *BB = block->getLLVMBlock();
-            if (!BB)
-                continue;
-            nR += state.getLoadCount(BB, v);
-            nW += state.getStoreCount(BB, v);
-        }
-        if (nR == 0 && nW == 0)
+        auto accessIt = variableAccesses.find(v);
+        if (accessIt == variableAccesses.end() || accessIt->second.accessCount == 0)
             continue;
-        nR *= accessScale;
-        nW *= accessScale;
-
-        auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
+        const VariableAccessEstimate &access = accessIt->second;
+        bool needRestore = access.needRestore;
+        bool needSave = access.needSave;
 
         // Reference: memory_allocator.py:179-181 — force pointer-type variables to NVM.
         bool isPointerType = false;
@@ -303,14 +321,16 @@ chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
         // Reference lines 182-190: two-branch structure matching Python exactly.
         if (!startAlloc && !endAlloc) {
             unsigned size = state.getVarSizeBytes(v);
-            double gain = estimateEnergyGain(nR + nW, size, needRestore, needSave, params);
+            double gain =
+                estimateEnergyGain(access.accessCount, size, needRestore, needSave, params);
             candidates.push_back({v, gain, size, needRestore, needSave});
         } else {
             if ((needRestore && startAlloc) || (needSave && endAlloc)) {
                 result.vars[v] = {Placement::NVM, needRestore, needSave};
             } else {
                 unsigned size = state.getVarSizeBytes(v);
-                double gain = estimateEnergyGain(nR + nW, size, needRestore, needSave, params);
+                double gain =
+                    estimateEnergyGain(access.accessCount, size, needRestore, needSave, params);
                 candidates.push_back({v, gain, size, needRestore, needSave});
             }
         }

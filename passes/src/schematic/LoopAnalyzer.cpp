@@ -117,6 +117,50 @@ recomputeLoopBodyEnergyFromPaths(const std::vector<std::vector<SchematicBlock *>
     }
 }
 
+static std::map<llvm::Value *, VariableAccessEstimate>
+estimateLoopVariableAccess(const LoadedLoopTrace &loopTrace, const SchematicStateAnalysis &state,
+                           uint64_t numIterations) {
+    std::map<llvm::Value *, double> expectedAccesses;
+    std::map<llvm::Value *, bool> needRestoreByVar;
+
+    uint64_t totalExecutions = 0;
+    for (const auto &path : loopTrace.iterationPaths)
+        totalExecutions += path.count;
+
+    double fallbackFreq = loopTrace.iterationPaths.empty()
+                              ? 0.0
+                              : 1.0 / static_cast<double>(loopTrace.iterationPaths.size());
+    for (const auto &path : loopTrace.iterationPaths) {
+        double freq = totalExecutions == 0
+                          ? fallbackFreq
+                          : static_cast<double>(path.count) / static_cast<double>(totalExecutions);
+        for (SchematicBlock *block : path.blocks) {
+            llvm::BasicBlock *BB = block->getLLVMBlock();
+            if (!BB)
+                continue;
+            for (llvm::Value *v : state.getCandidates()) {
+                unsigned accessCount = state.getLoadCount(BB, v) + state.getStoreCount(BB, v);
+                if (accessCount == 0)
+                    continue;
+                expectedAccesses[v] +=
+                    static_cast<double>(accessCount) * freq * static_cast<double>(numIterations);
+                if (!needRestoreByVar.count(v)) {
+                    auto firstOp = state.getFirstOpIsLoad(BB, v);
+                    if (firstOp.has_value())
+                        needRestoreByVar[v] = *firstOp;
+                }
+            }
+        }
+    }
+
+    std::map<llvm::Value *, VariableAccessEstimate> result;
+    for (const auto &[v, weightedCount] : expectedAccesses) {
+        result[v] = {std::max<unsigned>(1, static_cast<unsigned>(std::llround(weightedCount))),
+                     needRestoreByVar.count(v) ? needRestoreByVar[v] : false, true};
+    }
+    return result;
+}
+
 LoopAnalyzer::LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
                            VMAddressTracker *tracker, SchematicGraph &graph)
@@ -186,8 +230,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     // Step 2: Get loop body paths (header-to-latch).
     std::vector<std::vector<SchematicBlock *>> bodyPaths;
+    const LoadedLoopTrace *matchedLoopTrace = nullptr;
     for (const auto &lt : loadedLoopTraces_) {
         if (lt.header == headerBlock) {
+            matchedLoopTrace = &lt;
             for (const auto &ep : lt.iterationPaths) {
                 if (!ep.blocks.empty())
                     bodyPaths.push_back(ep.blocks);
@@ -197,6 +243,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
     if (bodyPaths.empty()) {
         PLOGE << "SCHEMATIC: loop at " << header->getName() << " has no analyzable body paths";
+        return false;
+    }
+    if (!matchedLoopTrace) {
+        PLOGE << "SCHEMATIC: internal error resolving loop trace for " << header->getName();
         return false;
     }
 
@@ -449,10 +499,6 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             }
         }
 
-        std::vector<SchematicBlock *> loopBlocks;
-        for (llvm::BasicBlock *BB : L->getBlocksVector())
-            loopBlocks.push_back(graph_.getOrCreate(BB));
-
         unsigned oldNumIt = 0;
         for (unsigned iter = 0; iter < 15; ++iter) {
             decision.convergenceIterations = iter + 1;
@@ -463,11 +509,14 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
             unsigned scaledIters =
                 static_cast<unsigned>(std::min(static_cast<uint64_t>(numIt), maxTripCount));
 
+            auto variableAccesses =
+                estimateLoopVariableAccess(*matchedLoopTrace, state_, scaledIters);
+
             // Reference: schematic.py:589-590 — pass None, None for start/end alloc,
             // and memory_allocations collected before analysis.
             auto [newAlloc, _gain] =
-                chooseMemoryAllocation(loopBlocks, state_, params_, nullptr, nullptr,
-                                       loopMemoryAllocations, tracker_, scaledIters);
+                chooseMemoryAllocation(variableAccesses, state_, params_, nullptr, nullptr,
+                                       loopMemoryAllocations, tracker_);
             bodyAlloc = newAlloc;
 
             // Recompute loop energy directly over all traced iteration paths.

@@ -42,6 +42,14 @@ std::pair<bool, bool> computeSaveRestoreFlags(llvm::Value *v,
 double estimateEnergyGain(unsigned accessCount, unsigned varSizeBytes, bool needRestore,
                           bool needSave, const SchematicParams &params);
 
+/// Per-variable access estimate used by the loop convergence logic.
+/// Reference: loop_utils.py:estimate_loop_variable_access.
+struct VariableAccessEstimate {
+    unsigned accessCount = 0;
+    bool needRestore = false;
+    bool needSave = true;
+};
+
 /// Merge multiple memory allocations into one, with conflict detection.
 /// Reference: memory_allocation.py:merge_allocations (line 217).
 /// Returns nullopt on incompatible allocations (equivalent to IncompatibleMemAllocException).
@@ -60,6 +68,16 @@ chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
                        const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
                        const std::vector<const RegionAllocation *> &memoryAllocations,
                        VMAddressTracker *tracker, unsigned accessScale);
+
+/// Compute optimal greedy allocation from precomputed variable access estimates.
+/// Used by the loop convergence path to match the reference's
+/// trace-frequency-weighted variable access model.
+std::pair<RegionAllocation, double>
+chooseMemoryAllocation(const std::map<llvm::Value *, VariableAccessEstimate> &variableAccesses,
+                       const SchematicStateAnalysis &state, const SchematicParams &params,
+                       const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
+                       const std::vector<const RegionAllocation *> &memoryAllocations,
+                       VMAddressTracker *tracker);
 
 /// Result of computeCost: allocation + net energy cost.
 struct ComputeCostResult {
