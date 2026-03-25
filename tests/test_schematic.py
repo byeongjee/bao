@@ -60,11 +60,12 @@ SCENARIOS = [
         "scenario_nested_loop_energy.c",
         ENERGY_CONFIG,
         SCHEMATIC_CONFIG,
-        # Inner loop energy far exceeds capacity — outer loop must NOT fit
-        # entirely. With the nested-energy-propagation fix, the outer loop
-        # back-edge also gets a checkpoint (mandatoryBackEdge). Both loops
-        # must produce checkpoints (min 2 loop decisions, 3+ enabled ckpts).
-        {"exit": 0, "min_boundary": 4,
+        # Inner loop energy far exceeds capacity, so the outer loop must not
+        # fit entirely and still needs a back-edge checkpoint. The correct
+        # reference-equivalent behavior does NOT blanket-reactivate every
+        # fixed edge inside the analyzed loops; the static boundary count
+        # stays compact.
+        {"exit": 0, "min_boundary": 3, "max_boundary": 3,
          "stderr_contains": "Loop decisions:"},
     ),
 ]

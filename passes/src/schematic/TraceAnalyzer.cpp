@@ -320,7 +320,7 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
         SchematicBlock *dstBlock = graph.getOrCreate(dstBB);
 
         CFGEdge edge{srcBlock, dstBlock};
-        if (solution.enabledCheckpoints.count(edge))
+        if (!isPotentialCheckpoint(solution, edge))
             continue;
 
         // Skip loop back-edges (handled by LoopAnalyzer).
@@ -356,6 +356,7 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
             if (srcMeta->second.E_left > dstMeta->second.E_to_leave) {
                 // Compatible and enough energy -> disabled, propagate.
                 // Reference: schematic.py:498-500.
+                disableCheckpoint(solution, edge);
                 propagateEnergyLeft(edge, srcMeta->second.E_left, solution, cfg, state, params, LI,
                                     loopScope);
                 propagateEnergyToLeave(edge, dstMeta->second.E_to_leave, solution, cfg, state,

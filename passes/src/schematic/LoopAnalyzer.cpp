@@ -456,6 +456,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         // energy scaling so propagation accounts for all iterations.
         decision.numIterationsPerCharge = static_cast<unsigned>(maxTripCount);
         decision.loopFitsEntirely = true;
+        if (latchBlock)
+            disableCheckpoint(solution, CFGEdge{latchBlock, headerBlock});
     } else if (numIt < 3) {
         // Too few iterations per charge — checkpoint every iteration.
         decision.mandatoryBackEdge = true;
@@ -466,6 +468,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     } else {
         // Conditional checkpoint every numIt iterations.
         decision.numIterationsPerCharge = numIt;
+        if (latchBlock)
+            setLoopLatchCheckpoint(solution, CFGEdge{latchBlock, headerBlock});
     }
 
     solution.loopDecisions[headerBlock] = decision;

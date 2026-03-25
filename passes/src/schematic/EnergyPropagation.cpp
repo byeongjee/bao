@@ -65,8 +65,8 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 
             if (visited.count(childEdge))
                 continue;
-            // Skip enabled checkpoints (only traverse DISABLED edges)
-            if (solution.enabledCheckpoints.count(childEdge))
+            // Reference: cfg_modification.py traverses only DISABLED checkpoints.
+            if (!isDisabledCheckpoint(solution, childEdge))
                 continue;
             // Skip back-edges
             if (auto *llvmBB = bb->getLLVMBlock()) {
@@ -206,7 +206,7 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
 
             if (visited.count(childEdge))
                 continue;
-            if (solution.enabledCheckpoints.count(childEdge))
+            if (!isDisabledCheckpoint(solution, childEdge))
                 continue;
             // Skip back-edges
             if (auto *llvmSucc = succ->getLLVMBlock()) {

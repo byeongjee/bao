@@ -96,9 +96,10 @@ double computeAllocationSaveCost(
 /// Reference: memory_allocation.py:MemoryAllocation.extends (line 153).
 void extendsAllocation(RegionAllocation &target, const RegionAllocation &source);
 
-/// Mark selected checkpoints as enabled in the solution.
+/// Update checkpoint states for all consecutive edges on a trace.
 /// Reference: cfg_modification.py:update_checkpoint_type (line 156).
-void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
+void updateCheckpointType(const std::vector<SchematicBlock *> &trace,
+                          const std::vector<CFGEdge> &selectedCheckpoints,
                           SchematicSolution &solution, const std::string &origin);
 
 /// Apply RCG result allocations to the solution and seed energy propagation.

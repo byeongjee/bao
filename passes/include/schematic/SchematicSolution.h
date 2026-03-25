@@ -20,6 +20,13 @@ namespace checkpoint {
 
 enum class Placement { VM, NVM };
 
+enum class CheckpointState {
+    Potential,
+    Disabled,
+    Active,
+    LoopLatch,
+};
+
 struct CFGEdge {
     SchematicBlock *src;
     SchematicBlock *dst;
@@ -115,6 +122,7 @@ struct RegionSolution {
 
 struct SchematicSolution {
     std::set<CFGEdge> enabledCheckpoints;
+    std::map<CFGEdge, CheckpointState> checkpointStates;
     std::map<CFGEdge, std::vector<std::string>> checkpointOrigins;
     std::vector<RegionSolution> regions;
     std::unordered_map<SchematicBlock *, BlockMetadata> blockMeta;
@@ -131,13 +139,57 @@ struct SchematicSolution {
     unsigned totalNvmVariables = 0;
 };
 
+inline CFGEdge getResolvedCheckpointEdge(const CFGEdge &edge) {
+    return resolveCheckpointEdge(edge);
+}
+
+inline CheckpointState getCheckpointState(const SchematicSolution &solution, const CFGEdge &edge) {
+    CFGEdge resolved = getResolvedCheckpointEdge(edge);
+    auto it = solution.checkpointStates.find(resolved);
+    if (it == solution.checkpointStates.end())
+        return CheckpointState::Potential;
+    return it->second;
+}
+
+inline bool isDisabledCheckpoint(const SchematicSolution &solution, const CFGEdge &edge) {
+    return getCheckpointState(solution, edge) == CheckpointState::Disabled;
+}
+
+inline bool isPotentialCheckpoint(const SchematicSolution &solution, const CFGEdge &edge) {
+    return getCheckpointState(solution, edge) == CheckpointState::Potential;
+}
+
+inline void setCheckpointState(SchematicSolution &solution, const CFGEdge &edge,
+                               CheckpointState state, const std::string &origin = "") {
+    CFGEdge resolved = resolveCheckpointEdge(edge);
+    solution.checkpointStates[resolved] = state;
+
+    if (state == CheckpointState::Active) {
+        solution.enabledCheckpoints.insert(resolved);
+        if (!origin.empty()) {
+            auto &origins = solution.checkpointOrigins[resolved];
+            if (std::find(origins.begin(), origins.end(), origin) == origins.end())
+                origins.push_back(origin);
+        }
+        return;
+    }
+
+    solution.enabledCheckpoints.erase(resolved);
+    if (state != CheckpointState::Active)
+        solution.checkpointOrigins.erase(resolved);
+}
+
 inline void enableCheckpoint(SchematicSolution &solution, const CFGEdge &edge,
                              const std::string &origin) {
-    CFGEdge resolved = resolveCheckpointEdge(edge);
-    solution.enabledCheckpoints.insert(resolved);
-    auto &origins = solution.checkpointOrigins[resolved];
-    if (std::find(origins.begin(), origins.end(), origin) == origins.end())
-        origins.push_back(origin);
+    setCheckpointState(solution, edge, CheckpointState::Active, origin);
+}
+
+inline void disableCheckpoint(SchematicSolution &solution, const CFGEdge &edge) {
+    setCheckpointState(solution, edge, CheckpointState::Disabled);
+}
+
+inline void setLoopLatchCheckpoint(SchematicSolution &solution, const CFGEdge &edge) {
+    setCheckpointState(solution, edge, CheckpointState::LoopLatch);
 }
 
 } // namespace checkpoint

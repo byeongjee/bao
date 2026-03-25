@@ -6,6 +6,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <set>
 #include <vector>
 
 namespace checkpoint {
@@ -437,10 +438,22 @@ void extendsAllocation(RegionAllocation &target, const RegionAllocation &source)
     }
 }
 
-void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
+void updateCheckpointType(const std::vector<SchematicBlock *> &trace,
+                          const std::vector<CFGEdge> &selectedCheckpoints,
                           SchematicSolution &solution, const std::string &origin) {
+    std::set<CFGEdge> selectedResolved;
     for (const auto &ckpt : selectedCheckpoints)
-        enableCheckpoint(solution, ckpt, origin);
+        selectedResolved.insert(getResolvedCheckpointEdge(ckpt));
+
+    for (unsigned i = 0; i + 1 < trace.size(); ++i) {
+        CFGEdge traceEdge{trace[i], trace[i + 1]};
+        CFGEdge resolved = getResolvedCheckpointEdge(traceEdge);
+        if (selectedResolved.count(resolved)) {
+            enableCheckpoint(solution, resolved, origin);
+        } else {
+            disableCheckpoint(solution, resolved);
+        }
+    }
 }
 
 void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicBlock *> &trace,
@@ -452,7 +465,7 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
         llvm::report_fatal_error("Trace should be at least 3 bb long (start, bb and end)");
 
     // 1. Mark checkpoints as enabled
-    updateCheckpointType(result.selectedCheckpoints, solution, origin);
+    updateCheckpointType(trace, result.selectedCheckpoints, solution, origin);
 
     // 1b. Boundary allocation extension (reference: schematic.py:402-421).
     // When no checkpoint separates a boundary from the adjacent interval,
