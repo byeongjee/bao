@@ -438,21 +438,21 @@ void extendsAllocation(RegionAllocation &target, const RegionAllocation &source)
 }
 
 void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
-                          SchematicSolution &solution) {
+                          SchematicSolution &solution, const std::string &origin) {
     for (const auto &ckpt : selectedCheckpoints)
-        solution.enabledCheckpoints.insert(resolveCheckpointEdge(ckpt));
+        enableCheckpoint(solution, ckpt, origin);
 }
 
 void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicBlock *> &trace,
                            SchematicSolution &solution, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
-                           llvm::LoopInfo &LI, llvm::Loop *loopScope) {
+                           llvm::LoopInfo &LI, llvm::Loop *loopScope, const std::string &origin) {
     // Reference: schematic.py:397-398.
     if (trace.size() < 3)
         llvm::report_fatal_error("Trace should be at least 3 bb long (start, bb and end)");
 
     // 1. Mark checkpoints as enabled
-    updateCheckpointType(result.selectedCheckpoints, solution);
+    updateCheckpointType(result.selectedCheckpoints, solution, origin);
 
     // 1b. Boundary allocation extension (reference: schematic.py:402-421).
     // When no checkpoint separates a boundary from the adjacent interval,

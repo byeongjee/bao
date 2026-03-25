@@ -13,6 +13,12 @@
 
 namespace checkpoint {
 
+static std::string loopOriginTag(llvm::Loop *L, llvm::StringRef reason) {
+    llvm::BasicBlock *header = L ? L->getHeader() : nullptr;
+    std::string headerName = header ? header->getName().str() : "<unknown>";
+    return ("loop-" + reason + "[" + headerName + "]").str();
+}
+
 LoopAnalyzer::LoopAnalyzer(llvm::LoopInfo &LI, llvm::ScalarEvolution &SE, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
                            VMAddressTracker *tracker, SchematicGraph &graph)
@@ -242,7 +248,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         solution.blockMeta[endSynth].E_to_leave = eToLeave;
 
         if (latchBlock)
-            solution.enabledCheckpoints.insert(CFGEdge{latchBlock, headerBlock});
+            enableCheckpoint(solution, CFGEdge{latchBlock, headerBlock},
+                             loopOriginTag(L, "alloc-mismatch-backedge"));
         return true;
     }
 
@@ -276,6 +283,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.E_loop = E_loop;
     decision.bodyAllocation = bodyAlloc;
 
+    PLOGI << "[LoopAnalyzer] loop=" << header->getName() << " E_loop=" << E_loop
+          << " startEToLeave=" << startEToLeave << " endEToLeave=" << endEToLeave
+          << " capacity=" << params_.capacity << " maxTripCount=" << maxTripCount;
+
     if (E_loop <= 0.0) {
         decision.numIterationsPerCharge = 0;
         solution.loopDecisions[headerBlock] = decision;
@@ -288,7 +299,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         decision.numIterationsPerCharge = 1;
         solution.loopDecisions[headerBlock] = decision;
         if (latchBlock)
-            solution.enabledCheckpoints.insert(CFGEdge{latchBlock, headerBlock});
+            enableCheckpoint(solution, CFGEdge{latchBlock, headerBlock},
+                             loopOriginTag(L, "nonpositive-available-energy"));
         return true;
     }
 
@@ -437,6 +449,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
 
     // Step 9: Decide checkpoint type.
+    PLOGI << "[LoopAnalyzer] loop=" << header->getName() << " numIt=" << numIt
+          << " maxTripCount=" << maxTripCount << " availableEnergy=" << availableEnergy;
     if (numIt > maxTripCount) {
         // Entire loop fits — no checkpoint needed, but use maxTripCount for
         // energy scaling so propagation accounts for all iterations.
@@ -447,7 +461,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         decision.mandatoryBackEdge = true;
         decision.numIterationsPerCharge = 1;
         if (latchBlock)
-            solution.enabledCheckpoints.insert(CFGEdge{latchBlock, headerBlock});
+            enableCheckpoint(solution, CFGEdge{latchBlock, headerBlock},
+                             loopOriginTag(L, "mandatory-backedge"));
     } else {
         // Conditional checkpoint every numIt iterations.
         decision.numIterationsPerCharge = numIt;

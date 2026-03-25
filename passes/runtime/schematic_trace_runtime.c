@@ -40,18 +40,18 @@ typedef struct {
  * Configuration
  * ============================================================================ */
 
-#define ITER_BUF_CAP 512      /* max BBs in a single iteration/path buffer */
+#define ITER_BUF_CAP 512 /* max BBs in a single iteration/path buffer */
 #define MAX_LOOP_DEPTH 8
 #define MAX_FUNCTIONS 32
 #define MAX_LOOPS_PER_FUNC 256
-#define INIT_TRACE_CAP 64     /* initial capacity for trace arrays (grows) */
+#define INIT_TRACE_CAP 64 /* initial capacity for trace arrays (grows) */
 
 /* ============================================================================
  * Data structures (heap-allocated trace storage)
  * ============================================================================ */
 
 typedef struct {
-    int *bbs;       /* heap-allocated copy of the path */
+    int *bbs; /* heap-allocated copy of the path */
     int len;
     int count;
 } UniqueTrace;
@@ -64,13 +64,13 @@ typedef struct {
 
 typedef struct {
     int loop_id;
-    int bbs[ITER_BUF_CAP];   /* current iteration buffer (stack-local) */
+    int bbs[ITER_BUF_CAP]; /* current iteration buffer (stack-local) */
     int len;
 } LoopCtx;
 
 typedef struct {
     int loop_id;
-    TraceArray traces;        /* accumulated unique iteration traces */
+    TraceArray traces; /* accumulated unique iteration traces */
 } LoopResult;
 
 typedef struct {
@@ -79,7 +79,7 @@ typedef struct {
     int func_trace_len;
     LoopCtx loop_stack[MAX_LOOP_DEPTH];
     int loop_depth;
-    TraceArray func_traces;           /* accumulated unique function traces */
+    TraceArray func_traces; /* accumulated unique function traces */
     LoopResult loop_results[MAX_LOOPS_PER_FUNC];
     int loop_results_count;
     int loop_results_overflow_reported;
@@ -112,10 +112,24 @@ static void trace_array_init(TraceArray *ta) {
     ta->cap = 0;
 }
 
+static void append_bb_to_active_context(FuncState *fs, int bb_idx) {
+    if (fs->loop_depth > 0) {
+        LoopCtx *lc = &fs->loop_stack[fs->loop_depth - 1];
+        if (lc->len < ITER_BUF_CAP)
+            lc->bbs[lc->len++] = bb_idx;
+    } else if (fs->func_trace_len < ITER_BUF_CAP) {
+        fs->func_trace_bbs[fs->func_trace_len++] = bb_idx;
+    }
+}
+
+static void append_path_to_active_context(FuncState *fs, const int *bbs, int len) {
+    for (int i = 0; i < len; i++)
+        append_bb_to_active_context(fs, bbs[i]);
+}
+
 static void trace_array_grow(TraceArray *ta) {
     int new_cap = (ta->cap == 0) ? INIT_TRACE_CAP : ta->cap * 2;
-    ta->traces = (UniqueTrace *)realloc(ta->traces,
-                                         new_cap * sizeof(UniqueTrace));
+    ta->traces = (UniqueTrace *)realloc(ta->traces, new_cap * sizeof(UniqueTrace));
     ta->cap = new_cap;
 }
 
@@ -222,30 +236,13 @@ void __trace_func_enter(const FuncTraceMeta *meta) {
 void __trace_bb(int bb_idx) {
     if (!g_current)
         return;
-
-    if (g_current->loop_depth > 0) {
-        LoopCtx *lc = &g_current->loop_stack[g_current->loop_depth - 1];
-        if (lc->len < ITER_BUF_CAP)
-            lc->bbs[lc->len++] = bb_idx;
-    } else {
-        if (g_current->func_trace_len < ITER_BUF_CAP)
-            g_current->func_trace_bbs[g_current->func_trace_len++] = bb_idx;
-    }
+    append_bb_to_active_context(g_current, bb_idx);
 }
 
 void __trace_loop_enter(int loop_id, int header_bb_idx) {
     if (!g_current)
         return;
-
-    /* Append header to parent trace (function or outer loop) */
-    if (g_current->loop_depth > 0) {
-        LoopCtx *parent = &g_current->loop_stack[g_current->loop_depth - 1];
-        if (parent->len < ITER_BUF_CAP)
-            parent->bbs[parent->len++] = header_bb_idx;
-    } else {
-        if (g_current->func_trace_len < ITER_BUF_CAP)
-            g_current->func_trace_bbs[g_current->func_trace_len++] = header_bb_idx;
-    }
+    (void)header_bb_idx;
 
     /* Push new loop context */
     if (g_current->loop_depth >= MAX_LOOP_DEPTH) {
@@ -277,17 +274,17 @@ void __trace_loop_exit(int loop_id) {
     if (!g_current || g_current->loop_depth == 0)
         return;
 
-    /* Discard partial iteration (matches Python: abandon on loop exit) */
     (void)loop_id;
+    LoopCtx *old_ctx = &g_current->loop_stack[g_current->loop_depth - 1];
     g_current->loop_depth--;
+    append_path_to_active_context(g_current, old_ctx->bbs, old_ctx->len);
 }
 
 void __trace_func_exit(void) {
     if (!g_current)
         return;
 
-    save_trace(&g_current->func_traces,
-               g_current->func_trace_bbs, g_current->func_trace_len);
+    save_trace(&g_current->func_traces, g_current->func_trace_bbs, g_current->func_trace_len);
 
     /* Reset for potential re-entry */
     g_current->func_trace_len = 0;
@@ -308,11 +305,21 @@ static void write_escaped_string(FILE *fp, const char *s) {
     fputc('"', fp);
     for (; *s; s++) {
         switch (*s) {
-        case '"':  fputs("\\\"", fp); break;
-        case '\\': fputs("\\\\", fp); break;
-        case '\n': fputs("\\n", fp); break;
-        case '\t': fputs("\\t", fp); break;
-        default:   fputc(*s, fp); break;
+        case '"':
+            fputs("\\\"", fp);
+            break;
+        case '\\':
+            fputs("\\\\", fp);
+            break;
+        case '\n':
+            fputs("\\n", fp);
+            break;
+        case '\t':
+            fputs("\\t", fp);
+            break;
+        default:
+            fputc(*s, fp);
+            break;
         }
     }
     fputc('"', fp);
@@ -476,6 +483,8 @@ static void __trace_write_json(void) {
     fputs("}\n", fp);
     fclose(fp);
 
-    fprintf(stderr, "schematic_trace_runtime: wrote schematic_trace.json "
-                    "(%d functions)\n", g_func_count);
+    fprintf(stderr,
+            "schematic_trace_runtime: wrote schematic_trace.json "
+            "(%d functions)\n",
+            g_func_count);
 }

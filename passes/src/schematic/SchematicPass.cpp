@@ -14,6 +14,8 @@
 #include "schematic/TraceAnalyzer.h"
 #include "schematic/TraceLoader.h"
 
+#include "common/FunctionFilters.h"
+
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -39,6 +41,11 @@ namespace checkpoint {
 PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     initLogging();
     const auto totalStart = std::chrono::steady_clock::now();
+
+    if (isBenchmarkInfrastructureFunction(F.getName())) {
+        PLOGI << "SCHEMATIC: skipping benchmark infrastructure function " << F.getName();
+        return PreservedAnalyses::all();
+    }
 
     // Step 1: Obtain LLVM analyses.
     auto &LI = AM.getResult<LoopAnalysis>(F);
@@ -274,6 +281,23 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     PLOGI << "  Store mem calls inserted:        " << instrumenter.storeMemCalls();
     PLOGI << "  Restore mem calls inserted:      " << instrumenter.restoreMemCalls();
     PLOGI << "  Trace-guided:                    yes";
+    if (!solution.checkpointOrigins.empty()) {
+        PLOGI << "  Checkpoint provenance:";
+        for (const auto &[edge, origins] : solution.checkpointOrigins) {
+            auto edgeName = [](SchematicBlock *block) -> std::string {
+                return block->getLLVMBlock() ? block->getLLVMBlock()->getName().str()
+                                             : block->getName().str();
+            };
+            std::string mergedOrigins;
+            for (size_t i = 0; i < origins.size(); ++i) {
+                if (i > 0)
+                    mergedOrigins += ", ";
+                mergedOrigins += origins[i];
+            }
+            PLOGI << "    - " << edgeName(edge.src) << " -> " << edgeName(edge.dst) << " : "
+                  << mergedOrigins;
+        }
+    }
 
     if (!StatsJsonOpt.empty()) {
         CommonStats c;

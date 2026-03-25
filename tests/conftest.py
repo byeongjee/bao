@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -86,6 +87,80 @@ def _run(cmd: list[str], *, cwd: str | Path | None = None,
     return subprocess.run(
         cmd, capture_output=True, text=True, cwd=cwd, timeout=timeout,
     )
+
+
+def _prepare_schematic_ir(
+    tools,
+    compile_to_ir,
+    src: str | Path,
+    tmp_path: Path,
+    frontend_opt_level: int,
+) -> str:
+    """Compile a C file, annotate trip counts, and optionally optimize."""
+    src = str(src)
+    input_ll = str(tmp_path / "input.ll")
+    compile_to_ir(src, input_ll, mem2reg=False)
+
+    ann_ll = str(tmp_path / "annotated.ll")
+    r = _run([
+        tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+        "-passes=tripcount-annotation",
+        "-S", input_ll, "-o", ann_ll,
+    ])
+    if r.returncode != 0:
+        raise RuntimeError(f"tripcount-annotation failed: {r.stderr}")
+
+    if frontend_opt_level == 0:
+        return ann_ll
+
+    opt_ll = str(tmp_path / f"optimized_O{frontend_opt_level}.ll")
+    r = _run([
+        tools["opt"],
+        f"-passes=default<O{frontend_opt_level}>",
+        "-vectorize-loops=false",
+        "-vectorize-slp=false",
+        "-S", ann_ll, "-o", opt_ll,
+    ])
+    if r.returncode != 0:
+        raise RuntimeError(f"optimize-ir-O{frontend_opt_level} failed: {r.stderr}")
+
+    return opt_ll
+
+
+def _collect_schematic_trace(
+    tools,
+    input_ll: str,
+    energy_config: str | Path,
+    tmp_path: Path,
+) -> Path:
+    """Instrument, run, and return the generated SCHEMATIC trace path."""
+    energy_config = str(energy_config)
+
+    trace_ll = str(tmp_path / "trace_inst.ll")
+    r = _run([
+        tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+        "-passes=trace-collect",
+        f"-energy-config={energy_config}",
+        "-S", input_ll, "-o", trace_ll,
+    ])
+    if r.returncode != 0:
+        raise RuntimeError(f"trace-collect failed: {r.stderr}")
+
+    trace_bin = str(tmp_path / "trace_run")
+    r = _run([
+        tools["clang"], *tools["sysroot_flags"], "-O0",
+        trace_ll, str(SCHEMATIC_TRACE_RUNTIME), "-o", trace_bin,
+    ])
+    if r.returncode != 0:
+        raise RuntimeError(f"trace compile failed: {r.stderr}")
+
+    _run([trace_bin], cwd=str(tmp_path))
+
+    trace_json = tmp_path / "schematic_trace.json"
+    if not trace_json.exists():
+        raise RuntimeError("Trace collection did not produce schematic_trace.json")
+
+    return trace_json
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +357,64 @@ def run_schematic(tools, compile_to_ir):
 def run_schematic_o0(run_schematic):
     """Alias for run_schematic (SCHEMATIC always uses O0/no-mem2reg mode)."""
     return run_schematic
+
+
+@pytest.fixture(scope="session")
+def run_schematic_o3(tools, compile_to_ir):
+    """Return a callable that runs an optimized SCHEMATIC pipeline."""
+
+    def _run_schematic_o3(
+        src: str | Path,
+        energy_config: str | Path,
+        schematic_config: str | Path,
+        tmp_path: Path,
+    ) -> PassResult:
+        energy_config = str(energy_config)
+        schematic_config = str(schematic_config)
+        schematic_input_ll = _prepare_schematic_ir(tools, compile_to_ir, src, tmp_path, 3)
+        trace_json = _collect_schematic_trace(tools, schematic_input_ll, energy_config, tmp_path)
+
+        output_ll = str(tmp_path / "output.ll")
+        r = _run([
+            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+            "-passes=schematic",
+            f"-energy-config={energy_config}",
+            f"-schematic-config={schematic_config}",
+            f"-schematic-trace={trace_json}",
+            "-S", schematic_input_ll, "-o", output_ll,
+        ])
+
+        output_ir = ""
+        if os.path.exists(output_ll):
+            output_ir = Path(output_ll).read_text()
+
+        return PassResult(
+            exit_code=r.returncode,
+            stdout=r.stdout,
+            stderr=r.stderr,
+            output_ir=output_ir,
+        )
+
+    return _run_schematic_o3
+
+
+@pytest.fixture(scope="session")
+def collect_schematic_trace(tools, compile_to_ir):
+    """Return a callable that collects and parses SCHEMATIC trace JSON."""
+
+    def _collect(
+        src: str | Path,
+        energy_config: str | Path,
+        tmp_path: Path,
+        frontend_opt_level: int,
+    ) -> dict:
+        schematic_input_ll = _prepare_schematic_ir(
+            tools, compile_to_ir, src, tmp_path, frontend_opt_level
+        )
+        trace_json = _collect_schematic_trace(tools, schematic_input_ll, energy_config, tmp_path)
+        return json.loads(trace_json.read_text())
+
+    return _collect
 
 
 # ---------------------------------------------------------------------------

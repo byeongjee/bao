@@ -5,6 +5,8 @@ Source files live in tests/scenarios/ and configs in tests/scenarios/configs/.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from conftest import SCENARIOS_DIR, CONFIGS_DIR, check_assertions
@@ -126,3 +128,61 @@ def test_schematic_alloca_placement(run_schematic_o0, tmp_path_factory):
     assert candidate_count >= 1, (
         f"Expected >= 1 candidates (globals + allocas), got {candidate_count}"
     )
+
+
+def test_schematic_trace_function_path_excludes_nested_loop_blocks(
+    collect_schematic_trace,
+    tmp_path_factory,
+):
+    """Function traces should not absorb inner-loop blocks from nested loops.
+
+    This matches the reference trace manager semantics: inner-loop iterations
+    are recorded in loop traces, while the function trace continues directly to
+    the post-loop block.
+    """
+    tmp_path = tmp_path_factory.mktemp("nested_loop_trace")
+    src = SCENARIOS_DIR / "scenario_nested_loop_energy.c"
+
+    trace = collect_schematic_trace(src, ENERGY_CONFIG, tmp_path, 0)
+    function_path = trace["main"]["traces"][0]["path"]
+
+    assert "for.cond1" not in function_path
+    assert "for.body3" not in function_path
+
+
+def test_schematic_o3_nested_loop_energy(run_schematic_o3, tmp_path_factory):
+    """Optimized nested loops must still charge the parent loop for child work."""
+    tmp_path = tmp_path_factory.mktemp("nested_loop_energy_o3")
+    src = SCENARIOS_DIR / "scenario_nested_loop_energy_o3.c"
+
+    result = run_schematic_o3(src, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path)
+
+    assert result.exit_code == 0, (
+        f"Expected exit=0 but got {result.exit_code}.\nstderr: {result.stderr[:1000]}"
+    )
+    assert "Loop decisions:                  2" in result.stderr
+
+    m = re.search(r"Region boundaries:\s+(\d+)", result.stderr)
+    assert m, f"Could not find region boundary count in stderr:\n{result.stderr}"
+    assert int(m.group(1)) >= 4, result.stderr
+
+
+def test_schematic_skips_debug_helper_functions(
+    collect_schematic_trace,
+    run_schematic_o0,
+    tmp_path_factory,
+):
+    tmp_path = tmp_path_factory.mktemp("schematic_skips_debug_helpers")
+    src = SCENARIOS_DIR / "scenario_schematic_skips_debug_helpers.c"
+
+    trace = collect_schematic_trace(src, ENERGY_CONFIG, tmp_path, 0)
+    assert sorted(trace.keys()) == ["main"]
+
+    result = run_schematic_o0(src, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path)
+    assert result.exit_code == 0, (
+        f"Expected exit=0 but got {result.exit_code}.\nstderr: {result.stderr[:1000]}"
+    )
+    assert "SCHEMATIC: skipping benchmark infrastructure function timing_gpio_start" in result.stderr
+    assert "SCHEMATIC: skipping benchmark infrastructure function timing_gpio_stop" in result.stderr
+    assert "SCHEMATIC: skipping benchmark infrastructure function _timing_delay_cycles" in result.stderr
+    assert "due to unresolved memory/call effects" not in result.stderr

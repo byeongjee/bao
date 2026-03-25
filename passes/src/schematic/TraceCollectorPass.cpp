@@ -1,5 +1,6 @@
 #include "schematic/TraceCollectorPass.h"
 #include "common/BBNaming.h"
+#include "common/FunctionFilters.h"
 #include "common/Logger.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -115,6 +116,11 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
     // Skip declarations
     if (F.isDeclaration())
         return PreservedAnalyses::all();
+
+    if (isBenchmarkInfrastructureFunction(F.getName())) {
+        PLOGI << "TraceCollectorPass: skipping benchmark infrastructure function " << F.getName();
+        return PreservedAnalyses::all();
+    }
 
     // Skip our own runtime functions
     if (F.getName().starts_with("__trace_"))

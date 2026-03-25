@@ -6,11 +6,13 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Value.h"
 
+#include <algorithm>
 #include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -113,6 +115,7 @@ struct RegionSolution {
 
 struct SchematicSolution {
     std::set<CFGEdge> enabledCheckpoints;
+    std::map<CFGEdge, std::vector<std::string>> checkpointOrigins;
     std::vector<RegionSolution> regions;
     std::unordered_map<SchematicBlock *, BlockMetadata> blockMeta;
     std::unordered_map<SchematicBlock *, LoopCheckpointDecision> loopDecisions;
@@ -127,5 +130,14 @@ struct SchematicSolution {
     unsigned totalVmVariables = 0;
     unsigned totalNvmVariables = 0;
 };
+
+inline void enableCheckpoint(SchematicSolution &solution, const CFGEdge &edge,
+                             const std::string &origin) {
+    CFGEdge resolved = resolveCheckpointEdge(edge);
+    solution.enabledCheckpoints.insert(resolved);
+    auto &origins = solution.checkpointOrigins[resolved];
+    if (std::find(origins.begin(), origins.end(), origin) == origins.end())
+        origins.push_back(origin);
+}
 
 } // namespace checkpoint

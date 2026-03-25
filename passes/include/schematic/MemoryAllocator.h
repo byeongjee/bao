@@ -99,13 +99,13 @@ void extendsAllocation(RegionAllocation &target, const RegionAllocation &source)
 /// Mark selected checkpoints as enabled in the solution.
 /// Reference: cfg_modification.py:update_checkpoint_type (line 156).
 void updateCheckpointType(const std::vector<CFGEdge> &selectedCheckpoints,
-                          SchematicSolution &solution);
+                          SchematicSolution &solution, const std::string &origin);
 
 /// Apply RCG result allocations to the solution and seed energy propagation.
 /// Reference: schematic.py:apply_memory_allocation (line 384).
 void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicBlock *> &trace,
                            SchematicSolution &solution, const CFGAnalysis &cfg,
                            const SchematicStateAnalysis &state, const SchematicParams &params,
-                           llvm::LoopInfo &LI, llvm::Loop *loopScope);
+                           llvm::LoopInfo &LI, llvm::Loop *loopScope, const std::string &origin);
 
 } // namespace checkpoint

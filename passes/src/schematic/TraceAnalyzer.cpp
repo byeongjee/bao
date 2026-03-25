@@ -9,6 +9,17 @@
 
 namespace checkpoint {
 
+static std::string describeTraceOrigin(const std::vector<SchematicBlock *> &trace,
+                                       llvm::Loop *loopScope) {
+    std::string scope = loopScope ? "loop" : "function";
+    std::string start = trace.front()->getLLVMBlock()
+                            ? trace.front()->getLLVMBlock()->getName().str()
+                            : trace.front()->getName().str();
+    std::string end = trace.back()->getLLVMBlock() ? trace.back()->getLLVMBlock()->getName().str()
+                                                   : trace.back()->getName().str();
+    return scope + "-rcg[" + start + " -> " + end + "]";
+}
+
 std::vector<std::vector<SchematicBlock *>>
 extractNotFixedBBPaths(const std::vector<SchematicBlock *> &trace,
                        const SchematicSolution &solution) {
@@ -154,7 +165,15 @@ bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution 
                                    /*checkpointIncreaseAllowed=*/false))) {
                 // Force checkpoint at the edge entering the end block.
                 CFGEdge forced{subPath[subPath.size() - 2], endBlock};
-                solution.enabledCheckpoints.insert(forced);
+                std::string origin =
+                    (loopScope ? "loop" : "function") + std::string("-forced-incompatible[") +
+                    (startBlock->getLLVMBlock() ? startBlock->getLLVMBlock()->getName().str()
+                                                : startBlock->getName().str()) +
+                    " -> " +
+                    (endBlock->getLLVMBlock() ? endBlock->getLLVMBlock()->getName().str()
+                                              : endBlock->getName().str()) +
+                    "]";
+                enableCheckpoint(solution, forced, origin);
                 // Reset E_left for all blocks in the current loop scope
                 // so that later sub-traces use a fresh energy budget
                 // (the forced checkpoint creates a new region boundary,
@@ -198,7 +217,8 @@ bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution 
             return false;
         }
 
-        applyMemoryAllocation(result, subPath, solution, cfg, state, params, LI, loopScope);
+        applyMemoryAllocation(result, subPath, solution, cfg, state, params, LI, loopScope,
+                              describeTraceOrigin(subPath, loopScope));
     }
 
     return true;
@@ -327,7 +347,10 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
         if (!isCompatibleWith(*srcAllocIt->second, *dstAllocIt->second, state)) {
             // Not compatible -> enable checkpoint (ACTIVE).
             // Reference: schematic.py:495.
-            solution.enabledCheckpoints.insert(edge);
+            std::string origin = (loopScope ? "loop" : "function") +
+                                 std::string("-fixed-edge-incompatible[") + srcBB->getName().str() +
+                                 " -> " + dstBB->getName().str() + "]";
+            enableCheckpoint(solution, edge, origin);
         } else {
             // Reference: schematic.py:497 — energy_left > energy_to_leave.
             if (srcMeta->second.E_left > dstMeta->second.E_to_leave) {
@@ -340,7 +363,10 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
             } else {
                 // Compatible but insufficient energy -> enable checkpoint (ACTIVE).
                 // Reference: schematic.py:502.
-                solution.enabledCheckpoints.insert(edge);
+                std::string origin = (loopScope ? "loop" : "function") +
+                                     std::string("-fixed-edge-energy[") + srcBB->getName().str() +
+                                     " -> " + dstBB->getName().str() + "]";
+                enableCheckpoint(solution, edge, origin);
             }
         }
     }
