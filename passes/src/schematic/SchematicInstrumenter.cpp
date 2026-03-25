@@ -21,14 +21,14 @@ void SchematicInstrumenter::declareRuntimeFunctions() {
     boundaryFn_ = M_.getOrInsertFunction("__region_boundary", VoidTy);
 
     if (addDebugMarkers_) {
-        llvm::Type *I16Ty = llvm::Type::getInt16Ty(Ctx);
+        llvm::Type *I32Ty = llvm::Type::getInt32Ty(Ctx);
         cntStoreMemGV_ =
-            llvm::dyn_cast<llvm::GlobalVariable>(M_.getOrInsertGlobal("cnt_store_mem", I16Ty));
+            llvm::dyn_cast<llvm::GlobalVariable>(M_.getOrInsertGlobal("cnt_store_mem", I32Ty));
         assert(cntStoreMemGV_ && "cnt_store_mem must be a GlobalVariable");
         cntStoreMemGV_->setLinkage(llvm::GlobalValue::ExternalLinkage);
 
         cntRestoreMemGV_ =
-            llvm::dyn_cast<llvm::GlobalVariable>(M_.getOrInsertGlobal("cnt_restore_mem", I16Ty));
+            llvm::dyn_cast<llvm::GlobalVariable>(M_.getOrInsertGlobal("cnt_restore_mem", I32Ty));
         assert(cntRestoreMemGV_ && "cnt_restore_mem must be a GlobalVariable");
         cntRestoreMemGV_->setLinkage(llvm::GlobalValue::ExternalLinkage);
     }
@@ -181,11 +181,11 @@ void SchematicInstrumenter::rewriteAllShadowAccesses(llvm::Function &F) {
     }
 }
 
-/// Emit an inline increment of an i16 NVM counter global: load, add 1, store.
+/// Emit an inline increment of an NVM counter global: load, add 1, store.
 static void emitCounterIncrement(llvm::IRBuilder<> &builder, llvm::GlobalVariable *counterGV) {
-    llvm::Type *I16Ty = llvm::Type::getInt16Ty(builder.getContext());
-    llvm::Value *val = builder.CreateLoad(I16Ty, counterGV);
-    llvm::Value *inc = builder.CreateAdd(val, llvm::ConstantInt::get(I16Ty, 1));
+    llvm::Type *counterTy = counterGV->getValueType();
+    llvm::Value *val = builder.CreateLoad(counterTy, counterGV);
+    llvm::Value *inc = builder.CreateAdd(val, llvm::ConstantInt::get(counterTy, 1));
     builder.CreateStore(inc, counterGV);
 }
 

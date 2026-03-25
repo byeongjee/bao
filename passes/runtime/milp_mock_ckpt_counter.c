@@ -20,10 +20,10 @@ static uint32_t cnt_region_boundary;
 /* IR-level debug counters — incremented by load-add-store sequences
    inserted by CheckpointInstrumenter when --add-debug-markers is used.
    Must be non-static so the LLVM pass can resolve them. */
-uint16_t cnt_save_vreg;
-uint16_t cnt_restore_vreg;
-uint16_t cnt_store_mem;
-uint16_t cnt_restore_mem;
+uint32_t cnt_save_vreg;
+uint32_t cnt_restore_vreg;
+uint32_t cnt_store_mem;
+uint32_t cnt_restore_mem;
 
 void __region_boundary(void) {
     cnt_region_boundary++;

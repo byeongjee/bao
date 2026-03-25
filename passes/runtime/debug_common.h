@@ -21,6 +21,7 @@ void uart_init(void);
 void uart_putc(char c);
 void uart_puts(const char *s);
 void uart_put_u16(uint16_t val);
+void uart_put_u32(uint32_t val);
 
 /*
  * debug_init — Call at benchmark start (via BENCH_INIT).

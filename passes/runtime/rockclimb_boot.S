@@ -71,7 +71,7 @@ _do_recovery:
 #ifdef DEVICE_DEBUG
     /* Preserve SR across counter increment — ADD clobbers flags. */
     push    SR
-    add.w   #14, &cnt_restore_reg
+    add_u32_to_nvm_counter cnt_restore_reg, 14
     pop     SR
 #endif
 
@@ -115,8 +115,8 @@ __region_boundary:
     /* Preserve SR across counter increments — ADD clobbers flags,
        and in nop halt mode this function returns to the caller. */
     push    SR
-    add.w   #1, &cnt_boundary
-    add.w   #2, &cnt_save_reg
+    add_u32_to_nvm_counter cnt_boundary, 1
+    add_u32_to_nvm_counter cnt_save_reg, 2
     pop     SR
 #endif
 

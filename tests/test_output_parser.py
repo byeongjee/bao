@@ -164,6 +164,13 @@ cnt_restore_reg=2
         assert counters.result == 42
         assert counters.region_boundary is None
 
+    def test_large_32bit_counter_values(self):
+        text = "cnt_boundary=70000\ncnt_save_reg=131072\ncnt_restore_mem=4294967295\n"
+        counters = parse_nvm_output(text)
+        assert counters.region_boundary == 70000
+        assert counters.save_reg == 131072
+        assert counters.restore_mem == 4294967295
+
     def test_empty(self):
         counters = parse_nvm_output("")
         assert counters == NvmCounters()
@@ -201,6 +208,12 @@ class TestNvmCountersToLabels:
         assert "RESULT: 1" in text
         assert "__region_boundary: 5" in text
         assert "vreg_saves" not in text
+
+    def test_large_counter_values(self):
+        c = NvmCounters(region_boundary=70000, save_reg=131072)
+        text = nvm_counters_to_labels(c)
+        assert "__region_boundary: 70000" in text
+        assert "reg_saves: 131072" in text
 
     def test_all_none(self):
         c = NvmCounters()

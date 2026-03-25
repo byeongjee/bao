@@ -95,7 +95,7 @@ _normal_boot:
 __region_boundary:
 #ifdef DEVICE_DEBUG
     push    SR
-    add.w   #1, &cnt_boundary
+    add_u32_to_nvm_counter cnt_boundary, 1
     pop     SR
 #endif
 

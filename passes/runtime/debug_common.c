@@ -80,6 +80,21 @@ void uart_put_u16(uint16_t val) {
     uart_puts(p);
 }
 
+void uart_put_u32(uint32_t val) {
+    char buf[11]; /* max 10 digits + null */
+    char *p = buf + sizeof(buf) - 1;
+    *p = '\0';
+    if (val == 0) {
+        *--p = '0';
+    } else {
+        while (val > 0) {
+            *--p = '0' + (char)(val % 10);
+            val /= 10;
+        }
+    }
+    uart_puts(p);
+}
+
 /* ============================================================================
  * Debug API
  * ============================================================================ */

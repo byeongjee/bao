@@ -44,12 +44,12 @@ void bench_halt(void) {
 
 /* ============================================================================
  * NVM Debug Counters (survive power cycles, incremented inline by
- * instrumented code via ADD.W instructions)
+ * instrumented code via 32-bit low-word plus carry propagation)
  * ============================================================================ */
 
-__attribute__((section(".nvm"))) uint16_t cnt_boundary = 0;
-__attribute__((section(".nvm"))) uint16_t cnt_save_reg = 0;
-__attribute__((section(".nvm"))) uint16_t cnt_restore_reg = 0;
+__attribute__((section(".nvm"))) uint32_t cnt_boundary = 0;
+__attribute__((section(".nvm"))) uint32_t cnt_save_reg = 0;
+__attribute__((section(".nvm"))) uint32_t cnt_restore_reg = 0;
 
 /* NVM result storage — read by host via mspdebug md (bypasses UART) */
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
@@ -58,13 +58,13 @@ __attribute__((section(".nvm"))) volatile uint16_t __nvm_done = 0;
 void debug_exit(int result) {
     debug_exit_begin(result);
     uart_puts("  __region_boundary:    ");
-    uart_put_u16(cnt_boundary);
+    uart_put_u32(cnt_boundary);
     uart_puts("\r\n");
     uart_puts("  reg_saves:            ");
-    uart_put_u16(cnt_save_reg);
+    uart_put_u32(cnt_save_reg);
     uart_puts("\r\n");
     uart_puts("  reg_restores:         ");
-    uart_put_u16(cnt_restore_reg);
+    uart_put_u32(cnt_restore_reg);
     uart_puts("\r\n");
     debug_exit_end();
 }

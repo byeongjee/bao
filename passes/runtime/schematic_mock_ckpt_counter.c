@@ -21,8 +21,8 @@ static uint32_t cnt_restore_reg;
 
 /* These are incremented inline by the instrumenter at IR level.
    Declared as globals (not static) so the instrumenter can reference them. */
-uint16_t cnt_store_mem;
-uint16_t cnt_restore_mem;
+uint32_t cnt_store_mem;
+uint32_t cnt_restore_mem;
 
 void __region_boundary(void) {
     cnt_boundary++;

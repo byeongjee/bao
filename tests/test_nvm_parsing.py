@@ -91,6 +91,12 @@ class TestExtractSymbolValues:
         result = extract_symbol_values(data, symbols, ["a", "b"], base_addr=0x4000)
         assert result == {"a": 0x000A, "b": 0x0005}
 
+    def test_mixed_width_symbols_with_offset(self):
+        data = bytearray([0x34, 0x12, 0x78, 0x56, 0xBC, 0x9A])
+        symbols = {"a": (0x4000, 2), "b": (0x4002, 4)}
+        result = extract_symbol_values(data, symbols, ["a", "b"], base_addr=0x4000)
+        assert result == {"a": 0x1234, "b": 0x9ABC5678}
+
 
 # ---------------------------------------------------------------------------
 # compute_md_region

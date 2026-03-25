@@ -54,11 +54,11 @@ void bench_halt(void) {
  * "vreg" counters count IR-level value saves, not physical register saves.
  * ============================================================================ */
 
-__attribute__((section(".nvm"))) uint16_t cnt_boundary = 0;
-__attribute__((section(".nvm"))) uint16_t cnt_save_vreg = 0;
-__attribute__((section(".nvm"))) uint16_t cnt_restore_vreg = 0;
-__attribute__((section(".nvm"))) uint16_t cnt_store_mem = 0;
-__attribute__((section(".nvm"))) uint16_t cnt_restore_mem = 0;
+__attribute__((section(".nvm"))) uint32_t cnt_boundary = 0;
+__attribute__((section(".nvm"))) uint32_t cnt_save_vreg = 0;
+__attribute__((section(".nvm"))) uint32_t cnt_restore_vreg = 0;
+__attribute__((section(".nvm"))) uint32_t cnt_store_mem = 0;
+__attribute__((section(".nvm"))) uint32_t cnt_restore_mem = 0;
 
 /* NVM result storage — read by host via mspdebug md (bypasses UART) */
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
@@ -67,19 +67,19 @@ __attribute__((section(".nvm"))) volatile uint16_t __nvm_done = 0;
 void debug_exit(int result) {
     debug_exit_begin(result);
     uart_puts("  __region_boundary:    ");
-    uart_put_u16(cnt_boundary);
+    uart_put_u32(cnt_boundary);
     uart_puts("\r\n");
     uart_puts("  vreg_saves:           ");
-    uart_put_u16(cnt_save_vreg);
+    uart_put_u32(cnt_save_vreg);
     uart_puts("\r\n");
     uart_puts("  vreg_restores:        ");
-    uart_put_u16(cnt_restore_vreg);
+    uart_put_u32(cnt_restore_vreg);
     uart_puts("\r\n");
     uart_puts("  mem_stores:           ");
-    uart_put_u16(cnt_store_mem);
+    uart_put_u32(cnt_store_mem);
     uart_puts("\r\n");
     uart_puts("  mem_restores:         ");
-    uart_put_u16(cnt_restore_mem);
+    uart_put_u32(cnt_restore_mem);
     uart_puts("\r\n");
     debug_exit_end();
 }

@@ -43,6 +43,10 @@ class TestNvmCounter:
         c = NvmCounters(region_boundary=5)
         assert nvm_counter(c, "region_boundary") == 5
 
+    def test_large_value(self):
+        c = NvmCounters(region_boundary=70000)
+        assert nvm_counter(c, "region_boundary") == 70000
+
     def test_missing_attr(self):
         c = NvmCounters()
         assert nvm_counter(c, "nonexistent") == 0

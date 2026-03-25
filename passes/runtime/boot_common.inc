@@ -34,6 +34,22 @@
 .endm
 
 /*
+ * add_u32_to_nvm_counter — Add an immediate to a uint32_t counter in .nvm.
+ *
+ * Counter layout is little-endian, two 16-bit words:
+ *   low  = counter + 0
+ *   high = counter + 2
+ *
+ * The low-word ADD updates carry in SR, then ADDC propagates it into
+ * the high word. Callers that need original flags preserved should wrap
+ * this macro with push/pop SR.
+ */
+.macro add_u32_to_nvm_counter counter, amount
+    add.w   #\amount, &\counter
+    addc.w  #0, &\counter+2
+.endm
+
+/*
  * save_pc_sp_and_halt — Save return address + caller SP to NVM, then halt.
  *
  * Expects __nvm_pc and __nvm_sp to be .extern'd by the caller.

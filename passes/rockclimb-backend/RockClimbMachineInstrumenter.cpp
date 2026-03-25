@@ -36,6 +36,7 @@ bool RockClimbMachineInstrumenter::verifyConstants() const {
     checkOpcode(msp430::CALLi, "CALLi");
     checkOpcode(msp430::MOV16mr, "MOV16mr");
     checkOpcode(msp430::ADD16mi, "ADD16mi");
+    checkOpcode(msp430::ADDC16mc, "ADDC16mc");
     checkOpcode(msp430::PUSH16r, "PUSH16r");
     checkOpcode(msp430::POP16r, "POP16r");
 
@@ -46,15 +47,20 @@ void RockClimbMachineInstrumenter::emitCounterIncrement(MachineBasicBlock &MBB,
                                                         MachineBasicBlock::iterator InsertPt,
                                                         const DebugLoc &DL,
                                                         GlobalVariable *counterGV, int64_t amount) {
-    // Wrap ADD16mi with PUSH SR / POP SR to preserve status flags.
-    // ADD16mi clobbers SR (V, N, Z, C), which can break conditional branches
-    // that depend on flags set by earlier instructions.
+    // Wrap the 32-bit increment with PUSH SR / POP SR to preserve status flags.
+    // ADD16mi and ADDC16mc clobber SR (V, N, Z, C), which can break
+    // conditional branches that depend on flags set by earlier instructions.
     BuildMI(MBB, InsertPt, DL, TII_->get(msp430::PUSH16r)).addReg(msp430::SR);
 
     BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
         .addReg(msp430::SR)          // base = SR (absolute addressing)
         .addGlobalAddress(counterGV) // address of counter
         .addImm(amount);
+
+    BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADDC16mc))
+        .addReg(msp430::SR)             // base = SR (absolute addressing)
+        .addGlobalAddress(counterGV, 2) // high half of uint32_t counter
+        .addImm(0);
 
     BuildMI(MBB, InsertPt, DL, TII_->get(msp430::POP16r)).addReg(msp430::SR, RegState::Define);
 }

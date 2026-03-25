@@ -42,7 +42,8 @@ class RockClimbMachineInstrumenter {
                         bool enableDistributedCkpt);
 
   private:
-    /// Emit a flag-safe counter increment: PUSH SR, ADD16mi, POP SR.
+    /// Emit a flag-safe uint32_t counter increment:
+    /// PUSH SR, ADD16mi low word, ADDC16mc high word, POP SR.
     /// Preserves status register flags across the increment.
     void emitCounterIncrement(llvm::MachineBasicBlock &MBB,
                               llvm::MachineBasicBlock::iterator InsertPt, const llvm::DebugLoc &DL,

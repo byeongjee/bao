@@ -332,16 +332,16 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
                                /*Initializer=*/nullptr, "__nvm_regs");
     }
 
-    // Get or create debug counter globals (uint16_t in .nvm section)
+    // Get or create debug counter globals (uint32_t in .nvm section)
     GlobalVariable *cntBoundaryGV = nullptr;
     GlobalVariable *cntSaveGV = nullptr;
     GlobalVariable *cntRestoreGV = nullptr;
     if (addDebugMarkers) {
-        auto *i16Ty = Type::getInt16Ty(M->getContext());
+        auto *i32Ty = Type::getInt32Ty(M->getContext());
         auto getOrCreateCounter = [&](const char *name) -> GlobalVariable * {
             GlobalVariable *gv = M->getGlobalVariable(name);
             if (!gv) {
-                gv = new GlobalVariable(*M, i16Ty, /*isConstant=*/false,
+                gv = new GlobalVariable(*M, i32Ty, /*isConstant=*/false,
                                         GlobalValue::ExternalLinkage,
                                         /*Initializer=*/nullptr, name);
             }

@@ -74,7 +74,7 @@ _do_recovery:
 
 #ifdef DEVICE_DEBUG
     push    SR
-    add.w   #14, &cnt_restore_reg
+    add_u32_to_nvm_counter cnt_restore_reg, 14
     pop     SR
 #endif
 
@@ -130,8 +130,8 @@ __region_boundary:
 
 #ifdef DEVICE_DEBUG
     push    SR
-    add.w   #14, &cnt_save_reg
-    add.w   #1, &cnt_boundary
+    add_u32_to_nvm_counter cnt_save_reg, 14
+    add_u32_to_nvm_counter cnt_boundary, 1
     pop     SR
 #endif
 

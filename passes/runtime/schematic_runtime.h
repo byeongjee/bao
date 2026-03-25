@@ -47,11 +47,11 @@ extern uint16_t __nvm_sp NVM_SECTION;
 
 #ifdef DEVICE_DEBUG
 /* NVM Debug Counters (incremented in assembly) */
-extern uint16_t cnt_boundary NVM_SECTION;
-extern uint16_t cnt_save_reg NVM_SECTION;
-extern uint16_t cnt_restore_reg NVM_SECTION;
-extern uint16_t cnt_store_mem NVM_SECTION;
-extern uint16_t cnt_restore_mem NVM_SECTION;
+extern uint32_t cnt_boundary NVM_SECTION;
+extern uint32_t cnt_save_reg NVM_SECTION;
+extern uint32_t cnt_restore_reg NVM_SECTION;
+extern uint32_t cnt_store_mem NVM_SECTION;
+extern uint32_t cnt_restore_mem NVM_SECTION;
 #endif
 
 /* ============================================================================
