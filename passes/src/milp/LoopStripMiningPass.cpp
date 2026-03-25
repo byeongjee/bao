@@ -733,15 +733,28 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     Value *IVNext = IV->getIncomingValueForBlock(BackedgeBB);
 
     int boundOperandIdx = -1;
-    if (CmpOp0 == IV || CmpOp0 == IVNext)
+    bool compareUsesCurrentIV = false;
+    if (CmpOp0 == IV || CmpOp0 == IVNext) {
         boundOperandIdx = 1;
-    else if (CmpOp1 == IV || CmpOp1 == IVNext)
+        compareUsesCurrentIV = (CmpOp0 == IV);
+    } else if (CmpOp1 == IV || CmpOp1 == IVNext) {
         boundOperandIdx = 0;
-    else
+        compareUsesCurrentIV = (CmpOp1 == IV);
+    } else {
         return false;
+    }
 
     auto *OrigBound = dyn_cast<ConstantInt>(ExitCmp->getOperand(boundOperandIdx));
-    if (!OrigBound || OrigBound->getZExtValue() != N)
+    if (!OrigBound)
+        return false;
+    bool exitAtLatch = (ExitingBB == Latch);
+    uint64_t expectedBound = N;
+    if (compareUsesCurrentIV && exitAtLatch) {
+        if (N == 0)
+            return false;
+        expectedBound = N - 1;
+    }
+    if (OrigBound->getZExtValue() != expectedBound)
         return false;
 
     // Collect LCSSA PHIs in ExitBlock before any modifications
@@ -772,6 +785,13 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     Value *NVal = ConstantInt::get(IVTy, N);
     Value *Cmp = OHB.CreateICmpULT(OuterIVPlusK, NVal, "min.cmp");
     Value *InnerLimit = OHB.CreateSelect(Cmp, OuterIVPlusK, NVal, "inner.limit");
+    Value *InnerExitBound = InnerLimit;
+    if (compareUsesCurrentIV && exitAtLatch) {
+        // Latch-exiting loops that compare the current IV against N - 1 still
+        // execute N iterations. Preserve that form so each chunk executes at
+        // most K iterations rather than K + 1.
+        InnerExitBound = OHB.CreateSub(InnerLimit, ConstantInt::get(IVTy, 1), "inner.exit.bound");
+    }
 
     OHB.CreateBr(Header);
 
@@ -796,7 +816,7 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     }
 
     // ── Phase 6: Modify inner loop exit ──
-    ExitCmp->setOperand(boundOperandIdx, InnerLimit);
+    ExitCmp->setOperand(boundOperandIdx, InnerExitBound);
     ExitBr->replaceSuccessorWith(ExitBlock, OuterLatch);
 
     // ── Phase 7: Build OuterLatch ──
@@ -901,7 +921,6 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     setStripMinedLoopMetadata(L);
 
     setLoopTripCountMetadata(OuterLoop, outerTripCount);
-
     formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
 
     SE.forgetLoop(L);
