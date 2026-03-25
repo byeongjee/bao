@@ -7,8 +7,10 @@
 #include "schematic/TraceAnalyzer.h"
 
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/CFG.h"
 
 #include <cmath>
+#include <deque>
 #include <limits>
 
 namespace checkpoint {
@@ -19,20 +21,18 @@ static std::string loopOriginTag(llvm::Loop *L, llvm::StringRef reason) {
     return ("loop-" + reason + "[" + headerName + "]").str();
 }
 
-static void
-recomputeLoopBodyEnergyFromPaths(const std::vector<std::vector<SchematicBlock *>> &bodyPaths,
-                                 RegionAllocation &bodyAlloc, SchematicSolution &solution,
-                                 const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
-                                 const SchematicParams &params, SchematicBlock *headerBlock,
-                                 SchematicBlock *startSynth, SchematicBlock *endSynth) {
+static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAlloc,
+                                         SchematicSolution &solution, const CFGAnalysis &cfg,
+                                         const SchematicStateAnalysis &state,
+                                         const SchematicParams &params, SchematicGraph &graph,
+                                         SchematicBlock *headerBlock, SchematicBlock *latchBlock,
+                                         SchematicBlock *startSynth, SchematicBlock *endSynth) {
     auto sharedAlloc = std::make_shared<RegionAllocation>(bodyAlloc);
 
     // Reset loop-local energy state and apply the converged body allocation.
     std::set<SchematicBlock *> loopBlocks;
-    for (const auto &path : bodyPaths) {
-        for (SchematicBlock *block : path)
-            loopBlocks.insert(block);
-    }
+    for (llvm::BasicBlock *BB : L->getBlocksVector())
+        loopBlocks.insert(graph.getOrCreate(BB));
 
     for (SchematicBlock *block : loopBlocks) {
         auto &meta = solution.blockMeta[block];
@@ -65,49 +65,163 @@ recomputeLoopBodyEnergyFromPaths(const std::vector<std::vector<SchematicBlock *>
             eToLeave += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
     }
 
-    for (const auto &path : bodyPaths) {
-        if (path.empty())
-            continue;
+    auto isCurrentLoopBackedge = [&](SchematicBlock *src, SchematicBlock *dst) {
+        return src == latchBlock && dst == headerBlock;
+    };
+    auto isBlockInLoop = [&](SchematicBlock *block) {
+        llvm::BasicBlock *BB = block ? block->getLLVMBlock() : nullptr;
+        return BB && L->contains(BB);
+    };
 
-        double forwardCost = 0.0;
-        std::set<llvm::BasicBlock *> seenForwardLoops;
-        for (SchematicBlock *block : path) {
+    // Forward propagation over the real loop CFG (LoopBodyNoBackedge).
+    {
+        std::map<CFGEdge, double> pending;
+        std::set<CFGEdge> visited;
+        std::set<llvm::BasicBlock *> seenLoops;
+        pending[CFGEdge{startSynth, headerBlock}] = 0.0;
+
+        while (!pending.empty()) {
+            auto maxIt =
+                std::max_element(pending.begin(), pending.end(),
+                                 [](const auto &a, const auto &b) { return a.second < b.second; });
+            CFGEdge edge = maxIt->first;
+            double cost = maxIt->second;
+            pending.erase(maxIt);
+            if (!visited.insert(edge).second)
+                continue;
+
+            SchematicBlock *block = edge.dst;
+            if (!isBlockInLoop(block))
+                continue;
+
             auto metaIt = solution.blockMeta.find(block);
             if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
                 llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
-                if (!seenForwardLoops.count(loopHeader)) {
-                    seenForwardLoops.insert(loopHeader);
-                    forwardCost +=
-                        (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+                if (!seenLoops.count(loopHeader)) {
+                    seenLoops.insert(loopHeader);
+                    cost += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
                 }
             }
-            forwardCost += getBlockExecEnergy(block, solution, cfg, state, params);
-            double energyLeft = energyLeftStart - forwardCost;
+
+            cost += getBlockExecEnergy(block, solution, cfg, state, params);
+            double energyLeft = energyLeftStart - cost;
             if (energyLeft < solution.blockMeta[block].E_left)
                 solution.blockMeta[block].E_left = energyLeft;
+
+            llvm::BasicBlock *BB = block->getLLVMBlock();
+            for (llvm::BasicBlock *succBB : llvm::successors(BB)) {
+                if (!L->contains(succBB))
+                    continue;
+                SchematicBlock *succ = graph.getOrCreate(succBB);
+                CFGEdge childEdge{block, succ};
+                if (isCurrentLoopBackedge(block, succ))
+                    continue;
+                if (!isDisabledCheckpoint(solution, childEdge))
+                    continue;
+                if (visited.count(childEdge))
+                    continue;
+                if (pending.find(childEdge) == pending.end() || cost < pending[childEdge])
+                    pending[childEdge] = cost;
+            }
+        }
+    }
+
+    // Backward propagation over the real loop CFG (LoopBodyNoBackedge).
+    {
+        std::deque<CFGEdge> toVisit = {CFGEdge{latchBlock, endSynth}};
+        std::set<CFGEdge> visited;
+        std::map<CFGEdge, std::vector<CFGEdge>> dagAdj;
+        dagAdj[CFGEdge{latchBlock, endSynth}];
+
+        while (!toVisit.empty()) {
+            CFGEdge edge = toVisit.front();
+            toVisit.pop_front();
+            if (!visited.insert(edge).second)
+                continue;
+
+            SchematicBlock *block = edge.src;
+            if (!isBlockInLoop(block))
+                continue;
+
+            llvm::BasicBlock *BB = block->getLLVMBlock();
+            for (llvm::BasicBlock *predBB : llvm::predecessors(BB)) {
+                if (!L->contains(predBB))
+                    continue;
+                SchematicBlock *pred = graph.getOrCreate(predBB);
+                CFGEdge childEdge{pred, block};
+                if (visited.count(childEdge))
+                    continue;
+                if (isCurrentLoopBackedge(pred, block))
+                    continue;
+                if (!isDisabledCheckpoint(solution, childEdge))
+                    continue;
+                dagAdj[childEdge];
+                dagAdj[edge].push_back(childEdge);
+                toVisit.push_back(childEdge);
+            }
         }
 
-        double backwardCost = eToLeave;
-        std::set<llvm::BasicBlock *> seenBackwardLoops;
-        for (auto it = path.rbegin(); it != path.rend(); ++it) {
-            SchematicBlock *block = *it;
-            auto metaIt = solution.blockMeta.find(block);
-            if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-                llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
-                if (!seenBackwardLoops.count(loopHeader)) {
-                    seenBackwardLoops.insert(loopHeader);
-                    backwardCost +=
-                        (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+        std::map<CFGEdge, unsigned> inDeg;
+        for (auto &[node, children] : dagAdj) {
+            if (inDeg.find(node) == inDeg.end())
+                inDeg[node] = 0;
+            for (auto &child : children)
+                inDeg[child]++;
+        }
+
+        std::deque<CFGEdge> topoQueue;
+        for (auto &[node, deg] : inDeg)
+            if (deg == 0)
+                topoQueue.push_back(node);
+
+        std::map<CFGEdge, double> maxEToLeave;
+        std::set<llvm::BasicBlock *> seenLoops;
+        CFGEdge seedEdge{latchBlock, endSynth};
+        maxEToLeave[seedEdge] = eToLeave;
+
+        while (!topoQueue.empty()) {
+            CFGEdge edge = topoQueue.front();
+            topoQueue.pop_front();
+
+            double energy = maxEToLeave.count(edge) ? maxEToLeave[edge] : 0.0;
+            maxEToLeave.erase(edge);
+
+            SchematicBlock *block = edge.src;
+            if (isBlockInLoop(block)) {
+                auto metaIt = solution.blockMeta.find(block);
+                if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
+                    llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
+                    if (!seenLoops.count(loopHeader)) {
+                        seenLoops.insert(loopHeader);
+                        energy +=
+                            (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+                    }
+                }
+
+                energy += getBlockExecEnergy(block, solution, cfg, state, params);
+                if (energy > solution.blockMeta[block].E_to_leave)
+                    solution.blockMeta[block].E_to_leave = energy;
+            }
+
+            for (auto &childEdge : dagAdj[edge]) {
+                if (maxEToLeave.find(childEdge) == maxEToLeave.end() ||
+                    energy > maxEToLeave[childEdge]) {
+                    maxEToLeave[childEdge] = energy;
                 }
             }
-            backwardCost += getBlockExecEnergy(block, solution, cfg, state, params);
-            if (backwardCost > solution.blockMeta[block].E_to_leave)
-                solution.blockMeta[block].E_to_leave = backwardCost;
+
+            for (auto &childEdge : dagAdj[edge]) {
+                inDeg[childEdge]--;
+                if (inDeg[childEdge] == 0)
+                    topoQueue.push_back(childEdge);
+            }
         }
     }
 
     solution.blockMeta[startSynth].E_left = energyLeftStart;
     solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[headerBlock].E_to_leave;
+    if (latchBlock)
+        solution.blockMeta[endSynth].E_left = solution.blockMeta[latchBlock].E_left;
     solution.blockMeta[endSynth].E_to_leave = eToLeave;
 
     auto hdPlIt = solution.decidedPlacements.find(headerBlock);
@@ -519,11 +633,9 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                                        loopMemoryAllocations, tracker_);
             bodyAlloc = newAlloc;
 
-            // Recompute loop energy directly over all traced iteration paths.
-            // Using the merged graph here is unsafe because it contains trace-added
-            // shortcut edges in addition to real CFG edges.
-            recomputeLoopBodyEnergyFromPaths(bodyPaths, bodyAlloc, solution, cfg_, state_, params_,
-                                             headerBlock, startSynth, endSynth);
+            // Recompute loop energy over the real LoopBodyNoBackedge CFG.
+            recomputeLoopBodyEnergyOnCFG(L, bodyAlloc, solution, cfg_, state_, params_, graph_,
+                                         headerBlock, latchBlock, startSynth, endSynth);
 
             // Re-read from synthetic blocks after re-propagation.
             startEToLeave = solution.blockMeta[startSynth].E_to_leave;

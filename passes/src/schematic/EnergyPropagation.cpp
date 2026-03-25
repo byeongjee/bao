@@ -32,15 +32,6 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
                             SchematicSolution &solution, const CFGAnalysis &cfg,
                             const SchematicStateAnalysis &state, const SchematicParams &params,
                             llvm::LoopInfo &LI, llvm::Loop *loopScope) {
-    // Phase 1: Initialize seenLoops, pre-adding the seed block's loop
-    std::set<llvm::BasicBlock *> seenLoops;
-    SchematicBlock *bbBefore = seedEdge.src;
-    if (bbBefore) {
-        auto metaIt = solution.blockMeta.find(bbBefore);
-        if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value())
-            seenLoops.insert(metaIt->second.loop->loop->getHeader());
-    }
-
     // Phase 2: BFS backward from seedEdge through disabled edges to build DAG
     std::deque<CFGEdge> toVisit = {seedEdge};
     std::set<CFGEdge> visited;
@@ -110,18 +101,6 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 
         SchematicBlock *bb = ckpt.src;
         if (bb) {
-            // Inner-loop scaling — apply seenLoops for all loops unconditionally,
-            // matching Python reference (cfg_modification.py:232-234).
-            // Step 10 directly adjusts E_to_leave/E_left on loop blocks.
-            auto metaIt = solution.blockMeta.find(bb);
-            if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-                llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
-                if (!seenLoops.count(loopHeader)) {
-                    seenLoops.insert(loopHeader);
-                    eToLeave += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
-                }
-            }
-
             // Add block execution cost
             double blockCost = getBlockExecEnergy(bb, solution, cfg, state, params);
             eToLeave += blockCost;
@@ -150,15 +129,6 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSolution &solution,
                          const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
                          const SchematicParams &params, llvm::LoopInfo &LI, llvm::Loop *loopScope) {
-    // Phase 1: Initialize seenLoops (reference lines 271-277)
-    std::set<llvm::BasicBlock *> seenLoops;
-    SchematicBlock *bbAfter = seedEdge.dst;
-    if (bbAfter) {
-        auto metaIt = solution.blockMeta.find(bbAfter);
-        if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value())
-            seenLoops.insert(metaIt->second.loop->loop->getHeader());
-    }
-
     // Priority queue: edge -> accumulated cost (reference: chkpt_cost)
     std::map<CFGEdge, double> ckptCost;
     ckptCost[seedEdge] = 0.0;
@@ -181,17 +151,6 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
             continue;
         if (loopScope && bb->getLLVMBlock() && !loopScope->contains(bb->getLLVMBlock()))
             continue;
-
-        // Inner-loop scaling (reference lines 293-295) — apply seenLoops for
-        // all loops unconditionally, matching Python reference.
-        auto metaIt = solution.blockMeta.find(bb);
-        if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-            llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
-            if (!seenLoops.count(loopHeader)) {
-                seenLoops.insert(loopHeader);
-                cost += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
-            }
-        }
 
         // Add block cost and compute energy_left (reference lines 298-302)
         double blockCost = getBlockExecEnergy(bb, solution, cfg, state, params);
