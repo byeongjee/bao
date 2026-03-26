@@ -5,18 +5,127 @@
 
 #include <deque>
 #include <limits>
+#include <optional>
 #include <set>
 
 namespace checkpoint {
 
+static bool isCompatibleWith(const RegionAllocation &a, const RegionAllocation &b,
+                             const SchematicStateAnalysis &state);
+
+namespace {
+
+struct FixedPotentialCheckpointEdge {
+    llvm::BasicBlock *srcBB;
+    llvm::BasicBlock *dstBB;
+    SchematicBlock *srcBlock;
+    SchematicBlock *dstBlock;
+    CFGEdge edge;
+    BlockMetadata *srcMeta;
+    BlockMetadata *dstMeta;
+    RegionAllocation *srcAlloc;
+    RegionAllocation *dstAlloc;
+};
+
+static std::string getBlockName(const SchematicBlock *block) {
+    if (const llvm::BasicBlock *BB = block->getLLVMBlock())
+        return BB->getName().str();
+    return block->getName().str();
+}
+
+static std::string describeFixedEdgeOrigin(llvm::Loop *loopScope, llvm::StringRef reason,
+                                           llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) {
+    std::string scope = loopScope ? "loop" : "function";
+    return scope + "-" + reason.str() + "[" + srcBB->getName().str() + " -> " +
+           dstBB->getName().str() + "]";
+}
+
+static bool isEdgeOutsideLoopScope(llvm::Loop *loopScope, llvm::BasicBlock *srcBB,
+                                   llvm::BasicBlock *dstBB) {
+    return loopScope && (!loopScope->contains(srcBB) || !loopScope->contains(dstBB));
+}
+
+static bool isLoopBackEdge(llvm::LoopInfo &LI, llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) {
+    if (llvm::Loop *L = LI.getLoopFor(dstBB))
+        return dstBB == L->getHeader() && L->contains(srcBB);
+    return false;
+}
+
+static BlockMetadata *getAnalyzedBlockMeta(SchematicSolution &solution, SchematicBlock *block) {
+    auto it = solution.blockMeta.find(block);
+    if (it == solution.blockMeta.end() || !it->second.analyzed)
+        return nullptr;
+    return &it->second;
+}
+
+static RegionAllocation *getResolvedAllocation(SchematicSolution &solution, SchematicBlock *block) {
+    auto it = solution.blockAllocation.find(block);
+    if (it == solution.blockAllocation.end() || !it->second)
+        return nullptr;
+    return it->second.get();
+}
+
+static std::optional<FixedPotentialCheckpointEdge> getFixedPotentialCheckpointEdge(
+    const std::pair<const llvm::BasicBlock *, const llvm::BasicBlock *> &cfgEdge,
+    SchematicSolution &solution, llvm::LoopInfo &LI, SchematicGraph &graph, llvm::Loop *loopScope) {
+    auto *srcBB = const_cast<llvm::BasicBlock *>(cfgEdge.first);
+    auto *dstBB = const_cast<llvm::BasicBlock *>(cfgEdge.second);
+    if (isEdgeOutsideLoopScope(loopScope, srcBB, dstBB))
+        return std::nullopt;
+
+    SchematicBlock *srcBlock = graph.getOrCreate(srcBB);
+    SchematicBlock *dstBlock = graph.getOrCreate(dstBB);
+    CFGEdge edge{srcBlock, dstBlock};
+    if (!isPotentialCheckpoint(solution, edge))
+        return std::nullopt;
+    if (isLoopBackEdge(LI, srcBB, dstBB))
+        return std::nullopt;
+
+    BlockMetadata *srcMeta = getAnalyzedBlockMeta(solution, srcBlock);
+    BlockMetadata *dstMeta = getAnalyzedBlockMeta(solution, dstBlock);
+    if (!srcMeta || !dstMeta)
+        return std::nullopt;
+
+    RegionAllocation *srcAlloc = getResolvedAllocation(solution, srcBlock);
+    RegionAllocation *dstAlloc = getResolvedAllocation(solution, dstBlock);
+    if (!srcAlloc || !dstAlloc)
+        return std::nullopt;
+
+    return FixedPotentialCheckpointEdge{srcBB,   dstBB,   srcBlock, dstBlock, edge,
+                                        srcMeta, dstMeta, srcAlloc, dstAlloc};
+}
+
+static bool canMergeWithoutCheckpoint(const FixedPotentialCheckpointEdge &edge) {
+    return edge.srcMeta->E_left > edge.dstMeta->E_to_leave;
+}
+
+static void enableFixedEdgeCheckpoint(SchematicSolution &solution,
+                                      const FixedPotentialCheckpointEdge &edge,
+                                      llvm::Loop *loopScope, llvm::StringRef reason) {
+    enableCheckpoint(solution, edge.edge,
+                     describeFixedEdgeOrigin(loopScope, reason, edge.srcBB, edge.dstBB));
+}
+
+static void disableFixedEdgeCheckpointAndPropagate(const FixedPotentialCheckpointEdge &edge,
+                                                   const CFGAnalysis &cfg,
+                                                   SchematicSolution &solution,
+                                                   const SchematicStateAnalysis &state,
+                                                   const SchematicParams &params,
+                                                   llvm::LoopInfo &LI, llvm::Loop *loopScope) {
+    disableCheckpoint(solution, edge.edge);
+    propagateEnergyLeft(edge.edge, edge.srcMeta->E_left, solution, cfg, state, params, LI,
+                        loopScope);
+    propagateEnergyToLeave(edge.edge, edge.dstMeta->E_to_leave, solution, cfg, state, params, LI,
+                           loopScope);
+}
+
+} // namespace
+
 static std::string describeTraceOrigin(const std::vector<SchematicBlock *> &trace,
                                        llvm::Loop *loopScope) {
     std::string scope = loopScope ? "loop" : "function";
-    std::string start = trace.front()->getLLVMBlock()
-                            ? trace.front()->getLLVMBlock()->getName().str()
-                            : trace.front()->getName().str();
-    std::string end = trace.back()->getLLVMBlock() ? trace.back()->getLLVMBlock()->getName().str()
-                                                   : trace.back()->getName().str();
+    std::string start = getBlockName(trace.front());
+    std::string end = getBlockName(trace.back());
     return scope + "-rcg[" + start + " -> " + end + "]";
 }
 
@@ -124,6 +233,11 @@ static bool isCompatibleOneWay(const RegionAllocation &self, const RegionAllocat
 static bool isCompatibleWith(const RegionAllocation &a, const RegionAllocation &b,
                              const SchematicStateAnalysis &state) {
     return isCompatibleOneWay(a, b, state) && isCompatibleOneWay(b, a, state);
+}
+
+static bool allocationsAreCompatible(const FixedPotentialCheckpointEdge &edge,
+                                     const SchematicStateAnalysis &state) {
+    return isCompatibleWith(*edge.srcAlloc, *edge.dstAlloc, state);
 }
 
 bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution &solution,
@@ -308,68 +422,23 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
                                                const SchematicStateAnalysis &state,
                                                const SchematicParams &params, llvm::LoopInfo &LI,
                                                SchematicGraph &graph, llvm::Loop *loopScope) {
-    for (const auto &[src, dst] : cfg.getEdges()) {
-        auto *srcBB = const_cast<llvm::BasicBlock *>(src);
-        auto *dstBB = const_cast<llvm::BasicBlock *>(dst);
-
-        // When scoped to a loop, skip edges outside it.
-        if (loopScope && (!loopScope->contains(srcBB) || !loopScope->contains(dstBB)))
+    for (const auto &cfgEdge : cfg.getEdges()) {
+        auto edge = getFixedPotentialCheckpointEdge(cfgEdge, solution, LI, graph, loopScope);
+        if (!edge)
             continue;
 
-        SchematicBlock *srcBlock = graph.getOrCreate(srcBB);
-        SchematicBlock *dstBlock = graph.getOrCreate(dstBB);
-
-        CFGEdge edge{srcBlock, dstBlock};
-        if (!isPotentialCheckpoint(solution, edge))
+        if (!allocationsAreCompatible(*edge, state)) {
+            enableFixedEdgeCheckpoint(solution, *edge, loopScope, "fixed-edge-incompatible");
             continue;
-
-        // Skip loop back-edges (handled by LoopAnalyzer).
-        if (llvm::Loop *L = LI.getLoopFor(dstBB)) {
-            if (dstBB == L->getHeader() && L->contains(srcBB))
-                continue;
         }
 
-        auto srcMeta = solution.blockMeta.find(srcBlock);
-        auto dstMeta = solution.blockMeta.find(dstBlock);
-        if (srcMeta == solution.blockMeta.end() || !srcMeta->second.analyzed)
+        if (canMergeWithoutCheckpoint(*edge)) {
+            disableFixedEdgeCheckpointAndPropagate(*edge, cfg, solution, state, params, LI,
+                                                   loopScope);
             continue;
-        if (dstMeta == solution.blockMeta.end() || !dstMeta->second.analyzed)
-            continue;
-
-        // Reference: schematic.py:483-491 — both blocks must have memory_allocation.
-        auto srcAllocIt = solution.blockAllocation.find(srcBlock);
-        auto dstAllocIt = solution.blockAllocation.find(dstBlock);
-        if (srcAllocIt == solution.blockAllocation.end() || !srcAllocIt->second ||
-            dstAllocIt == solution.blockAllocation.end() || !dstAllocIt->second)
-            continue;
-
-        // Reference: schematic.py:494 — is_compatible_with (memory_allocation.py:162-166).
-        if (!isCompatibleWith(*srcAllocIt->second, *dstAllocIt->second, state)) {
-            // Not compatible -> enable checkpoint (ACTIVE).
-            // Reference: schematic.py:495.
-            std::string origin = (loopScope ? "loop" : "function") +
-                                 std::string("-fixed-edge-incompatible[") + srcBB->getName().str() +
-                                 " -> " + dstBB->getName().str() + "]";
-            enableCheckpoint(solution, edge, origin);
-        } else {
-            // Reference: schematic.py:497 — energy_left > energy_to_leave.
-            if (srcMeta->second.E_left > dstMeta->second.E_to_leave) {
-                // Compatible and enough energy -> disabled, propagate.
-                // Reference: schematic.py:498-500.
-                disableCheckpoint(solution, edge);
-                propagateEnergyLeft(edge, srcMeta->second.E_left, solution, cfg, state, params, LI,
-                                    loopScope);
-                propagateEnergyToLeave(edge, dstMeta->second.E_to_leave, solution, cfg, state,
-                                       params, LI, loopScope);
-            } else {
-                // Compatible but insufficient energy -> enable checkpoint (ACTIVE).
-                // Reference: schematic.py:502.
-                std::string origin = (loopScope ? "loop" : "function") +
-                                     std::string("-fixed-edge-energy[") + srcBB->getName().str() +
-                                     " -> " + dstBB->getName().str() + "]";
-                enableCheckpoint(solution, edge, origin);
-            }
         }
+
+        enableFixedEdgeCheckpoint(solution, *edge, loopScope, "fixed-edge-energy");
     }
 }
 
