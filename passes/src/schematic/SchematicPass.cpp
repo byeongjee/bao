@@ -38,6 +38,12 @@ extern cl::opt<bool> ForceCheckpointOnIncompatibleLoopsOpt;
 
 namespace checkpoint {
 
+static std::string getSchematicBlockName(const SchematicBlock *block) {
+    if (const llvm::BasicBlock *BB = block->getLLVMBlock())
+        return BB->getName().str();
+    return block->getName().str();
+}
+
 static json::Array buildLoopDecisionDetails(const SchematicSolution &solution) {
     struct LoopDecisionRow {
         std::string headerName;
@@ -94,6 +100,50 @@ static json::Array buildLoopDecisionDetails(const SchematicSolution &solution) {
     }
 
     return details;
+}
+
+static void printSchematicStats(const Function &F, const CFGAnalysis &cfg,
+                                const SchematicStateAnalysis &state,
+                                const SchematicSolution &solution,
+                                const SchematicInstrumenter &instrumenter, unsigned inserted,
+                                double totalExecutionTimeMs) {
+    CommonStats common;
+    common.passName = "SCHEMATIC";
+    common.functionName = F.getName().str();
+    common.basicBlocks = cfg.getBlocks().size();
+    common.edges = cfg.getEdges().size();
+    common.candidateGlobals = state.getCandidates().size();
+    common.regions = solution.regions.size();
+    common.regionBoundaries = instrumenter.boundaryCalls();
+    common.runtimeCallsInserted = inserted;
+    common.compilationTimeMs = totalExecutionTimeMs;
+    common.peakRSSKb = getPeakRSSKb();
+    printCommonStats(common);
+
+    PLOGI << "  --- SCHEMATIC-specific ---";
+    PLOGI << "  Paths analyzed:                  " << solution.pathsAnalyzed;
+    PLOGI << "  Enabled checkpoints:             " << solution.enabledCheckpoints.size();
+    PLOGI << "  Loop decisions:                  " << solution.loopDecisions.size();
+    PLOGI << "  Boundary calls inserted:         " << instrumenter.boundaryCalls();
+    PLOGI << "  Store mem calls inserted:        " << instrumenter.storeMemCalls();
+    PLOGI << "  Restore mem calls inserted:      " << instrumenter.restoreMemCalls();
+    PLOGI << "  Trace-guided:                    yes";
+
+    if (solution.checkpointOrigins.empty())
+        return;
+
+    PLOGI << "  Checkpoint provenance:";
+    for (const auto &[edge, origins] : solution.checkpointOrigins) {
+        std::string mergedOrigins;
+        for (size_t i = 0; i < origins.size(); ++i) {
+            if (i > 0)
+                mergedOrigins += ", ";
+            mergedOrigins += origins[i];
+        }
+
+        PLOGI << "    - " << getSchematicBlockName(edge.src) << " -> "
+              << getSchematicBlockName(edge.dst) << " : " << mergedOrigins;
+    }
 }
 
 PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
@@ -316,46 +366,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
     // Step 13: Print statistics.
-    {
-        CommonStats common;
-        common.passName = "SCHEMATIC";
-        common.functionName = F.getName().str();
-        common.basicBlocks = ctx.cfg->getBlocks().size();
-        common.edges = ctx.cfg->getEdges().size();
-        common.candidateGlobals = state.getCandidates().size();
-        common.regions = solution.regions.size();
-        common.regionBoundaries = instrumenter.boundaryCalls();
-        common.runtimeCallsInserted = inserted;
-        common.compilationTimeMs = totalExecutionTimeMs;
-        common.peakRSSKb = getPeakRSSKb();
-        printCommonStats(common);
-    }
-
-    PLOGI << "  --- SCHEMATIC-specific ---";
-    PLOGI << "  Paths analyzed:                  " << solution.pathsAnalyzed;
-    PLOGI << "  Enabled checkpoints:             " << solution.enabledCheckpoints.size();
-    PLOGI << "  Loop decisions:                  " << solution.loopDecisions.size();
-    PLOGI << "  Boundary calls inserted:         " << instrumenter.boundaryCalls();
-    PLOGI << "  Store mem calls inserted:        " << instrumenter.storeMemCalls();
-    PLOGI << "  Restore mem calls inserted:      " << instrumenter.restoreMemCalls();
-    PLOGI << "  Trace-guided:                    yes";
-    if (!solution.checkpointOrigins.empty()) {
-        PLOGI << "  Checkpoint provenance:";
-        for (const auto &[edge, origins] : solution.checkpointOrigins) {
-            auto edgeName = [](SchematicBlock *block) -> std::string {
-                return block->getLLVMBlock() ? block->getLLVMBlock()->getName().str()
-                                             : block->getName().str();
-            };
-            std::string mergedOrigins;
-            for (size_t i = 0; i < origins.size(); ++i) {
-                if (i > 0)
-                    mergedOrigins += ", ";
-                mergedOrigins += origins[i];
-            }
-            PLOGI << "    - " << edgeName(edge.src) << " -> " << edgeName(edge.dst) << " : "
-                  << mergedOrigins;
-        }
-    }
+    printSchematicStats(F, *ctx.cfg, state, solution, instrumenter, inserted, totalExecutionTimeMs);
 
     if (!StatsJsonOpt.empty()) {
         CommonStats c;
