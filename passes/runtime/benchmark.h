@@ -39,8 +39,8 @@
  * Stop pulse is ~5 ms   (above threshold — fires the trigger).
  *
  * Execution time is measured in post-processing as:
- *   first falling edge (end of start pulse) →
- *   last rising edge (beginning of stop pulse).
+ *   falling edge of the unique short start pulse before the stop pulse →
+ *   rising edge of the first long stop pulse.
  */
 #ifdef __MSP430__
 #ifndef F_CPU

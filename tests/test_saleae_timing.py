@@ -1,0 +1,192 @@
+"""Unit tests for Saleae timing extraction and launch command wiring."""
+
+from __future__ import annotations
+
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+from ckpt.device.saleae import _extract_timing, saleae_run
+from ckpt.runner import DeviceError
+
+
+def write_capture_csv(tmp_path: Path, rows: list[tuple[float, int]]) -> Path:
+    """Write a minimal Saleae CSV with timestamp/value rows."""
+    csv_path = tmp_path / "digital.csv"
+    lines = capture_csv_lines(rows)
+    csv_path.write_text("".join(lines))
+    return csv_path
+
+
+def capture_csv_lines(rows: list[tuple[float, int]]) -> list[str]:
+    """Return CSV lines for a minimal Saleae digital capture."""
+    lines = ["Time [s],Channel 0\n"]
+    for timestamp, value in rows:
+        lines.append(f"{timestamp:.9f},{value}\n")
+    return lines
+
+
+class TestExtractTiming:
+    def test_single_start_and_stop(self, tmp_path: Path):
+        csv_path = write_capture_csv(
+            tmp_path,
+            [
+                (0.000000000, 0),
+                (0.001000000, 1),
+                (0.001010000, 0),
+                (0.379125720, 1),
+                (0.384125720, 0),
+            ],
+        )
+
+        assert _extract_timing(csv_path) == pytest.approx(378115.72)
+
+    def test_multiple_start_pulses_before_stop_is_ambiguous(self, tmp_path: Path):
+        csv_path = write_capture_csv(
+            tmp_path,
+            [
+                (0.000000000, 0),
+                (0.001000000, 1),
+                (0.001010000, 0),
+                (0.168091450, 1),
+                (0.168101450, 0),
+                (0.379125720, 1),
+                (0.384125720, 0),
+            ],
+        )
+
+        with pytest.raises(DeviceError, match="Ambiguous Saleae capture"):
+            _extract_timing(csv_path)
+
+    def test_short_pulses_after_stop_are_ignored(self, tmp_path: Path):
+        csv_path = write_capture_csv(
+            tmp_path,
+            [
+                (0.000000000, 0),
+                (0.001000000, 1),
+                (0.001010000, 0),
+                (0.379125720, 1),
+                (0.384125720, 0),
+                (0.500000000, 1),
+                (0.500010000, 0),
+            ],
+        )
+
+        assert _extract_timing(csv_path) == pytest.approx(378115.72)
+
+
+class FakeCapture:
+    def __init__(self, csv_lines: list[str]):
+        self.csv_lines = csv_lines
+
+    def wait(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def export_raw_data_csv(self, directory: str, digital_channels: list[int]) -> None:
+        del digital_channels
+        Path(directory, "digital.csv").write_text("".join(self.csv_lines))
+
+
+class FakeManager:
+    def __init__(self, capture_rows: list[list[tuple[float, int]]]):
+        self.capture_rows = capture_rows
+        self.calls = 0
+
+    def start_capture(self, device_configuration: object, capture_configuration: object) -> FakeCapture:
+        del device_configuration, capture_configuration
+        csv_lines = capture_csv_lines(self.capture_rows[self.calls])
+        self.calls += 1
+        return FakeCapture(csv_lines)
+
+
+def install_fake_saleae_automation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Install a stub ``saleae.automation`` module for pure unit tests."""
+    fake_automation = types.ModuleType("saleae.automation")
+
+    class CaptureConfiguration:
+        def __init__(self, capture_mode: object):
+            self.capture_mode = capture_mode
+
+    class DigitalTriggerCaptureMode:
+        def __init__(
+            self,
+            trigger_type: object,
+            trigger_channel_index: int,
+            min_pulse_width_seconds: float,
+            max_pulse_width_seconds: float,
+            after_trigger_seconds: float,
+        ):
+            self.trigger_type = trigger_type
+            self.trigger_channel_index = trigger_channel_index
+            self.min_pulse_width_seconds = min_pulse_width_seconds
+            self.max_pulse_width_seconds = max_pulse_width_seconds
+            self.after_trigger_seconds = after_trigger_seconds
+
+    class DigitalTriggerType:
+        PULSE_HIGH = "pulse_high"
+
+    class LogicDeviceConfiguration:
+        def __init__(self, enabled_digital_channels: list[int], digital_sample_rate: int):
+            self.enabled_digital_channels = enabled_digital_channels
+            self.digital_sample_rate = digital_sample_rate
+
+    fake_automation.CaptureConfiguration = CaptureConfiguration
+    fake_automation.DigitalTriggerCaptureMode = DigitalTriggerCaptureMode
+    fake_automation.DigitalTriggerType = DigitalTriggerType
+    fake_automation.LogicDeviceConfiguration = LogicDeviceConfiguration
+
+    fake_saleae = types.ModuleType("saleae")
+    fake_saleae.__path__ = []
+    fake_saleae.automation = fake_automation
+
+    monkeypatch.setitem(sys.modules, "saleae", fake_saleae)
+    monkeypatch.setitem(sys.modules, "saleae.automation", fake_automation)
+
+
+class TestSaleaeRun:
+    def test_retries_ambiguous_capture_and_returns_clean_measurement(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        install_fake_saleae_automation(monkeypatch)
+        flash_calls: list[tuple[Path, int]] = []
+
+        def fake_flash(elf_path: Path, timeout: int) -> None:
+            flash_calls.append((elf_path, timeout))
+
+        monkeypatch.setattr("ckpt.device.saleae.flash", fake_flash)
+
+        manager = FakeManager(
+            [
+                [
+                    (0.000000000, 0),
+                    (0.001000000, 1),
+                    (0.001010000, 0),
+                    (0.168091450, 1),
+                    (0.168101450, 0),
+                    (0.379125720, 1),
+                    (0.384125720, 0),
+                ],
+                [
+                    (0.000000000, 0),
+                    (0.001000000, 1),
+                    (0.001010000, 0),
+                    (0.379125720, 1),
+                    (0.384125720, 0),
+                ],
+            ]
+        )
+
+        result = saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0)
+
+        assert result == pytest.approx(378115.72)
+        assert flash_calls == [
+            (Path("/tmp/app.elf"), 30),
+            (Path("/tmp/app.elf"), 30),
+        ]
+        assert manager.calls == 2

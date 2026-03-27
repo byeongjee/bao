@@ -1,8 +1,8 @@
 """Saleae Logic 2 automation for execution timing measurement.
 
 Captures GPIO waveform (P3.4 -> digital channel 0) during benchmark
-execution and computes the time between first rising edge and last
-falling edge.
+execution and computes the time from the start-pulse falling edge to
+the stop-pulse rising edge.
 
 Requires the Logic 2 desktop app with automation server enabled
 (localhost:10430) and the ``logic2-automation`` package::
@@ -12,6 +12,7 @@ Requires the Logic 2 desktop app with automation server enabled
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -30,6 +31,10 @@ if TYPE_CHECKING:
 
 _SALEAE_CHANNEL = 0
 _SALEAE_SAMPLE_RATE = 100_000_000  # 100 MHz
+_MAX_CAPTURE_ATTEMPTS = 3
+_AMBIGUOUS_CAPTURE_PREFIX = "Ambiguous Saleae capture"
+
+logger = logging.getLogger(__name__)
 
 
 def discover_saleae() -> Manager:
@@ -77,13 +82,14 @@ def saleae_run(
 
     Flow:
         1. Start Saleae capture (trigger: PULSE_HIGH, min 1 ms)
-        2. Flash the ELF via mspdebug (device resets and starts running)
-        3. Start pulse (~10 us) is captured but does not trigger
-        4. Program runs (GPIO LOW — BOR resets are invisible)
-        5. Stop pulse (~5 ms) fires the trigger
-        6. Record *after_trigger_seconds* more, then capture ends
-        7. Export raw digital data, measure first falling → last rising
-        8. Return delta in microseconds
+        2. Flash the ELF via mspdebug
+        3. Programming session exits and the target free-runs
+        4. Start pulse (~10 us) is captured but does not trigger
+        5. Program runs (GPIO LOW — BOR resets are invisible)
+        6. Stop pulse (~5 ms) fires the trigger
+        7. Record *after_trigger_seconds* more, then capture ends
+        8. Export raw digital data, measure start falling -> stop rising
+        9. Retry if the waveform is ambiguous, else return delta in us
 
     Raises DeviceError if no edges are detected (GPIO never pulsed)
     or no stop pulse (program hung — capture.wait blocks until
@@ -110,28 +116,61 @@ def saleae_run(
         ),
     )
 
-    capture = manager.start_capture(
-        device_configuration=device_config,
-        capture_configuration=capture_config,
-    )
-
-    try:
-        flash(elf_path, flash_timeout)
-        capture.wait()
-    except Exception:
-        capture.stop()
-        raise
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        csv_path = Path(tmpdir) / "digital.csv"
-        capture.export_raw_data_csv(
-            directory=tmpdir,
-            digital_channels=[_SALEAE_CHANNEL],
+    last_ambiguous_error: DeviceError | None = None
+    for attempt in range(1, _MAX_CAPTURE_ATTEMPTS + 1):
+        capture = manager.start_capture(
+            device_configuration=device_config,
+            capture_configuration=capture_config,
         )
-        return _extract_timing(csv_path)
+
+        try:
+            flash(elf_path, flash_timeout)
+            capture.wait()
+        except Exception:
+            _stop_capture_quietly(capture)
+            raise
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = Path(tmpdir) / "digital.csv"
+            capture.export_raw_data_csv(
+                directory=tmpdir,
+                digital_channels=[_SALEAE_CHANNEL],
+            )
+            try:
+                return _extract_timing(csv_path)
+            except DeviceError as exc:
+                if not _is_ambiguous_capture(exc):
+                    raise
+                last_ambiguous_error = exc
+                if attempt == _MAX_CAPTURE_ATTEMPTS:
+                    break
+                logger.warning(
+                    "Ambiguous Saleae capture for %s on attempt %d/%d; retrying.",
+                    elf_path,
+                    attempt,
+                    _MAX_CAPTURE_ATTEMPTS,
+                )
+
+    assert last_ambiguous_error is not None
+    raise DeviceError(
+        f"{last_ambiguous_error} after {_MAX_CAPTURE_ATTEMPTS} attempts"
+    )
 
 
 _SHORT_PULSE_THRESHOLD = 0.001  # 1 ms — start pulse is ~10 us, stop pulse is ~5 ms
+
+
+def _stop_capture_quietly(capture: object) -> None:
+    """Best-effort stop for captures that failed before normal completion."""
+    try:
+        capture.stop()
+    except Exception:
+        pass
+
+
+def _is_ambiguous_capture(exc: DeviceError) -> bool:
+    """Return True when *exc* indicates an ambiguous multi-start waveform."""
+    return str(exc).startswith(_AMBIGUOUS_CAPTURE_PREFIX)
 
 
 def _extract_timing(csv_path: Path) -> float:
@@ -143,10 +182,12 @@ def _extract_timing(csv_path: Path) -> float:
     - Stop pulse:  ~5 ms HIGH (long, above 1 ms threshold)
 
     Execution time is measured as:
-        last short pulse falling edge → first long pulse rising edge.
+        the short pulse falling edge immediately before the first
+        long pulse rising edge.
 
-    This handles spurious start pulses from device resets during
-    flashing or initialization.
+    Multiple short pulses before the stop pulse are treated as ambiguous:
+    they indicate the target likely restarted during capture, so the
+    extractor refuses to guess which partial run is "correct".
 
     Raises DeviceError if edges are missing.
     """
@@ -196,20 +237,26 @@ def _extract_timing(csv_path: Path) -> float:
             "capture timeout was too short."
         )
 
-    # Last short pulse falling edge = benchmark start.
-    start_time = short_pulses[-1][1]
+    # The first long pulse is the stop pulse that triggered the capture.
+    stop_time = long_pulses[0][0]
 
-    # First long pulse rising edge after start = benchmark stop.
-    stop_time: float | None = None
-    for rising, _falling in long_pulses:
-        if rising > start_time:
-            stop_time = rising
-            break
-
-    if stop_time is None:
+    # Exactly one short pulse must precede the stop pulse. More than one means
+    # the target likely restarted during capture, and choosing one would
+    # silently under/over-report execution time.
+    start_pulses = [(r, f) for r, f in short_pulses if f < stop_time]
+    if not start_pulses:
         raise DeviceError(
-            "No stop pulse found after the last start pulse on Saleae channel "
-            f"{_SALEAE_CHANNEL}. Program may have hung."
+            "No start pulse found before the stop pulse on Saleae channel "
+            f"{_SALEAE_CHANNEL}. Check benchmark GPIO signalling."
         )
+    if len(start_pulses) > 1:
+        raise DeviceError(
+            "Ambiguous Saleae capture on channel "
+            f"{_SALEAE_CHANNEL}: detected {len(start_pulses)} start pulses "
+            "before the stop pulse. The target likely restarted during "
+            "capture; refusing to guess execution time."
+        )
+
+    start_time = start_pulses[0][1]
 
     return (stop_time - start_time) * 1_000_000  # seconds -> us
