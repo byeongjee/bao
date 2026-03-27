@@ -139,9 +139,10 @@ EnergyEstimate AssemblyBasedEstimator::estimate(const llvm::BasicBlock &BB) {
         return EnergyEstimate{it->second, "assembly-lookup"};
     }
 
-    // BB not found in energy data - likely no assembly code for this BB
-    PLOGW << "Warning: BB '" << bbName << "' in function '" << currentFuncName_
-          << "' not found in energy data";
+    // Missing BB energy is expected for IR-only/canonicalization blocks with no
+    // corresponding assembly. Treat it as a debug detail and assign zero energy.
+    PLOGD << "AssemblyBasedEstimator: BB '" << bbName << "' in function '" << currentFuncName_
+          << "' not found in energy data; assigning zero energy";
     return EnergyEstimate{0.0, "assembly-missing-bb"};
 }
 
