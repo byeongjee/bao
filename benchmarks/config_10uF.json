@@ -13,7 +13,7 @@
   "loop_increment_cost_nvm_O3": 6.093453349479254,
   "milp": {
     "loop_strip_mining_enabled": true,
-    "loop_strip_mining_cost": 18.0
+    "loop_strip_mining_cost": 25.0
   },
   "rockclimb": {
     "distributed_checkpointing": true,
