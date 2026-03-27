@@ -252,6 +252,43 @@ static bool hasEnabledCheckpointsInLoop(const SchematicSolution &solution, llvm:
     return false;
 }
 
+static bool hasOnlyDisabledCheckpointsInLoop(const SchematicSolution &solution, llvm::Loop *L,
+                                             const CFGAnalysis &cfg, SchematicGraph &graph,
+                                             const LoopBoundaryBlocks &blocks) {
+    llvm::BasicBlock *loopLatch = L->getLoopLatch();
+    llvm::BasicBlock *loopHeader = L->getHeader();
+    for (const auto &cfgEdge : cfg.getEdges()) {
+        auto *srcBB = const_cast<llvm::BasicBlock *>(cfgEdge.first);
+        auto *dstBB = const_cast<llvm::BasicBlock *>(cfgEdge.second);
+        if (!L->contains(srcBB) || !L->contains(dstBB))
+            continue;
+        if (srcBB == loopLatch && dstBB == loopHeader)
+            continue;
+
+        CFGEdge edge{graph.getOrCreate(srcBB), graph.getOrCreate(dstBB)};
+        if (!isDisabledCheckpoint(solution, edge))
+            return false;
+    }
+
+    for (SchematicBlock *succ : blocks.startSynth->successors()) {
+        llvm::BasicBlock *succBB = succ ? succ->getLLVMBlock() : nullptr;
+        if (!succBB || !L->contains(succBB))
+            continue;
+        if (!isDisabledCheckpoint(solution, CFGEdge{blocks.startSynth, succ}))
+            return false;
+    }
+
+    for (SchematicBlock *pred : blocks.endSynth->predecessors()) {
+        llvm::BasicBlock *predBB = pred ? pred->getLLVMBlock() : nullptr;
+        if (!predBB || !L->contains(predBB))
+            continue;
+        if (!isDisabledCheckpoint(solution, CFGEdge{pred, blocks.endSynth}))
+            return false;
+    }
+
+    return true;
+}
+
 static std::vector<const RegionAllocation *>
 collectLoopMemoryAllocations(llvm::Loop *L, const SchematicSolution &solution,
                              SchematicGraph &graph) {
@@ -320,8 +357,10 @@ static void refineLoopBudgetWithConvergence(
     VMAddressTracker *tracker, SchematicGraph &graph, LoopIterationBudget &budget,
     RegionAllocation &bodyAlloc, LoopCheckpointDecision &decision) {
     bool hasEnabledCheckpoints = hasEnabledCheckpointsInLoop(solution, L);
+    bool onlyDisabledCheckpoints =
+        hasOnlyDisabledCheckpointsInLoop(solution, L, cfg, graph, blocks);
     decision.hadEnabledCheckpoints = hasEnabledCheckpoints;
-    if (hasEnabledCheckpoints || budget.numIterations <= 1)
+    if (!onlyDisabledCheckpoints || budget.numIterations <= 1)
         return;
 
     decision.convergenceApplied = true;
