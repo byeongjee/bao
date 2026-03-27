@@ -16,7 +16,7 @@
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
-#define MAXSIZE 256
+#define MAXSIZE 32
 #define MAXWAVES 4
 
 /* --- Mutable globals --- */
@@ -57,7 +57,7 @@ FORCE_INLINE uint32_t ReverseBits(uint32_t index, uint32_t NumBits) {
     uint32_t i, rev;
 
     for (i = rev = 0; i < NumBits; i++) {
-        __loop_tripcount(8); /* log2(MAXSIZE) = 8 */
+        __loop_tripcount(5); /* log2(MAXSIZE) = 5 */
         rev = (rev << 1) | (index & 1);
         index >>= 1;
     }
@@ -83,7 +83,7 @@ FORCE_INLINE void fft_float(uint32_t NumSamples, int32_t InverseTransform, float
 
     /* Simultaneous data copy and bit-reversal ordering into outputs */
     for (i = 0; i < NumSamples; i++) {
-        __loop_tripcount(MAXSIZE); /* 256 */
+        __loop_tripcount(MAXSIZE); /* 32 */
         j = ReverseBits(i, NumBits);
         RealOut[j] = RealIn[i];
         ImagOut[j] = (ImagIn == NULL) ? 0.0f : ImagIn[i];
@@ -92,7 +92,7 @@ FORCE_INLINE void fft_float(uint32_t NumSamples, int32_t InverseTransform, float
     /* FFT butterfly */
     BlockEnd = 1;
     for (BlockSize = 2; BlockSize <= NumSamples; BlockSize <<= 1) {
-        __loop_tripcount(8); /* log2(MAXSIZE) = 8 */
+        __loop_tripcount(5); /* log2(MAXSIZE) = 5 */
         double delta_angle = angle_numerator / (double)BlockSize;
         double sm2 = sin(-2 * delta_angle);
         double sm1 = sin(-delta_angle);
@@ -102,7 +102,7 @@ FORCE_INLINE void fft_float(uint32_t NumSamples, int32_t InverseTransform, float
         double ar[3], ai[3];
 
         for (i = 0; i < NumSamples; i += BlockSize) {
-            __loop_tripcount(MAXSIZE); /* at most 256 */
+            __loop_tripcount(MAXSIZE); /* at most 32 */
             ar[2] = cm2;
             ar[1] = cm1;
 
@@ -110,7 +110,7 @@ FORCE_INLINE void fft_float(uint32_t NumSamples, int32_t InverseTransform, float
             ai[1] = sm1;
 
             for (j = i, n = 0; n < BlockEnd; j++, n++) {
-                __loop_tripcount(MAXSIZE / 2); /* at most 128 */
+                __loop_tripcount(MAXSIZE / 2); /* at most 16 */
                 ar[0] = w * ar[1] - ar[2];
                 ar[2] = ar[1];
                 ar[1] = ar[0];
@@ -139,7 +139,7 @@ FORCE_INLINE void fft_float(uint32_t NumSamples, int32_t InverseTransform, float
         double denom = (double)NumSamples;
 
         for (i = 0; i < NumSamples; i++) {
-            __loop_tripcount(MAXSIZE); /* 256 */
+            __loop_tripcount(MAXSIZE); /* 32 */
             RealOut[i] /= denom;
             ImagOut[i] /= denom;
         }
@@ -161,7 +161,7 @@ int main(void) {
         Amp[i] = my_rand() % 1000;
     }
     for (i = 0; i < MAXSIZE; i++) {
-        __loop_tripcount(MAXSIZE); /* 256 */
+        __loop_tripcount(MAXSIZE); /* 32 */
         realin[i] = 0;
         for (j = 0; j < MAXWAVES; j++) {
             __loop_tripcount(MAXWAVES); /* 4 */
