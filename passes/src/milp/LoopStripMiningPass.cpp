@@ -80,6 +80,7 @@ struct LoopStripMiningDetail {
     double budget = 0.0;
     double iterEnergy = 0.0;
     double perIterNvmPenalty = 0.0;
+    double loopStripMiningCost = 0.0;
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
     double boundaryStateMargin = 0.0;
@@ -198,6 +199,7 @@ static json::Object loopDetailToJSON(const LoopStripMiningDetail &detail) {
     obj["budget"] = detail.budget;
     obj["iter_energy"] = detail.iterEnergy;
     obj["per_iter_nvm_penalty"] = detail.perIterNvmPenalty;
+    obj["loop_strip_mining_cost"] = detail.loopStripMiningCost;
     obj["restore_livein_margin"] = detail.restoreLiveInMargin;
     obj["commit_def_margin"] = detail.commitDefMargin;
     obj["boundary_state_margin"] = detail.boundaryStateMargin;
@@ -613,31 +615,36 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         iterEnergy.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
     double budgetAfterBoundary = budget - boundaryStateMargin;
     result.detail.perIterNvmPenalty = perIterNvmPenalty;
+    result.detail.loopStripMiningCost = params.loopStripMiningCost;
     result.detail.restoreLiveInMargin = restoreLiveInMargin;
     result.detail.commitDefMargin = commitDefMargin;
     result.detail.boundaryStateMargin = boundaryStateMargin;
     result.detail.budgetAfterBoundary = budgetAfterBoundary;
     if (budgetAfterBoundary <= 0.0) {
         result.skipReason = "nonpositive-effective-budget";
-        result.skipDetail = "budget=" + std::to_string(budget) +
-                            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
-                            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
-                            ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
-                            ", commit-def-margin=" + std::to_string(commitDefMargin) +
-                            ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
-                            ", budget-after-boundary=" + std::to_string(budgetAfterBoundary);
+        result.skipDetail =
+            "budget=" + std::to_string(budget) +
+            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+            ", loop-strip-mining-cost=" + std::to_string(params.loopStripMiningCost) +
+            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+            ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
+            ", commit-def-margin=" + std::to_string(commitDefMargin) +
+            ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
+            ", budget-after-boundary=" + std::to_string(budgetAfterBoundary);
         result.detail.skipReason = result.skipReason;
         result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
-    double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty;
+    double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty + params.loopStripMiningCost;
     result.detail.perIterTotalEnergy = perIterTotalEnergy;
     if (perIterTotalEnergy <= 0.0) {
         result.skipReason = "nonpositive-per-iter-total-energy";
-        result.skipDetail = "per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
-                            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
-                            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
+        result.skipDetail =
+            "per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+            ", loop-strip-mining-cost=" + std::to_string(params.loopStripMiningCost) +
+            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
         result.detail.skipReason = result.skipReason;
         result.detail.skipDetail = result.skipDetail;
         return result;
@@ -651,11 +658,13 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     result.detail.rawK = rawK;
     if (!std::isfinite(rawK) || rawK <= 0.0) {
         result.skipReason = "k-zero";
-        result.skipDetail = "budget-after-boundary=" + std::to_string(budgetAfterBoundary) +
-                            ", strict-budget=" + std::to_string(strictBudget) +
-                            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
-                            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
-                            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
+        result.skipDetail =
+            "budget-after-boundary=" + std::to_string(budgetAfterBoundary) +
+            ", strict-budget=" + std::to_string(strictBudget) +
+            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+            ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+            ", loop-strip-mining-cost=" + std::to_string(params.loopStripMiningCost) +
+            ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
         result.detail.skipReason = result.skipReason;
         result.detail.skipDetail = result.skipDetail;
         return result;
@@ -812,7 +821,7 @@ recomputeChunkKWithOverhead(Loop *L, const DenseMap<const BasicBlock *, double> 
         return out;
     }
 
-    double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty;
+    double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty + params.loopStripMiningCost;
     if (perIterTotalEnergy <= 0.0) {
         out.error = "nonpositive-per-iter-total-energy";
         return out;

@@ -25,6 +25,7 @@ struct MILPEnergyParams {
     double memStoreEnergyPerByte;        // Energy per byte for VM->FRAM copy
     double memRestoreEnergyPerByte;      // Energy per byte for FRAM->VM copy
     unsigned vmCapacityBytes;            // VM (SRAM) capacity in bytes
+    double loopStripMiningCost = 0.0;    // Optional strip-mining per-iteration control overhead
     bool loopStripMiningEnabled = false; // Enable loop strip-mining pass
     bool addDebugMarkers = false;        // Emit debug marker calls for register save/restore
 };

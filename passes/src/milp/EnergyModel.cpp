@@ -226,11 +226,35 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
         return true; // not found, keep default
     };
 
+    auto readOptionalDouble = [&](const std::string &key, double &out) -> bool {
+        for (const auto *src : {&milpSection, &config}) {
+            if (src->contains(key)) {
+                if (!(*src)[key].is_number()) {
+                    PLOGE << "Error: Field '" << key << "' must be numeric"
+                          << " in MILP config: " << configPath;
+                    return false;
+                }
+                out = (*src)[key].get<double>();
+                return true;
+            }
+        }
+        return true;
+    };
+
     if (!readBool("loop_strip_mining_enabled", params.loopStripMiningEnabled))
         return std::nullopt;
 
     params.addDebugMarkers = false;
     if (!readBool("add_debug_markers", params.addDebugMarkers))
+        return std::nullopt;
+
+    if (!readOptionalDouble("loop_strip_mining_cost", params.loopStripMiningCost))
+        return std::nullopt;
+    if (params.loopStripMiningCost == 0.0 &&
+        !readOptionalDouble("loop_increment_cost_nvm", params.loopStripMiningCost))
+        return std::nullopt;
+    if (params.loopStripMiningCost == 0.0 &&
+        !readOptionalDouble("loop_increment_cost_nvm_O3", params.loopStripMiningCost))
         return std::nullopt;
 
     return params;
