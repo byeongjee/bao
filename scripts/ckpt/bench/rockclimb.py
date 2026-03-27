@@ -121,50 +121,52 @@ def run_rockclimb_benchmarks(
     from ..device.saleae import discover_saleae
 
     saleae_manager = discover_saleae()
+    try:
+        with compilation_workdir(prefix="rockclimb_bench_") as workdir:
 
-    with compilation_workdir(prefix="rockclimb_bench_") as workdir:
+            def compile_fn(
+                bench_path: Path, cap: CapacitorConfig
+            ) -> CompileResult:
+                bench_name = bench_path.stem
+                out_dir = workdir / f"{bench_name}_{cap.label}"
+                out_dir.mkdir(parents=True, exist_ok=True)
 
-        def compile_fn(
-            bench_path: Path, cap: CapacitorConfig
-        ) -> CompileResult:
-            bench_name = bench_path.stem
-            out_dir = workdir / f"{bench_name}_{cap.label}"
-            out_dir.mkdir(parents=True, exist_ok=True)
+                opts = RockClimbCompileOptions(
+                    input_c=bench_path,
+                    energy_config=energy_config,
+                    rockclimb_config=cap.config_path,
+                    output=out_dir / bench_name,
+                    pass_log_level=pass_log_level,
+                    precomputed_energy=True,
+                    link=True,
+                    device_debug=device_debug,
+                    halt_mode=halt_mode,
+                    cpu_freq=cpu_freq,
+                    clang_opt_level=3,
+                    opt_level=3,
+                )
 
-            opts = RockClimbCompileOptions(
-                input_c=bench_path,
-                energy_config=energy_config,
-                rockclimb_config=cap.config_path,
-                output=out_dir / bench_name,
-                pass_log_level=pass_log_level,
-                precomputed_energy=True,
-                link=True,
+                result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)
+                return CompileResult(
+                    out_dir=out_dir,
+                    pass_output=result.pass_output,
+                    stats_json=result.stats_json,
+                    profiling_time_ms=0,
+                )
+
+            run_benchmark_matrix(
+                env,
+                tc,
+                bench_paths,
+                capacitors,
+                compile_fn,
+                output_csv,
+                nvm_symbols=_NVM_SYMBOLS,
                 device_debug=device_debug,
-                halt_mode=halt_mode,
-                cpu_freq=cpu_freq,
-                clang_opt_level=3,
-                opt_level=3,
+                csv_header=_CSV_HEADER,
+                row_builder=_build_row,
+                saleae_manager=saleae_manager,
+                accumulate_keys_file=accumulate_keys_file,
             )
-
-            result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)
-            return CompileResult(
-                out_dir=out_dir,
-                pass_output=result.pass_output,
-                stats_json=result.stats_json,
-                profiling_time_ms=0,
-            )
-
-        run_benchmark_matrix(
-            env,
-            tc,
-            bench_paths,
-            capacitors,
-            compile_fn,
-            output_csv,
-            nvm_symbols=_NVM_SYMBOLS,
-            device_debug=device_debug,
-            csv_header=_CSV_HEADER,
-            row_builder=_build_row,
-            saleae_manager=saleae_manager,
-            accumulate_keys_file=accumulate_keys_file,
-        )
+    finally:
+        saleae_manager.close()

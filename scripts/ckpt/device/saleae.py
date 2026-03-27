@@ -118,38 +118,37 @@ def saleae_run(
 
     last_ambiguous_error: DeviceError | None = None
     for attempt in range(1, _MAX_CAPTURE_ATTEMPTS + 1):
-        capture = manager.start_capture(
+        with manager.start_capture(
             device_configuration=device_config,
             capture_configuration=capture_config,
-        )
-
-        try:
-            flash(elf_path, flash_timeout)
-            capture.wait()
-        except Exception:
-            _stop_capture_quietly(capture)
-            raise
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            csv_path = Path(tmpdir) / "digital.csv"
-            capture.export_raw_data_csv(
-                directory=tmpdir,
-                digital_channels=[_SALEAE_CHANNEL],
-            )
+        ) as capture:
             try:
-                return _extract_timing(csv_path)
-            except DeviceError as exc:
-                if not _is_ambiguous_capture(exc):
-                    raise
-                last_ambiguous_error = exc
-                if attempt == _MAX_CAPTURE_ATTEMPTS:
-                    break
-                logger.warning(
-                    "Ambiguous Saleae capture for %s on attempt %d/%d; retrying.",
-                    elf_path,
-                    attempt,
-                    _MAX_CAPTURE_ATTEMPTS,
+                flash(elf_path, flash_timeout)
+                capture.wait()
+            except Exception:
+                _stop_capture_quietly(capture)
+                raise
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                csv_path = Path(tmpdir) / "digital.csv"
+                capture.export_raw_data_csv(
+                    directory=tmpdir,
+                    digital_channels=[_SALEAE_CHANNEL],
                 )
+                try:
+                    return _extract_timing(csv_path)
+                except DeviceError as exc:
+                    if not _is_ambiguous_capture(exc):
+                        raise
+                    last_ambiguous_error = exc
+                    if attempt == _MAX_CAPTURE_ATTEMPTS:
+                        break
+                    logger.warning(
+                        "Ambiguous Saleae capture for %s on attempt %d/%d; retrying.",
+                        elf_path,
+                        attempt,
+                        _MAX_CAPTURE_ATTEMPTS,
+                    )
 
     assert last_ambiguous_error is not None
     raise DeviceError(

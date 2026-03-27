@@ -110,42 +110,44 @@ def verify_algorithm(
     except DeviceError as exc:
         logger.error("Error: %s", exc)
         return False
+    try:
+        capacitors = discover_capacitors(env, algorithm, caps)
 
-    capacitors = discover_capacitors(env, algorithm, caps)
+        results: list[BenchResult] = []
 
-    results: list[BenchResult] = []
+        pairs = [
+            (bench_path, cap)
+            for bench_path in bench_files
+            for cap in capacitors
+        ]
+        total = len(pairs)
 
-    pairs = [
-        (bench_path, cap)
-        for bench_path in bench_files
-        for cap in capacitors
-    ]
-    total = len(pairs)
+        for idx, (bench_path, cap) in enumerate(pairs, 1):
+            bench_name = bench_path.stem
+            logger.info("[%d/%d] %s %s ...", idx, total, bench_name, cap.label)
 
-    for idx, (bench_path, cap) in enumerate(pairs, 1):
-        bench_name = bench_path.stem
-        logger.info("[%d/%d] %s %s ...", idx, total, bench_name, cap.label)
+            result = _verify_one(
+                tc, env,
+                algorithm=algorithm,
+                bench_path=bench_path,
+                bench_name=bench_name,
+                cap_config=cap.config_path,
+                cap_label=cap.label,
+                saleae_manager=saleae_manager,
+                halt_mode=halt_mode,
+                cpu_freq=cpu_freq,
+                nvm_symbols=nvm_symbols,
+                compile_instrumented=compile_instrumented,
+            )
+            results.append(result)
 
-        result = _verify_one(
-            tc, env,
-            algorithm=algorithm,
-            bench_path=bench_path,
-            bench_name=bench_name,
-            cap_config=cap.config_path,
-            cap_label=cap.label,
-            saleae_manager=saleae_manager,
-            halt_mode=halt_mode,
-            cpu_freq=cpu_freq,
-            nvm_symbols=nvm_symbols,
-            compile_instrumented=compile_instrumented,
+        _print_summary(results, algorithm, halt_mode)
+
+        return not any(
+            r.status in (Status.FAIL, Status.ERROR) for r in results
         )
-        results.append(result)
-
-    _print_summary(results, algorithm, halt_mode)
-
-    return not any(
-        r.status in (Status.FAIL, Status.ERROR) for r in results
-    )
+    finally:
+        saleae_manager.close()
 
 
 def _compile_baseline(

@@ -229,75 +229,77 @@ def run_schematic_benchmarks(
     from ..device.saleae import discover_saleae
 
     saleae_manager = discover_saleae()
+    try:
+        # Trace cache: collect once per benchmark, reuse for all capacitors.
+        trace_cache: dict[str, tuple[Path, int]] = {}  # bench_name -> (trace_path, profiling_ms)
 
-    # Trace cache: collect once per benchmark, reuse for all capacitors.
-    trace_cache: dict[str, tuple[Path, int]] = {}  # bench_name -> (trace_path, profiling_ms)
+        with compilation_workdir(prefix="schematic_bench_") as workdir:
 
-    with compilation_workdir(prefix="schematic_bench_") as workdir:
+            def compile_fn(
+                bench_path: Path, cap: CapacitorConfig
+            ) -> CompileResult:
+                bench_name = bench_path.stem
 
-        def compile_fn(
-            bench_path: Path, cap: CapacitorConfig
-        ) -> CompileResult:
-            bench_name = bench_path.stem
+                # Collect trace on first capacitor for this benchmark
+                if bench_name not in trace_cache:
+                    trace_cache[bench_name] = _collect_trace(
+                        tc, env, bench_path, workdir,
+                        energy_config=energy_config,
+                        trace_config=trace_config,
+                        estimator_mode=estimator_mode,
+                        halt_mode=halt_mode,
+                        cpu_freq=cpu_freq,
+                        clang_opt_level=clang_opt_level,
+                        pass_log_level=pass_log_level,
+                    )
 
-            # Collect trace on first capacitor for this benchmark
-            if bench_name not in trace_cache:
-                trace_cache[bench_name] = _collect_trace(
-                    tc, env, bench_path, workdir,
+                trace_json, profiling_ms = trace_cache[bench_name]
+
+                out_dir = workdir / f"{bench_name}_{cap.label}"
+                out_dir.mkdir(parents=True, exist_ok=True)
+
+                compile_opts = SchematicCompileOptions(
+                    input_c=bench_path,
                     energy_config=energy_config,
-                    trace_config=trace_config,
+                    schematic_config=cap.config_path,
+                    output=out_dir / bench_name,
                     estimator_mode=estimator_mode,
+                    pass_log_level=pass_log_level,
+                    debug=False,
+                    trace_only=False,
+                    link=True,
+                    device_debug=device_debug,
                     halt_mode=halt_mode,
                     cpu_freq=cpu_freq,
+                    opt_level=3,
                     clang_opt_level=clang_opt_level,
-                    pass_log_level=pass_log_level,
+                    force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+                    extra_includes=[str(env.project_dir / "passes" / "runtime")],
+                    trace_file=trace_json,
+                )
+                result: SchematicCompileResult = compile_schematic(
+                    tc, env, compile_opts
+                )
+                return CompileResult(
+                    out_dir=out_dir,
+                    pass_output=result.pass_output,
+                    stats_json=result.stats_json,
+                    profiling_time_ms=profiling_ms,
                 )
 
-            trace_json, profiling_ms = trace_cache[bench_name]
-
-            out_dir = workdir / f"{bench_name}_{cap.label}"
-            out_dir.mkdir(parents=True, exist_ok=True)
-
-            compile_opts = SchematicCompileOptions(
-                input_c=bench_path,
-                energy_config=energy_config,
-                schematic_config=cap.config_path,
-                output=out_dir / bench_name,
-                estimator_mode=estimator_mode,
-                pass_log_level=pass_log_level,
-                debug=False,
-                trace_only=False,
-                link=True,
+            run_benchmark_matrix(
+                env,
+                tc,
+                bench_paths,
+                capacitors,
+                compile_fn,
+                output_csv,
+                nvm_symbols=_NVM_SYMBOLS,
                 device_debug=device_debug,
-                halt_mode=halt_mode,
-                cpu_freq=cpu_freq,
-                opt_level=3,
-                clang_opt_level=clang_opt_level,
-                force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-                extra_includes=[str(env.project_dir / "passes" / "runtime")],
-                trace_file=trace_json,
+                csv_header=_CSV_HEADER,
+                row_builder=_build_row,
+                saleae_manager=saleae_manager,
+                accumulate_keys_file=accumulate_keys_file,
             )
-            result: SchematicCompileResult = compile_schematic(
-                tc, env, compile_opts
-            )
-            return CompileResult(
-                out_dir=out_dir,
-                pass_output=result.pass_output,
-                stats_json=result.stats_json,
-                profiling_time_ms=profiling_ms,
-            )
-
-        run_benchmark_matrix(
-            env,
-            tc,
-            bench_paths,
-            capacitors,
-            compile_fn,
-            output_csv,
-            nvm_symbols=_NVM_SYMBOLS,
-            device_debug=device_debug,
-            csv_header=_CSV_HEADER,
-            row_builder=_build_row,
-            saleae_manager=saleae_manager,
-            accumulate_keys_file=accumulate_keys_file,
-        )
+    finally:
+        saleae_manager.close()

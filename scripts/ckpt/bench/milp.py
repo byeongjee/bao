@@ -148,54 +148,56 @@ def run_milp_benchmarks(
     from ..device.saleae import discover_saleae
 
     saleae_manager = discover_saleae()
+    try:
+        # Shared workdir for all compilations (cleaned up on exit)
+        with compilation_workdir(prefix="milp_bench_") as workdir:
 
-    # Shared workdir for all compilations (cleaned up on exit)
-    with compilation_workdir(prefix="milp_bench_") as workdir:
+            def compile_fn(
+                bench_path: Path, cap: CapacitorConfig
+            ) -> CompileResult:
+                bench_name = bench_path.stem
+                out_dir = workdir / f"{bench_name}_{cap.label}"
+                out_dir.mkdir(parents=True, exist_ok=True)
 
-        def compile_fn(
-            bench_path: Path, cap: CapacitorConfig
-        ) -> CompileResult:
-            bench_name = bench_path.stem
-            out_dir = workdir / f"{bench_name}_{cap.label}"
-            out_dir.mkdir(parents=True, exist_ok=True)
+                opts = MilpCompileOptions(
+                    input_c=bench_path,
+                    energy_config=energy_config,
+                    milp_config=cap.config_path,
+                    output=out_dir / bench_name,
+                    estimator_mode=estimator_mode,
+                    pass_log_level=pass_log_level,
+                    debug=False,
+                    link=True,
+                    halt_mode=halt_mode,
+                    device_debug=device_debug,
+                    cpu_freq=cpu_freq,
+                    opt_level=3,
+                    clang_opt_level=3,
+                    milp_gap=0.0,
+                    milp_log_file="",
+                )
 
-            opts = MilpCompileOptions(
-                input_c=bench_path,
-                energy_config=energy_config,
-                milp_config=cap.config_path,
-                output=out_dir / bench_name,
-                estimator_mode=estimator_mode,
-                pass_log_level=pass_log_level,
-                debug=False,
-                link=True,
-                halt_mode=halt_mode,
+                result: MilpCompileResult = compile_milp(tc, env, opts)
+                return CompileResult(
+                    out_dir=out_dir,
+                    pass_output=result.pass_output,
+                    stats_json=result.stats_json,
+                    profiling_time_ms=result.profiling_time_ms,
+                )
+
+            run_benchmark_matrix(
+                env,
+                tc,
+                bench_paths,
+                capacitors,
+                compile_fn,
+                output_csv,
+                nvm_symbols=_NVM_SYMBOLS,
                 device_debug=device_debug,
-                cpu_freq=cpu_freq,
-                opt_level=3,
-                clang_opt_level=3,
-                milp_gap=0.0,
-                milp_log_file="",
+                csv_header=_CSV_HEADER,
+                row_builder=_build_row,
+                saleae_manager=saleae_manager,
+                accumulate_keys_file=accumulate_keys_file,
             )
-
-            result: MilpCompileResult = compile_milp(tc, env, opts)
-            return CompileResult(
-                out_dir=out_dir,
-                pass_output=result.pass_output,
-                stats_json=result.stats_json,
-                profiling_time_ms=result.profiling_time_ms,
-            )
-
-        run_benchmark_matrix(
-            env,
-            tc,
-            bench_paths,
-            capacitors,
-            compile_fn,
-            output_csv,
-            nvm_symbols=_NVM_SYMBOLS,
-            device_debug=device_debug,
-            csv_header=_CSV_HEADER,
-            row_builder=_build_row,
-            saleae_manager=saleae_manager,
-            accumulate_keys_file=accumulate_keys_file,
-        )
+    finally:
+        saleae_manager.close()
