@@ -13,7 +13,7 @@
 
 #define NUM_FUNCS 8U
 #define RNG_SEED 0x0C728394u
-#define ITERATIONS 100000U
+#define ITERATIONS 20000U
 
 static uint32_t g_seed __attribute__((section(".fram"))) = RNG_SEED;
 static uint32_t g_totals[NUM_FUNCS] __attribute__((used, section(".fram")));
