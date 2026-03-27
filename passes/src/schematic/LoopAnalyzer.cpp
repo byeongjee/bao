@@ -787,7 +787,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.E_loop = budget.ELoop;
     decision.bodyAllocation = bodyAlloc;
 
-    PLOGI << "[LoopAnalyzer] loop=" << blocks.header->getName() << " E_loop=" << budget.ELoop
+    PLOGD << "[LoopAnalyzer] loop=" << blocks.header->getName() << " E_loop=" << budget.ELoop
           << " startEToLeave=" << budget.startEToLeave << " endEToLeave=" << budget.endEToLeave
           << " capacity=" << params_.capacity << " maxTripCount=" << maxTripCount;
 
@@ -824,7 +824,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.finalRawNumIterations = budget.rawNumIterations;
 
     // Step 9: Decide checkpoint type.
-    PLOGI << "[LoopAnalyzer] loop=" << blocks.header->getName() << " numIt=" << budget.numIterations
+    PLOGD << "[LoopAnalyzer] loop=" << blocks.header->getName() << " numIt=" << budget.numIterations
           << " maxTripCount=" << maxTripCount << " availableEnergy=" << budget.availableEnergy;
     applyLoopCheckpointPolicy(L, static_cast<unsigned>(maxTripCount), blocks, budget, solution,
                               decision);

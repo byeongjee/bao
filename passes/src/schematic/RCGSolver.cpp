@@ -1,11 +1,12 @@
 #include "schematic/RCGSolver.h"
+#include "common/Logger.h"
 #include "schematic/MemoryAllocator.h"
 
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <limits>
+#include <sstream>
 #include <vector>
 
 namespace checkpoint {
@@ -83,24 +84,27 @@ void RCGSolver::createReachableCheckpointGraph() {
     unsigned startNode = 0;
     unsigned endNode = numNodes - 1;
 
-    llvm::errs() << "[DEBUG RCG] === createRCG: pathBlocks:";
+    std::ostringstream pathStream;
+    pathStream << "[DEBUG RCG] === createRCG: pathBlocks:";
     for (auto *b : pathBlocks_)
-        llvm::errs() << " " << (b->getLLVMBlock() ? b->getLLVMBlock()->getName() : b->getName());
-    llvm::errs() << "\n";
-    llvm::errs() << "[DEBUG RCG] energyLeft=" << energyLeft << " energyToLeave=" << energyToLeave
-                 << " startAlloc=" << (startAlloc ? "yes" : "no")
-                 << " endAlloc=" << (endAlloc ? "yes" : "no") << "\n";
+        pathStream << " "
+                   << (b->getLLVMBlock() ? b->getLLVMBlock()->getName().str() : b->getName().str());
+    PLOGD << pathStream.str();
+
+    PLOGD << "[DEBUG RCG] energyLeft=" << energyLeft << " energyToLeave=" << energyToLeave
+          << " startAlloc=" << (startAlloc ? "yes" : "no")
+          << " endAlloc=" << (endAlloc ? "yes" : "no");
     if (startAlloc) {
         for (const auto &[v, va] : startAlloc->vars)
-            llvm::errs() << "[DEBUG RCG]   startAlloc var='" << v->getName() << "' "
-                         << (va.placement == Placement::VM ? "VM" : "NVM")
-                         << " restore=" << va.needRestore() << " save=" << va.needSave() << "\n";
+            PLOGD << "[DEBUG RCG]   startAlloc var='" << v->getName() << "' "
+                  << (va.placement == Placement::VM ? "VM" : "NVM")
+                  << " restore=" << va.needRestore() << " save=" << va.needSave();
     }
     if (endAlloc) {
         for (const auto &[v, va] : endAlloc->vars)
-            llvm::errs() << "[DEBUG RCG]   endAlloc var='" << v->getName() << "' "
-                         << (va.placement == Placement::VM ? "VM" : "NVM")
-                         << " restore=" << va.needRestore() << " save=" << va.needSave() << "\n";
+            PLOGD << "[DEBUG RCG]   endAlloc var='" << v->getName() << "' "
+                  << (va.placement == Placement::VM ? "VM" : "NVM")
+                  << " restore=" << va.needRestore() << " save=" << va.needSave();
     }
 
     // Helper: compute interval cost, handling empty intervals (zero execution cost).
