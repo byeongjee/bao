@@ -70,17 +70,17 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
 
     // Clear product buffer first
     for (i = 0; i < NUM_DIGITS * 2; i++) {
-        __loop_tripcount(NUM_DIGITS * 2); // 32 iterations
+        __loop_tripcount(NUM_DIGITS * 2); // 2 * NUM_DIGITS iterations
         g_product[i] = 0;
     }
 
     for (int digit = 0; digit < NUM_DIGITS * 2; ++digit) {
-        __loop_tripcount(NUM_DIGITS * 2); // 32 iterations
+        __loop_tripcount(NUM_DIGITS * 2); // 2 * NUM_DIGITS iterations
         p = c;                            // carry from previous
         c = 0;                            // new carry
 
         for (i = 0; i < NUM_DIGITS; ++i) {
-            __loop_tripcount(NUM_DIGITS); // 16 iterations
+            __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
             if (digit - i >= 0 && digit - i < NUM_DIGITS) {
                 digit_t a_val = A[digit - i];
                 digit_t b_val = B[i];
@@ -104,7 +104,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
     int d = 2 * NUM_DIGITS;
     digit_t m;
     do {
-        __loop_tripcount(NUM_DIGITS * 2); // at most 32 iterations
+        __loop_tripcount(NUM_DIGITS * 2); // at most 2 * NUM_DIGITS iterations
         d--;
         m = g_product[d];
     } while (m == 0 && d > 0);
@@ -112,7 +112,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
     // If result is 0, we are done
     if (m == 0) {
         for (i = 0; i < NUM_DIGITS; i++) {
-            __loop_tripcount(NUM_DIGITS); // 16 iterations
+            __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
             result_buffer[i] = 0;
         }
         return;
@@ -120,13 +120,14 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
 
     // Reduction Loop
     while (1) {
-        __loop_tripcount(NUM_DIGITS * 3); // at most ~48 reduction steps
+        __loop_tripcount(NUM_DIGITS *
+                         3); // conservative bound: up to 3 * NUM_DIGITS reduction steps
 
         bool normalizable = true;
         unsigned offset = d + 1 - NUM_DIGITS;
 
         for (i = d; i >= 0; --i) {
-            __loop_tripcount(NUM_DIGITS * 2); // at most 32 iterations
+            __loop_tripcount(NUM_DIGITS * 2); // at most 2 * NUM_DIGITS iterations
             digit_t m_val = g_product[i];
             digit_t n_val = (i - offset >= 0 && i - offset < NUM_DIGITS) ? pubkey.n[i - offset] : 0;
 
@@ -147,7 +148,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
             // Simple subtraction: product = product - (N << offset)
             unsigned borrow = 0;
             for (i = 0; i < NUM_DIGITS; ++i) {
-                __loop_tripcount(NUM_DIGITS); // 16 iterations
+                __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
                 digit_t m_val = g_product[i + offset];
                 digit_t n_val = pubkey.n[i];
                 digit_t s = n_val + borrow;
@@ -196,7 +197,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
 
             digit_t qn_arr[NUM_DIGITS * 2];
             for (int k = 0; k < NUM_DIGITS * 2; k++) {
-                __loop_tripcount(NUM_DIGITS * 2); // 32 iterations
+                __loop_tripcount(NUM_DIGITS * 2); // 2 * NUM_DIGITS iterations
                 qn_arr[k] = 0;
             }
 
@@ -204,7 +205,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
             digit_t mul_c = 0;
 
             for (i = mul_offset; i < 2 * NUM_DIGITS; ++i) {
-                __loop_tripcount(NUM_DIGITS * 2); // at most 32 iterations
+                __loop_tripcount(NUM_DIGITS * 2); // at most 2 * NUM_DIGITS iterations
                 digit_t m_curr = mul_c;
                 if (i < mul_offset + NUM_DIGITS) {
                     m_curr += q_final * pubkey.n[i - mul_offset];
@@ -215,7 +216,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
 
             char relation = '=';
             for (i = NUM_DIGITS * 2 - 1; i >= 0; --i) {
-                __loop_tripcount(NUM_DIGITS * 2); // 32 iterations
+                __loop_tripcount(NUM_DIGITS * 2); // 2 * NUM_DIGITS iterations
                 if (g_product[i] > qn_arr[i]) {
                     relation = '>';
                     break;
@@ -229,7 +230,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
                 unsigned add_offset = current_d - NUM_DIGITS;
                 digit_t add_c = 0;
                 for (i = add_offset; i < 2 * NUM_DIGITS; ++i) {
-                    __loop_tripcount(NUM_DIGITS * 2); // at most 32 iterations
+                    __loop_tripcount(NUM_DIGITS * 2); // at most 2 * NUM_DIGITS iterations
                     digit_t add_n = (i < add_offset + NUM_DIGITS) ? pubkey.n[i - add_offset] : 0;
                     digit_t add_r = add_c + g_product[i] + add_n;
                     add_c = add_r >> DIGIT_BITS;
@@ -241,7 +242,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
             unsigned sub_borrow = 0;
 
             for (i = 0; i < 2 * NUM_DIGITS; ++i) {
-                __loop_tripcount(NUM_DIGITS * 2); // 32 iterations
+                __loop_tripcount(NUM_DIGITS * 2); // 2 * NUM_DIGITS iterations
                 if (i >= sub_offset) {
                     digit_t sub_qn = qn_arr[i];
                     digit_t sub_s = sub_qn + sub_borrow;
@@ -260,7 +261,7 @@ FORCE_INLINE void mult_mod_operation(digit_t *A, digit_t *B, digit_t *result_buf
 
     // Copy result to output buffer
     for (i = 0; i < NUM_DIGITS; i++) {
-        __loop_tripcount(NUM_DIGITS); // 16 iterations
+        __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
         result_buffer[i] = g_product[i];
     }
 }
@@ -272,23 +273,23 @@ __attribute__((noinline)) int main(void) {
 
     // Main Loop handling blocks
     while (block_offset < message_length) {
-        __loop_tripcount(NUM_PLAINTEXT_BLOCKS); // 1 block for current plaintext
+        __loop_tripcount(NUM_PLAINTEXT_BLOCKS); // up to NUM_PLAINTEXT_BLOCKS plaintext blocks
 
         // Construct the base for this block
         int i;
         for (i = 0; i < NUM_DIGITS - NUM_PAD_DIGITS; ++i) {
-            __loop_tripcount(NUM_DIGITS); // 15 iterations
+            __loop_tripcount(NUM_DIGITS); // up to NUM_DIGITS - NUM_PAD_DIGITS iterations
             g_base[i] = (block_offset + i < message_length) ? PLAINTEXT[block_offset + i] : 0xFF;
         }
         for (int j = 0; i < NUM_DIGITS; ++i, ++j) {
-            __loop_tripcount(NUM_PAD_DIGITS); // 1 iteration
+            __loop_tripcount(NUM_PAD_DIGITS); // NUM_PAD_DIGITS iterations
             g_base[i] = PAD_DIGITS[j];
         }
 
         // Initialize block (which accumulates result) to 1
         g_block[0] = 1;
         for (i = 1; i < NUM_DIGITS; ++i) {
-            __loop_tripcount(NUM_DIGITS); // 15 iterations
+            __loop_tripcount(NUM_DIGITS); // NUM_DIGITS - 1 iterations
             g_block[i] = 0;
         }
 
@@ -297,18 +298,18 @@ __attribute__((noinline)) int main(void) {
 
         // Modular Exponentiation
         while (e > 0) {
-            __loop_tripcount(16); // at most 16 bits in digit_t
+            __loop_tripcount(16); // up to 16 exponent bits (digit_t is uint16_t)
             bool multiply = e & 0x1;
             e >>= 1;
 
             if (multiply) {
                 // block = (block * base) % N
                 for (int k = 0; k < NUM_DIGITS; k++) {
-                    __loop_tripcount(NUM_DIGITS); // 16 iterations
+                    __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
                     g_A[k] = g_base[k];
                 }
                 for (int k = 0; k < NUM_DIGITS; k++) {
-                    __loop_tripcount(NUM_DIGITS); // 16 iterations
+                    __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
                     g_B[k] = g_block[k];
                 }
 
@@ -318,11 +319,11 @@ __attribute__((noinline)) int main(void) {
             if (e > 0) {
                 // base = (base * base) % N
                 for (int k = 0; k < NUM_DIGITS; k++) {
-                    __loop_tripcount(NUM_DIGITS); // 16 iterations
+                    __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
                     g_A[k] = g_base[k];
                 }
                 for (int k = 0; k < NUM_DIGITS; k++) {
-                    __loop_tripcount(NUM_DIGITS); // 16 iterations
+                    __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
                     g_B[k] = g_base[k];
                 }
 
@@ -333,7 +334,7 @@ __attribute__((noinline)) int main(void) {
         // Save block to cyphertext
         if (g_cyphertext_len + NUM_DIGITS <= CYPHERTEXT_SIZE) {
             for (i = 0; i < NUM_DIGITS; ++i) {
-                __loop_tripcount(NUM_DIGITS); // 16 iterations
+                __loop_tripcount(NUM_DIGITS); // NUM_DIGITS iterations
                 g_cyphertext[g_cyphertext_len++] = g_block[i];
             }
         }
