@@ -173,7 +173,7 @@ def run_milp_benchmarks(
                 cpu_freq=cpu_freq,
                 opt_level=3,
                 clang_opt_level=3,
-                milp_gap=0.05,
+                milp_gap=0.0,
                 milp_log_file="",
             )
 

@@ -163,7 +163,12 @@ def _resolve_algorithm_config(
     help="CPU frequency in MHz (default: 1).",
 )
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
-@click.option("--milp-gap", type=float, default=0.05, help="MIP optimality gap (default: 0.05 = 5%).")
+@click.option(
+    "--milp-gap",
+    type=float,
+    default=0.0,
+    help="MIP optimality gap (default: 0.0 = proven optimal).",
+)
 @click.option("--milp-log-file", type=click.Path(), default="", help="Gurobi log file path.")
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context

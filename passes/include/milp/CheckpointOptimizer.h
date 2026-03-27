@@ -115,7 +115,7 @@ class CheckpointOptimizer {
     bool solved_ = false;
     bool acceptFeasible_ = false;
     double timeLimit_ = 600.0;
-    double mipGap_ = 0.05;
+    double mipGap_ = 0.0;
     std::string logFile_;
 
     using BlockVarKey = std::pair<NodeId, llvm::Value *>;

@@ -39,8 +39,8 @@ cl::opt<double> MILPTimeLimitOpt("milp-time-limit",
                                  cl::value_desc("seconds"), cl::init(600.0));
 
 cl::opt<double> MILPGapOpt("milp-gap",
-                           cl::desc("MIP optimality gap tolerance (default: 0.05 = 5%)"),
-                           cl::value_desc("fraction"), cl::init(0.05));
+                           cl::desc("MIP optimality gap tolerance (default: 0.0 = proven optimal)"),
+                           cl::value_desc("fraction"), cl::init(0.0));
 
 cl::opt<std::string> MILPLogFileOpt("milp-log-file",
                                     cl::desc("Gurobi log file path (empty = no logging)"),
