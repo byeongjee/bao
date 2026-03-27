@@ -21,6 +21,17 @@ static std::string loopOriginTag(llvm::Loop *L, llvm::StringRef reason) {
     return ("loop-" + reason + "[" + headerName + "]").str();
 }
 
+static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAlloc,
+                                         SchematicSolution &solution, const CFGAnalysis &cfg,
+                                         const SchematicStateAnalysis &state,
+                                         const SchematicParams &params, SchematicGraph &graph,
+                                         SchematicBlock *headerBlock, SchematicBlock *latchBlock,
+                                         SchematicBlock *startSynth, SchematicBlock *endSynth);
+
+static std::map<llvm::Value *, VariableAccessEstimate>
+estimateLoopVariableAccess(const LoadedLoopTrace &loopTrace, const SchematicStateAnalysis &state,
+                           uint64_t numIterations);
+
 namespace {
 
 struct LoopBoundaryBlocks {
@@ -300,6 +311,90 @@ static void applyLoopIterationAdjustment(llvm::Loop *L, unsigned maxTripCount,
         meta.E_to_leave += adjustment;
         meta.E_left -= adjustment;
     }
+}
+
+static void refineLoopBudgetWithConvergence(
+    llvm::Loop *L, const LoadedLoopTrace &matchedLoopTrace, uint64_t maxTripCount,
+    const LoopBoundaryBlocks &blocks, SchematicSolution &solution, const CFGAnalysis &cfg,
+    const SchematicStateAnalysis &state, const SchematicParams &params, llvm::LoopInfo &LI,
+    VMAddressTracker *tracker, SchematicGraph &graph, LoopIterationBudget &budget,
+    RegionAllocation &bodyAlloc, LoopCheckpointDecision &decision) {
+    bool hasEnabledCheckpoints = hasEnabledCheckpointsInLoop(solution, L);
+    decision.hadEnabledCheckpoints = hasEnabledCheckpoints;
+    if (hasEnabledCheckpoints || budget.numIterations <= 1)
+        return;
+
+    decision.convergenceApplied = true;
+    std::vector<const RegionAllocation *> loopMemoryAllocations =
+        collectLoopMemoryAllocations(L, solution, graph);
+
+    unsigned previousNumIterations = 0;
+    for (unsigned iter = 0; iter < 15; ++iter) {
+        decision.convergenceIterations = iter + 1;
+        if (previousNumIterations != 0 && budget.numIterations >= previousNumIterations)
+            break;
+        previousNumIterations = budget.numIterations;
+
+        unsigned scaledIterations = static_cast<unsigned>(
+            std::min(static_cast<uint64_t>(budget.numIterations), maxTripCount));
+        auto variableAccesses =
+            estimateLoopVariableAccess(matchedLoopTrace, state, scaledIterations);
+
+        auto [newAlloc, _gain] = chooseMemoryAllocation(variableAccesses, state, params, nullptr,
+                                                        nullptr, loopMemoryAllocations, tracker);
+        bodyAlloc = newAlloc;
+
+        recomputeLoopBodyEnergyOnCFG(L, bodyAlloc, solution, cfg, state, params, graph,
+                                     blocks.headerBlock, blocks.latchBlock, blocks.startSynth,
+                                     blocks.endSynth);
+
+        budget = readLoopIterationBudget(blocks, params, solution);
+        decision.E_loop = budget.ELoop;
+        decision.bodyAllocation = bodyAlloc;
+
+        if (budget.ELoop <= 0.0)
+            break;
+
+        // Convergence uses startEToLeave rather than endEToLeave, matching the
+        // Python reference loop-budget update.
+        budget.availableEnergy = params.capacity - budget.startEToLeave;
+        if (budget.availableEnergy <= 0.0)
+            break;
+        budget.rawNumIterations =
+            static_cast<int>(std::floor(budget.availableEnergy / budget.ELoop)) - 1;
+        budget.numIterations = static_cast<unsigned>(std::max(budget.rawNumIterations, 0));
+    }
+}
+
+static void applyLoopCheckpointPolicy(llvm::Loop *L, unsigned maxTripCount,
+                                      const LoopBoundaryBlocks &blocks,
+                                      const LoopIterationBudget &budget,
+                                      SchematicSolution &solution,
+                                      LoopCheckpointDecision &decision) {
+    if (budget.numIterations > maxTripCount) {
+        // Entire loop fits — no checkpoint needed, but use maxTripCount for
+        // energy scaling so propagation accounts for all iterations.
+        decision.numIterationsPerCharge = maxTripCount;
+        decision.loopFitsEntirely = true;
+        if (blocks.latchBlock)
+            disableCheckpoint(solution, CFGEdge{blocks.latchBlock, blocks.headerBlock});
+        return;
+    }
+
+    if (budget.numIterations < 3) {
+        // Too few iterations per charge — checkpoint every iteration.
+        decision.mandatoryBackEdge = true;
+        decision.numIterationsPerCharge = 1;
+        if (blocks.latchBlock)
+            enableCheckpoint(solution, CFGEdge{blocks.latchBlock, blocks.headerBlock},
+                             loopOriginTag(L, "mandatory-backedge"));
+        return;
+    }
+
+    // Conditional checkpoint every numIt iterations.
+    decision.numIterationsPerCharge = budget.numIterations;
+    if (blocks.latchBlock)
+        setLoopLatchCheckpoint(solution, CFGEdge{blocks.latchBlock, blocks.headerBlock});
 }
 
 } // namespace
@@ -718,58 +813,10 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     decision.initialRawNumIterations = budget.rawNumIterations;
 
-    // Step 8: Convergence loop (reference lines 574-617): if loop has only disabled
-    // checkpoints and numIt > 1, re-estimate variable accesses scaled by
-    // min(numIt, maxTripCount) iterations and re-compute allocation until
-    // numIt converges.
-    bool hasEnabledCheckpoints = hasEnabledCheckpointsInLoop(solution, L);
-    decision.hadEnabledCheckpoints = hasEnabledCheckpoints;
-
-    if (!hasEnabledCheckpoints && budget.numIterations > 1) {
-        decision.convergenceApplied = true;
-        std::vector<const RegionAllocation *> loopMemoryAllocations =
-            collectLoopMemoryAllocations(L, solution, graph_);
-
-        unsigned oldNumIt = 0;
-        for (unsigned iter = 0; iter < 15; ++iter) {
-            decision.convergenceIterations = iter + 1;
-            if (oldNumIt != 0 && budget.numIterations >= oldNumIt)
-                break;
-            oldNumIt = budget.numIterations;
-
-            unsigned scaledIters = static_cast<unsigned>(
-                std::min(static_cast<uint64_t>(budget.numIterations), maxTripCount));
-
-            auto variableAccesses =
-                estimateLoopVariableAccess(*matchedLoopTrace, state_, scaledIters);
-
-            // Reference: schematic.py:589-590 — pass None, None for start/end alloc,
-            // and memory_allocations collected before analysis.
-            auto [newAlloc, _gain] =
-                chooseMemoryAllocation(variableAccesses, state_, params_, nullptr, nullptr,
-                                       loopMemoryAllocations, tracker_);
-            bodyAlloc = newAlloc;
-
-            // Recompute loop energy over the real LoopBodyNoBackedge CFG.
-            recomputeLoopBodyEnergyOnCFG(L, bodyAlloc, solution, cfg_, state_, params_, graph_,
-                                         blocks.headerBlock, blocks.latchBlock, blocks.startSynth,
-                                         blocks.endSynth);
-
-            budget = readLoopIterationBudget(blocks, params_, solution);
-            decision.E_loop = budget.ELoop;
-            decision.bodyAllocation = bodyAlloc;
-
-            if (budget.ELoop <= 0.0)
-                break;
-
-            budget.availableEnergy = params_.capacity - budget.startEToLeave;
-            if (budget.availableEnergy <= 0.0)
-                break;
-            budget.rawNumIterations =
-                static_cast<int>(std::floor(budget.availableEnergy / budget.ELoop)) - 1;
-            budget.numIterations = static_cast<unsigned>(std::max(budget.rawNumIterations, 0));
-        }
-    }
+    // Step 8: Convergence loop (reference lines 574-617).
+    refineLoopBudgetWithConvergence(L, *matchedLoopTrace, maxTripCount, blocks, solution, cfg_,
+                                    state_, params_, LI_, tracker_, graph_, budget, bodyAlloc,
+                                    decision);
 
     decision.finalStartEToLeave = budget.startEToLeave;
     decision.finalEndEToLeave = budget.endEToLeave;
@@ -779,26 +826,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // Step 9: Decide checkpoint type.
     PLOGI << "[LoopAnalyzer] loop=" << blocks.header->getName() << " numIt=" << budget.numIterations
           << " maxTripCount=" << maxTripCount << " availableEnergy=" << budget.availableEnergy;
-    if (budget.numIterations > maxTripCount) {
-        // Entire loop fits — no checkpoint needed, but use maxTripCount for
-        // energy scaling so propagation accounts for all iterations.
-        decision.numIterationsPerCharge = static_cast<unsigned>(maxTripCount);
-        decision.loopFitsEntirely = true;
-        if (blocks.latchBlock)
-            disableCheckpoint(solution, CFGEdge{blocks.latchBlock, blocks.headerBlock});
-    } else if (budget.numIterations < 3) {
-        // Too few iterations per charge — checkpoint every iteration.
-        decision.mandatoryBackEdge = true;
-        decision.numIterationsPerCharge = 1;
-        if (blocks.latchBlock)
-            enableCheckpoint(solution, CFGEdge{blocks.latchBlock, blocks.headerBlock},
-                             loopOriginTag(L, "mandatory-backedge"));
-    } else {
-        // Conditional checkpoint every numIt iterations.
-        decision.numIterationsPerCharge = budget.numIterations;
-        if (blocks.latchBlock)
-            setLoopLatchCheckpoint(solution, CFGEdge{blocks.latchBlock, blocks.headerBlock});
-    }
+    applyLoopCheckpointPolicy(L, static_cast<unsigned>(maxTripCount), blocks, budget, solution,
+                              decision);
 
     solution.loopDecisions[blocks.headerBlock] = decision;
 
