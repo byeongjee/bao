@@ -8,6 +8,7 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/Support/ErrorHandling.h"
 
 #include <cmath>
 #include <deque>
@@ -140,6 +141,114 @@ collectLoopBodyPaths(const LoadedLoopTrace &loopTrace) {
             bodyPaths.push_back(ep.blocks);
     }
     return bodyPaths;
+}
+
+static std::string getBlockName(const SchematicBlock *block) {
+    if (const llvm::BasicBlock *BB = block->getLLVMBlock())
+        return BB->getName().str();
+    return block->getName().str();
+}
+
+static bool tracedLoopContainsBlock(const LoadedLoopTrace &loopTrace, SchematicBlock *block) {
+    for (SchematicBlock *member : loopTrace.members) {
+        if (member == block)
+            return true;
+    }
+    return false;
+}
+
+static bool blockCoveredByNestedTracedLoop(const LoadedLoopTrace &parentLoopTrace,
+                                           SchematicBlock *block,
+                                           const std::vector<LoadedLoopTrace> &loadedLoopTraces) {
+    if (!parentLoopTrace.loop)
+        return false;
+
+    for (const auto &candidate : loadedLoopTraces) {
+        if (!candidate.loop || candidate.loop == parentLoopTrace.loop)
+            continue;
+        if (!parentLoopTrace.loop->contains(candidate.loop))
+            continue;
+        if (tracedLoopContainsBlock(candidate, block))
+            return true;
+    }
+    return false;
+}
+
+static std::vector<std::string>
+collectUnexplainedUncoveredLoopMembers(const LoadedLoopTrace &loopTrace,
+                                       const std::vector<LoadedLoopTrace> &loadedLoopTraces) {
+    std::set<SchematicBlock *> covered;
+    for (const auto &ep : loopTrace.iterationPaths) {
+        for (SchematicBlock *block : ep.blocks)
+            covered.insert(block);
+    }
+
+    std::vector<std::string> uncovered;
+    for (SchematicBlock *member : loopTrace.members) {
+        if (covered.count(member))
+            continue;
+        if (blockCoveredByNestedTracedLoop(loopTrace, member, loadedLoopTraces))
+            continue;
+        uncovered.push_back(getBlockName(member));
+    }
+    return uncovered;
+}
+
+static std::string joinNames(const std::vector<std::string> &names) {
+    std::string joined;
+    for (size_t i = 0; i < names.size(); ++i) {
+        if (i != 0)
+            joined += ", ";
+        joined += names[i];
+    }
+    return joined;
+}
+
+static std::vector<std::string>
+collectLoopTraceCoverageErrors(llvm::LoopInfo &LI, SchematicGraph &graph,
+                               const std::vector<LoadedLoopTrace> &loadedLoopTraces) {
+    std::vector<std::string> errors;
+    for (const auto &loopTrace : loadedLoopTraces) {
+        std::vector<std::string> uncovered =
+            collectUnexplainedUncoveredLoopMembers(loopTrace, loadedLoopTraces);
+        if (uncovered.empty())
+            continue;
+        errors.push_back("loop trace for header '" + getBlockName(loopTrace.header) +
+                         "' does not cover loop members without traced subloop coverage: " +
+                         joinNames(uncovered));
+    }
+
+    for (llvm::Loop *L : LI.getLoopsInPreorder()) {
+        SchematicBlock *headerBlock = graph.getOrCreate(L->getHeader());
+        if (findLoadedLoopTraceForHeader(headerBlock, loadedLoopTraces))
+            continue;
+
+        llvm::Loop *tracedAncestor = nullptr;
+        for (llvm::Loop *parent = L->getParentLoop(); parent; parent = parent->getParentLoop()) {
+            SchematicBlock *parentHeaderBlock = graph.getOrCreate(parent->getHeader());
+            if (findLoadedLoopTraceForHeader(parentHeaderBlock, loadedLoopTraces)) {
+                tracedAncestor = parent;
+                break;
+            }
+        }
+        if (!tracedAncestor)
+            continue;
+
+        errors.push_back("loop at '" + L->getHeader()->getName().str() +
+                         "' has no dedicated loop trace despite executing inside traced loop '" +
+                         tracedAncestor->getHeader()->getName().str() + "'");
+    }
+    return errors;
+}
+
+static std::string joinLines(const std::vector<std::string> &lines) {
+    std::string joined;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (i != 0)
+            joined += "\n";
+        joined += lines[i];
+    }
+    return joined;
 }
 
 static bool analyzeLoopBodyPaths(const std::vector<std::vector<SchematicBlock *>> &bodyPaths,
@@ -878,6 +987,14 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 }
 
 bool LoopAnalyzer::analyzeLoops(SchematicSolution &solution) {
+    std::vector<std::string> coverageErrors =
+        collectLoopTraceCoverageErrors(LI_, graph_, loadedLoopTraces_);
+    if (!coverageErrors.empty()) {
+        std::string message =
+            "SCHEMATIC: incomplete loop trace coverage\n" + joinLines(coverageErrors);
+        llvm::report_fatal_error(llvm::StringRef(message));
+    }
+
     // Process only loops that have trace data, sorted by depth (innermost first).
     // Reference: schematic.py:675-684 — iterates over f_traces.loop_traces.values()
     // sorted by depth descending, NOT over all loops in the IR.

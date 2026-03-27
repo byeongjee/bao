@@ -19,6 +19,7 @@ from . import common
 from .common import (
     MATH_LINK_FLAGS,
     annotate_tripcounts,
+    canonicalize_ir_for_native_profiling,
     compile_to_ir,
     compile_to_object,
     inline_functions,
@@ -244,9 +245,11 @@ def _collect_or_reuse_trace(
     )
 
     # Strip MSP430 target info for native compilation
+    native_prep_ll = tmp / "trace_inst_native_prep.ll"
     native_ll = tmp / "trace_inst_native.ll"
     stubs_c = tmp / "debug_stubs.c"
-    strip_ir_for_native(trace_inst_ll, native_ll)
+    canonicalize_ir_for_native_profiling(tc, trace_inst_ll, native_prep_ll)
+    strip_ir_for_native(native_prep_ll, native_ll)
     write_native_stubs(stubs_c)
 
     # Compile native trace binary

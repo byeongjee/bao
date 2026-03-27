@@ -289,6 +289,30 @@ def strip_ir_for_native(input_ll: Path, output_ll: Path) -> None:
     output_ll.write_text("".join(lines))
 
 
+def canonicalize_ir_for_native_profiling(
+    tc: Toolchain,
+    input_ll: Path,
+    output_ll: Path,
+) -> StepResult:
+    """Canonicalize IR before native profiling compilation.
+
+    Native profiling recompiles MSP430-targeted IR for the host.  Some O0 traces
+    keep aggregate copies and field accesses whose semantics depend on the MSP430
+    datalayout.  A small scalarization pipeline rewrites those accesses while the
+    original target datalayout is still present, which keeps later host execution
+    semantically aligned with the profiled target code.
+    """
+    return run(
+        [
+            tc.opt,
+            "-passes=sroa,instcombine,gvn",
+            "-S", str(input_ll),
+            "-o", str(output_ll),
+        ],
+        step_name="native-profile-canonicalize",
+    )
+
+
 def write_native_stubs(stubs_c: Path) -> None:
     """Write C stub file for MSP430 hardware registers used by benchmark.h."""
     stubs_c.write_text(_NATIVE_STUBS_C)
