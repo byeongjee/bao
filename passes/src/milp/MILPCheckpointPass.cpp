@@ -40,6 +40,7 @@ namespace checkpoint {
 
 PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &AM) {
     const auto totalStart = std::chrono::steady_clock::now();
+    checkpoint::initLogging();
 
     // Skip benchmark infrastructure functions — these are timing/debug helpers
     // that should not be checkpointed (checkpointing a busy-wait delay loop
