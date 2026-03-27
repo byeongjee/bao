@@ -13,6 +13,7 @@ import json as _json
 import logging
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 _FLASH_TIMEOUT = 30              # seconds
 _AFTER_TRIGGER_SECONDS = 1.0     # seconds to record after falling edge
+_POST_CAPTURE_SETTLE_SECONDS = 2.0
 
 
 @dataclass
@@ -252,6 +254,7 @@ def run_benchmark_matrix(
                             )
 
                             if device_debug and nvm_symbols:
+                                time.sleep(_POST_CAPTURE_SETTLE_SECONDS)
                                 nvm_dict = read_nvm(
                                     tc, elf, _FLASH_TIMEOUT, nvm_symbols,
                                 )

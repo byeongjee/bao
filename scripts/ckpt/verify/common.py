@@ -8,6 +8,7 @@ both to hardware, read NVM results, and compare.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _FLASH_TIMEOUT = 30
 _AFTER_TRIGGER_SECONDS = 1.0
+_POST_CAPTURE_SETTLE_SECONDS = 2.0
 
 # Only need result + done from the baseline (no counter symbols).
 _BASELINE_NVM_SYMBOLS = [
@@ -208,6 +210,10 @@ def _verify_one(
 
         try:
             saleae_run(baseline_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
+            # The stop pulse fires before debug_exit() stores the result and halts.
+            # Reconnecting with mspdebug too early resets the target and can restart
+            # the benchmark before __nvm_done/__nvm_result are final.
+            time.sleep(_POST_CAPTURE_SETTLE_SECONDS)
             baseline_nvm = read_nvm(tc, baseline_elf, _FLASH_TIMEOUT, _BASELINE_NVM_SYMBOLS)
         except (DeviceError, OSError) as exc:
             msg = f"Baseline flash/read failed: {exc}"
@@ -271,6 +277,7 @@ def _verify_one(
         # -- D: Flash + read instrumented --
         try:
             saleae_run(inst_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
+            time.sleep(_POST_CAPTURE_SETTLE_SECONDS)
             inst_nvm = read_nvm(tc, inst_elf, _FLASH_TIMEOUT, nvm_symbols)
         except (DeviceError, OSError) as exc:
             msg = f"{algorithm} flash/read failed: {exc}"
