@@ -17,6 +17,7 @@ from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from . import common
 from .common import (
+    MATH_LINK_FLAGS,
     annotate_tripcounts,
     compile_to_ir,
     compile_to_object,
@@ -257,6 +258,7 @@ def _collect_or_reuse_trace(
             str(native_ll),
             str(env.schematic_trace_runtime),
             str(stubs_c),
+            *MATH_LINK_FLAGS,
             "-o", str(trace_bin),
         ],
         step_name="trace-compile",

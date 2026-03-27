@@ -16,6 +16,8 @@ from ..env import ProjectEnv
 from ..runner import CompilationError, StepResult, run
 from ..toolchain import Toolchain
 
+MATH_LINK_FLAGS = ["-lm"]
+
 
 # ---------------------------------------------------------------------------
 # C -> LLVM IR
@@ -320,6 +322,7 @@ def collect_bb_freq(
         str(native_ll),
         str(env.bb_freq_runtime),
         str(stubs_c),
+        *MATH_LINK_FLAGS,
         "-o", str(freq_bin),
     ]
     run(compile_cmd, step_name="bb-freq-compile")
@@ -408,6 +411,7 @@ def assemble_and_link(
     ]
     cmd += [str(o) for o in objects]
     cmd += extra_flags or []
+    cmd += MATH_LINK_FLAGS
     cmd += ["-o", str(output_elf)]
 
     return run(cmd, step_name="link")
