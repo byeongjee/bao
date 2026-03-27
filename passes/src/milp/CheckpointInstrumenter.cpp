@@ -1,6 +1,7 @@
 #include "milp/CheckpointInstrumenter.h"
 #include "common/BlockUtils.h"
 #include "common/Logger.h"
+#include "common/ValueOrder.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/IRBuilder.h"
@@ -10,7 +11,6 @@
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 
 #include <cassert>
-#include <set>
 #include <vector>
 
 namespace checkpoint {
@@ -89,13 +89,14 @@ void CheckpointInstrumenter::createShadowGlobals(llvm::Function &F, const MILPSo
     shadowMap_.clear();
 
     // Collect candidate GVs that have placeInVm=true for at least one node.
-    std::set<llvm::GlobalVariable *> vmPlacedGVs;
+    std::vector<llvm::GlobalVariable *> vmPlacedGVs;
     for (const auto &[key, placed] : solution.m) {
         if (!placed)
             continue;
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(key.second))
-            vmPlacedGVs.insert(GV);
+            vmPlacedGVs.push_back(GV);
     }
+    stableSortAndUniqueValues(vmPlacedGVs);
 
     for (llvm::GlobalVariable *GV : vmPlacedGVs) {
         auto *shadow = new llvm::GlobalVariable(
@@ -253,17 +254,18 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
         if (!isEntryNode) {
             // --- Commit phase (all in BB, before boundary) ---
 
-            std::set<llvm::Value *> commitVars;
+            std::vector<llvm::Value *> commitVars;
             for (NodeId n : nodeSet)
                 for (llvm::Value *V : solution.getSaveVarsAt(n))
-                    commitVars.insert(V);
+                    commitVars.push_back(V);
 
             // Ineligible live-in values must also be committed so that the
             // restore loads after the boundary read correct values.  The MILP
             // solver only tracks eligible (global) objects in its save set;
             // ineligible SSA values and allocas are handled here.
             for (llvm::Value *V : state.getIneligLiveIn(&BB))
-                commitVars.insert(V);
+                commitVars.push_back(V);
+            stableSortAndUniqueValues(commitVars);
 
             for (llvm::Value *V : commitVars) {
                 unsigned sizeBytes = state.getVarSizeBytes(V);
@@ -335,13 +337,14 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
         // The builder is now positioned in the restore block.
 
         // Eligible restores (needRestore).
-        std::set<llvm::GlobalVariable *> restoreGVs;
+        std::vector<llvm::GlobalVariable *> restoreGVs;
         for (NodeId n : nodeSet) {
             for (llvm::Value *V : solution.getRestoreVarsAt(n)) {
                 if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V))
-                    restoreGVs.insert(GV);
+                    restoreGVs.push_back(GV);
             }
         }
+        stableSortAndUniqueValues(restoreGVs);
 
         for (llvm::GlobalVariable *GV : restoreGVs) {
             unsigned sizeBytes = state.getVarSizeBytes(GV);
@@ -361,7 +364,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
 
         // Ineligible restores: unconditional at every region start where
         // the object is live-in.
-        for (llvm::Value *V : state.getIneligLiveIn(&BB)) {
+        std::vector<llvm::Value *> orderedIneligLiveIn(state.getIneligLiveIn(&BB).begin(),
+                                                       state.getIneligLiveIn(&BB).end());
+        stableSortAndUniqueValues(orderedIneligLiveIn);
+        for (llvm::Value *V : orderedIneligLiveIn) {
             auto backupIt = nvmBackupMap_.find(V);
             if (backupIt == nvmBackupMap_.end())
                 continue;
@@ -394,7 +400,14 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
     //   - V itself in its def block (original definition)
     //   - restored value in each BB_bottom (after boundary)
     // SSAUpdater selects the correct reaching definition for each use.
-    for (auto &[origVal, defs] : ssaRestoreDefs) {
+    std::vector<llvm::Value *> orderedSSAValues;
+    orderedSSAValues.reserve(ssaRestoreDefs.size());
+    for (const auto &[origVal, defs] : ssaRestoreDefs)
+        orderedSSAValues.push_back(origVal);
+    stableSortAndUniqueValues(orderedSSAValues);
+
+    for (llvm::Value *origVal : orderedSSAValues) {
+        auto &defs = ssaRestoreDefs[origVal];
         llvm::SSAUpdater updater;
         updater.Initialize(origVal->getType(), origVal->getName());
 

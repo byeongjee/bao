@@ -50,6 +50,28 @@ static std::string makeVarName(const ICFGView &cfg, const char *prefix, NodeId b
     return std::string(prefix) + "_" + nodeToken(cfg, block) + "_" + valueToken(v);
 }
 
+template <typename T> static std::vector<T *> collectSortedValues(const std::vector<T *> &values) {
+    std::vector<T *> ordered(values.begin(), values.end());
+    stableSortAndUniqueValues(ordered);
+    return ordered;
+}
+
+template <typename T> static std::vector<T *> collectSortedValues(const std::set<T *> &values) {
+    std::vector<T *> ordered(values.begin(), values.end());
+    stableSortAndUniqueValues(ordered);
+    return ordered;
+}
+
+static std::vector<llvm::Value *> collectSortedLiveInValues(const IStateView &state, NodeId block) {
+    std::vector<llvm::Value *> ordered;
+    for (llvm::GlobalVariable *GV : state.getEligLiveIn(block))
+        ordered.push_back(GV);
+    for (llvm::Value *V : state.getIneligLiveIn(block))
+        ordered.push_back(V);
+    stableSortAndUniqueValues(ordered);
+    return ordered;
+}
+
 static std::map<NodeId, std::vector<NodeId>> buildPredecessorMap(const ICFGView &cfg) {
     std::map<NodeId, std::vector<NodeId>> preds;
     for (NodeId block : cfg.getBlocks()) {
@@ -115,6 +137,9 @@ CheckpointOptimizer::CheckpointOptimizer(const MILPInput &input)
     : cfg_(input.cfg), state_(input.state), energy_(input.energy),
       params_(input.energy.getParams()), env_(), model_(env_) {
     model_.set(GRB_IntParam_OutputFlag, 0);
+    model_.set(GRB_IntParam_Threads, 1);
+    model_.set(GRB_IntParam_Seed, 0);
+    model_.set(GRB_IntParam_ConcurrentMIP, 1);
     model_.set(GRB_IntParam_MIPFocus, 1);
     model_.set(GRB_IntParam_Presolve, 2);
     model_.set(GRB_IntParam_Cuts, 2);
@@ -224,16 +249,20 @@ bool CheckpointOptimizer::solve() {
 void CheckpointOptimizer::buildModel() {
     predecessors_ = buildPredecessorMap(cfg_);
     auto succs = buildSuccessorMap(cfg_);
+    orderedVmObjs_ = collectSortedValues(state_.getVMObjs());
 
     // Build combined list of all tracked variables.
-    std::vector<llvm::Value *> allTracked;
-    for (llvm::GlobalVariable *GV : state_.getVMObjs())
-        allTracked.push_back(static_cast<llvm::Value *>(GV));
-    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
-                      state_.getIneligibleObjs().end());
+    orderedTrackedValues_.clear();
+    for (llvm::GlobalVariable *GV : orderedVmObjs_)
+        orderedTrackedValues_.push_back(static_cast<llvm::Value *>(GV));
+    orderedTrackedValues_.insert(orderedTrackedValues_.end(), state_.getIneligibleObjs().begin(),
+                                 state_.getIneligibleObjs().end());
+    stableSortAndUniqueValues(orderedTrackedValues_);
 
     // Precompute Reach(v) for scoping d[b,v] variables.
-    reachableDefs_ = computeReachableDefs(cfg_, state_, allTracked, succs);
+    reachableDefs_ = computeReachableDefs(cfg_, state_, orderedTrackedValues_, succs);
+    rHatKeys_.clear();
+    sKeys_.clear();
 
     addVariables();
     addObjective();
@@ -250,17 +279,10 @@ void CheckpointOptimizer::addVariables() {
         r_[block] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, "r_" + nodeToken(cfg_, block));
     }
 
-    // Build combined list of all tracked variables as Value*.
-    std::vector<llvm::Value *> allTracked;
-    for (llvm::GlobalVariable *GV : state_.getVMObjs())
-        allTracked.push_back(static_cast<llvm::Value *>(GV));
-    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
-                      state_.getIneligibleObjs().end());
-
     // m_{b,v} for eligible variables only (ineligibles have m=1 constant).
     // d_{b,v} only for (block, var) where b ∈ Reach(v).
     for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::Value *V : allTracked) {
+        for (llvm::Value *V : orderedTrackedValues_) {
             BlockVarKey key = std::make_pair(block, V);
             if (!state_.isIneligible(V)) {
                 m_[key] =
@@ -277,12 +299,13 @@ void CheckpointOptimizer::addVariables() {
     // Ineligible+live-in: rHat = r[b], substituted directly in buildEStart.
     // Not live-in: rHat = 0, no variable needed.
     for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        for (llvm::GlobalVariable *GV : collectSortedValues(state_.getEligLiveIn(block))) {
             if (state_.getEligLiveIn(block).count(GV) == 0)
                 continue;
             BlockVarKey key = std::make_pair(block, static_cast<llvm::Value *>(GV));
             rHat_[key] =
                 model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "rHat", block, GV));
+            rHatKeys_.push_back(key);
         }
     }
 
@@ -291,13 +314,7 @@ void CheckpointOptimizer::addVariables() {
     for (NodeId block : cfg_.getBlocks()) {
         if (block == entry)
             continue;
-        // Union of eligible and ineligible live-ins.
-        std::set<llvm::Value *> liveIn;
-        for (llvm::GlobalVariable *GV : state_.getEligLiveIn(block))
-            liveIn.insert(static_cast<llvm::Value *>(GV));
-        for (llvm::Value *V : state_.getIneligLiveIn(block))
-            liveIn.insert(V);
-        for (llvm::Value *V : liveIn) {
+        for (llvm::Value *V : collectSortedLiveInValues(state_, block)) {
             // Skip if no predecessor is in Reach(v) (d[pred,v] = 0 for all preds).
             bool hasDirtyPred = false;
             for (NodeId pred : predecessors_[block]) {
@@ -311,6 +328,7 @@ void CheckpointOptimizer::addVariables() {
             BlockVarKey key = std::make_pair(block, V);
             s_[key] =
                 model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "s", block, V));
+            sKeys_.push_back(key);
         }
     }
 
@@ -330,7 +348,7 @@ void CheckpointOptimizer::addObjective() {
     // Term 1: placement penalty (eligible only).
     for (NodeId block : cfg_.getBlocks()) {
         double fEntry = energy_.getFEntry(block);
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        for (llvm::GlobalVariable *GV : orderedVmObjs_) {
             double eNvm = energy_.getENvm(block, GV);
             if (eNvm == 0.0)
                 continue;
@@ -389,7 +407,9 @@ void CheckpointOptimizer::constrainIneligiblePlacement() {
 void CheckpointOptimizer::constrainVMCapacity() {
     // Compute fixed VM usage from ineligible variables (m=1 always).
     double ineligibleUsage = 0.0;
-    for (llvm::Value *V : state_.getIneligibleObjs()) {
+    for (llvm::Value *V : orderedTrackedValues_) {
+        if (!state_.isIneligible(V))
+            continue;
         if (!llvm::isa<llvm::GlobalVariable>(V) && !llvm::isa<llvm::AllocaInst>(V))
             continue;
         int sizeBytes = state_.getVarSizeBytes(V);
@@ -400,7 +420,7 @@ void CheckpointOptimizer::constrainVMCapacity() {
 
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr vmUsage = 0;
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        for (llvm::GlobalVariable *GV : orderedVmObjs_) {
             int sizeBytes = state_.getVarSizeBytes(GV);
             if (sizeBytes <= 0)
                 continue;
@@ -415,9 +435,10 @@ void CheckpointOptimizer::constrainVMCapacity() {
 // McCormick linearization (exact when r,m are binary):
 //   rHat <= r,  rHat <= m,  rHat >= r + m - 1
 void CheckpointOptimizer::constrainNeedRestoreLinearization() {
-    for (const auto &[key, rHatVar] : rHat_) {
+    for (const BlockVarKey &key : rHatKeys_) {
         NodeId block = key.first;
         llvm::Value *V = key.second;
+        GRBVar rHatVar = rHat_.at(key);
         std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
         model_.addConstr(rHatVar <= r_[block], "C3_rHat_le_r_" + suffix);
         model_.addConstr(rHatVar <= m_[key], "C3_rHat_le_m_" + suffix);
@@ -430,7 +451,7 @@ void CheckpointOptimizer::constrainNeedRestoreLinearization() {
 void CheckpointOptimizer::constrainPlacementPropagation() {
     unsigned idx = 0;
     for (const auto &[pred, succ] : cfg_.getEdges()) {
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        for (llvm::GlobalVariable *GV : orderedVmObjs_) {
             BlockVarKey predKey = std::make_pair(pred, static_cast<llvm::Value *>(GV));
             BlockVarKey succKey = std::make_pair(succ, static_cast<llvm::Value *>(GV));
             model_.addConstr(m_[succKey] <= m_[predKey] + r_[succ],
@@ -450,7 +471,7 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
         const auto &preds = predecessors_[block];
         if (preds.size() <= 1)
             continue;
-        for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+        for (llvm::GlobalVariable *GV : orderedVmObjs_) {
             auto *V = static_cast<llvm::Value *>(GV);
             // Constrain all predecessors to match the first predecessor's placement.
             NodeId firstPred = preds[0];
@@ -471,14 +492,8 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
 // C6:  d[b,v] <= D_{b,v} - r[b] + 1                   (∀ b ∈ Reach(v), v)
 // d[b,v] is not created for b ∉ Reach(v) (provably 0).
 void CheckpointOptimizer::constrainDirtyPropagation() {
-    std::vector<llvm::Value *> allTracked;
-    for (llvm::GlobalVariable *GV : state_.getVMObjs())
-        allTracked.push_back(static_cast<llvm::Value *>(GV));
-    allTracked.insert(allTracked.end(), state_.getIneligibleObjs().begin(),
-                      state_.getIneligibleObjs().end());
-
     for (NodeId block : cfg_.getBlocks()) {
-        for (llvm::Value *V : allTracked) {
+        for (llvm::Value *V : orderedTrackedValues_) {
             BlockVarKey key = std::make_pair(block, V);
             auto dIt = d_.find(key);
             if (dIt == d_.end())
@@ -516,7 +531,7 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
     // C5: d[succ,v] >= d[pred,v] - r[succ]  (∀ edge, v where both in Reach(v))
     unsigned idx = 0;
     for (const auto &[pred, succ] : cfg_.getEdges()) {
-        for (llvm::Value *V : allTracked) {
+        for (llvm::Value *V : orderedTrackedValues_) {
             auto predIt = d_.find(std::make_pair(pred, V));
             auto succIt = d_.find(std::make_pair(succ, V));
             if (predIt == d_.end() || succIt == d_.end())
@@ -535,9 +550,10 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
 // C8': s[b,v] <= Σ_pred m[pred,v]                           (∀ b, v)  [LP tightening]
 void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
     // LP tightening for s variables.
-    for (const auto &[key, sVar] : s_) {
+    for (const BlockVarKey &key : sKeys_) {
         NodeId block = key.first;
         llvm::Value *V = key.second;
+        GRBVar sVar = s_.at(key);
         std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
 
         // C8': s[b,v] <= r[b]
@@ -567,8 +583,8 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
     // C8: s[succ,v] >= d[pred,v] + m[pred,v] + r[succ] - 2  (∀ edge, v where s exists)
     // Build per-block save variable lookup for efficiency.
     std::map<NodeId, std::vector<std::pair<llvm::Value *, GRBVar>>> saveByBlock;
-    for (const auto &[key, sVar] : s_) {
-        saveByBlock[key.first].emplace_back(key.second, sVar);
+    for (const BlockVarKey &key : sKeys_) {
+        saveByBlock[key.first].emplace_back(key.second, s_.at(key));
     }
 
     unsigned idx = 0;
@@ -649,7 +665,7 @@ void CheckpointOptimizer::constrainEnergyWithinCapacity() {
 
 GRBLinExpr CheckpointOptimizer::buildEBlk(NodeId block) {
     GRBLinExpr expr = energy_.getEBase(block);
-    for (llvm::GlobalVariable *GV : state_.getVMObjs()) {
+    for (llvm::GlobalVariable *GV : orderedVmObjs_) {
         double eNvm = energy_.getENvm(block, GV);
         if (eNvm == 0.0)
             continue;
@@ -666,9 +682,10 @@ GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
     GRBLinExpr expr = params_.E_pro * r_[block];
 
     // Eligible + live-in: use rHat variable.
-    for (const auto &[key, rHatVar] : rHat_) {
+    for (const BlockVarKey &key : rHatKeys_) {
         if (key.first != block)
             continue;
+        GRBVar rHatVar = rHat_.at(key);
         double eRestore = energy_.getERestore(key.second);
         if (eRestore > 0.0) {
             expr += eRestore * rHatVar;
@@ -690,9 +707,10 @@ GRBLinExpr CheckpointOptimizer::buildEEnd(NodeId block) {
     GRBLinExpr expr = 0;
     expr += params_.E_epi * r_[block];
 
-    for (const auto &[key, saveVar] : s_) {
+    for (const BlockVarKey &key : sKeys_) {
         if (key.first != block)
             continue;
+        GRBVar saveVar = s_.at(key);
         double eSave = energy_.getESave(key.second);
         if (eSave > 0.0) {
             expr += eSave * saveVar;

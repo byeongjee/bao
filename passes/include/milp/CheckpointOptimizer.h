@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/ValueOrder.h"
 #include "milp/ModelViews.h"
 
 #include "gurobi_c++.h"
@@ -51,20 +52,22 @@ struct MILPSolution {
     double mipGap = 0.0;
 
     /// Get all Value*s with s=true at a given node.
-    std::set<llvm::Value *> getSaveVarsAt(NodeId node) const {
-        std::set<llvm::Value *> result;
+    std::vector<llvm::Value *> getSaveVarsAt(NodeId node) const {
+        std::vector<llvm::Value *> result;
         for (const auto &[key, enabled] : s)
             if (enabled && key.first == node)
-                result.insert(key.second);
+                result.push_back(key.second);
+        stableSortAndUniqueValues(result);
         return result;
     }
 
     /// Get all Value*s with rHat=true at a given node.
-    std::set<llvm::Value *> getRestoreVarsAt(NodeId node) const {
-        std::set<llvm::Value *> result;
+    std::vector<llvm::Value *> getRestoreVarsAt(NodeId node) const {
+        std::vector<llvm::Value *> result;
         for (const auto &[key, enabled] : rHat)
             if (enabled && key.first == node)
-                result.insert(key.second);
+                result.push_back(key.second);
+        stableSortAndUniqueValues(result);
         return result;
     }
 
@@ -129,6 +132,10 @@ class CheckpointOptimizer {
     std::map<NodeId, GRBVar> eAccum_;    // ε_accum[b]: accumulated energy
 
     std::map<NodeId, std::vector<NodeId>> predecessors_;
+    std::vector<llvm::GlobalVariable *> orderedVmObjs_;
+    std::vector<llvm::Value *> orderedTrackedValues_;
+    std::vector<BlockVarKey> rHatKeys_;
+    std::vector<BlockVarKey> sKeys_;
 
     /// Reach(v): set of blocks where d_{b,v} can be non-zero.
     /// Computed as forward-reachable closure from {b : D_{b,v} = 1}.
