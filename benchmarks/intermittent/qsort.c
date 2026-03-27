@@ -30,74 +30,21 @@ FORCE_INLINE void populate_distances(void) {
     }
 }
 
-FORCE_INLINE void swap_vertices(Vertex *lhs, Vertex *rhs) {
-    Vertex tmp = *lhs;
-    *lhs = *rhs;
-    *rhs = tmp;
-}
-
-FORCE_INLINE int32_t partition_vertices(int32_t left, int32_t right) {
-    uint32_t pivot_distance = vertices[left + ((right - left) / 2)].distance;
-
-    while (1) {
-        __loop_tripcount(ARRAY_SIZE);
-
-        while (vertices[left].distance < pivot_distance) {
-            __loop_tripcount(ARRAY_SIZE);
-            left++;
-        }
-
-        while (vertices[right].distance > pivot_distance) {
-            __loop_tripcount(ARRAY_SIZE);
-            right--;
-        }
-
-        if (left >= right) {
-            return right;
-        }
-
-        swap_vertices(&vertices[left], &vertices[right]);
-        left++;
-        right--;
-    }
-}
-
 FORCE_INLINE void sort_vertices(void) {
-    int16_t left_stack[ARRAY_SIZE];
-    int16_t right_stack[ARRAY_SIZE];
-    int32_t stack_top = 0;
+    uint32_t i;
 
-    left_stack[0] = 0;
-    right_stack[0] = ARRAY_SIZE - 1;
+    for (i = 1; i < ARRAY_SIZE; ++i) {
+        __loop_tripcount(ARRAY_SIZE - 1);
+        Vertex key = vertices[i];
+        int32_t j = (int32_t)i - 1;
 
-    while (stack_top >= 0) {
-        __loop_tripcount(ARRAY_SIZE);
-        int32_t left = left_stack[stack_top];
-        int32_t right = right_stack[stack_top];
-        stack_top--;
-
-        while (left < right) {
-            __loop_tripcount(ARRAY_SIZE);
-            int32_t split = partition_vertices(left, right);
-            int32_t left_len = split - left + 1;
-            int32_t right_len = right - split;
-
-            if (left_len < right_len) {
-                if (split + 1 < right) {
-                    stack_top++;
-                    left_stack[stack_top] = (int16_t)(split + 1);
-                    right_stack[stack_top] = (int16_t)right;
-                }
-                right = split;
-            } else {
-                if (left < split) {
-                    stack_top++;
-                    left_stack[stack_top] = (int16_t)left;
-                    right_stack[stack_top] = (int16_t)split;
-                }
-                left = split + 1;
-            }
+        while ((j >= 0) && (vertices[j].distance > key.distance)) {
+            __loop_tripcount(ARRAY_SIZE - 1);
+            vertices[j + 1] = vertices[j];
+            j--;
         }
+
+        vertices[j + 1] = key;
     }
 }
 
