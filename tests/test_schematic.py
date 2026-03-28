@@ -5,6 +5,7 @@ Source files live in tests/scenarios/ and configs in tests/scenarios/configs/.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 
@@ -15,6 +16,7 @@ from conftest import (
     CONFIGS_DIR,
     _collect_schematic_trace,
     _prepare_schematic_ir,
+    PassResult,
     check_assertions,
     count_calls,
 )
@@ -79,6 +81,50 @@ SCENARIOS = [
 ]
 
 _SCENARIO_IDS = [s[0] for s in SCENARIOS]
+
+
+def _run_schematic_with_trace(
+    tools,
+    compile_to_ir,
+    src,
+    energy_config,
+    schematic_config,
+    trace_json,
+    tmp_path,
+    frontend_opt_level,
+):
+    energy_config = str(energy_config)
+    schematic_config = str(schematic_config)
+    schematic_input_ll = _prepare_schematic_ir(
+        tools, compile_to_ir, src, tmp_path, frontend_opt_level
+    )
+
+    output_ll = tmp_path / "output.ll"
+    result = subprocess.run(
+        [
+            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+            "-passes=schematic",
+            f"-energy-config={energy_config}",
+            f"-schematic-config={schematic_config}",
+            f"-schematic-trace={trace_json}",
+            "-S", schematic_input_ll, "-o", str(output_ll),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    output_ir = output_ll.read_text() if output_ll.exists() else ""
+    return PassResult(
+        exit_code=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        output_ir=output_ir,
+    )
+
+
+def _write_trace(trace, trace_json):
+    trace_json.write_text(json.dumps(trace, indent=2))
 
 
 @pytest.mark.parametrize(
@@ -176,6 +222,73 @@ def test_schematic_o3_nested_loop_energy(run_schematic_o3, tmp_path_factory):
     assert int(m.group(1)) >= 4, result.stderr
 
 
+def test_schematic_synthesizes_missing_top_level_loop_trace(
+    collect_schematic_trace,
+    tools,
+    compile_to_ir,
+    tmp_path_factory,
+):
+    tmp_path = tmp_path_factory.mktemp("schematic_missing_top_level_loop_trace")
+    src = SCENARIOS_DIR / "scenario_loop.c"
+
+    trace = collect_schematic_trace(src, ENERGY_CONFIG, tmp_path, 0)
+    assert len(trace["main"]["loop_traces"]) == 1, trace
+
+    trace["main"]["loop_traces"] = {}
+    trace_json = tmp_path / "missing_top_level_loop_trace.json"
+    _write_trace(trace, trace_json)
+
+    result = _run_schematic_with_trace(
+        tools,
+        compile_to_ir,
+        src,
+        ENERGY_CONFIG,
+        SCHEMATIC_CONFIG,
+        trace_json,
+        tmp_path,
+        0,
+    )
+
+    assert result.exit_code == 0, result.stderr[:1000]
+    assert "Loop decisions:                  1" in result.stderr
+
+
+def test_schematic_synthesizes_missing_nested_loop_trace(
+    collect_schematic_trace,
+    tools,
+    compile_to_ir,
+    tmp_path_factory,
+):
+    tmp_path = tmp_path_factory.mktemp("schematic_missing_nested_loop_trace")
+    src = SCENARIOS_DIR / "scenario_nested_loop_energy.c"
+
+    trace = collect_schematic_trace(src, ENERGY_CONFIG, tmp_path, 0)
+    loop_traces = trace["main"]["loop_traces"]
+    assert len(loop_traces) == 2, loop_traces
+
+    deepest_header = max(
+        loop_traces.items(), key=lambda item: item[1]["loop"]["depth"]
+    )[0]
+    del loop_traces[deepest_header]
+
+    trace_json = tmp_path / "missing_nested_loop_trace.json"
+    _write_trace(trace, trace_json)
+
+    result = _run_schematic_with_trace(
+        tools,
+        compile_to_ir,
+        src,
+        ENERGY_CONFIG,
+        SCHEMATIC_CONFIG,
+        trace_json,
+        tmp_path,
+        0,
+    )
+
+    assert result.exit_code == 0, result.stderr[:1000]
+    assert "Loop decisions:                  2" in result.stderr
+
+
 def test_schematic_debug_loop_logs_respect_log_level(tools, compile_to_ir, tmp_path_factory):
     tmp_path = tmp_path_factory.mktemp("schematic_log_levels")
     src = SCENARIOS_DIR / "scenario_nested_loop_energy_o3.c"
@@ -267,4 +380,55 @@ def test_schematic_rare_loop_path_can_increase_boundaries(
         f"baseline={baseline_boundaries}, outlier={outlier_boundaries}\n"
         f"baseline stderr:\n{baseline.stderr}\n"
         f"outlier stderr:\n{outlier.stderr}"
+    )
+
+
+def test_schematic_synthesizes_missing_rare_loop_path(
+    collect_schematic_trace,
+    run_schematic_o0,
+    tools,
+    compile_to_ir,
+    tmp_path_factory,
+):
+    baseline_tmp = tmp_path_factory.mktemp("schematic_missing_rare_loop_path_baseline")
+    partial_tmp = tmp_path_factory.mktemp("schematic_missing_rare_loop_path_partial")
+
+    baseline_src = SCENARIOS_DIR / "scenario_schematic_hot_loop_bias_baseline.c"
+    outlier_src = SCENARIOS_DIR / "scenario_schematic_cold_loop_outlier.c"
+    path_bias_cfg = CONFIGS_DIR / "scenario_schematic_path_bias_config.json"
+
+    trace = collect_schematic_trace(outlier_src, ENERGY_CONFIG, partial_tmp, 0)
+    loop_traces = trace["main"]["loop_traces"]
+    assert len(loop_traces) == 1, loop_traces
+    loop_info = next(iter(loop_traces.values()))
+    iteration_traces = sorted(loop_info["traces"], key=lambda entry: entry["count"], reverse=True)
+    assert len(iteration_traces) == 2, iteration_traces
+
+    loop_info["traces"] = [iteration_traces[0]]
+    trace_json = partial_tmp / "missing_rare_loop_path.json"
+    _write_trace(trace, trace_json)
+
+    baseline = run_schematic_o0(baseline_src, ENERGY_CONFIG, path_bias_cfg, baseline_tmp)
+    partial = _run_schematic_with_trace(
+        tools,
+        compile_to_ir,
+        outlier_src,
+        ENERGY_CONFIG,
+        path_bias_cfg,
+        trace_json,
+        partial_tmp,
+        0,
+    )
+
+    assert baseline.exit_code == 0, baseline.stderr[:1000]
+    assert partial.exit_code == 0, partial.stderr[:1000]
+
+    baseline_boundaries = count_calls(baseline.output_ir, "__region_boundary")
+    partial_boundaries = count_calls(partial.output_ir, "__region_boundary")
+
+    assert partial_boundaries > baseline_boundaries, (
+        f"Expected synthesized rare loop path to preserve the cold-path penalty, got "
+        f"baseline={baseline_boundaries}, partial={partial_boundaries}\n"
+        f"baseline stderr:\n{baseline.stderr}\n"
+        f"partial stderr:\n{partial.stderr}"
     )

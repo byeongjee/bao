@@ -216,8 +216,11 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     if (!SchematicTraceOpt.getValue().empty()) {
         TraceLoader loader(F, LI, graph);
         loadedTraces = loader.load(SchematicTraceOpt.getValue());
-        if (loadedTraces)
-            PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
+        if (!loadedTraces) {
+            PLOGE << "SCHEMATIC: failed to load traces for " << F.getName();
+            return PreservedAnalyses::all();
+        }
+        PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
     }
 
     // Step 7: Loop analysis.
