@@ -389,6 +389,7 @@ def _compile_schematic_impl(
     algorithm_label: str,
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     from .bench.config import default_energy_config
     from .compile.schematic import SchematicCompileOptions, compile_schematic
@@ -438,6 +439,7 @@ def _compile_schematic_impl(
             trace_file=Path(trace_file) if trace_file else None,
             save_temps=save_temps,
             force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+            recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
         ),
     )
 
@@ -499,6 +501,8 @@ def _compile_schematic_impl(
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
               help="Force checkpoint at loop header when inner loop allocations conflict.")
+@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
+              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
 @click.pass_context
 def compile_schematic_cmd(
     ctx: click.Context,
@@ -521,6 +525,7 @@ def compile_schematic_cmd(
     save_temps: bool,
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     """Run the SCHEMATIC trace-based compilation pipeline.
 
@@ -533,6 +538,7 @@ def compile_schematic_cmd(
         cpu_freq, save_temps, algorithm_label="schematic",
         accumulate_keys=accumulate_keys,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
 
 
@@ -576,6 +582,8 @@ def compile_schematic_cmd(
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
               help="Force checkpoint at loop header when inner loop allocations conflict.")
+@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
+              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
 @click.pass_context
 def compile_schematic_o3_cmd(
     ctx: click.Context,
@@ -598,6 +606,7 @@ def compile_schematic_o3_cmd(
     save_temps: bool,
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     """Run the SCHEMATIC-O3 trace-based compilation pipeline (clang -O3).
 
@@ -610,6 +619,7 @@ def compile_schematic_o3_cmd(
         cpu_freq, save_temps, algorithm_label="schematicO3",
         accumulate_keys=accumulate_keys,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
 
 
@@ -832,6 +842,8 @@ def bench_rockclimb_cmd(
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
               help="Force checkpoint at loop header when inner loop allocations conflict.")
+@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
+              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
 @click.pass_context
 def bench_schematic_cmd(
     ctx: click.Context,
@@ -846,6 +858,7 @@ def bench_schematic_cmd(
     cpu_freq: str,
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -867,6 +880,7 @@ def bench_schematic_cmd(
         algorithm_label="schematic",
         accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
 
 
@@ -907,6 +921,8 @@ def bench_schematic_cmd(
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
               help="Force checkpoint at loop header when inner loop allocations conflict.")
+@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
+              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
 @click.pass_context
 def bench_schematic_o3_cmd(
     ctx: click.Context,
@@ -921,6 +937,7 @@ def bench_schematic_o3_cmd(
     cpu_freq: str,
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     """Run SCHEMATIC-O3 benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -942,6 +959,7 @@ def bench_schematic_o3_cmd(
         algorithm_label="schematicO3",
         accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
 
 
@@ -1118,6 +1136,8 @@ def verify_milp_cmd(
 )
 @click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
               help="Force checkpoint at loop header when inner loop allocations conflict.")
+@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
+              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
 @click.pass_context
 def verify_schematic_cmd(
     ctx: click.Context,
@@ -1128,6 +1148,7 @@ def verify_schematic_cmd(
     estimator_mode: str,
     cpu_freq: str,
     force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
     from .verify.schematic import verify_schematic
@@ -1145,6 +1166,7 @@ def verify_schematic_cmd(
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label="schematic",
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
     if not success:
         raise SystemExit(1)
@@ -1180,6 +1202,8 @@ def verify_schematic_cmd(
 )
 @click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
               help="Force checkpoint at loop header when inner loop allocations conflict.")
+@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
+              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
 @click.pass_context
 def verify_schematic_o3_cmd(
     ctx: click.Context,
@@ -1190,6 +1214,7 @@ def verify_schematic_o3_cmd(
     estimator_mode: str,
     cpu_freq: str,
     force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     """Verify semantic correctness of SCHEMATIC-O3 checkpoint insertion."""
     from .verify.schematic import verify_schematic
@@ -1207,6 +1232,7 @@ def verify_schematic_o3_cmd(
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label="schematicO3",
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
     if not success:
         raise SystemExit(1)

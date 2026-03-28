@@ -119,6 +119,7 @@ def _collect_trace(
         opt_level=3,
         clang_opt_level=clang_opt_level,
         force_checkpoint_on_incompatible_loops=False,
+        recompute_energy_after_new_checkpoint=False,
         extra_includes=[str(env.project_dir / "passes" / "runtime")],
     )
     trace_result: SchematicCompileResult = compile_schematic(tc, env, trace_opts)
@@ -183,6 +184,7 @@ def run_schematic_benchmarks(
     algorithm_label: str,
     accumulate_keys_file: Path | None,
     force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -274,6 +276,9 @@ def run_schematic_benchmarks(
                     opt_level=3,
                     clang_opt_level=clang_opt_level,
                     force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+                    recompute_energy_after_new_checkpoint=(
+                        recompute_energy_after_new_checkpoint
+                    ),
                     extra_includes=[str(env.project_dir / "passes" / "runtime")],
                     trace_file=trace_json,
                 )

@@ -26,6 +26,9 @@ struct SchematicParams {
     bool forceCheckpointOnIncompatibleLoops = false; // Force checkpoint at loop header
                                                      // when inner loop allocation conflicts
                                                      // with previously fixed allocations
+    bool recomputeEnergyAfterNewCheckpoint = false;  // Recompute local E_left/E_to_leave
+                                                     // around new checkpoints. Disabled by
+                                                     // default to preserve reference behavior.
 };
 
 /// Parse SCHEMATIC parameters from a JSON config file.

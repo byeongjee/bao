@@ -6,10 +6,92 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include <algorithm>
+#include <deque>
+#include <limits>
 #include <set>
 #include <vector>
 
 namespace checkpoint {
+
+namespace {
+
+bool isPropagationBackedge(const CFGEdge &edge, llvm::LoopInfo &LI) {
+    if (!edge.src || !edge.dst)
+        return false;
+    auto *dstBB = edge.dst->getLLVMBlock();
+    auto *srcBB = edge.src->getLLVMBlock();
+    if (!dstBB || !srcBB)
+        return false;
+    if (llvm::Loop *dstLoop = LI.getLoopFor(dstBB))
+        return dstLoop->getHeader() == dstBB && dstLoop->contains(srcBB);
+    return false;
+}
+
+void resetBackwardReachableEnergy(const CFGEdge &seedEdge, SchematicSolution &solution,
+                                  llvm::LoopInfo &LI, llvm::Loop *loopScope) {
+    std::deque<CFGEdge> toVisit = {seedEdge};
+    std::set<CFGEdge> visited;
+
+    while (!toVisit.empty()) {
+        CFGEdge edge = toVisit.front();
+        toVisit.pop_front();
+        if (!visited.insert(edge).second)
+            continue;
+
+        SchematicBlock *bb = edge.src;
+        if (!bb)
+            continue;
+        if (loopScope && bb->getLLVMBlock() && !loopScope->contains(bb->getLLVMBlock()))
+            continue;
+
+        solution.blockMeta[bb].E_to_leave = 0.0;
+
+        for (SchematicBlock *pred : bb->predecessors()) {
+            CFGEdge predEdge{pred, bb};
+            if (!isDisabledCheckpoint(solution, predEdge))
+                continue;
+            if (isPropagationBackedge(predEdge, LI))
+                continue;
+            if (loopScope && pred->getLLVMBlock() && !loopScope->contains(pred->getLLVMBlock()))
+                continue;
+            toVisit.push_back(predEdge);
+        }
+    }
+}
+
+void resetForwardReachableEnergy(const CFGEdge &seedEdge, SchematicSolution &solution,
+                                 llvm::LoopInfo &LI, llvm::Loop *loopScope) {
+    std::deque<CFGEdge> toVisit = {seedEdge};
+    std::set<CFGEdge> visited;
+
+    while (!toVisit.empty()) {
+        CFGEdge edge = toVisit.front();
+        toVisit.pop_front();
+        if (!visited.insert(edge).second)
+            continue;
+
+        SchematicBlock *bb = edge.dst;
+        if (!bb)
+            continue;
+        if (loopScope && bb->getLLVMBlock() && !loopScope->contains(bb->getLLVMBlock()))
+            continue;
+
+        solution.blockMeta[bb].E_left = std::numeric_limits<double>::max();
+
+        for (SchematicBlock *succ : bb->successors()) {
+            CFGEdge succEdge{bb, succ};
+            if (!isDisabledCheckpoint(solution, succEdge))
+                continue;
+            if (isPropagationBackedge(succEdge, LI))
+                continue;
+            if (loopScope && succ->getLLVMBlock() && !loopScope->contains(succ->getLLVMBlock()))
+                continue;
+            toVisit.push_back(succEdge);
+        }
+    }
+}
+
+} // namespace
 
 void VMAddressTracker::reset() {
     allocatedVars_.clear();
@@ -599,6 +681,10 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
 
     for (const auto &checkpoint : ckpts) {
         if (checkpoint.bbAfter) {
+            CFGEdge fwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
+            if (params.recomputeEnergyAfterNewCheckpoint && !checkpoint.isVirtual)
+                resetForwardReachableEnergy(fwdEdge, solution, LI, loopScope);
+
             double energyLeftStart;
             auto metaIt = solution.blockMeta.find(checkpoint.bbAfter);
             // Reference line 453: virtual checkpoint with existing value
@@ -613,7 +699,6 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
                     computeAllocationRestoreCost(checkpoint.bbAfter, solution.decidedPlacements,
                                                  state, params);
             }
-            CFGEdge fwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
             // Synthetic blocks now have proper successors via SchematicGraph,
             // so energy propagation via SchematicBlock's successors() works directly.
             propagateEnergyLeft(fwdEdge, energyLeftStart, solution, cfg, state, params, LI,
@@ -621,10 +706,17 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
         }
 
         if (checkpoint.bbBefore) {
+            CFGEdge bwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
+            if (params.recomputeEnergyAfterNewCheckpoint && !checkpoint.isVirtual)
+                resetBackwardReachableEnergy(bwdEdge, solution, LI, loopScope);
+
             double energyToLeave;
             auto metaIt = solution.blockMeta.find(checkpoint.bbBefore);
             // Reference line 461: existing nonzero value -> undo block cost
-            if (metaIt != solution.blockMeta.end() && metaIt->second.E_to_leave != 0.0) {
+            bool reuseExisting =
+                metaIt != solution.blockMeta.end() && metaIt->second.E_to_leave != 0.0 &&
+                (!params.recomputeEnergyAfterNewCheckpoint || checkpoint.isVirtual);
+            if (reuseExisting) {
                 energyToLeave =
                     metaIt->second.E_to_leave -
                     getBlockExecEnergy(checkpoint.bbBefore, solution, cfg, state, params);
@@ -633,7 +725,6 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
                                 computeAllocationSaveCost(
                                     checkpoint.bbBefore, solution.decidedPlacements, state, params);
             }
-            CFGEdge bwdEdge{checkpoint.bbBefore, checkpoint.bbAfter};
             // Synthetic blocks now have proper predecessors via SchematicGraph,
             // so energy propagation via SchematicBlock's predecessors() works directly.
             propagateEnergyToLeave(bwdEdge, energyToLeave, solution, cfg, state, params, LI,

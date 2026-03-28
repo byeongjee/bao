@@ -61,6 +61,12 @@ cl::opt<bool> ForceCheckpointOnIncompatibleLoopsOpt(
              "conflicts with previously fixed allocations (SCHEMATIC)"),
     cl::init(false));
 
+cl::opt<bool> RecomputeEnergyAfterNewCheckpointOpt(
+    "recompute-energy-after-new-checkpoint",
+    cl::desc("Recompute local SCHEMATIC E_left/E_to_leave when a new checkpoint is inserted "
+             "(disabled by default to preserve reference behavior)"),
+    cl::init(false));
+
 cl::opt<std::string> SchematicConfigOpt("schematic-config",
                                         cl::desc("Path to JSON SCHEMATIC configuration file"),
                                         cl::value_desc("filename"), cl::init(""));

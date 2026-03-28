@@ -52,6 +52,7 @@ class SchematicCompileOptions:
     opt_level: int
     clang_opt_level: int
     force_checkpoint_on_incompatible_loops: bool
+    recompute_energy_after_new_checkpoint: bool
     save_temps: bool = False
     extra_includes: list[str] = field(default_factory=list)
     trace_file: Path | None = None
@@ -364,6 +365,8 @@ def _run_schematic_pass(
         cmd.append("-add-debug-markers")
     if opts.force_checkpoint_on_incompatible_loops:
         cmd.append("-force-checkpoint-on-incompatible-loops")
+    if opts.recompute_energy_after_new_checkpoint:
+        cmd.append("-recompute-energy-after-new-checkpoint")
     cmd.append(f"-ckpt-stats-json={tmp / 'stats.json'}")
     cmd += ["-S", str(input_ll), "-o", str(tmp / "ckpt.ll")]
 
