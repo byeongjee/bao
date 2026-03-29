@@ -51,4 +51,12 @@ void removePotentialCheckpointsBetweenFixedBBs(const CFGAnalysis &cfg, Schematic
                                                SchematicGraph &graph,
                                                llvm::Loop *loopScope = nullptr);
 
+/// Re-propagate energy across already-disabled fixed edges until block energy
+/// metadata reaches a local fixpoint.
+/// This does not change checkpoint states.
+bool refreshDisabledCheckpointEnergy(const CFGAnalysis &cfg, SchematicSolution &solution,
+                                     const SchematicStateAnalysis &state,
+                                     const SchematicParams &params, llvm::LoopInfo &LI,
+                                     SchematicGraph &graph, llvm::Loop *loopScope = nullptr);
+
 } // namespace checkpoint

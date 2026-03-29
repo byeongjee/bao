@@ -12,8 +12,9 @@ import subprocess
 import pytest
 
 from conftest import (
-    SCENARIOS_DIR,
     CONFIGS_DIR,
+    PROJECT_DIR,
+    SCENARIOS_DIR,
     _collect_schematic_trace,
     _prepare_schematic_ir,
     PassResult,
@@ -123,6 +124,51 @@ def _run_schematic_with_trace(
     )
 
 
+def _run_ckpt_compile_schematic_o3(
+    benchmark_name,
+    cap_value,
+    output_prefix,
+):
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "ckpt",
+            "--log-level",
+            "debug",
+            "compile",
+            "schematicO3",
+            benchmark_name,
+            "--cap",
+            cap_value,
+            "-o",
+            str(output_prefix),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(PROJECT_DIR),
+        timeout=240,
+    )
+    return result, result.stdout + result.stderr
+
+
+def _extract_loop_budget(
+    log_text,
+    loop_header,
+):
+    e_loop_match = re.search(
+        rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+E_loop=([0-9.]+)",
+        log_text,
+    )
+    num_it_match = re.search(
+        rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+numIt=(\d+)",
+        log_text,
+    )
+    assert e_loop_match, f"Missing E_loop log for {loop_header}:\n{log_text[-4000:]}"
+    assert num_it_match, f"Missing numIt log for {loop_header}:\n{log_text[-4000:]}"
+    return float(e_loop_match.group(1)), int(num_it_match.group(1))
+
+
 def _write_trace(trace, trace_json):
     trace_json.write_text(json.dumps(trace, indent=2))
 
@@ -220,6 +266,27 @@ def test_schematic_o3_nested_loop_energy(run_schematic_o3, tmp_path_factory):
     m = re.search(r"Region boundaries:\s+(\d+)", result.stderr)
     assert m, f"Could not find region boundary count in stderr:\n{result.stderr}"
     assert int(m.group(1)) >= 4, result.stderr
+
+
+def test_schematic_o3_dijkstra_loop_budget_uses_rare_inner_branch(
+    tmp_path_factory,
+):
+    tmp_path = tmp_path_factory.mktemp("schematic_dijkstra_o3")
+
+    result, log_text = _run_ckpt_compile_schematic_o3(
+        "dijkstra",
+        "10uF",
+        tmp_path / "dijkstra_schematicO3",
+    )
+
+    assert result.returncode == 0, log_text[-4000:]
+
+    inner_e_loop, _inner_num_it = _extract_loop_budget(log_text, "for.body18.i")
+    outer_e_loop, outer_num_it = _extract_loop_budget(log_text, "while.body.i")
+
+    assert inner_e_loop > 70.0, log_text
+    assert outer_e_loop > 2400.0, log_text
+    assert outer_num_it < 25, log_text
 
 
 def test_schematic_synthesizes_missing_top_level_loop_trace(

@@ -495,6 +495,7 @@ static void refineLoopBudgetWithConvergence(
         recomputeLoopBodyEnergyOnCFG(L, bodyAlloc, solution, cfg, state, params, graph,
                                      blocks.headerBlock, blocks.latchBlock, blocks.startSynth,
                                      blocks.endSynth);
+        refreshDisabledCheckpointEnergy(cfg, solution, state, params, LI, graph, L);
 
         budget = readLoopIterationBudget(blocks, params, solution);
         decision.E_loop = budget.ELoop;
@@ -889,6 +890,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     // Step 3c: Resolve loop-internal edges (reference: schematic.py:555).
     removePotentialCheckpointsBetweenFixedBBs(cfg_, solution, state_, params_, LI_, graph_, L);
+    refreshDisabledCheckpointEnergy(cfg_, solution, state_, params_, LI_, graph_, L);
 
     // Step 5: Reconcile header and latch allocations.
     LoopBoundaryPlacements placements = resolveLoopBoundaryPlacements(solution, blocks);
