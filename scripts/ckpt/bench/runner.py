@@ -275,32 +275,31 @@ def run_benchmark_matrix(
 
                 # ----- Parse stats (prefer JSON, fall back to text) -----
                 stats: PassStatistics | None = None
+                row_status = "ok"
                 if stats_json_data is not None:
                     stats, json_feasible, json_reason = load_stats_json(stats_json_data)
                     if not json_feasible:
                         logger.error("  INFEASIBLE (%s)", json_reason)
-                        row = BenchmarkRow(
-                            benchmark=row_name,
-                            capacitor=cap.label,
-                            status="infeasible",
-                        )
-                        write_csv_row(writer, row, csv_header)
-                        continue
+                        row_status = "infeasible"
                 else:
                     # ----- Check infeasibility (text fallback) -----
                     infeasible_reason = detect_infeasibility(full_output)
                     if infeasible_reason is not None:
                         logger.error("  INFEASIBLE (%s)", infeasible_reason)
-                        row = BenchmarkRow(
-                            benchmark=row_name,
-                            capacitor=cap.label,
-                            status="infeasible",
-                        )
-                        write_csv_row(writer, row, csv_header)
-                        continue
+                        row_status = "infeasible"
+                        if has_pass_statistics(full_output):
+                            stats = parse_pass_output(full_output)
+                        else:
+                            row = BenchmarkRow(
+                                benchmark=row_name,
+                                capacitor=cap.label,
+                                status="infeasible",
+                            )
+                            write_csv_row(writer, row, csv_header)
+                            continue
 
                     # ----- Check for compilation failure -----
-                    if not has_pass_statistics(full_output):
+                    if stats is None and not has_pass_statistics(full_output):
                         logger.error("  FAILED (compilation error)")
                         row = BenchmarkRow(
                             benchmark=row_name,
@@ -310,7 +309,8 @@ def run_benchmark_matrix(
                         write_csv_row(writer, row, csv_header)
                         continue
 
-                    stats = parse_pass_output(full_output)
+                    if stats is None:
+                        stats = parse_pass_output(full_output)
 
                 # ----- Build common fields -----
                 result_val = ""
@@ -340,7 +340,7 @@ def run_benchmark_matrix(
                 row = BenchmarkRow(
                     benchmark=row_name,
                     capacitor=cap.label,
-                    status="link_failed" if had_compilation_error else "ok",
+                    status="link_failed" if had_compilation_error and row_status == "ok" else row_status,
                     fields=row_fields,
                 )
                 write_csv_row(writer, row, csv_header)
@@ -429,6 +429,12 @@ def print_benchmark_summary(
         ("constraints", _fmt("milp_constraints", fields)),
         ("solve", f"{fields['milp_solve_time_ms']}ms" if _fmt("milp_solve_time_ms", fields) else None),
     ]
+    presolved_vars = _fmt("milp_presolved_variables", fields)
+    presolved_constraints = _fmt("milp_presolved_constraints", fields)
+    if presolved_vars is not None:
+        milp_items.append(("vars after presolve", presolved_vars))
+    if presolved_constraints is not None:
+        milp_items.append(("constrs after presolve", presolved_constraints))
     optimal = _fmt("optimal_solution", fields)
     if optimal is not None:
         milp_items.append(("optimal", optimal))

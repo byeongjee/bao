@@ -147,12 +147,25 @@ CheckpointOptimizer::CheckpointOptimizer(const MILPInput &input)
     model_.set(GRB_DoubleParam_Heuristics, 0.1);
 }
 
-int CheckpointOptimizer::getNumVars() const {
-    return model_.get(GRB_IntAttr_NumVars);
+const MILPProblemSizeStats &CheckpointOptimizer::getProblemSizeStats() {
+    computeProblemSizeStats();
+    return problemSizeStats_;
 }
 
-int CheckpointOptimizer::getNumConstrs() const {
-    return model_.get(GRB_IntAttr_NumConstrs);
+int CheckpointOptimizer::getNumVars() {
+    return getProblemSizeStats().variablesBeforePresolve;
+}
+
+int CheckpointOptimizer::getNumConstrs() {
+    return getProblemSizeStats().constraintsBeforePresolve;
+}
+
+int CheckpointOptimizer::getNumPresolvedVars() {
+    return getProblemSizeStats().variablesAfterPresolve;
+}
+
+int CheckpointOptimizer::getNumPresolvedConstrs() {
+    return getProblemSizeStats().constraintsAfterPresolve;
 }
 
 std::vector<NodeId> CheckpointOptimizer::getInfeasibleBlocks() const {
@@ -172,7 +185,7 @@ bool CheckpointOptimizer::solve() {
         return false;
     }
 
-    buildModel();
+    computeProblemSizeStats();
     if (timeLimit_ > 0.0)
         model_.set(GRB_DoubleParam_TimeLimit, timeLimit_);
     if (mipGap_ > 0.0)
@@ -244,6 +257,29 @@ bool CheckpointOptimizer::solve() {
     }
 
     return false;
+}
+
+void CheckpointOptimizer::ensureModelBuilt() {
+    if (modelBuilt_)
+        return;
+
+    buildModel();
+    modelBuilt_ = true;
+}
+
+void CheckpointOptimizer::computeProblemSizeStats() {
+    ensureModelBuilt();
+    if (problemSizeStatsComputed_)
+        return;
+
+    model_.update();
+    problemSizeStats_.variablesBeforePresolve = model_.get(GRB_IntAttr_NumVars);
+    problemSizeStats_.constraintsBeforePresolve = model_.get(GRB_IntAttr_NumConstrs);
+
+    GRBModel presolved = model_.presolve();
+    problemSizeStats_.variablesAfterPresolve = presolved.get(GRB_IntAttr_NumVars);
+    problemSizeStats_.constraintsAfterPresolve = presolved.get(GRB_IntAttr_NumConstrs);
+    problemSizeStatsComputed_ = true;
 }
 
 void CheckpointOptimizer::buildModel() {

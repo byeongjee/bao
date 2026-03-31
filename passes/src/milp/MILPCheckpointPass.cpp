@@ -71,6 +71,21 @@ void appendAbstractCFGStatsToJSON(llvm::json::Object &root,
     root["abstract_cfg"] = std::move(acfg);
 }
 
+void printMILPProblemSizeStats(const checkpoint::MILPProblemSizeStats &stats) {
+    PLOGI << "  MILP variables (before presolve): " << stats.variablesBeforePresolve;
+    PLOGI << "  MILP constraints (before presolve): " << stats.constraintsBeforePresolve;
+    PLOGI << "  MILP variables (after presolve):  " << stats.variablesAfterPresolve;
+    PLOGI << "  MILP constraints (after presolve): " << stats.constraintsAfterPresolve;
+}
+
+void appendMILPProblemSizeStatsToJSON(llvm::json::Object &root,
+                                      const checkpoint::MILPProblemSizeStats &stats) {
+    root["milp_variables"] = static_cast<int64_t>(stats.variablesBeforePresolve);
+    root["milp_constraints"] = static_cast<int64_t>(stats.constraintsBeforePresolve);
+    root["milp_presolved_variables"] = static_cast<int64_t>(stats.variablesAfterPresolve);
+    root["milp_presolved_constraints"] = static_cast<int64_t>(stats.constraintsAfterPresolve);
+}
+
 void printIneligibleStateStats(unsigned ineligGlobalCount, unsigned ineligAllocaCount,
                                unsigned ineligSSACount) {
     PLOGI << "  Ineligible globals:              " << ineligGlobalCount;
@@ -187,6 +202,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     optimizer.setTimeLimit(MILPTimeLimitOpt);
     optimizer.setMIPGap(MILPGapOpt);
     optimizer.setLogFile(MILPLogFileOpt);
+    const auto &problemSizeStats = optimizer.getProblemSizeStats();
 
     // Count ineligible objects by type once so every exit path reports them.
     unsigned ineligGlobalCount = 0, ineligAllocaCount = 0, ineligSSACount = 0;
@@ -223,8 +239,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  --- MILP-specific ---";
         printAbstractCFGStats(abstractCFG.stats);
         printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
-        PLOGI << "  MILP variables:                  " << optimizer.getNumVars();
-        PLOGI << "  MILP constraints:                " << optimizer.getNumConstrs();
+        printMILPProblemSizeStats(problemSizeStats);
         PLOGI << "  Optimal solution:                no (blocks exceed energy capacity)";
 
         if (!StatsJsonOpt.empty()) {
@@ -239,8 +254,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = false;
             root["infeasibility_reason"] = "blocks exceed energy capacity";
-            root["milp_variables"] = static_cast<int64_t>(optimizer.getNumVars());
-            root["milp_constraints"] = static_cast<int64_t>(optimizer.getNumConstrs());
+            appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
             root["optimal_solution"] = "no (blocks exceed energy capacity)";
             appendAbstractCFGStatsToJSON(root, abstractCFG.stats);
             root["ineligible_globals"] = static_cast<int64_t>(ineligGlobalCount);
@@ -281,8 +295,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  --- MILP-specific ---";
         printAbstractCFGStats(abstractCFG.stats);
         printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
-        PLOGI << "  MILP variables:                  " << optimizer.getNumVars();
-        PLOGI << "  MILP constraints:                " << optimizer.getNumConstrs();
+        printMILPProblemSizeStats(problemSizeStats);
         PLOGI << "  Optimal solution:                no (solver failed)";
         PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
 
@@ -298,8 +311,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = false;
             root["infeasibility_reason"] = "solver found no feasible solution";
-            root["milp_variables"] = static_cast<int64_t>(optimizer.getNumVars());
-            root["milp_constraints"] = static_cast<int64_t>(optimizer.getNumConstrs());
+            appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
             root["optimal_solution"] = "no (solver failed)";
             root["solve_time_ms"] = solveTimeMs;
             root["boundary_commits_enabled"] = int64_t{0};
@@ -338,8 +350,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  --- MILP-specific ---";
         printAbstractCFGStats(abstractCFG.stats);
         printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
-        PLOGI << "  MILP variables:                  " << optimizer.getNumVars();
-        PLOGI << "  MILP constraints:                " << optimizer.getNumConstrs();
+        printMILPProblemSizeStats(problemSizeStats);
         if (solution.solverStatus == SolverStatus::Optimal) {
             PLOGI << "  Optimal solution:                yes";
         } else {
@@ -360,8 +371,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             c.peakRSSKb = getPeakRSSKb();
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = true;
-            root["milp_variables"] = static_cast<int64_t>(optimizer.getNumVars());
-            root["milp_constraints"] = static_cast<int64_t>(optimizer.getNumConstrs());
+            appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
             if (solution.solverStatus == SolverStatus::Optimal) {
                 root["optimal_solution"] = "yes";
             } else {
@@ -409,8 +419,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     PLOGI << "  --- MILP-specific ---";
     printAbstractCFGStats(abstractCFG.stats);
     printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
-    PLOGI << "  MILP variables:                  " << optimizer.getNumVars();
-    PLOGI << "  MILP constraints:                " << optimizer.getNumConstrs();
+    printMILPProblemSizeStats(problemSizeStats);
     if (solution.solverStatus == SolverStatus::Optimal) {
         PLOGI << "  Optimal solution:                yes";
     } else {
@@ -434,8 +443,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         c.peakRSSKb = getPeakRSSKb();
         json::Object root = commonStatsToJSON(c);
         root["feasible"] = true;
-        root["milp_variables"] = static_cast<int64_t>(optimizer.getNumVars());
-        root["milp_constraints"] = static_cast<int64_t>(optimizer.getNumConstrs());
+        appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
         if (solution.solverStatus == SolverStatus::Optimal) {
             root["optimal_solution"] = "yes";
         } else {

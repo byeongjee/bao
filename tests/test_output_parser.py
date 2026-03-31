@@ -86,8 +86,10 @@ Edges (concrete): 30
 Abstract CFG size: 11
 Regions: 3
 Candidate globals (V_elig): 5
-MILP variables: 100
-MILP constraints: 200
+MILP variables (before presolve): 100
+MILP constraints (before presolve): 200
+MILP variables (after presolve): 60
+MILP constraints (after presolve): 120
 Optimal solution: 3.0
 Region boundaries: 4
 Distributed checkpoints inserted: 2
@@ -105,6 +107,8 @@ Peak RSS (KB): 10240
         assert stats.candidate_globals == 5
         assert stats.milp_variables == 100
         assert stats.milp_constraints == 200
+        assert stats.milp_presolved_variables == 60
+        assert stats.milp_presolved_constraints == 120
         assert stats.optimal_solution == "3.0"
         assert stats.region_boundaries == 4
         assert stats.distributed_checkpoints == 2
@@ -120,6 +124,7 @@ Peak RSS (KB): 10240
         assert stats.abstract_cfg_size is None
         assert stats.regions is None
         assert stats.milp_variables is None
+        assert stats.milp_presolved_variables is None
 
     def test_empty_string(self):
         stats = parse_pass_output("")
@@ -128,6 +133,11 @@ Peak RSS (KB): 10240
     def test_legacy_abstract_cfg_label(self):
         stats = parse_pass_output("Basic blocks (abstract): 9\n")
         assert stats.abstract_cfg_size == 9
+
+    def test_legacy_milp_size_labels(self):
+        stats = parse_pass_output("MILP variables: 17\nMILP constraints: 31\n")
+        assert stats.milp_variables == 17
+        assert stats.milp_constraints == 31
 
 
 # ---------------------------------------------------------------------------
@@ -284,12 +294,20 @@ class TestLoadStatsJson:
                 "basic_blocks": 24,
                 "edges": 30,
                 "abstract_cfg_size": 11,
+                "milp_variables": 100,
+                "milp_constraints": 200,
+                "milp_presolved_variables": 60,
+                "milp_presolved_constraints": 120,
                 "compilation_time_ms": 500.0,
             }
         )
         assert feasible is True
         assert infeasibility_reason is None
         assert stats.abstract_cfg_size == 11
+        assert stats.milp_variables == 100
+        assert stats.milp_constraints == 200
+        assert stats.milp_presolved_variables == 60
+        assert stats.milp_presolved_constraints == 120
         assert stats.compilation_time_ms == 500
 
     def test_falls_back_to_nested_abstract_cfg_nodes(self):

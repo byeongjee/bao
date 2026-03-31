@@ -82,6 +82,14 @@ struct MILPSolution {
     }
 };
 
+/// Problem size statistics for the MILP model before and after Gurobi presolve.
+struct MILPProblemSizeStats {
+    int variablesBeforePresolve = 0;
+    int constraintsBeforePresolve = 0;
+    int variablesAfterPresolve = 0;
+    int constraintsAfterPresolve = 0;
+};
+
 /// MILP optimizer for checkpoint placement using Gurobi.
 class CheckpointOptimizer {
   public:
@@ -100,8 +108,11 @@ class CheckpointOptimizer {
 
     double getObjectiveValue() const { return solution_.objectiveValue; }
 
-    int getNumVars() const;
-    int getNumConstrs() const;
+    const MILPProblemSizeStats &getProblemSizeStats();
+    int getNumVars();
+    int getNumConstrs();
+    int getNumPresolvedVars();
+    int getNumPresolvedConstrs();
 
     /// Check feasibility - returns nodes whose base energy exceeds capacity.
     std::vector<NodeId> getInfeasibleBlocks() const;
@@ -115,7 +126,10 @@ class CheckpointOptimizer {
     GRBEnv env_;
     GRBModel model_;
     MILPSolution solution_;
+    MILPProblemSizeStats problemSizeStats_;
     bool solved_ = false;
+    bool modelBuilt_ = false;
+    bool problemSizeStatsComputed_ = false;
     bool acceptFeasible_ = false;
     double timeLimit_ = 600.0;
     double mipGap_ = 0.0;
@@ -141,6 +155,8 @@ class CheckpointOptimizer {
     /// Computed as forward-reachable closure from {b : D_{b,v} = 1}.
     std::map<llvm::Value *, std::set<NodeId>> reachableDefs_;
 
+    void ensureModelBuilt();
+    void computeProblemSizeStats();
     void buildModel();
     void addVariables();
     void addObjective();

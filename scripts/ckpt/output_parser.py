@@ -20,6 +20,8 @@ class PassStatistics:
     candidate_globals: int | None = None
     milp_variables: int | None = None
     milp_constraints: int | None = None
+    milp_presolved_variables: int | None = None
+    milp_presolved_constraints: int | None = None
     optimal_solution: str | None = None
     region_boundaries: int | None = None
     distributed_checkpoints: int | None = None
@@ -41,8 +43,10 @@ _STAT_LABELS: dict[str, list[str]] = {
     "abstract_cfg_size": ["Abstract CFG size", "Basic blocks (abstract)"],
     "regions": ["Regions"],
     "candidate_globals": ["Candidate globals (V_elig)"],
-    "milp_variables": ["MILP variables"],
-    "milp_constraints": ["MILP constraints"],
+    "milp_variables": ["MILP variables (before presolve)", "MILP variables"],
+    "milp_constraints": ["MILP constraints (before presolve)", "MILP constraints"],
+    "milp_presolved_variables": ["MILP variables (after presolve)"],
+    "milp_presolved_constraints": ["MILP constraints (after presolve)"],
     "optimal_solution": ["Optimal solution"],
     "region_boundaries": ["Region boundaries"],
     "distributed_checkpoints": ["Distributed checkpoints inserted", "Boundary commits enabled"],
@@ -215,6 +219,8 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
         candidate_globals=data.get("candidate_globals"),
         milp_variables=data.get("milp_variables"),
         milp_constraints=data.get("milp_constraints"),
+        milp_presolved_variables=data.get("milp_presolved_variables"),
+        milp_presolved_constraints=data.get("milp_presolved_constraints"),
         optimal_solution=data.get("optimal_solution"),
         region_boundaries=data.get("region_boundaries"),
         # MILP writes "boundary_commits_enabled"; maps to distributed_checkpoints
