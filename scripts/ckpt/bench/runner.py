@@ -425,6 +425,7 @@ def print_benchmark_summary(
 
     # MILP
     milp_items: list[tuple[str, str | None]] = [
+        ("mode", _fmt("milp_allocation_mode", fields)),
         ("variables", _fmt("milp_variables", fields)),
         ("constraints", _fmt("milp_constraints", fields)),
         ("solve", f"{fields['milp_solve_time_ms']}ms" if _fmt("milp_solve_time_ms", fields) else None),

@@ -5,8 +5,11 @@ from __future__ import annotations
 import pytest
 
 from conftest import (
+    CONFIGS_DIR,
+    SCENARIOS_DIR,
     TESTS_DIR,
     check_assertions,
+    get_metric,
 )
 
 # ---------------------------------------------------------------------------
@@ -85,3 +88,33 @@ def test_milp_missing_bb_freq(run_milp, tmp_path):
         "exit": "nonzero",
         "stderr_contains": "bb-freq-file",
     })
+
+
+def test_coarse_allocation_reduces_problem_size(run_milp, tmp_path_factory):
+    fine_tmp = tmp_path_factory.mktemp("scenario_merge_divergence_fine")
+    coarse_tmp = tmp_path_factory.mktemp("scenario_merge_divergence_coarse")
+    src = SCENARIOS_DIR / "scenario_merge_divergence.c"
+    energy_config = CONFIGS_DIR / "scenario_config.json"
+    milp_config = CONFIGS_DIR / "scenario_merge_divergence_milp_config.json"
+
+    fine = run_milp(src, energy_config, milp_config, fine_tmp)
+    coarse = run_milp(
+        src,
+        energy_config,
+        milp_config,
+        coarse_tmp,
+        coarse_allocation=True,
+    )
+
+    check_assertions(fine, {"exit": 0})
+    check_assertions(coarse, {"exit": 0})
+    assert get_metric(fine.stderr, "MILP allocation mode") == "regional"
+    assert get_metric(coarse.stderr, "MILP allocation mode") == "coarse"
+
+    fine_vars = int(get_metric(fine.stderr, "MILP variables (before presolve)"))
+    fine_constraints = int(get_metric(fine.stderr, "MILP constraints (before presolve)"))
+    coarse_vars = int(get_metric(coarse.stderr, "MILP variables (before presolve)"))
+    coarse_constraints = int(get_metric(coarse.stderr, "MILP constraints (before presolve)"))
+
+    assert coarse_vars < fine_vars
+    assert coarse_constraints < fine_constraints

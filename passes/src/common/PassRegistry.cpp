@@ -46,6 +46,11 @@ cl::opt<std::string> MILPLogFileOpt("milp-log-file",
                                     cl::desc("Gurobi log file path (empty = no logging)"),
                                     cl::value_desc("path"), cl::init(""));
 
+cl::opt<bool> MILPCoarseAllocationOpt(
+    "milp-coarse-allocation",
+    cl::desc("Use one VM placement variable per eligible value instead of per-region placement"),
+    cl::init(false));
+
 cl::opt<bool> LoopStripMiningEnabledOpt("loop-strip-mining-enabled",
                                         cl::desc("Enable loop strip-mining before MILP passes"),
                                         cl::init(false));

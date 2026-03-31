@@ -131,3 +131,20 @@ def test_vm_nvm_basic(run_milp, tmp_path):
     assert "__vm_shadow_" in ir, (
         "Expected at least one @__vm_shadow_* global in IR"
     )
+
+
+def test_vm_nvm_basic_with_coarse_allocation(run_milp, tmp_path):
+    """scenario_vm_hot.c: coarse allocation still places a hot global in VM."""
+    src = SCENARIOS_DIR / "scenario_vm_hot.c"
+    energy_config = CONFIGS_DIR / "scenario_config.json"
+    milp_config = CONFIGS_DIR / "scenario_milp_config.json"
+
+    result = run_milp(
+        src,
+        energy_config,
+        milp_config,
+        tmp_path,
+        coarse_allocation=True,
+    )
+
+    check_assertions(result, {"exit": 0, "has_shadow": ["g_hot"]})

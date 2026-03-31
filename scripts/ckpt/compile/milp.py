@@ -49,6 +49,7 @@ class MilpCompileOptions:
     clang_opt_level: int
     milp_gap: float
     milp_log_file: str
+    coarse_allocation: bool
     save_temps: bool = False
     extra_includes: list[str] = field(default_factory=list)
 
@@ -359,6 +360,8 @@ def _run_milp_pass(
     cmd += milp_extra_flags
     if strip_mining_stats_json is not None:
         cmd.append(f"-loop-strip-mining-stats-json={strip_mining_stats_json}")
+    if opts.coarse_allocation:
+        cmd.append("-milp-coarse-allocation")
     cmd.append(f"-ckpt-stats-json={output_ll.parent / 'stats.json'}")
     cmd += ["-S", str(input_ll), "-o", str(output_ll)]
 

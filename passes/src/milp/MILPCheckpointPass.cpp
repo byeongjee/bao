@@ -33,6 +33,7 @@ extern cl::opt<bool> AcceptFeasibleOpt;
 extern cl::opt<double> MILPTimeLimitOpt;
 extern cl::opt<double> MILPGapOpt;
 extern cl::opt<std::string> MILPLogFileOpt;
+extern cl::opt<bool> MILPCoarseAllocationOpt;
 extern cl::opt<bool> AddDebugMarkersOpt;
 extern cl::opt<std::string> BBFreqFileOpt;
 
@@ -84,6 +85,18 @@ void appendMILPProblemSizeStatsToJSON(llvm::json::Object &root,
     root["milp_constraints"] = static_cast<int64_t>(stats.constraintsBeforePresolve);
     root["milp_presolved_variables"] = static_cast<int64_t>(stats.variablesAfterPresolve);
     root["milp_presolved_constraints"] = static_cast<int64_t>(stats.constraintsAfterPresolve);
+}
+
+const char *milpAllocationModeLabel(bool coarseAllocation) {
+    return coarseAllocation ? "coarse" : "regional";
+}
+
+void printMILPAllocationMode(bool coarseAllocation) {
+    PLOGI << "  MILP allocation mode:           " << milpAllocationModeLabel(coarseAllocation);
+}
+
+void appendMILPAllocationModeToJSON(llvm::json::Object &root, bool coarseAllocation) {
+    root["milp_allocation_mode"] = milpAllocationModeLabel(coarseAllocation);
 }
 
 void printIneligibleStateStats(unsigned ineligGlobalCount, unsigned ineligAllocaCount,
@@ -198,11 +211,12 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
 
     MILPInput milpInput{*abstractCFG.model, *abstractCFG.model, *abstractCFG.model};
     CheckpointOptimizer optimizer(milpInput);
+    optimizer.setCoarseAllocation(MILPCoarseAllocationOpt.getValue());
     optimizer.setAcceptFeasible(AcceptFeasibleOpt);
     optimizer.setTimeLimit(MILPTimeLimitOpt);
     optimizer.setMIPGap(MILPGapOpt);
     optimizer.setLogFile(MILPLogFileOpt);
-    const auto &problemSizeStats = optimizer.getProblemSizeStats();
+    const bool coarseAllocation = optimizer.isCoarseAllocationEnabled();
 
     // Count ineligible objects by type once so every exit path reports them.
     unsigned ineligGlobalCount = 0, ineligAllocaCount = 0, ineligSSACount = 0;
@@ -239,7 +253,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  --- MILP-specific ---";
         printAbstractCFGStats(abstractCFG.stats);
         printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
-        printMILPProblemSizeStats(problemSizeStats);
+        printMILPAllocationMode(coarseAllocation);
         PLOGI << "  Optimal solution:                no (blocks exceed energy capacity)";
 
         if (!StatsJsonOpt.empty()) {
@@ -254,7 +268,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = false;
             root["infeasibility_reason"] = "blocks exceed energy capacity";
-            appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
+            appendMILPAllocationModeToJSON(root, coarseAllocation);
             root["optimal_solution"] = "no (blocks exceed energy capacity)";
             appendAbstractCFGStatsToJSON(root, abstractCFG.stats);
             root["ineligible_globals"] = static_cast<int64_t>(ineligGlobalCount);
@@ -264,6 +278,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         }
         return PreservedAnalyses::all();
     }
+
+    const auto &problemSizeStats = optimizer.getProblemSizeStats();
 
     // Step 6: Solve MILP
     auto solveStart = std::chrono::steady_clock::now();
@@ -295,6 +311,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  --- MILP-specific ---";
         printAbstractCFGStats(abstractCFG.stats);
         printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
+        printMILPAllocationMode(coarseAllocation);
         printMILPProblemSizeStats(problemSizeStats);
         PLOGI << "  Optimal solution:                no (solver failed)";
         PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
@@ -311,6 +328,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = false;
             root["infeasibility_reason"] = "solver found no feasible solution";
+            appendMILPAllocationModeToJSON(root, coarseAllocation);
             appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
             root["optimal_solution"] = "no (solver failed)";
             root["solve_time_ms"] = solveTimeMs;
@@ -350,6 +368,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  --- MILP-specific ---";
         printAbstractCFGStats(abstractCFG.stats);
         printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
+        printMILPAllocationMode(coarseAllocation);
         printMILPProblemSizeStats(problemSizeStats);
         if (solution.solverStatus == SolverStatus::Optimal) {
             PLOGI << "  Optimal solution:                yes";
@@ -371,6 +390,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             c.peakRSSKb = getPeakRSSKb();
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = true;
+            appendMILPAllocationModeToJSON(root, coarseAllocation);
             appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
             if (solution.solverStatus == SolverStatus::Optimal) {
                 root["optimal_solution"] = "yes";
@@ -419,6 +439,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     PLOGI << "  --- MILP-specific ---";
     printAbstractCFGStats(abstractCFG.stats);
     printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
+    printMILPAllocationMode(coarseAllocation);
     printMILPProblemSizeStats(problemSizeStats);
     if (solution.solverStatus == SolverStatus::Optimal) {
         PLOGI << "  Optimal solution:                yes";
@@ -443,6 +464,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         c.peakRSSKb = getPeakRSSKb();
         json::Object root = commonStatsToJSON(c);
         root["feasible"] = true;
+        appendMILPAllocationModeToJSON(root, coarseAllocation);
         appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
         if (solution.solverStatus == SolverStatus::Optimal) {
             root["optimal_solution"] = "yes";

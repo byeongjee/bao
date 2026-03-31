@@ -30,6 +30,7 @@ def verify_milp(
     energy_config: Path | None,
     estimator_mode: str,
     cpu_freq: int,
+    coarse_allocation: bool,
     pass_log_level: str,
 ) -> bool:
     """Verify semantic correctness of MILP checkpoint insertion."""
@@ -65,6 +66,7 @@ def verify_milp(
                 clang_opt_level=3,
                 milp_gap=0.0,
                 milp_log_file="",
+                coarse_allocation=coarse_allocation,
             ),
         )
         return InstrumentedOutput(

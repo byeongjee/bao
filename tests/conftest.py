@@ -201,6 +201,7 @@ def run_milp(tools, compile_to_ir):
         tmp_path: Path,
         *,
         skip_bb_freq: bool = False,
+        coarse_allocation: bool = False,
     ) -> PassResult:
         src = str(src)
         energy_config = str(energy_config)
@@ -253,14 +254,17 @@ def run_milp(tools, compile_to_ir):
 
         # Run MILP checkpoint pass
         output_ll = str(tmp_path / "output.ll")
-        r = _run([
+        pass_cmd = [
             tools["opt"], "-load-pass-plugin", tools["pass_lib"],
             "-passes=checkpoint",
             f"-energy-config={energy_config}",
             f"-milp-config={milp_config}",
             *bb_freq_flags,
-            "-S", input_ll, "-o", output_ll,
-        ])
+        ]
+        if coarse_allocation:
+            pass_cmd.append("-milp-coarse-allocation")
+        pass_cmd += ["-S", input_ll, "-o", output_ll]
+        r = _run(pass_cmd)
 
         output_ir = ""
         if os.path.exists(output_ll):

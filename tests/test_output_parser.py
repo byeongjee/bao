@@ -86,6 +86,7 @@ Edges (concrete): 30
 Abstract CFG size: 11
 Regions: 3
 Candidate globals (V_elig): 5
+MILP allocation mode: coarse
 MILP variables (before presolve): 100
 MILP constraints (before presolve): 200
 MILP variables (after presolve): 60
@@ -105,6 +106,7 @@ Peak RSS (KB): 10240
         assert stats.abstract_cfg_size == 11
         assert stats.regions == 3
         assert stats.candidate_globals == 5
+        assert stats.milp_allocation_mode == "coarse"
         assert stats.milp_variables == 100
         assert stats.milp_constraints == 200
         assert stats.milp_presolved_variables == 60
@@ -294,6 +296,7 @@ class TestLoadStatsJson:
                 "basic_blocks": 24,
                 "edges": 30,
                 "abstract_cfg_size": 11,
+                "milp_allocation_mode": "coarse",
                 "milp_variables": 100,
                 "milp_constraints": 200,
                 "milp_presolved_variables": 60,
@@ -304,6 +307,7 @@ class TestLoadStatsJson:
         assert feasible is True
         assert infeasibility_reason is None
         assert stats.abstract_cfg_size == 11
+        assert stats.milp_allocation_mode == "coarse"
         assert stats.milp_variables == 100
         assert stats.milp_constraints == 200
         assert stats.milp_presolved_variables == 60

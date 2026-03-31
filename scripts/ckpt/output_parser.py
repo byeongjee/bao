@@ -18,6 +18,7 @@ class PassStatistics:
     abstract_cfg_size: int | None = None
     regions: int | None = None
     candidate_globals: int | None = None
+    milp_allocation_mode: str | None = None
     milp_variables: int | None = None
     milp_constraints: int | None = None
     milp_presolved_variables: int | None = None
@@ -43,6 +44,7 @@ _STAT_LABELS: dict[str, list[str]] = {
     "abstract_cfg_size": ["Abstract CFG size", "Basic blocks (abstract)"],
     "regions": ["Regions"],
     "candidate_globals": ["Candidate globals (V_elig)"],
+    "milp_allocation_mode": ["MILP allocation mode"],
     "milp_variables": ["MILP variables (before presolve)", "MILP variables"],
     "milp_constraints": ["MILP constraints (before presolve)", "MILP constraints"],
     "milp_presolved_variables": ["MILP variables (after presolve)"],
@@ -95,7 +97,7 @@ def parse_pass_output(text: str) -> PassStatistics:
     stats = PassStatistics()
     for field_name, labels in _STAT_LABELS.items():
         raw = extract_stat(text, *labels)
-        if field_name == "optimal_solution":
+        if field_name in ("optimal_solution", "milp_allocation_mode"):
             setattr(stats, field_name, raw)
         else:
             setattr(stats, field_name, _parse_int(raw))
@@ -217,6 +219,7 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
         abstract_cfg_size=abstract_cfg_size,
         regions=data.get("regions"),
         candidate_globals=data.get("candidate_globals"),
+        milp_allocation_mode=data.get("milp_allocation_mode"),
         milp_variables=data.get("milp_variables"),
         milp_constraints=data.get("milp_constraints"),
         milp_presolved_variables=data.get("milp_presolved_variables"),

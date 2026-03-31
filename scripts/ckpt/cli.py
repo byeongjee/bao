@@ -170,6 +170,8 @@ def _resolve_algorithm_config(
     help="MIP optimality gap (default: 0.0 = proven optimal).",
 )
 @click.option("--milp-log-file", type=click.Path(), default="", help="Gurobi log file path.")
+@click.option("--coarse-allocation", is_flag=True,
+              help="Use one MILP placement variable per eligible value instead of per-region placement.")
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def compile_milp_cmd(
@@ -191,6 +193,7 @@ def compile_milp_cmd(
     save_temps: bool,
     milp_gap: float,
     milp_log_file: str,
+    coarse_allocation: bool,
     accumulate_keys: str | None,
 ) -> None:
     """Run the MILP checkpoint insertion compilation pipeline.
@@ -239,6 +242,7 @@ def compile_milp_cmd(
             cpu_freq=cpu_freq_hz,
             milp_gap=milp_gap,
             milp_log_file=milp_log_file,
+            coarse_allocation=coarse_allocation,
             save_temps=save_temps,
         ),
     )
@@ -718,6 +722,8 @@ def bench() -> None:
     default="16",
     help="CPU frequency in MHz (default: 16).",
 )
+@click.option("--coarse-allocation", is_flag=True,
+              help="Use one MILP placement variable per eligible value instead of per-region placement.")
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def bench_milp_cmd(
@@ -730,6 +736,7 @@ def bench_milp_cmd(
     estimator_mode: str,
     energy_config: str | None,
     cpu_freq: str,
+    coarse_allocation: bool,
     accumulate_keys: str | None,
 ) -> None:
     """Run MILP benchmarks across programs and capacitor sizes."""
@@ -746,6 +753,7 @@ def bench_milp_cmd(
         estimator_mode=estimator_mode,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        coarse_allocation=coarse_allocation,
         pass_log_level=ctx.obj["pass_log_level"],
         accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
     )
@@ -1078,6 +1086,8 @@ def verify_rockclimb_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--coarse-allocation", is_flag=True,
+              help="Use one MILP placement variable per eligible value instead of per-region placement.")
 @click.pass_context
 def verify_milp_cmd(
     ctx: click.Context,
@@ -1087,6 +1097,7 @@ def verify_milp_cmd(
     halt_mode: str,
     estimator_mode: str,
     cpu_freq: str,
+    coarse_allocation: bool,
 ) -> None:
     """Verify semantic correctness of MILP checkpoint insertion."""
     from .verify.milp import verify_milp
@@ -1100,6 +1111,7 @@ def verify_milp_cmd(
         energy_config=Path(energy_config) if energy_config else None,
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        coarse_allocation=coarse_allocation,
         pass_log_level=ctx.obj["pass_log_level"],
     )
     if not success:

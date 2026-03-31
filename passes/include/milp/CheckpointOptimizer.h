@@ -97,10 +97,12 @@ class CheckpointOptimizer {
 
     bool solve();
 
+    void setCoarseAllocation(bool enable) { coarseAllocation_ = enable; }
     void setAcceptFeasible(bool accept) { acceptFeasible_ = accept; }
     void setTimeLimit(double seconds) { timeLimit_ = seconds; }
     void setMIPGap(double gap) { mipGap_ = gap; }
     void setLogFile(const std::string &path) { logFile_ = path; }
+    bool isCoarseAllocationEnabled() const { return coarseAllocation_; }
 
     const MILPSolution &getSolution() const { return solution_; }
 
@@ -130,6 +132,7 @@ class CheckpointOptimizer {
     bool solved_ = false;
     bool modelBuilt_ = false;
     bool problemSizeStatsComputed_ = false;
+    bool coarseAllocation_ = false;
     bool acceptFeasible_ = false;
     double timeLimit_ = 600.0;
     double mipGap_ = 0.0;
@@ -138,12 +141,13 @@ class CheckpointOptimizer {
     using BlockVarKey = std::pair<NodeId, llvm::Value *>;
 
     // MILP variables (paper notation)
-    std::map<NodeId, GRBVar> r_;         // r_b: region start
-    std::map<BlockVarKey, GRBVar> m_;    // m_{b,v}: VM placement (all tracked)
-    std::map<BlockVarKey, GRBVar> rHat_; // r̂_{b,v}: need-restore (all tracked)
-    std::map<BlockVarKey, GRBVar> d_;    // d_{b,v}: dirty/pending (all tracked)
-    std::map<BlockVarKey, GRBVar> s_;    // s_{b,v}: save (all tracked)
-    std::map<NodeId, GRBVar> eAccum_;    // ε_accum[b]: accumulated energy
+    std::map<NodeId, GRBVar> r_;                       // r_b: region start
+    std::map<BlockVarKey, GRBVar> m_;                  // m_{b,v}: VM placement (fine mode)
+    std::map<llvm::GlobalVariable *, GRBVar> mGlobal_; // m_v: VM placement (coarse mode)
+    std::map<BlockVarKey, GRBVar> rHat_;               // r̂_{b,v}: need-restore (all tracked)
+    std::map<BlockVarKey, GRBVar> d_;                  // d_{b,v}: dirty/pending (all tracked)
+    std::map<BlockVarKey, GRBVar> s_;                  // s_{b,v}: save (all tracked)
+    std::map<NodeId, GRBVar> eAccum_;                  // ε_accum[b]: accumulated energy
 
     std::map<NodeId, std::vector<NodeId>> predecessors_;
     std::vector<llvm::GlobalVariable *> orderedVmObjs_;

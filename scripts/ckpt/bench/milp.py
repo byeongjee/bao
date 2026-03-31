@@ -45,6 +45,7 @@ _CSV_HEADER: list[str] = [
     "runtime_debug_store_mem_calls",
     "runtime_debug_restore_mem_calls",
     "candidate_globals",
+    "milp_allocation_mode",
     "milp_variables",
     "milp_constraints",
     "milp_presolved_variables",
@@ -84,6 +85,7 @@ def _build_row(
         "runtime_debug_store_mem_calls": nvm_counter(nvm, "store_mem"),
         "runtime_debug_restore_mem_calls": nvm_counter(nvm, "restore_mem"),
         "candidate_globals": stats.candidate_globals or 0,
+        "milp_allocation_mode": stats.milp_allocation_mode or "",
         "milp_variables": stats.milp_variables or 0,
         "milp_constraints": stats.milp_constraints or 0,
         "milp_presolved_variables": stats.milp_presolved_variables or 0,
@@ -106,6 +108,7 @@ def run_milp_benchmarks(
     estimator_mode: str,
     energy_config: Path | None = None,
     cpu_freq: int,
+    coarse_allocation: bool,
     pass_log_level: str,
     accumulate_keys_file: Path | None,
 ) -> None:
@@ -180,6 +183,7 @@ def run_milp_benchmarks(
                     clang_opt_level=3,
                     milp_gap=0.0,
                     milp_log_file="",
+                    coarse_allocation=coarse_allocation,
                 )
 
                 result: MilpCompileResult = compile_milp(tc, env, opts)
