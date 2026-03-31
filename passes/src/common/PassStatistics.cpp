@@ -20,7 +20,6 @@ void printCommonStats(const CommonStats &stats) {
     PLOGI << "  Candidate globals (V_elig):      " << stats.candidateGlobals;
     PLOGI << "  Regions:                         " << stats.regions;
     PLOGI << "  Region boundaries:               " << stats.regionBoundaries;
-    PLOGI << "  Runtime calls inserted:          " << stats.runtimeCallsInserted;
     PLOGI << "  Compilation time (ms):           "
           << checkpoint::fmtDouble(stats.compilationTimeMs);
     PLOGI << "  Peak RSS (KB):                   " << stats.peakRSSKb;
