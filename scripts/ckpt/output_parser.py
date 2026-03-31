@@ -15,6 +15,7 @@ class PassStatistics:
 
     basic_blocks: int | None = None
     edges: int | None = None
+    abstract_cfg_size: int | None = None
     regions: int | None = None
     candidate_globals: int | None = None
     milp_variables: int | None = None
@@ -37,6 +38,7 @@ class PassStatistics:
 _STAT_LABELS: dict[str, list[str]] = {
     "basic_blocks": ["Basic blocks (concrete)", "Basic blocks"],
     "edges": ["Edges (concrete)", "Edges"],
+    "abstract_cfg_size": ["Abstract CFG size", "Basic blocks (abstract)"],
     "regions": ["Regions"],
     "candidate_globals": ["Candidate globals (V_elig)"],
     "milp_variables": ["MILP variables"],
@@ -200,9 +202,15 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
     Returns (stats, feasible, infeasibility_reason).
     """
 
+    abstract_cfg_size = data.get("abstract_cfg_size")
+    abstract_cfg = data.get("abstract_cfg")
+    if abstract_cfg_size is None and isinstance(abstract_cfg, dict):
+        abstract_cfg_size = abstract_cfg.get("abstract_nodes")
+
     stats = PassStatistics(
         basic_blocks=data.get("basic_blocks"),
         edges=data.get("edges"),
+        abstract_cfg_size=abstract_cfg_size,
         regions=data.get("regions"),
         candidate_globals=data.get("candidate_globals"),
         milp_variables=data.get("milp_variables"),

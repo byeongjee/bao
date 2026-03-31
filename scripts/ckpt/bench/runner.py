@@ -321,6 +321,7 @@ def run_benchmark_matrix(
                 common_fields: dict[str, str | int | None] = {
                     "basic_blocks": stats.basic_blocks or 0,
                     "edges": stats.edges or 0,
+                    "abstract_cfg_size": stats.abstract_cfg_size or 0,
                     "region_boundaries": stats.region_boundaries or 0,
                     "compilation_time_ms": stats.compilation_time_ms or 0,
                     "peak_rss_kb": stats.peak_rss_kb or 0,
@@ -418,6 +419,7 @@ def print_benchmark_summary(
     _print_group("CFG", [
         ("blocks", _fmt("basic_blocks", fields)),
         ("edges", _fmt("edges", fields)),
+        ("abstract cfg", _fmt("abstract_cfg_size", fields)),
         ("region boundaries", _fmt("region_boundaries", fields)),
     ])
 

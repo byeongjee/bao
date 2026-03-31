@@ -11,6 +11,7 @@ from ckpt.output_parser import (
     detect_infeasibility,
     extract_stat,
     has_pass_statistics,
+    load_stats_json,
     nvm_counters_to_labels,
     parse_nvm_output,
     parse_pass_output,
@@ -82,6 +83,7 @@ class TestParsePassOutput:
 --- Checkpoint Insertion Statistics ---
 Basic blocks (concrete): 24
 Edges (concrete): 30
+Abstract CFG size: 11
 Regions: 3
 Candidate globals (V_elig): 5
 MILP variables: 100
@@ -98,6 +100,7 @@ Peak RSS (KB): 10240
         stats = parse_pass_output(self.REALISTIC_OUTPUT)
         assert stats.basic_blocks == 24
         assert stats.edges == 30
+        assert stats.abstract_cfg_size == 11
         assert stats.regions == 3
         assert stats.candidate_globals == 5
         assert stats.milp_variables == 100
@@ -114,12 +117,17 @@ Peak RSS (KB): 10240
         stats = parse_pass_output(text)
         assert stats.basic_blocks == 10
         assert stats.edges == 5
+        assert stats.abstract_cfg_size is None
         assert stats.regions is None
         assert stats.milp_variables is None
 
     def test_empty_string(self):
         stats = parse_pass_output("")
         assert stats == PassStatistics()
+
+    def test_legacy_abstract_cfg_label(self):
+        stats = parse_pass_output("Basic blocks (abstract): 9\n")
+        assert stats.abstract_cfg_size == 9
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +271,37 @@ class TestHasPassStatistics:
 
     def test_absent(self):
         assert has_pass_statistics("no stats here") is False
+
+
+# ---------------------------------------------------------------------------
+# load_stats_json
+# ---------------------------------------------------------------------------
+
+class TestLoadStatsJson:
+    def test_loads_top_level_abstract_cfg_size(self):
+        stats, feasible, infeasibility_reason = load_stats_json(
+            {
+                "basic_blocks": 24,
+                "edges": 30,
+                "abstract_cfg_size": 11,
+                "compilation_time_ms": 500.0,
+            }
+        )
+        assert feasible is True
+        assert infeasibility_reason is None
+        assert stats.abstract_cfg_size == 11
+        assert stats.compilation_time_ms == 500
+
+    def test_falls_back_to_nested_abstract_cfg_nodes(self):
+        stats, feasible, infeasibility_reason = load_stats_json(
+            {
+                "abstract_cfg": {
+                    "abstract_nodes": 7,
+                },
+                "feasible": False,
+                "infeasibility_reason": "solver found no feasible solution",
+            }
+        )
+        assert feasible is False
+        assert infeasibility_reason == "solver found no feasible solution"
+        assert stats.abstract_cfg_size == 7
