@@ -81,6 +81,13 @@ class FakeCapture:
     def __init__(self, csv_lines: list[str]):
         self.csv_lines = csv_lines
 
+    def __enter__(self) -> FakeCapture:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        del exc_type, exc, tb
+        return False
+
     def wait(self) -> None:
         return None
 
@@ -102,6 +109,26 @@ class FakeManager:
         csv_lines = capture_csv_lines(self.capture_rows[self.calls])
         self.calls += 1
         return FakeCapture(csv_lines)
+
+
+class FakeFlakyManager:
+    def __init__(
+        self,
+        failures_before_success: int,
+        capture_rows: list[tuple[float, int]],
+        error_message: str,
+    ):
+        self.failures_before_success = failures_before_success
+        self.capture_rows = capture_rows
+        self.error_message = error_message
+        self.calls = 0
+
+    def start_capture(self, device_configuration: object, capture_configuration: object) -> FakeCapture:
+        del device_configuration, capture_configuration
+        self.calls += 1
+        if self.calls <= self.failures_before_success:
+            raise RuntimeError(self.error_message)
+        return FakeCapture(capture_csv_lines(self.capture_rows))
 
 
 def install_fake_saleae_automation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -190,3 +217,69 @@ class TestSaleaeRun:
             (Path("/tmp/app.elf"), 30),
         ]
         assert manager.calls == 2
+
+    def test_retries_start_capture_failure_before_flashing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        install_fake_saleae_automation(monkeypatch)
+        flash_calls: list[tuple[Path, int]] = []
+        sleep_calls: list[float] = []
+
+        def fake_flash(elf_path: Path, timeout: int) -> None:
+            flash_calls.append((elf_path, timeout))
+
+        def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr("ckpt.device.saleae.flash", fake_flash)
+        monkeypatch.setattr("ckpt.device.saleae.time.sleep", fake_sleep)
+
+        manager = FakeFlakyManager(
+            failures_before_success=1,
+            capture_rows=[
+                (0.000000000, 0),
+                (0.001000000, 1),
+                (0.001010000, 0),
+                (0.379125720, 1),
+                (0.384125720, 0),
+            ],
+            error_message="No physical devices found",
+        )
+
+        result = saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0)
+
+        assert result == pytest.approx(378115.72)
+        assert flash_calls == [(Path("/tmp/app.elf"), 30)]
+        assert sleep_calls == [0.5]
+        assert manager.calls == 2
+
+    def test_wraps_terminal_start_capture_failure_as_device_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        install_fake_saleae_automation(monkeypatch)
+        sleep_calls: list[float] = []
+
+        def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr("ckpt.device.saleae.time.sleep", fake_sleep)
+
+        manager = FakeFlakyManager(
+            failures_before_success=3,
+            capture_rows=[
+                (0.000000000, 0),
+                (0.001000000, 1),
+                (0.001010000, 0),
+                (0.379125720, 1),
+                (0.384125720, 0),
+            ],
+            error_message="No physical devices found",
+        )
+
+        with pytest.raises(DeviceError, match="Cannot start Saleae capture after 3 attempts"):
+            saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0)
+
+        assert sleep_calls == [0.5, 0.5]
+        assert manager.calls == 3

@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 _SALEAE_CHANNEL = 0
 _SALEAE_SAMPLE_RATE = 100_000_000  # 100 MHz
 _MAX_CAPTURE_ATTEMPTS = 3
+_CAPTURE_START_RETRY_DELAY_SECONDS = 0.5
 _AMBIGUOUS_CAPTURE_PREFIX = "Ambiguous Saleae capture"
 
 logger = logging.getLogger(__name__)
@@ -117,11 +119,29 @@ def saleae_run(
     )
 
     last_ambiguous_error: DeviceError | None = None
+    last_start_error: Exception | None = None
     for attempt in range(1, _MAX_CAPTURE_ATTEMPTS + 1):
-        with manager.start_capture(
-            device_configuration=device_config,
-            capture_configuration=capture_config,
-        ) as capture:
+        try:
+            capture_context = manager.start_capture(
+                device_configuration=device_config,
+                capture_configuration=capture_config,
+            )
+        except Exception as exc:
+            last_start_error = exc
+            if attempt == _MAX_CAPTURE_ATTEMPTS:
+                break
+            logger.warning(
+                "Saleae start_capture failed for %s on attempt %d/%d; retrying in %.1fs. Error: %s",
+                elf_path,
+                attempt,
+                _MAX_CAPTURE_ATTEMPTS,
+                _CAPTURE_START_RETRY_DELAY_SECONDS,
+                exc,
+            )
+            time.sleep(_CAPTURE_START_RETRY_DELAY_SECONDS)
+            continue
+
+        with capture_context as capture:
             try:
                 flash(elf_path, flash_timeout)
                 capture.wait()
@@ -150,10 +170,18 @@ def saleae_run(
                         _MAX_CAPTURE_ATTEMPTS,
                     )
 
-    assert last_ambiguous_error is not None
+    if last_ambiguous_error is not None:
+        raise DeviceError(
+            f"{last_ambiguous_error} after {_MAX_CAPTURE_ATTEMPTS} attempts"
+        )
+
+    assert last_start_error is not None
     raise DeviceError(
-        f"{last_ambiguous_error} after {_MAX_CAPTURE_ATTEMPTS} attempts"
-    )
+        "Cannot start Saleae capture after "
+        f"{_MAX_CAPTURE_ATTEMPTS} attempts. "
+        "Is a physical Logic device connected and visible to Logic 2? "
+        f"Error: {last_start_error}"
+    ) from last_start_error
 
 
 _SHORT_PULSE_THRESHOLD = 0.001  # 1 ms — start pulse is ~10 us, stop pulse is ~5 ms
