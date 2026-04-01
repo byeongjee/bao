@@ -293,11 +293,6 @@ SchematicInstrumenter::insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
     if (numIt == 0)
         return 0;
 
-    // In preheader: alloca counter, store 0.
-    llvm::IRBuilder<> preBuilder(preheader->getTerminator());
-    llvm::AllocaInst *counter = preBuilder.CreateAlloca(I32Ty, nullptr, "schematic_loop_counter");
-    preBuilder.CreateStore(llvm::ConstantInt::get(I32Ty, 0), counter);
-
     // Split the back-edge (latch -> header) using SplitEdge.
     // This correctly updates PHI nodes in header, replacing the latch
     // predecessor with the new intermediate block.
@@ -322,14 +317,6 @@ SchematicInstrumenter::insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
     for (auto &[PHI, _] : phiEntries)
         PHI->removeIncomingValue(checkBB, /*DeletePHIIfEmpty=*/false);
 
-    // Reference: compare counter >= (numIt - 2) using signed comparison.
-    // Counter starts at 0, incremented only on non-checkpoint path.
-    // numIt >= 3 guaranteed (LoopAnalyzer sets mandatory for numIt < 3).
-    llvm::IRBuilder<> checkBuilder(checkBB);
-    llvm::Value *counterVal = checkBuilder.CreateLoad(I32Ty, counter);
-    llvm::Value *threshold = llvm::ConstantInt::get(I32Ty, numIt - 2);
-    llvm::Value *cond = checkBuilder.CreateICmpSGE(counterVal, threshold);
-
     // Create increment BB (counter++, branch to header).
     llvm::BasicBlock *incrBB =
         llvm::BasicBlock::Create(Ctx, "schematic_loop_incr", header->getParent(), header);
@@ -338,21 +325,33 @@ SchematicInstrumenter::insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
     llvm::BasicBlock *ckptBB =
         llvm::BasicBlock::Create(Ctx, "schematic_loop_ckpt", header->getParent(), header);
 
+    // Create a loop-local SSA counter in the header instead of a stack slot.
+    // It carries the number of non-checkpoint iterations since the last boundary.
+    llvm::IRBuilder<> headerBuilder(header, header->getFirstInsertionPt());
+    auto *counterPHI = headerBuilder.CreatePHI(I32Ty, 3, "schematic_loop_counter");
+    counterPHI->addIncoming(llvm::ConstantInt::get(I32Ty, 0), preheader);
+
     // checkBB: if counter >= threshold, goto ckptBB, else goto incrBB.
+    // Reference: compare counter >= (numIt - 2) using signed comparison.
+    // Counter starts at 0, incremented only on non-checkpoint path.
+    // numIt >= 3 guaranteed (LoopAnalyzer sets mandatory for numIt < 3).
+    llvm::IRBuilder<> checkBuilder(checkBB);
+    llvm::Value *threshold = llvm::ConstantInt::get(I32Ty, numIt - 2);
+    llvm::Value *cond = checkBuilder.CreateICmpSGE(counterPHI, threshold);
     checkBuilder.CreateCondBr(cond, ckptBB, incrBB);
 
     // incrBB: increment counter, branch to header.
     llvm::IRBuilder<> incrBuilder(incrBB);
-    llvm::Value *incremented = incrBuilder.CreateAdd(counterVal, llvm::ConstantInt::get(I32Ty, 1));
-    incrBuilder.CreateStore(incremented, counter);
+    llvm::Value *incremented = incrBuilder.CreateAdd(counterPHI, llvm::ConstantInt::get(I32Ty, 1));
     incrBuilder.CreateBr(header);
+    counterPHI->addIncoming(incremented, incrBB);
 
     // ckptBB: full save/restore sequence, reset counter to 0, branch to header.
     inserted +=
         insertCheckpointSequence(ckptBB, &decision.bodyAllocation, &decision.bodyAllocation, state);
     llvm::IRBuilder<> ckptBuilder(ckptBB);
-    ckptBuilder.CreateStore(llvm::ConstantInt::get(I32Ty, 0), counter);
     ckptBuilder.CreateBr(header);
+    counterPHI->addIncoming(llvm::ConstantInt::get(I32Ty, 0), ckptBB);
 
     // Update PHI nodes: add entries for both incrBB and ckptBB predecessors.
     for (auto &[PHI, val] : phiEntries) {
