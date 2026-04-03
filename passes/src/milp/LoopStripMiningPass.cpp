@@ -33,6 +33,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
 #include <cmath>
@@ -156,6 +158,7 @@ using checkpoint::containsInvoke;
 using checkpoint::getDirectChildLoop;
 using checkpoint::getMarkerTripCount;
 using checkpoint::removeLoopTripCountMetadata;
+using checkpoint::removeStripMinedLoopMetadata;
 using checkpoint::setLoopTripCountMetadata;
 using checkpoint::setStripMinedLoopMetadata;
 
@@ -1029,20 +1032,53 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     if (OrigBound->getZExtValue() != expectedBound)
         return false;
 
-    // Collect LCSSA PHIs in ExitBlock before any modifications
+    // Collect LCSSA PHIs in ExitBlock before any modifications.
     SmallVector<PHINode *, 4> lcssaPhis;
     for (PHINode &PN : ExitBlock->phis())
         lcssaPhis.push_back(&PN);
 
+    uint64_t cleanupRemainder = N % K;
+    bool needsCleanupLoop = cleanupRemainder != 0;
+    uint64_t fullChunkBound = N - cleanupRemainder;
+    uint64_t outerTripCount = fullChunkBound / K;
+
+    // If a peeled cleanup loop is needed, first create a synthetic preheader
+    // so the cloned cleanup path does not re-execute arbitrary original
+    // preheader instructions.
+    if (needsCleanupLoop) {
+        Preheader = SplitEdge(Preheader, Header, &DT, &LI);
+        if (!Preheader || L->getLoopPreheader() != Preheader)
+            return false;
+    }
+
+    ValueToValueMapTy cleanupVMap;
+    SmallVector<BasicBlock *, 8> cleanupBlocks;
+    Loop *CleanupLoop = nullptr;
+    BasicBlock *CleanupPreheader = nullptr;
+    BasicBlock *CleanupExitingBB = nullptr;
+    if (needsCleanupLoop) {
+        CleanupLoop = cloneLoopWithPreheader(ExitBlock, Preheader, L, cleanupVMap, ".remainder",
+                                             &LI, &DT, cleanupBlocks);
+        if (!CleanupLoop)
+            return false;
+        remapInstructionsInBlocks(cleanupBlocks, cleanupVMap);
+
+        CleanupPreheader = dyn_cast_or_null<BasicBlock>(cleanupVMap[Preheader]);
+        CleanupExitingBB = dyn_cast_or_null<BasicBlock>(cleanupVMap[ExitingBB]);
+        if (!CleanupPreheader || !CleanupExitingBB)
+            return false;
+    }
+
     // ── Phase 3: Create outer loop blocks ──
     BasicBlock *OuterHeader = BasicBlock::Create(Ctx, "outer.header", F, Header);
-    BasicBlock *OuterLatch = BasicBlock::Create(Ctx, "outer.latch", F, ExitBlock);
+    BasicBlock *OuterLatch =
+        BasicBlock::Create(Ctx, "outer.latch", F, needsCleanupLoop ? CleanupPreheader : ExitBlock);
 
     // ── Phase 4: Build OuterHeader ──
     IRBuilder<> OHB(OuterHeader);
     PHINode *OuterIV = OHB.CreatePHI(IVTy, 2, "outer.iv");
 
-    // Forward non-IV Header PHIs through the outer loop
+    // Forward non-IV Header PHIs through the outer loop.
     SmallVector<HeaderPhiInfo, 4> headerPhiForwarding;
     for (PHINode &PN : Header->phis()) {
         if (&PN == IV)
@@ -1052,17 +1088,15 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
         headerPhiForwarding.push_back({&PN, OHP, InitVal});
     }
 
-    // Inner limit: min(outer.iv + K, N)
+    // Full chunks always execute exactly K iterations. Any non-zero remainder
+    // executes in the peeled cleanup loop cloned above.
     Value *OuterIVPlusK = OHB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K), "outer.iv.plus.k");
-    Value *NVal = ConstantInt::get(IVTy, N);
-    Value *Cmp = OHB.CreateICmpULT(OuterIVPlusK, NVal, "min.cmp");
-    Value *InnerLimit = OHB.CreateSelect(Cmp, OuterIVPlusK, NVal, "inner.limit");
-    Value *InnerExitBound = InnerLimit;
+    Value *InnerExitBound = OuterIVPlusK;
     if (compareUsesCurrentIV && exitAtLatch) {
         // Latch-exiting loops that compare the current IV against N - 1 still
-        // execute N iterations. Preserve that form so each chunk executes at
-        // most K iterations rather than K + 1.
-        InnerExitBound = OHB.CreateSub(InnerLimit, ConstantInt::get(IVTy, 1), "inner.exit.bound");
+        // execute N iterations. Preserve that form so each full chunk executes
+        // exactly K iterations rather than K + 1.
+        InnerExitBound = OHB.CreateSub(OuterIVPlusK, ConstantInt::get(IVTy, 1), "inner.exit.bound");
     }
 
     OHB.CreateBr(Header);
@@ -1094,16 +1128,7 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     // ── Phase 7: Build OuterLatch ──
     IRBuilder<> OLB(OuterLatch);
 
-    // Forwarding PHIs for LCSSA values escaping to ExitBlock
-    SmallVector<PHINode *, 4> outerLatchPhis;
-    for (PHINode *LCPhi : lcssaPhis) {
-        Value *IncomingVal = LCPhi->getIncomingValueForBlock(ExitingBB);
-        PHINode *OLP = OLB.CreatePHI(LCPhi->getType(), 1, LCPhi->getName() + ".ol");
-        OLP->addIncoming(IncomingVal, ExitingBB);
-        outerLatchPhis.push_back(OLP);
-    }
-
-    // Forwarding PHIs for non-IV Header PHIs (loop-carried state)
+    // Forwarding PHIs for non-IV Header PHIs (loop-carried state).
     SmallVector<PHINode *, 4> headerForwardPhis;
     for (auto &info : headerPhiForwarding) {
         Value *ForwardVal;
@@ -1125,30 +1150,74 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
         headerForwardPhis.push_back(FP);
     }
 
-    // Next outer IV
+    // Next outer IV.
     Value *NextOuterIV = OLB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K), "outer.iv.next");
 
-    // Outer exit condition: outer runs ceil(N/K) times
-    uint64_t outerTripCount = (N + K - 1) / K;
-    Value *OuterContinue = OLB.CreateICmpULT(NextOuterIV, ConstantInt::get(IVTy, N), "outer.cmp");
-    OLB.CreateCondBr(OuterContinue, OuterHeader, ExitBlock);
+    // Outer exit condition: run exactly the full-size chunks. Any remainder
+    // falls into the peeled cleanup loop using the original bound N.
+    Value *OuterContinue =
+        OLB.CreateICmpULT(NextOuterIV, ConstantInt::get(IVTy, fullChunkBound), "outer.cmp");
+    if (needsCleanupLoop) {
+        OLB.CreateCondBr(OuterContinue, OuterHeader, CleanupPreheader);
+    } else {
+        OLB.CreateCondBr(OuterContinue, OuterHeader, ExitBlock);
+    }
 
-    // Complete OuterIV PHI
+    // Complete OuterIV PHI.
     OuterIV->addIncoming(ConstantInt::get(IVTy, 0), Preheader);
     OuterIV->addIncoming(NextOuterIV, OuterLatch);
 
-    // Complete non-IV OuterHeader PHIs
+    // Complete non-IV OuterHeader PHIs.
     for (unsigned i = 0; i < headerPhiForwarding.size(); i++) {
         auto &info = headerPhiForwarding[i];
         info.outerPhi->addIncoming(info.initVal, Preheader);
         info.outerPhi->addIncoming(headerForwardPhis[i], OuterLatch);
     }
 
-    // ── Phase 8: Update ExitBlock PHIs ──
-    for (unsigned i = 0; i < lcssaPhis.size(); i++) {
-        int idx = lcssaPhis[i]->getBasicBlockIndex(ExitingBB);
-        lcssaPhis[i]->setIncomingBlock(idx, OuterLatch);
-        lcssaPhis[i]->setIncomingValue(idx, outerLatchPhis[i]);
+    // ── Phase 8: Update cleanup seed / ExitBlock PHIs ──
+    if (needsCleanupLoop) {
+        PHINode *CleanupIV = dyn_cast_or_null<PHINode>(cleanupVMap[IV]);
+        if (!CleanupIV)
+            return false;
+        int cleanupIVIdx = CleanupIV->getBasicBlockIndex(CleanupPreheader);
+        if (cleanupIVIdx < 0)
+            return false;
+        CleanupIV->setIncomingValue(cleanupIVIdx, NextOuterIV);
+
+        for (unsigned i = 0; i < headerPhiForwarding.size(); i++) {
+            PHINode *CleanupPhi =
+                dyn_cast_or_null<PHINode>(cleanupVMap[headerPhiForwarding[i].headerPhi]);
+            if (!CleanupPhi)
+                return false;
+            int cleanupIdx = CleanupPhi->getBasicBlockIndex(CleanupPreheader);
+            if (cleanupIdx < 0)
+                return false;
+            CleanupPhi->setIncomingValue(cleanupIdx, headerForwardPhis[i]);
+        }
+
+        for (PHINode *LCPhi : lcssaPhis) {
+            Value *IncomingVal = LCPhi->getIncomingValueForBlock(ExitingBB);
+            Value *CleanupIncoming = MapValue(IncomingVal, cleanupVMap);
+            if (!CleanupIncoming)
+                CleanupIncoming = IncomingVal;
+            int idx = LCPhi->getBasicBlockIndex(ExitingBB);
+            if (idx < 0)
+                return false;
+            LCPhi->setIncomingBlock(idx, CleanupExitingBB);
+            LCPhi->setIncomingValue(idx, CleanupIncoming);
+        }
+    } else {
+        for (PHINode *LCPhi : lcssaPhis) {
+            Value *IncomingVal = LCPhi->getIncomingValueForBlock(ExitingBB);
+            PHINode *OLP = OLB.CreatePHI(LCPhi->getType(), 1, LCPhi->getName() + ".ol");
+            OLP->addIncoming(IncomingVal, ExitingBB);
+
+            int idx = LCPhi->getBasicBlockIndex(ExitingBB);
+            if (idx < 0)
+                return false;
+            LCPhi->setIncomingBlock(idx, OuterLatch);
+            LCPhi->setIncomingValue(idx, OLP);
+        }
     }
 
     // ── Phase 9: Update LoopInfo ──
@@ -1194,6 +1263,11 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
 
     setLoopTripCountMetadata(OuterLoop, outerTripCount);
     formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
+    if (CleanupLoop) {
+        removeStripMinedLoopMetadata(CleanupLoop);
+        setLoopTripCountMetadata(CleanupLoop, cleanupRemainder);
+        formLCSSARecursively(*CleanupLoop, DT, &LI, &SE);
+    }
 
     SE.forgetLoop(L);
 
