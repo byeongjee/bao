@@ -1150,6 +1150,19 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
         headerForwardPhis.push_back(FP);
     }
 
+    SmallVector<std::pair<PHINode *, PHINode *>, 4> outerExitPhiForwarding;
+    if (!needsCleanupLoop) {
+        // These forwarding PHIs must stay at the top of outer.latch. Creating
+        // them after the branch would leave the latch without a trailing
+        // terminator, which breaks loop metadata queries.
+        for (PHINode *LCPhi : lcssaPhis) {
+            Value *IncomingVal = LCPhi->getIncomingValueForBlock(ExitingBB);
+            PHINode *OLP = OLB.CreatePHI(LCPhi->getType(), 1, LCPhi->getName() + ".ol");
+            OLP->addIncoming(IncomingVal, ExitingBB);
+            outerExitPhiForwarding.push_back({LCPhi, OLP});
+        }
+    }
+
     // Next outer IV.
     Value *NextOuterIV = OLB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K), "outer.iv.next");
 
@@ -1207,11 +1220,9 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
             LCPhi->setIncomingValue(idx, CleanupIncoming);
         }
     } else {
-        for (PHINode *LCPhi : lcssaPhis) {
-            Value *IncomingVal = LCPhi->getIncomingValueForBlock(ExitingBB);
-            PHINode *OLP = OLB.CreatePHI(LCPhi->getType(), 1, LCPhi->getName() + ".ol");
-            OLP->addIncoming(IncomingVal, ExitingBB);
-
+        for (auto &entry : outerExitPhiForwarding) {
+            PHINode *LCPhi = entry.first;
+            PHINode *OLP = entry.second;
             int idx = LCPhi->getBasicBlockIndex(ExitingBB);
             if (idx < 0)
                 return false;

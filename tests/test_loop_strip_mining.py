@@ -98,6 +98,22 @@ def test_exact_division_strip_mining_avoids_min_select(tools, compile_to_ir, tmp
     assert "%exitcond = icmp ne i32 %inc, %outer.iv.plus.k" in output_ir
 
 
+def test_exact_division_liveout_preserves_outer_latch_terminator(tools, compile_to_ir, tmp_path):
+    _, output_ir = _run_preprocess(
+        tools,
+        compile_to_ir,
+        TESTS_DIR / "test_stripmine_divisible_liveout.c",
+        54.0,
+        tmp_path,
+    )
+
+    assert "outer.header" in output_ir
+    assert "outer.latch" in output_ir
+    assert ".ol = phi i32" in output_ir
+    assert "min.cmp" not in output_ir
+    assert "inner.limit = select" not in output_ir
+
+
 def test_remainder_strip_mining_uses_cleanup_loop_without_min_select(tools, compile_to_ir, tmp_path):
     stats, output_ir = _run_preprocess(
         tools,
