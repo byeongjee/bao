@@ -70,9 +70,6 @@ METRICS = {
     },
 }
 
-_CAP_ORDER = {"1uF": 0, "10uF": 1, "100uF": 2}
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -103,11 +100,21 @@ def _get_value(row: dict[str, str], metric_key: str) -> float | None:
         return None
 
 
-def _sort_key(label: str) -> tuple[str, int]:
+def _cap_sort_key(cap: str) -> tuple[float, str]:
+    if cap.endswith("uF"):
+        try:
+            return float(cap.removesuffix("uF")), cap
+        except ValueError:
+            pass
+    return float("inf"), cap
+
+
+def _sort_key(label: str) -> tuple[str, float, str]:
     parts = label.split("\n")
     program = parts[0]
     cap = parts[1].strip("()") if len(parts) > 1 else ""
-    return (program, _CAP_ORDER.get(cap, 99))
+    cap_value, cap_label = _cap_sort_key(cap)
+    return (program, cap_value, cap_label)
 
 
 def _load_data(

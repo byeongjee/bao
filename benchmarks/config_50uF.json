@@ -1,0 +1,26 @@
+{
+  "capacity": 243000.0,
+  "E_pro": 43.886124298491924,
+  "E_epi": 35.482127300247587,
+  "N_reg": 16,
+  "reg_store_energy": 4.712573998475123,
+  "reg_restore_energy": 1.90,
+  "nvm_access_penalty": 2.23,
+  "mem_store_energy_per_byte": 7.38,
+  "mem_restore_energy_per_byte": 8.13,
+  "vm_capacity_bytes": 2048,
+  "loop_increment_cost_nvm_O0": 27.822605858712205,
+  "loop_increment_cost_nvm_O3": 6.093453349479254,
+  "milp": {
+    "loop_strip_mining_enabled": true,
+    "loop_strip_mining_cost": 25.0
+  },
+  "rockclimb": {
+    "distributed_checkpointing": true,
+    "reg_store_energy": 0.0
+  },
+  "schematic": {
+    "max_paths": 10,
+    "enable_block_splitting": true
+  }
+}

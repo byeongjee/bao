@@ -13,7 +13,7 @@ from pathlib import Path
 from ..env import ProjectEnv
 from ..errors import ConfigError
 
-_DEFAULT_CAPS = ["1uF", "5uF", "10uF", "100uF"]
+_DEFAULT_CAPS = ["1uF", "5uF", "10uF", "50uF", "100uF"]
 
 _ENERGY_CONFIG_MAP: dict[str, str] = {
     "milp": "assembly_params.json",
@@ -66,7 +66,7 @@ def discover_capacitors(
     *algorithm*: ``"milp"``, ``"rockclimb"``, or ``"schematic"``.
 
     Looks for ``benchmarks/config_{cap}.json`` files.
-    Default caps: 1uF, 10uF, 100uF.
+    Default caps: 1uF, 5uF, 10uF, 50uF, 100uF.
 
     If *filter_caps* is given, only return matching ones.  Raises
     :class:`SystemExit` if no caps match.
