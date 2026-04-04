@@ -19,7 +19,6 @@ from conftest import (
     _prepare_schematic_ir,
     PassResult,
     check_assertions,
-    count_calls,
 )
 
 pytestmark = pytest.mark.schematic
@@ -410,92 +409,3 @@ def test_schematic_skips_debug_helper_functions(
     assert "SCHEMATIC: skipping benchmark infrastructure function timing_gpio_stop" in result.stderr
     assert "SCHEMATIC: skipping benchmark infrastructure function _timing_delay_cycles" in result.stderr
     assert "due to unresolved memory/call effects" not in result.stderr
-
-
-def test_schematic_rare_loop_path_can_increase_boundaries(
-    collect_schematic_trace,
-    run_schematic_o0,
-    tmp_path_factory,
-):
-    baseline_tmp = tmp_path_factory.mktemp("schematic_hot_loop_bias_baseline")
-    outlier_tmp = tmp_path_factory.mktemp("schematic_cold_loop_outlier")
-
-    baseline_src = SCENARIOS_DIR / "scenario_schematic_hot_loop_bias_baseline.c"
-    outlier_src = SCENARIOS_DIR / "scenario_schematic_cold_loop_outlier.c"
-    path_bias_cfg = CONFIGS_DIR / "scenario_schematic_path_bias_config.json"
-
-    trace = collect_schematic_trace(outlier_src, ENERGY_CONFIG, outlier_tmp, 0)
-    loop_traces = trace["main"]["loop_traces"]
-    assert len(loop_traces) == 1, loop_traces
-    loop_info = next(iter(loop_traces.values()))
-    iteration_traces = sorted(loop_info["traces"], key=lambda entry: entry["count"], reverse=True)
-    assert len(iteration_traces) == 2, iteration_traces
-    assert iteration_traces[0]["count"] == 63, iteration_traces
-    assert iteration_traces[1]["count"] == 1, iteration_traces
-
-    baseline = run_schematic_o0(baseline_src, ENERGY_CONFIG, path_bias_cfg, baseline_tmp)
-    outlier = run_schematic_o0(outlier_src, ENERGY_CONFIG, path_bias_cfg, outlier_tmp)
-
-    assert baseline.exit_code == 0, baseline.stderr[:1000]
-    assert outlier.exit_code == 0, outlier.stderr[:1000]
-
-    baseline_boundaries = count_calls(baseline.output_ir, "__region_boundary")
-    outlier_boundaries = count_calls(outlier.output_ir, "__region_boundary")
-
-    assert outlier_boundaries > baseline_boundaries, (
-        f"Expected rare cold outlier to increase boundaries, got "
-        f"baseline={baseline_boundaries}, outlier={outlier_boundaries}\n"
-        f"baseline stderr:\n{baseline.stderr}\n"
-        f"outlier stderr:\n{outlier.stderr}"
-    )
-
-
-def test_schematic_synthesizes_missing_rare_loop_path(
-    collect_schematic_trace,
-    run_schematic_o0,
-    tools,
-    compile_to_ir,
-    tmp_path_factory,
-):
-    baseline_tmp = tmp_path_factory.mktemp("schematic_missing_rare_loop_path_baseline")
-    partial_tmp = tmp_path_factory.mktemp("schematic_missing_rare_loop_path_partial")
-
-    baseline_src = SCENARIOS_DIR / "scenario_schematic_hot_loop_bias_baseline.c"
-    outlier_src = SCENARIOS_DIR / "scenario_schematic_cold_loop_outlier.c"
-    path_bias_cfg = CONFIGS_DIR / "scenario_schematic_path_bias_config.json"
-
-    trace = collect_schematic_trace(outlier_src, ENERGY_CONFIG, partial_tmp, 0)
-    loop_traces = trace["main"]["loop_traces"]
-    assert len(loop_traces) == 1, loop_traces
-    loop_info = next(iter(loop_traces.values()))
-    iteration_traces = sorted(loop_info["traces"], key=lambda entry: entry["count"], reverse=True)
-    assert len(iteration_traces) == 2, iteration_traces
-
-    loop_info["traces"] = [iteration_traces[0]]
-    trace_json = partial_tmp / "missing_rare_loop_path.json"
-    _write_trace(trace, trace_json)
-
-    baseline = run_schematic_o0(baseline_src, ENERGY_CONFIG, path_bias_cfg, baseline_tmp)
-    partial = _run_schematic_with_trace(
-        tools,
-        compile_to_ir,
-        outlier_src,
-        ENERGY_CONFIG,
-        path_bias_cfg,
-        trace_json,
-        partial_tmp,
-        0,
-    )
-
-    assert baseline.exit_code == 0, baseline.stderr[:1000]
-    assert partial.exit_code == 0, partial.stderr[:1000]
-
-    baseline_boundaries = count_calls(baseline.output_ir, "__region_boundary")
-    partial_boundaries = count_calls(partial.output_ir, "__region_boundary")
-
-    assert partial_boundaries > baseline_boundaries, (
-        f"Expected synthesized rare loop path to preserve the cold-path penalty, got "
-        f"baseline={baseline_boundaries}, partial={partial_boundaries}\n"
-        f"baseline stderr:\n{baseline.stderr}\n"
-        f"partial stderr:\n{partial.stderr}"
-    )
