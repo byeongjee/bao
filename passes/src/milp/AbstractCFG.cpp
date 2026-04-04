@@ -8,6 +8,8 @@
 #include "milp/EnergyModel.h"
 #include "milp/EnergyPathUtils.h"
 #include "milp/StateAnalysis.h"
+#include "milp/StripMiningMetadata.h"
+#include "milp/StripMiningSummary.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
@@ -17,7 +19,6 @@
 #include "llvm/IR/Instructions.h"
 
 #include <algorithm>
-#include <functional>
 #include <limits>
 #include <map>
 #include <set>
@@ -45,12 +46,6 @@ struct LoopAggregate {
     double fEntry = 1.0;
 };
 
-enum class VisitState {
-    Unvisited = 0,
-    Visiting,
-    Visited,
-};
-
 static void collectOutermostFirst(Loop *L, std::vector<Loop *> &out) {
     out.push_back(L);
     for (Loop *Sub : L->getSubLoops()) {
@@ -64,177 +59,6 @@ static std::vector<Loop *> collectOutermostFirst(LoopInfo &LI) {
         collectOutermostFirst(L, loops);
     }
     return loops;
-}
-
-static WorstCasePathResult
-computeWorstCaseWorstCasePathResult(Loop *L,
-                                    const DenseMap<const BasicBlock *, double> &blockEnergyByBB,
-                                    LoopInfo &LI, ScalarEvolution &SE) {
-    WorstCasePathResult result;
-
-    BasicBlock *Header = L->getHeader();
-    BasicBlock *Latch = L->getLoopLatch();
-    if (!Header || !Latch) {
-        result.error = "missing-header-or-latch";
-        return result;
-    }
-
-    // Step 1: Recursively compute total energy for each direct sub-loop.
-    DenseMap<const Loop *, double> subLoopTotal;
-    DenseMap<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
-    for (Loop *SubL : L->getSubLoops()) {
-        auto subPath = computeWorstCaseWorstCasePathResult(SubL, blockEnergyByBB, LI, SE);
-        if (!subPath.ok) {
-            result.error = "sub-loop-energy-unavailable";
-            return result;
-        }
-        unsigned scevTC = SE.getSmallConstantTripCount(SubL);
-        auto markerTC = getMarkerTripCount(SubL);
-        unsigned tc;
-        if (scevTC > 0 && markerTC)
-            tc = std::min(scevTC, static_cast<unsigned>(*markerTC));
-        else if (scevTC > 0)
-            tc = scevTC;
-        else if (markerTC)
-            tc = static_cast<unsigned>(*markerTC);
-        else {
-            result.error = "sub-loop-unknown-trip-count";
-            return result;
-        }
-        subLoopTotal[SubL] = subPath.energy * static_cast<double>(tc);
-        for (const BasicBlock *BB : SubL->blocks())
-            subLoopBlocks[SubL].insert(BB);
-    }
-
-    // Step 2: Block energy with sub-loop collapsing — inner-loop headers
-    // carry collapsed total energy; other blocks use per-block energy.
-    auto getEnergy = [&](const BasicBlock *BB) -> double {
-        Loop *ChildL = getDirectChildLoop(L, BB, LI);
-        if (ChildL && ChildL->getHeader() == BB) {
-            auto it = subLoopTotal.find(ChildL);
-            return (it != subLoopTotal.end()) ? it->second : 0.0;
-        }
-        auto it = blockEnergyByBB.find(BB);
-        return (it != blockEnergyByBB.end()) ? it->second : 0.0;
-    };
-
-    // Step 3: Successor computation with sub-loop collapsing — inner-loop
-    // headers jump directly to exit blocks, skipping inner-loop bodies.
-    auto getSuccs = [&](const BasicBlock *BB) -> SmallVector<const BasicBlock *, 4> {
-        SmallVector<const BasicBlock *, 4> succs;
-        Loop *ChildL = getDirectChildLoop(L, BB, LI);
-        if (ChildL && ChildL->getHeader() == BB) {
-            SmallVector<BasicBlock *, 4> exits;
-            ChildL->getExitBlocks(exits);
-            for (BasicBlock *Exit : exits)
-                succs.push_back(Exit);
-        } else {
-            for (const BasicBlock *Succ : successors(BB))
-                succs.push_back(Succ);
-        }
-        return succs;
-    };
-
-    if (Header == Latch) {
-        result.ok = true;
-        result.energy = getEnergy(Header);
-        result.blocksOnPath.insert(Header);
-        return result;
-    }
-
-    DenseMap<const BasicBlock *, VisitState> visitState;
-    DenseMap<const BasicBlock *, double> memo;
-    DenseMap<const BasicBlock *, const BasicBlock *> bestSucc;
-    bool cycleDetected = false;
-
-    std::function<double(const BasicBlock *)> dfs = [&](const BasicBlock *BB) -> double {
-        if (BB == Latch) {
-            return getEnergy(BB);
-        }
-
-        VisitState state = visitState.lookup(BB);
-        if (state == VisitState::Visiting) {
-            cycleDetected = true;
-            return -1.0;
-        }
-        if (state == VisitState::Visited) {
-            return memo[BB];
-        }
-
-        visitState[BB] = VisitState::Visiting;
-        double bestSuccEnergy = -1.0;
-        const BasicBlock *best = nullptr;
-        for (const BasicBlock *Succ : getSuccs(BB)) {
-            if (!L->contains(Succ)) {
-                continue;
-            }
-            if (BB == Latch && Succ == Header) {
-                continue;
-            }
-            double succEnergy = dfs(Succ);
-            if (succEnergy < 0.0) {
-                continue;
-            }
-            if (succEnergy > bestSuccEnergy) {
-                bestSuccEnergy = succEnergy;
-                best = Succ;
-            }
-        }
-        visitState[BB] = VisitState::Visited;
-
-        if (!best || bestSuccEnergy < 0.0) {
-            memo[BB] = -1.0;
-            return -1.0;
-        }
-
-        bestSucc[BB] = best;
-        memo[BB] = getEnergy(BB) + bestSuccEnergy;
-        return memo[BB];
-    };
-
-    double energy = dfs(Header);
-    if (cycleDetected) {
-        result.error = "unsupported-intra-loop-cycle";
-        return result;
-    }
-    if (energy <= 0.0) {
-        result.error = "unable-to-compute-path-energy";
-        return result;
-    }
-
-    SmallPtrSet<const BasicBlock *, 16> pathBlocks;
-    const BasicBlock *cur = Header;
-    while (cur) {
-        pathBlocks.insert(cur);
-        // If this block is an inner-loop header, expand pathBlocks to
-        // include all blocks in that sub-loop for NVM/def/liveIn aggregation.
-        Loop *ChildL = getDirectChildLoop(L, cur, LI);
-        if (ChildL && ChildL->getHeader() == cur) {
-            auto it = subLoopBlocks.find(ChildL);
-            if (it != subLoopBlocks.end()) {
-                pathBlocks.insert(it->second.begin(), it->second.end());
-            }
-        }
-        if (cur == Latch) {
-            break;
-        }
-        auto it = bestSucc.find(cur);
-        if (it == bestSucc.end()) {
-            result.error = "path-reconstruction-failed";
-            return result;
-        }
-        cur = it->second;
-    }
-
-    if (pathBlocks.empty() || !pathBlocks.count(Latch)) {
-        result.error = "path-reconstruction-failed";
-        return result;
-    }
-
-    result.ok = true;
-    result.energy = energy;
-    result.blocksOnPath = std::move(pathBlocks);
-    return result;
 }
 
 static bool overlapsSelected(Loop *L, const SmallPtrSetImpl<const BasicBlock *> &selectedBlocks) {
@@ -416,8 +240,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
     // summaryNodeName -> LoopAggregate
     std::map<std::string, LoopAggregate> summariesByNode;
 
-    const double budget = model.params_.capacity - model.params_.E_pro - model.params_.E_epi;
-
     for (Loop *L : loops) {
         out.stats.loopsSeen++;
         BasicBlock *loopHeader = L->getHeader();
@@ -448,12 +270,8 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
             }
         };
 
-        if (budget <= 0.0) {
-            skipLoop("nonpositive-energy-budget",
-                     "capacity=" + std::to_string(model.params_.capacity) +
-                         ", E_pro=" + std::to_string(model.params_.E_pro) +
-                         ", E_epi=" + std::to_string(model.params_.E_epi) +
-                         ", budget=" + std::to_string(budget));
+        if (hasNoSummaryLoopMetadata(L)) {
+            out.stats.skippedReasons["no-summary-loop-metadata"]++;
             continue;
         }
         if (!loopHeader || !L->getLoopLatch()) {
@@ -471,14 +289,11 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
             continue;
         }
 
-        WorstCasePathResult path = computeWorstCaseWorstCasePathResult(L, blockEnergyByBB, LI, SE);
-        if (!path.ok) {
-            skipLoop(path.error.empty() ? "unknown-path-summary-error" : path.error,
-                     "path-energy-unavailable");
-            continue;
-        }
-        if (path.energy <= 0.0) {
-            skipLoop("nonpositive-loop-energy", "path-energy=" + std::to_string(path.energy));
+        StripMiningBudgetResult budget =
+            computeStripMiningBudgetResult(L, blockEnergyByBB, LI, SE, state, model.params_);
+        if (!budget.ok) {
+            skipLoop(budget.reason.empty() ? "unknown-path-summary-error" : budget.reason,
+                     budget.details);
             continue;
         }
 
@@ -500,37 +315,24 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
             continue;
         }
 
-        // Compute per-iteration NVM penalty on the selected path.
-        double perIterNvmPenalty = 0.0;
-        for (const BasicBlock *BB : path.blocksOnPath) {
-            for (llvm::GlobalVariable *GV : model.vmObjs_) {
-                perIterNvmPenalty += energy.getENvm(BB, GV);
-            }
-        }
-
-        double restoreLiveInMargin = 0.0;
-        double commitDefMargin = 0.0;
-        double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-            path.blocksOnPath, state, model.params_, restoreLiveInMargin, commitDefMargin);
-
-        const double budgetAfterBoundary = budget - boundaryStateMargin;
-        double totalBaseEnergy = path.energy * static_cast<double>(loopTC);
-        double totalNvmPenalty = perIterNvmPenalty * static_cast<double>(loopTC);
+        double totalBaseEnergy = budget.pathEnergy * static_cast<double>(loopTC);
+        double totalNvmPenalty = budget.perIterNvmPenalty * static_cast<double>(loopTC);
         double totalEnergyWithNvm = totalBaseEnergy + totalNvmPenalty;
-        if (budgetAfterBoundary <= 0.0 || !(totalEnergyWithNvm < budgetAfterBoundary)) {
+        if (loopTC > budget.maxK || !(totalEnergyWithNvm < budget.budgetAfterBoundary)) {
             skipLoop("loop-total-exceeds-budget",
-                     "path-energy=" + std::to_string(path.energy) +
-                         ", per-iter-path-energy=" + std::to_string(path.energy) +
-                         ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
+                     "path-energy=" + std::to_string(budget.pathEnergy) +
+                         ", per-iter-path-energy=" + std::to_string(budget.pathEnergy) +
+                         ", per-iter-nvm-penalty=" + std::to_string(budget.perIterNvmPenalty) +
                          ", trip-count=" + std::to_string(loopTC) +
                          ", total-base-energy=" + std::to_string(totalBaseEnergy) +
                          ", total-nvm-penalty=" + std::to_string(totalNvmPenalty) +
                          ", total-energy-with-nvm=" + std::to_string(totalEnergyWithNvm) +
-                         ", nvm-access-margin=" + std::to_string(perIterNvmPenalty) +
-                         ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
-                         ", commit-def-margin=" + std::to_string(commitDefMargin) +
-                         ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
-                         ", budget-after-boundary=" + std::to_string(budgetAfterBoundary));
+                         ", nvm-access-margin=" + std::to_string(budget.perIterNvmPenalty) +
+                         ", restore-livein-margin=" + std::to_string(budget.restoreLiveInMargin) +
+                         ", commit-def-margin=" + std::to_string(budget.commitDefMargin) +
+                         ", boundary-state-margin=" + std::to_string(budget.boundaryStateMargin) +
+                         ", budget-after-boundary=" + std::to_string(budget.budgetAfterBoundary) +
+                         ", max-k=" + std::to_string(budget.maxK));
             continue;
         }
 
@@ -542,7 +344,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
         LoopAggregate agg;
         agg.nodeName = nodeName;
         agg.headerBB = headerBB;
-        agg.pathBlocks = std::move(path.blocksOnPath);
+        agg.pathBlocks = budget.pathBlocks;
         agg.pathEnergy = totalBaseEnergy;
         // Summary represents all iterations — entered once per loop invocation.
         if (BasicBlock *PH = L->getLoopPreheader()) {

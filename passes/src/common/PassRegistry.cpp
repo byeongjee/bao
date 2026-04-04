@@ -1,6 +1,7 @@
 #include "common/BBFreqCollectorPass.h"
 #include "common/EdgeSplitPass.h"
 #include "common/TripCountAnnotationPass.h"
+#include "milp/ChooseStripMiningKPass.h"
 #include "milp/LoopStripMiningPass.h"
 #include "milp/MILPCheckpointPass.h"
 #include "schematic/SchematicPass.h"
@@ -147,6 +148,10 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                     }
                     if (Name == "milp-solve-only") {
                         FPM.addPass(checkpoint::MILPCheckpointPass());
+                        return true;
+                    }
+                    if (Name == "choose-strip-mining-k") {
+                        FPM.addPass(checkpoint::ChooseStripMiningKPass());
                         return true;
                     }
                     if (Name == "bb-freq-collect-only") {

@@ -76,7 +76,8 @@ def compile_milp(
     Assembly mode (two-pass):
       compile_to_ir(-O0) -> tripcount annotation -> optimize_ir ->
       pre-strip-mining assembly energy -> milp-preprocess ->
-      post-strip-mining assembly energy -> bb-freq-collect-only + collect_bb_freq ->
+      post-strip-mining assembly energy -> choose-strip-mining-k (chunked fallback retune) ->
+      bb-freq-collect-only + collect_bb_freq ->
       milp-solve-only -> compile to object
 
     IR mode (single-pass):
@@ -243,7 +244,23 @@ def _assembly_mode(
         post_bb_energy,
     )
 
-    # Phase 5: BB frequency collection
+    # Phase 5: Final K selection on already rewritten chunked fallback loops
+    chosen_ll = tmp / "chosen_k.ll"
+    choose_result = run(
+        [
+            tc.opt,
+            f"-load-pass-plugin={env.pass_lib}",
+            "-passes=choose-strip-mining-k",
+            f"-energy-config={post_energy_config}",
+            f"-milp-config={opts.milp_config}",
+            f"-ckpt-log-level={opts.pass_log_level}",
+            "-S", str(preprocessed_ll),
+            "-o", str(chosen_ll),
+        ],
+        step_name="choose-strip-mining-k",
+    )
+
+    # Phase 6: BB frequency collection
     profile_start = now_ms()
 
     freq_inst_ll = tmp / "freq_inst.ll"
@@ -252,7 +269,7 @@ def _assembly_mode(
             tc.opt,
             f"-load-pass-plugin={env.pass_lib}",
             "-passes=bb-freq-collect-only",
-            "-S", str(preprocessed_ll),
+            "-S", str(chosen_ll),
             "-o", str(freq_inst_ll),
         ],
         step_name="bb-freq-collect-only",
@@ -262,19 +279,19 @@ def _assembly_mode(
 
     profiling_ms = now_ms() - profile_start
 
-    # Phase 6: MILP solving (on preprocessed IR)
+    # Phase 7: MILP solving (on K-finalized IR)
     pass_output = _run_milp_pass(
         tc, env, opts,
         pass_name="milp-solve-only",
         energy_config=post_energy_config,
-        input_ll=preprocessed_ll,
+        input_ll=chosen_ll,
         output_ll=tmp / "ckpt.ll",
         bb_freq_json=bb_freq_json,
         milp_extra_flags=milp_extra_flags,
         strip_mining_stats_json=None,
     )
 
-    pass_output = pre_stderr + post_stderr + pass_output
+    pass_output = pre_stderr + post_stderr + choose_result.stderr + pass_output
     return pass_output, profiling_ms, strip_mining_stats_json
 
 

@@ -82,6 +82,9 @@ src/common/LoopTripCount.cpp
     src/milp/LivenessAnalysis.cpp
     src/milp/EnergyModel.cpp
     src/milp/LoopStripMiningPass.cpp
+    src/milp/StripMiningMetadata.cpp
+    src/milp/StripMiningSummary.cpp
+    src/milp/ChooseStripMiningKPass.cpp
     src/milp/AbstractCFG.cpp
     src/milp/MILPCheckpointPass.cpp
     src/milp/CheckpointOptimizer.cpp
