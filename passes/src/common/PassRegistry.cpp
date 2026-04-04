@@ -145,6 +145,10 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         // FPM.addPass(checkpoint::EdgeSplitPass());
                         return true;
                     }
+                    if (Name == "milp-reclamp-only") {
+                        FPM.addPass(checkpoint::LoopStripMiningPass(/*reclampOnly=*/true));
+                        return true;
+                    }
                     if (Name == "milp-solve-only") {
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;

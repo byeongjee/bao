@@ -243,6 +243,19 @@ def _assembly_mode(
         post_bb_energy,
     )
 
+    # Phase 4b: Re-clamp chunked strip-mined loops using post-strip-mining
+    # energy so later MILP summarization sees a consistent K.
+    reclamped_ll = tmp / "reclamped.ll"
+    reclamp_stats_json = tmp / "strip_mining_reclamp_stats.json"
+    reclamp_output = _run_loop_reclamp_pass(
+        tc, env, opts,
+        energy_config=post_energy_config,
+        input_ll=preprocessed_ll,
+        output_ll=reclamped_ll,
+        strip_mining_stats_json=reclamp_stats_json,
+    )
+    _merge_strip_mining_reclamp_stats(strip_mining_stats_json, reclamp_stats_json)
+
     # Phase 5: BB frequency collection
     profile_start = now_ms()
 
@@ -252,7 +265,7 @@ def _assembly_mode(
             tc.opt,
             f"-load-pass-plugin={env.pass_lib}",
             "-passes=bb-freq-collect-only",
-            "-S", str(preprocessed_ll),
+            "-S", str(reclamped_ll),
             "-o", str(freq_inst_ll),
         ],
         step_name="bb-freq-collect-only",
@@ -267,14 +280,14 @@ def _assembly_mode(
         tc, env, opts,
         pass_name="milp-solve-only",
         energy_config=post_energy_config,
-        input_ll=preprocessed_ll,
+        input_ll=reclamped_ll,
         output_ll=tmp / "ckpt.ll",
         bb_freq_json=bb_freq_json,
         milp_extra_flags=milp_extra_flags,
         strip_mining_stats_json=None,
     )
 
-    pass_output = pre_stderr + post_stderr + pass_output
+    pass_output = pre_stderr + post_stderr + reclamp_output + pass_output
     return pass_output, profiling_ms, strip_mining_stats_json
 
 
@@ -369,6 +382,33 @@ def _run_milp_pass(
     return result.output
 
 
+def _run_loop_reclamp_pass(
+    tc: Toolchain,
+    env: ProjectEnv,
+    opts: MilpCompileOptions,
+    *,
+    energy_config: Path,
+    input_ll: Path,
+    output_ll: Path,
+    strip_mining_stats_json: Path,
+) -> str:
+    """Run the post-strip-mining loop K re-clamp pass."""
+    cmd: list[str] = [
+        tc.opt,
+        f"-load-pass-plugin={env.pass_lib}",
+        "-passes=milp-reclamp-only",
+        f"-energy-config={energy_config}",
+        f"-milp-config={opts.milp_config}",
+        f"-ckpt-log-level={opts.pass_log_level}",
+        f"-loop-strip-mining-stats-json={strip_mining_stats_json}",
+        "-S", str(input_ll),
+        "-o", str(output_ll),
+    ]
+
+    result = run(cmd, step_name="milp-reclamp-only")
+    return result.output
+
+
 def _merge_strip_mining_stats(stats_json: Path, strip_mining_stats_json: Path) -> None:
     if not stats_json.is_file():
         return
@@ -407,6 +447,113 @@ def _merge_strip_mining_stats(stats_json: Path, strip_mining_stats_json: Path) -
 
     with open(stats_json, "w") as f:
         json.dump(stats_data, f)
+
+
+def _merge_strip_mining_reclamp_stats(
+    strip_mining_stats_json: Path,
+    reclamp_stats_json: Path,
+) -> None:
+    if not strip_mining_stats_json.is_file():
+        return
+    if not reclamp_stats_json.is_file():
+        return
+
+    with open(strip_mining_stats_json) as f:
+        strip_data = json.load(f)
+    with open(reclamp_stats_json) as f:
+        reclamp_data = json.load(f)
+
+    base_functions = strip_data.get("functions", [])
+    reclamp_functions = reclamp_data.get("functions", [])
+    if not isinstance(base_functions, list) or not isinstance(reclamp_functions, list):
+        return
+
+    base_by_function: dict[str, dict] = {}
+    for item in base_functions:
+        if not isinstance(item, dict):
+            continue
+        function_name = item.get("function")
+        if isinstance(function_name, str) and function_name:
+            base_by_function[function_name] = item
+
+    for reclamp_entry in reclamp_functions:
+        if not isinstance(reclamp_entry, dict):
+            continue
+        function_name = reclamp_entry.get("function")
+        if not isinstance(function_name, str) or not function_name:
+            continue
+
+        base_entry = base_by_function.get(function_name)
+        if base_entry is None and len(base_functions) == 1 and len(reclamp_functions) == 1:
+            only_entry = base_functions[0]
+            if isinstance(only_entry, dict):
+                base_entry = only_entry
+        if base_entry is None:
+            continue
+
+        base_details = base_entry.get("loop_details", [])
+        if not isinstance(base_details, list):
+            continue
+
+        base_detail_by_header: dict[str, dict] = {}
+        for item in base_details:
+            if not isinstance(item, dict):
+                continue
+            header = item.get("loop_header")
+            if isinstance(header, str) and header:
+                base_detail_by_header[header] = item
+
+        detail_fields = [
+            "decision",
+            "skip_reason",
+            "skip_detail",
+            "chosen_k_valid",
+            "chosen_k",
+            "post_chunk_reclamp_attempted",
+            "post_chunk_reclamp_succeeded",
+            "post_chunk_reclamp_applied",
+            "post_chunk_max_k_valid",
+            "post_chunk_max_k",
+            "post_chunk_iter_energy_valid",
+            "post_chunk_iter_energy",
+            "post_chunk_reclamp_error",
+        ]
+
+        for item in reclamp_entry.get("loop_details", []):
+            if not isinstance(item, dict):
+                continue
+            header = item.get("loop_header")
+            if not isinstance(header, str) or not header:
+                continue
+            target = base_detail_by_header.get(header)
+            if target is None:
+                base_details.append(item)
+                base_detail_by_header[header] = item
+                continue
+            for detail_field in detail_fields:
+                if detail_field in item:
+                    target[detail_field] = item[detail_field]
+
+        chosen_k_by_header: dict[str, dict] = {}
+        for item in base_entry.get("chosen_k_values", []):
+            if not isinstance(item, dict):
+                continue
+            header = item.get("loop_header")
+            if isinstance(header, str) and header:
+                chosen_k_by_header[header] = item
+        for item in reclamp_entry.get("chosen_k_values", []):
+            if not isinstance(item, dict):
+                continue
+            header = item.get("loop_header")
+            if isinstance(header, str) and header:
+                chosen_k_by_header[header] = item
+        base_entry["chosen_k_values"] = [
+            chosen_k_by_header[header]
+            for header in sorted(chosen_k_by_header)
+        ]
+
+    with open(strip_mining_stats_json, "w") as f:
+        json.dump(strip_data, f)
 
 
 # ---------------------------------------------------------------------------

@@ -8,9 +8,14 @@ namespace checkpoint {
 /// The pass skips unsupported loops conservatively.
 class LoopStripMiningPass : public llvm::PassInfoMixin<LoopStripMiningPass> {
   public:
+    explicit LoopStripMiningPass(bool reclampOnly = false) : reclampOnly_(reclampOnly) {}
+
     llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager &AM);
 
     static llvm::StringRef name() { return "LoopStripMiningPass"; }
+
+  private:
+    bool reclampOnly_;
 };
 
 } // namespace checkpoint

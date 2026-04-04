@@ -155,6 +155,7 @@ struct HeaderPhiInfo {
 using checkpoint::containsInvoke;
 using checkpoint::getDirectChildLoop;
 using checkpoint::getMarkerTripCount;
+using checkpoint::hasStripMinedLoopMetadata;
 using checkpoint::removeLoopTripCountMetadata;
 using checkpoint::setLoopTripCountMetadata;
 using checkpoint::setStripMinedLoopMetadata;
@@ -175,6 +176,17 @@ static std::string getLoopFunctionName(const Loop *L) {
     const BasicBlock *Header = L->getHeader();
     const Function *F = Header ? Header->getParent() : nullptr;
     return F ? F->getName().str() : "<unknown>";
+}
+
+static bool isChunkCounterLoop(const Loop *L) {
+    if (!L || !L->getHeader())
+        return false;
+
+    for (const PHINode &PN : L->getHeader()->phis()) {
+        if (PN.getName().starts_with("chunk.counter"))
+            return true;
+    }
+    return false;
 }
 
 static LoopStripMiningDetail buildInitialLoopDetail(const Loop *L) {
@@ -482,6 +494,171 @@ computeWorstCaseIterationEnergy(Loop *L, const DenseMap<const BasicBlock *, doub
     return result;
 }
 
+static WorstCasePathResult
+computeWorstCaseSummaryPathResult(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                                  LoopInfo &LI, ScalarEvolution &SE) {
+    WorstCasePathResult result;
+
+    BasicBlock *Header = L->getHeader();
+    BasicBlock *Latch = L->getLoopLatch();
+    if (!Header || !Latch) {
+        result.error = "missing-header-or-latch";
+        return result;
+    }
+
+    DenseMap<const Loop *, double> subLoopTotal;
+    DenseMap<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
+    for (Loop *SubL : L->getSubLoops()) {
+        auto subPath = computeWorstCaseSummaryPathResult(SubL, blockEnergy, LI, SE);
+        if (!subPath.ok) {
+            result.error = "sub-loop-energy-unavailable";
+            return result;
+        }
+
+        unsigned scevTC = SE.getSmallConstantTripCount(SubL);
+        auto markerTC = getMarkerTripCount(SubL);
+        unsigned tc;
+        if (scevTC > 0 && markerTC)
+            tc = std::min(scevTC, static_cast<unsigned>(*markerTC));
+        else if (scevTC > 0)
+            tc = scevTC;
+        else if (markerTC)
+            tc = static_cast<unsigned>(*markerTC);
+        else {
+            result.error = "sub-loop-unknown-trip-count";
+            return result;
+        }
+
+        subLoopTotal[SubL] = subPath.energy * static_cast<double>(tc);
+        for (const BasicBlock *BB : SubL->blocks())
+            subLoopBlocks[SubL].insert(BB);
+    }
+
+    auto getEnergy = [&](const BasicBlock *BB) -> double {
+        Loop *ChildL = getDirectChildLoop(L, BB, LI);
+        if (ChildL && ChildL->getHeader() == BB) {
+            auto it = subLoopTotal.find(ChildL);
+            return (it != subLoopTotal.end()) ? it->second : 0.0;
+        }
+        auto it = blockEnergy.find(BB);
+        return (it != blockEnergy.end()) ? it->second : 0.0;
+    };
+
+    auto getSuccs = [&](const BasicBlock *BB) -> SmallVector<const BasicBlock *, 4> {
+        SmallVector<const BasicBlock *, 4> succs;
+        Loop *ChildL = getDirectChildLoop(L, BB, LI);
+        if (ChildL && ChildL->getHeader() == BB) {
+            SmallVector<BasicBlock *, 4> exits;
+            ChildL->getExitBlocks(exits);
+            for (BasicBlock *Exit : exits)
+                succs.push_back(Exit);
+        } else {
+            for (const BasicBlock *Succ : successors(BB))
+                succs.push_back(Succ);
+        }
+        return succs;
+    };
+
+    if (Header == Latch) {
+        result.ok = true;
+        result.energy = getEnergy(Header);
+        result.blocksOnPath.insert(Header);
+        return result;
+    }
+
+    DenseMap<const BasicBlock *, VisitState> visitState;
+    DenseMap<const BasicBlock *, double> memo;
+    DenseMap<const BasicBlock *, const BasicBlock *> bestSucc;
+    bool cycleDetected = false;
+
+    std::function<double(const BasicBlock *)> dfs = [&](const BasicBlock *BB) -> double {
+        if (BB == Latch) {
+            return getEnergy(BB);
+        }
+
+        VisitState state = visitState.lookup(BB);
+        if (state == VisitState::Visiting) {
+            cycleDetected = true;
+            return -1.0;
+        }
+        if (state == VisitState::Visited) {
+            return memo[BB];
+        }
+
+        visitState[BB] = VisitState::Visiting;
+        double bestSuccEnergy = -1.0;
+        const BasicBlock *best = nullptr;
+        for (const BasicBlock *Succ : getSuccs(BB)) {
+            if (!L->contains(Succ)) {
+                continue;
+            }
+            if (BB == Latch && Succ == Header) {
+                continue;
+            }
+            double succEnergy = dfs(Succ);
+            if (succEnergy < 0.0) {
+                continue;
+            }
+            if (succEnergy > bestSuccEnergy) {
+                bestSuccEnergy = succEnergy;
+                best = Succ;
+            }
+        }
+        visitState[BB] = VisitState::Visited;
+
+        if (!best || bestSuccEnergy < 0.0) {
+            memo[BB] = -1.0;
+            return -1.0;
+        }
+
+        bestSucc[BB] = best;
+        memo[BB] = getEnergy(BB) + bestSuccEnergy;
+        return memo[BB];
+    };
+
+    double energy = dfs(Header);
+    if (cycleDetected) {
+        result.error = "unsupported-intra-loop-cycle";
+        return result;
+    }
+    if (energy <= 0.0) {
+        result.error = "unable-to-compute-path-energy";
+        return result;
+    }
+
+    SmallPtrSet<const BasicBlock *, 16> pathBlocks;
+    const BasicBlock *cur = Header;
+    while (cur) {
+        pathBlocks.insert(cur);
+        Loop *ChildL = getDirectChildLoop(L, cur, LI);
+        if (ChildL && ChildL->getHeader() == cur) {
+            auto it = subLoopBlocks.find(ChildL);
+            if (it != subLoopBlocks.end()) {
+                pathBlocks.insert(it->second.begin(), it->second.end());
+            }
+        }
+        if (cur == Latch) {
+            break;
+        }
+        auto it = bestSucc.find(cur);
+        if (it == bestSucc.end()) {
+            result.error = "path-reconstruction-failed";
+            return result;
+        }
+        cur = it->second;
+    }
+
+    if (pathBlocks.empty() || !pathBlocks.count(Latch)) {
+        result.error = "path-reconstruction-failed";
+        return result;
+    }
+
+    result.ok = true;
+    result.energy = energy;
+    result.blocksOnPath = std::move(pathBlocks);
+    return result;
+}
+
 static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE,
                                                     const BasicBlock *ExitingBlock) {
     const SCEV *btc = SE.getBackedgeTakenCount(L);
@@ -518,6 +695,74 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE
         return backedgeValue + 1;
     }
     return backedgeValue;
+}
+
+static bool supportsExitRewriteForm(Loop *L, uint64_t N) {
+    if (!L) {
+        return false;
+    }
+
+    BasicBlock *Preheader = L->getLoopPreheader();
+    BasicBlock *Header = L->getHeader();
+    BasicBlock *Latch = L->getLoopLatch();
+    BasicBlock *ExitBlock = L->getExitBlock();
+    BasicBlock *ExitingBB = L->getExitingBlock();
+    if (!Preheader || !Header || !Latch || !ExitBlock || !ExitingBB) {
+        return false;
+    }
+
+    PHINode *IV = L->getCanonicalInductionVariable();
+    if (!IV) {
+        return false;
+    }
+
+    auto *ExitBr = dyn_cast<BranchInst>(ExitingBB->getTerminator());
+    if (!ExitBr || !ExitBr->isConditional()) {
+        return false;
+    }
+
+    auto *ExitCmp = dyn_cast<ICmpInst>(ExitBr->getCondition());
+    if (!ExitCmp) {
+        return false;
+    }
+
+    BasicBlock *BackedgeBB = nullptr;
+    BasicBlock *IncomingBB = nullptr;
+    if (!L->getIncomingAndBackEdge(IncomingBB, BackedgeBB)) {
+        return false;
+    }
+
+    Value *IVNext = IV->getIncomingValueForBlock(BackedgeBB);
+    Value *CmpOp0 = ExitCmp->getOperand(0);
+    Value *CmpOp1 = ExitCmp->getOperand(1);
+
+    int boundOperandIdx = -1;
+    bool compareUsesCurrentIV = false;
+    if (CmpOp0 == IV || CmpOp0 == IVNext) {
+        boundOperandIdx = 1;
+        compareUsesCurrentIV = (CmpOp0 == IV);
+    } else if (CmpOp1 == IV || CmpOp1 == IVNext) {
+        boundOperandIdx = 0;
+        compareUsesCurrentIV = (CmpOp1 == IV);
+    } else {
+        return false;
+    }
+
+    auto *OrigBound = dyn_cast<ConstantInt>(ExitCmp->getOperand(boundOperandIdx));
+    if (!OrigBound) {
+        return false;
+    }
+
+    bool exitAtLatch = (ExitingBB == Latch);
+    uint64_t expectedBound = N;
+    if (compareUsesCurrentIV && exitAtLatch) {
+        if (N == 0) {
+            return false;
+        }
+        expectedBound = N - 1;
+    }
+
+    return OrigBound->getZExtValue() == expectedBound;
 }
 
 using checkpoint::computeBoundaryStateMarginOnPath;
@@ -697,7 +942,8 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         result.detail.tripCount = *exactTripCount;
     }
 
-    if (IV && exitingBlocks.size() == 1) {
+    if (IV && exitingBlocks.size() == 1 && exactTripCount &&
+        supportsExitRewriteForm(L, *exactTripCount)) {
         if (exactTripCount && *exactTripCount >= 2) {
             if (K >= *exactTripCount) {
                 result.skipReason = "k-covers-entire-loop";
@@ -847,6 +1093,67 @@ recomputeChunkKWithOverhead(Loop *L, const DenseMap<const BasicBlock *, double> 
     return out;
 }
 
+static ChunkBudgetResult
+recomputeChunkKForSummaryBudget(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                                const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+                                ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
+    ChunkBudgetResult out;
+
+    double budget = params.capacity - params.E_pro - params.E_epi;
+    if (budget <= 0.0) {
+        out.error = "nonpositive-energy-budget";
+        return out;
+    }
+
+    WorstCasePathResult path = computeWorstCaseSummaryPathResult(L, blockEnergy, LI, SE);
+    if (!path.ok || path.energy <= 0.0) {
+        out.error = path.error.empty() ? "post-chunk-summary-path-unavailable" : path.error;
+        return out;
+    }
+
+    double perIterNvmPenalty = 0.0;
+    for (const BasicBlock *BB : path.blocksOnPath) {
+        for (GlobalVariable *GV : state.getVMObjs()) {
+            unsigned accesses = state.getLoadCount(BB, GV) + state.getStoreCount(BB, GV);
+            perIterNvmPenalty += static_cast<double>(accesses) * params.nvmAccessPenalty;
+        }
+    }
+
+    double restoreLiveInMargin = 0.0;
+    double commitDefMargin = 0.0;
+    double boundaryStateMargin = computeBoundaryStateMarginOnPath(
+        path.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
+    double budgetAfterBoundary = budget - boundaryStateMargin;
+    if (budgetAfterBoundary <= 0.0) {
+        out.error = "nonpositive-effective-budget";
+        return out;
+    }
+
+    double perIterTotalEnergy = path.energy + perIterNvmPenalty;
+    if (perIterTotalEnergy <= 0.0) {
+        out.error = "nonpositive-per-iter-total-energy";
+        return out;
+    }
+
+    double strictBudget =
+        std::nextafter(budgetAfterBoundary, -std::numeric_limits<double>::infinity());
+    double rawK = std::floor(strictBudget / perIterTotalEnergy);
+    if (!std::isfinite(rawK) || rawK <= 0.0) {
+        out.error = "post-chunk-k-zero";
+        return out;
+    }
+
+    auto maxK = static_cast<uint64_t>(rawK);
+    if (maxK > std::numeric_limits<unsigned>::max()) {
+        maxK = std::numeric_limits<unsigned>::max();
+    }
+
+    out.ok = true;
+    out.maxK = maxK;
+    out.iterEnergy = path.energy;
+    return out;
+}
+
 static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
     BasicBlock *Header = L->getHeader();
     if (!Header) {
@@ -902,6 +1209,112 @@ static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
     }
 
     return false;
+}
+
+static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
+                                        AAResults &AA, checkpoint::EnergyEstimator &estimator,
+                                        const checkpoint::MILPEnergyParams &params,
+                                        DenseMap<const BasicBlock *, double> &blockEnergy,
+                                        LoopStripMiningStats &stats) {
+    checkpoint::CFGAnalysis cfg(F, LI, estimator);
+    checkpoint::StateAnalysis state(F, AA, cfg);
+    if (state.hasAnalysisErrors()) {
+        state.printAnalysisErrors(errs());
+        PLOGW << "LoopStripMiningPass: skipping re-clamp for " << F.getName()
+              << " due to unresolved memory/call effects.";
+        return false;
+    }
+
+    bool changed = false;
+    std::function<void(Loop *)> visitLoop = [&](Loop *L) {
+        if (!L)
+            return;
+
+        if (hasStripMinedLoopMetadata(L)) {
+            stats.loopsSeen++;
+            LoopStripMiningDetail detail = buildInitialLoopDetail(L);
+            auto currentK = getMarkerTripCount(L);
+            if (!currentK) {
+                stats.skippedReasons["reclamp-missing-tripcount-metadata"]++;
+                detail.decision = "skipped";
+                detail.skipReason = "reclamp-missing-tripcount-metadata";
+                detail.skipDetail = "strip-mined loop missing llvm.loop.tripcount.upper metadata";
+                stats.loopDetails.push_back(detail);
+            } else {
+                detail.chosenKValid = true;
+                detail.chosenK = *currentK;
+
+                if (!isChunkCounterLoop(L)) {
+                    stats.skippedReasons["reclamp-unsupported-loop-form"]++;
+                    detail.decision = "skipped";
+                    detail.skipReason = "reclamp-unsupported-loop-form";
+                    detail.skipDetail = "strip-mined loop has no chunk.counter PHI";
+                } else {
+                    stats.loopsEligible++;
+                    detail.postChunkReclampAttempted = true;
+
+                    ChunkBudgetResult reclamp =
+                        recomputeChunkKForSummaryBudget(L, blockEnergy, params, LI, SE, state);
+                    if (!reclamp.ok) {
+                        stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
+                        detail.decision = "kept";
+                        detail.postChunkReclampError = reclamp.error;
+                        PLOGW << "LoopStripMiningPass: post-energy chunk K re-clamp unavailable "
+                              << F.getName() << "::" << detail.loopHeader
+                              << " reason=" << reclamp.error << " current-K=" << *currentK;
+                    } else {
+                        detail.postChunkReclampSucceeded = true;
+                        detail.postChunkMaxKValid = true;
+                        detail.postChunkMaxK = reclamp.maxK;
+                        detail.postChunkIterEnergyValid = true;
+                        detail.postChunkIterEnergy = reclamp.iterEnergy;
+
+                        uint64_t newK = std::min<uint64_t>(*currentK, reclamp.maxK);
+                        if (newK != *currentK) {
+                            if (!updateChunkLoopBound(L, newK)) {
+                                stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
+                                detail.decision = "kept";
+                                detail.postChunkReclampError = "chunk-k-reclamp-update-failed";
+                                PLOGW << "LoopStripMiningPass: post-energy chunk K re-clamp "
+                                      << "update failed " << F.getName()
+                                      << "::" << detail.loopHeader << " current-K=" << *currentK
+                                      << " new-K=" << newK;
+                            } else {
+                                setLoopTripCountMetadata(L, newK);
+                                SE.forgetLoop(L);
+                                detail.decision = "reclamped";
+                                detail.postChunkReclampApplied = true;
+                                detail.chosenK = newK;
+                                stats.loopsRewritten++;
+                                stats.loopsChunked++;
+                                changed = true;
+                                PLOGI << "LoopStripMiningPass: post-energy chunk K re-clamped "
+                                      << F.getName() << "::" << detail.loopHeader
+                                      << " current-K=" << *currentK << " new-K=" << newK
+                                      << " E_iter_wc_post=" << reclamp.iterEnergy;
+                            }
+                        } else {
+                            detail.decision = "kept";
+                            PLOGD << "LoopStripMiningPass: post-energy chunk K unchanged "
+                                  << F.getName() << "::" << detail.loopHeader << " K=" << *currentK
+                                  << " E_iter_wc_post=" << reclamp.iterEnergy;
+                        }
+                    }
+                }
+
+                stats.chosenKByHeader.emplace_back(detail.loopHeader, detail.chosenK);
+                stats.loopDetails.push_back(detail);
+            }
+        }
+
+        for (Loop *SubL : L->getSubLoops())
+            visitLoop(SubL);
+    };
+
+    for (Loop *L : LI)
+        visitLoop(L);
+
+    return changed;
 }
 
 static void selectInNest(Loop *L, ScalarEvolution &SE,
@@ -1451,8 +1864,16 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     auto &LI = AM.getResult<LoopAnalysis>(F);
     auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
     auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
-    auto &AC = AM.getResult<AssumptionAnalysis>(F);
     auto &AA = AM.getResult<AAManager>(F);
+    LoopStripMiningStats stats;
+    if (reclampOnly_) {
+        bool changed = reclampExistingChunkedLoops(F, LI, SE, AA, *estimator, *milpParamsOpt,
+                                                   blockEnergy, stats);
+        writeLoopStripMiningStatsJSON(F, stats);
+        return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+    }
+
+    auto &AC = AM.getResult<AssumptionAnalysis>(F);
     auto &TTI = AM.getResult<TargetIRAnalysis>(F);
     checkpoint::CFGAnalysis cfg(F, LI, *estimator);
     checkpoint::StateAnalysis state(F, AA, cfg);
@@ -1463,7 +1884,6 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         return PreservedAnalyses::all();
     }
 
-    LoopStripMiningStats stats;
     bool changed = false;
 
     // Select loops to strip-mine (outermost-first within each nest).
