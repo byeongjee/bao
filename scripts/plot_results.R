@@ -47,7 +47,7 @@ ALG_STYLE <- tribble(
   ~algo,             ~label,            ~color,     ~pattern,      ~pattern_angle,
   "milp",            "MILP",            "#0072B2",  "stripe",      45,
   "schematic",       "SCHEMATIC",       "#D55E00",  "stripe",     -45,
-  "rockclimb",       "RockClimb",       "#009E73",  "crosshatch",   0,
+  "rockclimb",       "RockClimb",       "#009E73",  "stripe",      90,
   "schematicO3",     "SCHEMATIC-O3",    "#CC79A7",  "stripe",       0,
   "uninstrumented",  "Uninstrumented",  "#595959",  "none",         0,
 )
@@ -97,19 +97,19 @@ theme_benchmark <- function() {
       plot.caption = element_text(color = "grey35", size = 7.5, hjust = 0),
       axis.title.x = element_text(margin = margin(t = 6)),
       axis.title.y = element_text(margin = margin(r = 6)),
-      axis.text.x = element_text(size = 8.5, angle = 20, hjust = 1, vjust = 1),
+      axis.text.x = element_text(size = 10.5, angle = 18, hjust = 1, vjust = 1),
       axis.text.y = element_text(size = 8.5),
       legend.position = "top",
       legend.title = element_blank(),
-      legend.text = element_text(size = 9),
-      legend.key.size = unit(0.42, "cm"),
+      legend.text = element_text(size = 10),
+      legend.key.size = unit(0.82, "cm"),
       legend.box.spacing = unit(0.05, "cm"),
       legend.margin = margin(0, 0, 2, 0),
       panel.grid.major.x = element_blank(),
       panel.grid.minor = element_blank(),
       panel.grid.major.y = element_line(color = "grey90", linewidth = 0.3),
       panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.4),
-      plot.margin = margin(6, 8, 8, 6)
+      plot.margin = margin(6, 10, 18, 22)
     )
 }
 
@@ -136,12 +136,27 @@ resolve_csv_path <- function(result_dir, algo, source) {
   if (length(found) > 0) found[1] else NA_character_
 }
 
+read_result_csv <- function(path) {
+  if (is.na(path) || !file.exists(path) || file.info(path)$size == 0) {
+    return(tibble())
+  }
+
+  df <- suppressWarnings(read_csv(path, show_col_types = FALSE))
+  if (!"benchmark" %in% names(df)) {
+    return(tibble())
+  }
+
+  df
+}
+
 load_algorithm_data <- function(result_dir, algo, source, column) {
   path <- resolve_csv_path(result_dir, algo, source)
   if (is.na(path)) return(tibble())
 
-  df <- read_csv(path, show_col_types = FALSE) %>%
-    filter(!is.na(benchmark), benchmark != "")
+  df <- read_result_csv(path)
+  if (nrow(df) == 0) return(tibble())
+
+  df <- df %>% filter(!is.na(benchmark), benchmark != "")
 
   if (!column %in% names(df)) return(tibble())
 
@@ -162,8 +177,10 @@ load_uninstrumented_data <- function(result_dir, column) {
   path <- file.path(result_dir, "uninstrumented.csv")
   if (!file.exists(path)) return(tibble())
 
-  df <- read_csv(path, show_col_types = FALSE) %>%
-    filter(!is.na(benchmark), benchmark != "")
+  df <- read_result_csv(path)
+  if (nrow(df) == 0) return(tibble())
+
+  df <- df %>% filter(!is.na(benchmark), benchmark != "")
 
   if (!column %in% names(df)) return(tibble())
 
@@ -183,7 +200,8 @@ discover_capacitors <- function(result_dir) {
     for (source in c("debug", "no-debug")) {
       path <- resolve_csv_path(result_dir, algo, source)
       if (is.na(path)) next
-      df <- read_csv(path, show_col_types = FALSE)
+      df <- read_result_csv(path)
+      if (nrow(df) == 0) next
       bm <- df$benchmark[!is.na(df$benchmark) & df$benchmark != ""]
       parsed <- map_dfr(bm, parse_benchmark_cap)
       caps <- c(caps, parsed$cap[!is.na(parsed$cap)])
@@ -200,6 +218,17 @@ discover_capacitors <- function(result_dir) {
 LOG_SCALE_METRICS <- c("execution_time", "runtime_region_boundary_calls")
 OUTLIER_RATIO_THRESHOLD <- 3.0
 OUTLIER_HEADROOM <- 1.15
+PATTERN_FILL_COLOUR <- "white"
+PATTERN_COLOUR <- "grey10"
+PATTERN_DENSITY <- 0.28
+PATTERN_SPACING <- 0.05
+PATTERN_ALPHA <- 1.0
+PATTERN_SIZE <- 0.3
+PATTERN_LEGEND_SCALE <- 1.4
+PATTERN_LEGEND_DENSITY <- 0.42
+PATTERN_LEGEND_SPACING <- 0.035
+PATTERN_LEGEND_ALPHA <- 1.0
+PATTERN_LEGEND_SIZE <- 0.42
 
 format_metric_value <- function(value, normalize) {
   if (normalize) {
@@ -395,15 +424,16 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       aes(pattern = algo_label, pattern_angle = algo_label),
       position = bar_position,
       width = 0.72,
+      key_glyph = ggpattern::draw_key_polygon_pattern,
       color = "grey20",
       linewidth = 0.35,
-      pattern_fill = "white",
-      pattern_colour = "grey10",
-      pattern_density = 0.18,
-      pattern_spacing = 0.065,
-      pattern_alpha = 0.7,
-      pattern_size = 0.18,
-      pattern_key_scale_factor = 0.6
+      pattern_fill = PATTERN_FILL_COLOUR,
+      pattern_colour = PATTERN_COLOUR,
+      pattern_density = PATTERN_DENSITY,
+      pattern_spacing = PATTERN_SPACING,
+      pattern_alpha = PATTERN_ALPHA,
+      pattern_size = PATTERN_SIZE,
+      pattern_key_scale_factor = 1.0
     ) +
       ggpattern::scale_pattern_manual(values = pattern_map, drop = FALSE) +
       ggpattern::scale_pattern_angle_manual(values = pattern_angle_map,
@@ -425,9 +455,34 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       x = NULL,
       y = y_label,
       caption = if (length(plot_notes) > 0) paste(plot_notes, collapse = "\n") else NULL
-    ) +
-    guides(fill = guide_legend(nrow = 1)) +
-    theme_benchmark()
+    )
+
+  if (HAS_GGPATTERN) {
+    p <- p + guides(
+      fill = "none",
+      pattern_angle = "none",
+      pattern = guide_legend(
+        nrow = 1,
+        override.aes = list(
+          pattern = unname(pattern_map),
+          pattern_angle = unname(pattern_angle_map),
+          fill = unname(color_map),
+          color = "grey20",
+          pattern_fill = PATTERN_FILL_COLOUR,
+          pattern_colour = PATTERN_COLOUR,
+          pattern_density = PATTERN_LEGEND_DENSITY,
+          pattern_spacing = PATTERN_LEGEND_SPACING,
+          pattern_alpha = PATTERN_LEGEND_ALPHA,
+          pattern_size = PATTERN_LEGEND_SIZE,
+          pattern_key_scale_factor = PATTERN_LEGEND_SCALE
+        )
+      )
+    )
+  } else {
+    p <- p + guides(fill = guide_legend(nrow = 1))
+  }
+
+  p <- p + theme_benchmark()
 
   # Add value labels on bars
   label_df <- plot_df %>%
@@ -489,7 +544,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
         labels = axis_labeler,
         breaks = compute_transformed_breaks(pos_vals, include_zero = FALSE)
       ) +
-      coord_transform(y = "log10", ylim = c(y_lo, y_hi), clip = "off") +
+      coord_transform(y = "log10", ylim = c(y_lo, y_hi), clip = "on") +
       labs(subtitle = paste0(subtitle, " [log scale]"))
   } else if (use_symlog) {
     p <- p + scale_y_continuous(
@@ -571,7 +626,8 @@ main <- function() {
     for (source in c("debug", "no-debug")) {
       path <- resolve_csv_path(result_dir, algo, source)
       if (is.na(path)) next
-      df <- read_csv(path, show_col_types = FALSE)
+      df <- read_result_csv(path)
+      if (nrow(df) == 0) next
       bm <- df$benchmark[!is.na(df$benchmark) & df$benchmark != ""]
       parsed <- map_dfr(bm, parse_benchmark_cap)
       all_benchmarks <- c(all_benchmarks, parsed$name[!is.na(parsed$name)])
@@ -579,8 +635,10 @@ main <- function() {
   }
   uninst_path <- file.path(result_dir, "uninstrumented.csv")
   if (file.exists(uninst_path)) {
-    df <- read_csv(uninst_path, show_col_types = FALSE)
+    df <- read_result_csv(uninst_path)
+    if (nrow(df) > 0) {
     all_benchmarks <- c(all_benchmarks, df$benchmark[!is.na(df$benchmark)])
+    }
   }
   all_benchmarks <- unique(all_benchmarks)
 
