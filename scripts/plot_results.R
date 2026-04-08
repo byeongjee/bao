@@ -59,61 +59,77 @@ METRICS <- list(
     source = "debug", column = "region_boundaries",
     include_uninstrumented = FALSE,
     ylabel = "# Region Boundaries (static)",
+    relative_ylabel = "Relative Region Boundaries",
     title = "Region Boundaries"
   ),
   runtime_region_boundary_calls = list(
     source = "debug", column = "runtime_region_boundary_calls",
     include_uninstrumented = FALSE,
     ylabel = "# Runtime Region Boundary Calls",
-    title = "Runtime Region Boundary Calls"
+    relative_ylabel = "Relative Region Boundary Calls",
+    title = "Region Boundary Calls at Run-time"
   ),
   execution_time = list(
     source = "no-debug", column = "execution_time_us",
     include_uninstrumented = TRUE,
     ylabel = expression("Execution Time (" * mu * "s)"),
+    relative_ylabel = "Relative Execution Time",
     title = "Execution Time"
   ),
   profiling_time = list(
     source = "no-debug", column = "profiling_time_ms",
     include_uninstrumented = FALSE,
     ylabel = "Profiling Time (ms)",
+    relative_ylabel = "Relative Profiling Time",
     title = "Profiling Time"
   ),
   compilation_time = list(
     source = "no-debug", column = "compilation_time_ms",
     include_uninstrumented = TRUE,
     ylabel = "Compilation Time (ms)",
+    relative_ylabel = "Relative Compilation Time",
     title = "Compilation Time"
   )
+)
+
+BENCHMARK_LABELS <- c(
+  activity_recognition = "ar"
 )
 
 # -- Theme --------------------------------------------------------------------
 
 theme_benchmark <- function() {
-  theme_minimal(base_size = 10.5, base_family = "Helvetica") +
+  theme_minimal(base_size = 16.5, base_family = "Helvetica") +
     theme(
-      plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
-      plot.subtitle = element_text(color = "grey35", size = 9, hjust = 0.5),
-      plot.caption = element_text(color = "grey35", size = 7.5, hjust = 0),
-      axis.title.x = element_text(margin = margin(t = 6)),
-      axis.title.y = element_text(margin = margin(r = 6)),
-      axis.text.x = element_text(size = 10.5, angle = 18, hjust = 1, vjust = 1),
-      axis.text.y = element_text(size = 8.5),
+      plot.title = element_text(face = "bold", size = 20, hjust = 0.5,
+                                margin = margin(b = 4)),
+      plot.caption = element_text(color = "grey35", size = 12, hjust = 0,
+                                  margin = margin(t = 6)),
+      axis.title.x = element_text(size = 17, margin = margin(t = 10)),
+      axis.title.y = element_text(size = 17, margin = margin(r = 10)),
+      axis.text.x = element_text(size = 15, angle = 18, hjust = 1, vjust = 1),
+      axis.text.y = element_text(size = 14),
       legend.position = "top",
       legend.title = element_blank(),
-      legend.text = element_text(size = 10),
-      legend.key.size = unit(0.82, "cm"),
-      legend.box.spacing = unit(0.05, "cm"),
+      legend.text = element_text(size = 15),
+      legend.key.size = unit(0.88, "cm"),
+      legend.box.spacing = unit(0.04, "cm"),
       legend.margin = margin(0, 0, 2, 0),
       panel.grid.major.x = element_blank(),
       panel.grid.minor = element_blank(),
       panel.grid.major.y = element_line(color = "grey90", linewidth = 0.3),
       panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.4),
-      plot.margin = margin(6, 10, 18, 22)
+      plot.margin = margin(6, 12, 10, 24)
     )
 }
 
 # -- Data loading -------------------------------------------------------------
+
+format_benchmark_labels <- function(benchmarks) {
+  labels <- BENCHMARK_LABELS[benchmarks]
+  labels[is.na(labels)] <- benchmarks[is.na(labels)]
+  unname(labels)
+}
 
 parse_benchmark_cap <- function(benchmark) {
   # Split "name-cap" into (name, cap). E.g. "aes-5uF" -> ("aes", "5uF")
@@ -218,6 +234,16 @@ discover_capacitors <- function(result_dir) {
 LOG_SCALE_METRICS <- c("execution_time", "runtime_region_boundary_calls")
 OUTLIER_RATIO_THRESHOLD <- 3.0
 OUTLIER_HEADROOM <- 1.15
+LINEAR_LABEL_CROWDING_THRESHOLD <- 0.03
+TRANSFORMED_LABEL_CROWDING_THRESHOLD <- 0.11
+LINEAR_LABEL_OFFSET_BASE <- 0.05
+LINEAR_LABEL_OFFSET_STEP <- 0.04
+TRANSFORMED_LABEL_OFFSET_BASE <- 0.08
+TRANSFORMED_LABEL_OFFSET_STEP <- 0.12
+LINEAR_TOP_HEADROOM_BASE <- 0.03
+LINEAR_TOP_HEADROOM_PER_TIER <- 0.04
+TRANSFORMED_TOP_HEADROOM_BASE <- 0.04
+TRANSFORMED_TOP_HEADROOM_PER_TIER <- 0.12
 PATTERN_FILL_COLOUR <- "white"
 PATTERN_COLOUR <- "grey10"
 PATTERN_DENSITY <- 0.28
@@ -290,6 +316,137 @@ compute_display_limit <- function(values) {
   }
 
   max(second, tail) * OUTLIER_HEADROOM
+}
+
+assign_label_tiers <- function(df, threshold) {
+  if (nrow(df) == 0) {
+    return(df)
+  }
+
+  row_ids <- seq_len(nrow(df))
+  ordered_idx <- order(df$transformed_value, decreasing = TRUE, na.last = TRUE)
+  ordered_df <- df[ordered_idx, , drop = FALSE]
+  ordered_rows <- row_ids[ordered_idx]
+
+  cluster_id <- integer(nrow(ordered_df))
+  current_cluster <- 1L
+
+  for (i in seq_len(nrow(ordered_df))) {
+    if (i == 1) {
+      cluster_id[i] <- current_cluster
+      next
+    }
+
+    prev_value <- ordered_df$transformed_value[i - 1]
+    curr_value <- ordered_df$transformed_value[i]
+    separated <- !is.finite(prev_value) || !is.finite(curr_value) ||
+      abs(prev_value - curr_value) >= threshold
+
+    if (separated) {
+      current_cluster <- current_cluster + 1L
+    }
+    cluster_id[i] <- current_cluster
+  }
+
+  ordered_df <- ordered_df %>%
+    mutate(row_id = ordered_rows, cluster_id = cluster_id) %>%
+    group_by(cluster_id) %>%
+    mutate(label_tier = row_number() - 1L) %>%
+    ungroup()
+
+  ordered_df[order(ordered_df$row_id), , drop = FALSE] %>%
+    select(-row_id, -cluster_id)
+}
+
+compute_label_positions <- function(df, force_log, use_symlog) {
+  if (nrow(df) == 0) {
+    return(df)
+  }
+
+  transformed_values <- if (force_log) {
+    log10(df$display_value)
+  } else if (use_symlog) {
+    pseudo_log_trans(base = 10)$transform(df$display_value)
+  } else {
+    scale_ref <- max(df$display_value, na.rm = TRUE)
+    df$display_value / max(scale_ref, 1)
+  }
+
+  threshold <- if (force_log || use_symlog) {
+    TRANSFORMED_LABEL_CROWDING_THRESHOLD
+  } else {
+    LINEAR_LABEL_CROWDING_THRESHOLD
+  }
+
+  positioned_df <- df %>%
+    mutate(transformed_value = transformed_values) %>%
+    group_by(benchmark) %>%
+    group_modify(~ assign_label_tiers(.x, threshold)) %>%
+    ungroup() %>%
+    mutate(label_hjust = 0.5)
+
+  if (force_log || use_symlog) {
+    trans <- if (force_log) {
+      transform_log10()
+    } else {
+      pseudo_log_trans(base = 10)
+    }
+    positioned_df <- positioned_df %>%
+      mutate(
+        label_y = trans$inverse(
+          transformed_value +
+            TRANSFORMED_LABEL_OFFSET_BASE +
+            TRANSFORMED_LABEL_OFFSET_STEP * label_tier
+        )
+      )
+  } else {
+    scale_ref <- max(positioned_df$display_value, na.rm = TRUE)
+    positioned_df <- positioned_df %>%
+      mutate(
+        label_y = display_value +
+          scale_ref * (LINEAR_LABEL_OFFSET_BASE +
+                         LINEAR_LABEL_OFFSET_STEP * label_tier)
+      )
+  }
+
+  positioned_df %>%
+    select(-transformed_value)
+}
+
+compute_max_label_tier <- function(df) {
+  if (nrow(df) == 0 || !"label_tier" %in% names(df)) {
+    return(0L)
+  }
+
+  as.integer(max(0, max(df$label_tier, na.rm = TRUE)))
+}
+
+compute_upper_limit <- function(max_value, max_label_tier, force_log, use_symlog,
+                                has_clipped_values) {
+  if (!is.finite(max_value) || max_value <= 0) {
+    return(max_value)
+  }
+
+  if (force_log || use_symlog) {
+    trans <- if (force_log) {
+      transform_log10()
+    } else {
+      pseudo_log_trans(base = 10)
+    }
+    headroom <- TRANSFORMED_TOP_HEADROOM_BASE +
+      TRANSFORMED_TOP_HEADROOM_PER_TIER * max_label_tier
+    if (has_clipped_values) {
+      headroom <- headroom + 0.05
+    }
+    return(trans$inverse(trans$transform(max_value) + headroom))
+  }
+
+  headroom <- LINEAR_TOP_HEADROOM_BASE +
+    LINEAR_TOP_HEADROOM_PER_TIER * max_label_tier
+  if (has_clipped_values) {
+    headroom <- headroom + 0.04
+  }
+  max_value * (1 + headroom)
 }
 
 plot_metric_for_cap <- function(cap, metric_key, metric_info,
@@ -375,13 +532,9 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
   }
   clipped_df <- plot_df %>% filter(clipped)
 
-  # Build subtitle
   if (normalize && !is.null(norm_algo)) {
-    norm_label <- ALG_STYLE$label[ALG_STYLE$algo == norm_algo]
-    subtitle <- paste0(cap, " - normalized to ", norm_label)
-    y_label <- paste0("Normalized to ", norm_label)
+    y_label <- metric_info$relative_ylabel
   } else {
-    subtitle <- cap
     y_label <- metric_info$ylabel
   }
 
@@ -404,6 +557,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
 
   bar_position <- position_dodge2(width = 0.84, preserve = "single",
                                   padding = 0.08)
+  text_position <- position_dodge(width = 0.84)
   color_map <- setNames(
     ALG_STYLE$color[match(active_algos, ALG_STYLE$algo)],
     label_map[active_algos]
@@ -449,9 +603,9 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
 
   p <- p +
     scale_fill_manual(values = color_map, drop = FALSE) +
+    scale_x_discrete(labels = format_benchmark_labels) +
     labs(
       title = metric_info$title,
-      subtitle = subtitle,
       x = NULL,
       y = y_label,
       caption = if (length(plot_notes) > 0) paste(plot_notes, collapse = "\n") else NULL
@@ -487,16 +641,34 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
   # Add value labels on bars
   label_df <- plot_df %>%
     filter(!is.na(display_value), display_value > 0, !clipped)
+  if (normalize && !is.null(norm_algo)) {
+    label_df <- label_df %>% filter(algo != norm_algo)
+  }
+  label_df <- label_df %>%
+    compute_label_positions(force_log, use_symlog)
   if (nrow(label_df) > 0) {
-    p <- p + geom_text(
+    p <- p + geom_label(
       data = label_df,
-      aes(label = vapply(value, format_metric_value,
-                         FUN.VALUE = character(1), normalize = normalize)),
-      position = bar_position,
-      vjust = -0.35, size = 2.2, color = "grey25"
+      aes(
+        y = label_y,
+        label = vapply(value, format_metric_value,
+                       FUN.VALUE = character(1), normalize = normalize),
+        hjust = label_hjust
+      ),
+      position = text_position,
+      vjust = 0,
+      size = 3.6, color = "grey25",
+      fill = alpha("white", 0.75),
+      label.size = 0,
+      label.padding = unit(0.12, "lines")
     )
   }
 
+  if (normalize && !is.null(norm_algo)) {
+    clipped_df <- clipped_df %>% filter(algo != norm_algo)
+  }
+  clipped_df <- clipped_df %>%
+    compute_label_positions(force_log, use_symlog)
   if (nrow(clipped_df) > 0) {
     p <- p +
       geom_segment(
@@ -505,23 +677,30 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
             y = display_value / OUTLIER_HEADROOM, yend = display_value,
             group = algo_label),
         inherit.aes = FALSE,
-        position = bar_position,
+        position = text_position,
         linewidth = 0.35,
         color = "grey15",
         arrow = arrow(type = "closed", length = unit(0.07, "in"))
       ) +
-      geom_text(
+      geom_label(
         data = clipped_df,
-        aes(label = paste0(
-          vapply(value, format_metric_value,
-                 FUN.VALUE = character(1), normalize = normalize),
-          " ^"
-        )),
-        position = bar_position,
-        vjust = -0.2,
-        size = 2.25,
+        aes(
+          y = label_y,
+          label = paste0(
+            vapply(value, format_metric_value,
+                   FUN.VALUE = character(1), normalize = normalize),
+            " ^"
+          ),
+          hjust = label_hjust
+        ),
+        position = text_position,
+        vjust = 0,
+        size = 3.7,
         color = "grey15",
-        fontface = "bold"
+        fontface = "bold",
+        fill = alpha("white", 0.75),
+        label.size = 0,
+        label.padding = unit(0.12, "lines")
       )
   }
 
@@ -531,21 +710,32 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
                         color = "grey50", linewidth = 0.5)
   }
 
-  top_display_value <- max(plot_df$display_value, na.rm = TRUE)
-  top_padding <- if (nrow(clipped_df) > 0) 1.08 else 1.04
+  max_label_tier <- max(
+    compute_max_label_tier(label_df),
+    compute_max_label_tier(clipped_df)
+  )
+  top_display_value <- max(
+    c(plot_df$display_value, label_df$label_y, clipped_df$label_y),
+    na.rm = TRUE
+  )
+  y_hi <- compute_upper_limit(
+    top_display_value,
+    max_label_tier,
+    force_log,
+    use_symlog,
+    nrow(clipped_df) > 0
+  )
 
   if (force_log) {
     # Log-scaled bar chart: use coord_trans so bars render properly,
     # clip the y-axis just below the minimum value
     y_lo <- min(pos_vals, na.rm = TRUE) * 0.88
-    y_hi <- top_display_value * top_padding
     p <- p +
       scale_y_continuous(
         labels = axis_labeler,
         breaks = compute_transformed_breaks(pos_vals, include_zero = FALSE)
       ) +
-      coord_transform(y = "log10", ylim = c(y_lo, y_hi), clip = "on") +
-      labs(subtitle = paste0(subtitle, " [log scale]"))
+      coord_transform(y = "log10", ylim = c(y_lo, y_hi), clip = "on")
   } else if (use_symlog) {
     p <- p + scale_y_continuous(
       trans = pseudo_log_trans(base = 10),
@@ -553,16 +743,15 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       breaks = compute_transformed_breaks(pos_vals, include_zero = TRUE),
       expand = expansion(mult = c(0, 0.03))
     ) +
-      coord_cartesian(ylim = c(0, top_display_value * top_padding),
-                      clip = "off") +
-      labs(subtitle = paste0(subtitle, " [pseudo-log scale]"))
+      coord_cartesian(ylim = c(0, y_hi),
+                      clip = "off")
   } else {
     p <- p + scale_y_continuous(
       expand = expansion(mult = c(0, 0.03)),
       labels = axis_labeler,
       n.breaks = 5
     ) +
-      coord_cartesian(ylim = c(0, top_display_value * top_padding),
+      coord_cartesian(ylim = c(0, y_hi),
                       clip = "off")
   }
 
@@ -686,10 +875,10 @@ main <- function() {
         filepath <- file.path(output_dir, filename)
 
         n_bm <- length(benchmarks) + 1  # +1 for geomean
-        w <- max(6.2, n_bm * 0.95 + 1.5)
+        w <- max(7.4, n_bm * 1.05 + 1.8)
 
         save_plot <- function() {
-          ggsave(filepath, p, width = w, height = 4.35, device = "pdf")
+          ggsave(filepath, p, width = w, height = 4.45, device = "pdf")
         }
         if (HAS_GGPATTERN && log_scale && metric_key %in% LOG_SCALE_METRICS) {
           # ggpattern bars still originate at y = 0 internally, so log-scale
