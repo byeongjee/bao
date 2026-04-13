@@ -45,7 +45,7 @@ cl::opt<std::string> RockClimbConfigOpt("rockclimb-config",
 cl::opt<unsigned> RockClimbMaxUnrollFactorOpt(
     "rockclimb-max-unroll-factor",
     cl::desc("Maximum partial unroll factor for RockClimb loop preprocessing"), cl::value_desc("N"),
-    cl::init(2));
+    cl::init(4));
 
 enum class VisitState {
     Unvisited = 0,

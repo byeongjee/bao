@@ -292,6 +292,8 @@ def compile_milp_cmd(
 @click.option(
     "--max-unroll",
     type=click.IntRange(min=1),
+    default=4,
+    show_default=True,
     help="Maximum RockClimb partial unroll factor for the preprocess pass.",
 )
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
@@ -311,7 +313,7 @@ def compile_rockclimb_cmd(
     clang_opt_level: int,
     no_precomputed_energy: bool,
     cpu_freq: str,
-    max_unroll: int | None,
+    max_unroll: int,
     save_temps: bool,
     accumulate_keys: str | None,
 ) -> None:
@@ -792,6 +794,8 @@ def bench_milp_cmd(
 @click.option(
     "--max-unroll",
     type=click.IntRange(min=1),
+    default=4,
+    show_default=True,
     help="Maximum RockClimb partial unroll factor for the preprocess pass.",
 )
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
@@ -805,7 +809,7 @@ def bench_rockclimb_cmd(
     halt_mode: str,
     energy_config: str | None,
     cpu_freq: str,
-    max_unroll: int | None,
+    max_unroll: int,
     accumulate_keys: str | None,
 ) -> None:
     """Run RockClimb benchmarks across programs and capacitor sizes."""
