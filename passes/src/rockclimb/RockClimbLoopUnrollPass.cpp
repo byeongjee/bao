@@ -38,6 +38,8 @@ extern cl::opt<std::string> EnergyConfigOpt;
 
 namespace {
 
+constexpr uint64_t MaxRockClimbUnrollFactor = 2;
+
 cl::opt<std::string> RockClimbConfigOpt("rockclimb-config",
                                         cl::desc("Path to RockClimb config JSON"),
                                         cl::value_desc("filename"), cl::init(""));
@@ -327,21 +329,23 @@ static PlanResult computePlan(Loop *L, const DenseMap<const BasicBlock *, double
     }
 
     double loopEnergy = static_cast<double>(*tripCount) * iterEnergy.energy;
+
+    uint64_t K = 0;
     if (loopEnergy < ESafe) {
-        result.skipReason = "loop-fits-budget";
-        return result;
+        K = std::min<uint64_t>(*tripCount, MaxRockClimbUnrollFactor);
+    } else {
+        double strictBudget = std::nextafter(ESafe, -std::numeric_limits<double>::infinity());
+        double rawK = std::floor(strictBudget / iterEnergy.energy);
+        if (!std::isfinite(rawK) || rawK <= 1.0) {
+            result.skipReason = "k-not-beneficial";
+            return result;
+        }
+
+        K = static_cast<uint64_t>(rawK);
+        K = std::min<uint64_t>(K, MaxRockClimbUnrollFactor);
+        K = std::min<uint64_t>(K, *tripCount - 1);
     }
 
-    double strictBudget = std::nextafter(ESafe, -std::numeric_limits<double>::infinity());
-    double rawK = std::floor(strictBudget / iterEnergy.energy);
-    if (!std::isfinite(rawK) || rawK <= 1.0) {
-        result.skipReason = "k-not-beneficial";
-        return result;
-    }
-
-    uint64_t K = static_cast<uint64_t>(rawK);
-    K = std::min<uint64_t>(K, 16);
-    K = std::min<uint64_t>(K, *tripCount - 1);
     if (K <= 1) {
         result.skipReason = "k-not-beneficial";
         return result;

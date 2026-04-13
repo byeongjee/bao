@@ -21,6 +21,7 @@ from .common import (
     link_algorithm,
     optimize_ir_with_options,
     run_assembly_energy,
+    strip_noinline_for_optimization,
     write_assembly_energy_config,
 )
 
@@ -63,7 +64,8 @@ def compile_rockclimb(
     """Run the RockClimb machine-level checkpoint insertion pipeline.
 
     Pipeline:
-      C -> clang(-O0) -> .ll -> tripcount-annotation -> optimize_ir(no auto-unroll) ->
+      C -> clang(-O0) -> .ll -> tripcount-annotation -> strip_noinline ->
+      optimize_ir ->
       pre-rockclimb assembly energy -> rockclimb-preprocess ->
       (if precomputed: assign-bb-debuginfo -> llc to obj -> bb-energy-analyzer) ->
       llc -stop-after=virtregrewriter -> .mir ->
@@ -84,7 +86,8 @@ def compile_rockclimb(
     with compilation_workdir(prefix="ckpt_rockclimb_") as tmp:
         output = opts.output
 
-        # Step 1: C -> LLVM IR at -O0 so RockClimb controls loop unrolling.
+        # Step 1: C -> LLVM IR at -O0 so later opt passes can rebuild the
+        # frontend shape while preserving exact loop-trip annotations.
         raw_ll = tmp / "raw.ll"
         clang_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
         if opts.device_debug:
@@ -103,14 +106,18 @@ def compile_rockclimb(
         annotated_ll = tmp / "annotated.ll"
         annotate_tripcounts(tc, env, raw_ll, annotated_ll)
 
-        # Step 1c: Frontend optimization with generic loop unrolling disabled.
+        # Step 1c: Strip clang -O0 noinline attributes so the normal
+        # optimization pipeline can recover the old clang -O3 frontend shape.
         rockclimb_input_ll = annotated_ll
         if opts.clang_opt_level != 0:
+            stripped_ll = tmp / "stripped.ll"
+            strip_noinline_for_optimization(annotated_ll, stripped_ll)
+
             optimized_ll = tmp / "optimized.ll"
             optimize_ir_with_options(
-                tc, annotated_ll, optimized_ll,
+                tc, stripped_ll, optimized_ll,
                 opt_level=opts.clang_opt_level,
-                disable_loop_unrolling=True,
+                disable_loop_unrolling=False,
             )
             rockclimb_input_ll = optimized_ll
 
@@ -369,8 +376,12 @@ def _run_rockclimb_pass(
         str(mir_file),
         "-o", str(instrumented_mir),
     ]
-    if opts.device_debug:
-        cmd.insert(-2, "-add-debug-markers")
+    # Per-save debug counters are intentionally disabled for RockClimb.
+    # The inline counter sequence after each distributed register save
+    # bloats large benchmarks enough to overflow FRAM.
+    #
+    # if opts.device_debug:
+    #     cmd.insert(-2, "-add-debug-markers")
 
     # We always capture; the caller can choose whether to display.
     result = run(cmd, step_name="rockclimb-pass")

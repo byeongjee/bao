@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 
+import ckpt.compile.rockclimb as rockclimb_module
 from ckpt.compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 from ckpt.env import ProjectEnv
+from ckpt.runner import StepResult
 from ckpt.toolchain import Toolchain
 
 
@@ -28,6 +30,24 @@ int sum8(int *a) {
     for (int i = 0; i < 8; i++) {
         __loop_tripcount(8);
         s += a[i];
+    }
+    return s;
+}
+"""
+
+
+HELPER_LOOP = """\
+void __loop_tripcount(int);
+
+static int add1(int x) {
+    return x + 1;
+}
+
+int sum8_helper(int *a) {
+    int s = 0;
+    for (int i = 0; i < 8; i++) {
+        __loop_tripcount(8);
+        s += add1(a[i]);
     }
     return s;
 }
@@ -131,7 +151,7 @@ def test_preprocess_partially_unrolls_constant_trip_loop(tools, compile_to_ir, t
     assert _count_ir_loads(after_ir) > _count_ir_loads(before_ir)
 
 
-def test_preprocess_skips_loop_that_fits_budget(tools, compile_to_ir, tmp_path):
+def test_preprocess_caps_unroll_for_loop_that_fits_budget(tools, compile_to_ir, tmp_path):
     src = _write_src(tmp_path, CONSTANT_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
@@ -143,8 +163,11 @@ def test_preprocess_skips_loop_that_fits_budget(tools, compile_to_ir, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "RockClimbLoopUnrollPass: unrolled" not in result.stdout + result.stderr
-    assert _count_ir_loads(output_ll.read_text()) == _count_ir_loads(before_ir)
+    after_ir = output_ll.read_text()
+
+    assert "RockClimbLoopUnrollPass: unrolled sum8::" in result.stdout + result.stderr
+    assert _count_ir_loads(after_ir) > _count_ir_loads(before_ir)
+    assert "br i1 %exitcond.not" in after_ir
 
 
 def test_preprocess_skips_unknown_trip_count_loop(tools, compile_to_ir, tmp_path):
@@ -163,14 +186,22 @@ def test_preprocess_skips_unknown_trip_count_loop(tools, compile_to_ir, tmp_path
     assert _count_ir_loads(output_ll.read_text()) == _count_ir_loads(before_ir)
 
 
-def test_compile_rockclimb_runs_preprocess(tmp_path):
+def test_compile_rockclimb_runs_preprocess(tmp_path, monkeypatch):
     env = ProjectEnv.from_environ(PROJECT_DIR)
     tc = Toolchain.resolve(env)
 
     src = _write_src(tmp_path, CONSTANT_LOOP)
     config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
 
-    result = compile_rockclimb(
+    real_preprocess = rockclimb_module._run_rockclimb_preprocess
+    seen: dict[str, bool] = {"called": False}
+
+    def wrapped_preprocess(tc, env, opts, tmp, input_ll):
+        seen["called"] = True
+        return real_preprocess(tc, env, opts, tmp, input_ll)
+
+    monkeypatch.setattr(rockclimb_module, "_run_rockclimb_preprocess", wrapped_preprocess)
+    compile_rockclimb(
         tc, env,
         RockClimbCompileOptions(
             input_c=src,
@@ -189,5 +220,125 @@ def test_compile_rockclimb_runs_preprocess(tmp_path):
         ),
     )
 
-    assert "RockClimbLoopUnrollPass: unrolled sum8::" in result.pass_output
+    assert seen["called"] is True
     assert (tmp_path / "preprocessed.ll").exists()
+
+
+def test_compile_rockclimb_recovers_inlining_from_o0_ir(tmp_path):
+    env = ProjectEnv.from_environ(PROJECT_DIR)
+    tc = Toolchain.resolve(env)
+
+    src = _write_src(tmp_path, HELPER_LOOP)
+    config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
+
+    compile_rockclimb(
+        tc, env,
+        RockClimbCompileOptions(
+            input_c=src,
+            energy_config=ASSEMBLY_ENERGY_CONFIG,
+            rockclimb_config=config_path,
+            output=tmp_path / "rockclimb_inline",
+            pass_log_level="info",
+            precomputed_energy=False,
+            link=False,
+            device_debug=False,
+            halt_mode="nop",
+            cpu_freq=1_000_000,
+            clang_opt_level=3,
+            opt_level=3,
+            save_temps=True,
+        ),
+    )
+
+    optimized_ir = (tmp_path / "optimized.ll").read_text()
+    assert "@add1" not in optimized_ir
+    assert "noinline" not in optimized_ir
+
+
+def test_compile_rockclimb_leaves_llvm_loop_unrolling_enabled(tmp_path, monkeypatch):
+    env = ProjectEnv.from_environ(PROJECT_DIR)
+    tc = Toolchain.resolve(env)
+
+    src = _write_src(tmp_path, CONSTANT_LOOP)
+    config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
+
+    real_optimize = rockclimb_module.optimize_ir_with_options
+    seen: dict[str, bool] = {}
+
+    def wrapped_optimize_ir_with_options(tc, input_ll, output_ll, *, opt_level, disable_loop_unrolling):
+        seen["disable_loop_unrolling"] = disable_loop_unrolling
+        return real_optimize(
+            tc,
+            input_ll,
+            output_ll,
+            opt_level=opt_level,
+            disable_loop_unrolling=disable_loop_unrolling,
+        )
+
+    monkeypatch.setattr(
+        rockclimb_module,
+        "optimize_ir_with_options",
+        wrapped_optimize_ir_with_options,
+    )
+
+    compile_rockclimb(
+        tc, env,
+        RockClimbCompileOptions(
+            input_c=src,
+            energy_config=ASSEMBLY_ENERGY_CONFIG,
+            rockclimb_config=config_path,
+            output=tmp_path / "rockclimb_unrolls",
+            pass_log_level="info",
+            precomputed_energy=False,
+            link=False,
+            device_debug=False,
+            halt_mode="nop",
+            cpu_freq=1_000_000,
+            clang_opt_level=3,
+            opt_level=3,
+            save_temps=False,
+        ),
+    )
+
+    assert seen["disable_loop_unrolling"] is False
+
+
+def test_run_rockclimb_pass_skips_debug_marker_instrumentation(tmp_path, monkeypatch):
+    env = ProjectEnv.from_environ(PROJECT_DIR)
+    tc = Toolchain.resolve(env)
+    config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
+    mir_file = tmp_path / "dummy.mir"
+    mir_file.write_text("")
+
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(cmd, *, check=True, step_name="", cwd=None, timeout=300, input=None):
+        seen["cmd"] = cmd
+        return StepResult(0, "", "", 0)
+
+    monkeypatch.setattr(rockclimb_module, "run", fake_run)
+
+    rockclimb_module._run_rockclimb_pass(
+        tc,
+        env,
+        RockClimbCompileOptions(
+            input_c=tmp_path / "dummy.c",
+            energy_config=ASSEMBLY_ENERGY_CONFIG,
+            rockclimb_config=config_path,
+            output=tmp_path / "rockclimb_debug",
+            pass_log_level="info",
+            precomputed_energy=True,
+            link=False,
+            device_debug=True,
+            halt_mode="swbor",
+            cpu_freq=16_000_000,
+            clang_opt_level=3,
+            opt_level=3,
+            save_temps=False,
+        ),
+        tmp_path,
+        mir_file,
+        energy_flag=("-rockclimb-energy-data", str(tmp_path / "bb_energy.json")),
+    )
+
+    assert "-add-debug-markers" not in seen["cmd"]

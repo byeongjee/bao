@@ -145,7 +145,7 @@ _NOINLINE_FUNCTIONS = frozenset({
 """Benchmark infrastructure functions that must never be inlined."""
 
 
-def _strip_noinline_for_inlining(input_ll: Path, output_ll: Path) -> None:
+def strip_noinline_for_optimization(input_ll: Path, output_ll: Path) -> None:
     """Strip ``noinline`` from attribute groups, then re-add it to infra functions.
 
     At -O0 clang puts ``noinline`` on a shared attribute group used by every
@@ -186,7 +186,7 @@ def inline_functions(
     halt) so only business-logic helpers get inlined.
     """
     stripped_ll = input_ll.with_name(input_ll.stem + "_stripped.ll")
-    _strip_noinline_for_inlining(input_ll, stripped_ll)
+    strip_noinline_for_optimization(input_ll, stripped_ll)
 
     return run(
         [

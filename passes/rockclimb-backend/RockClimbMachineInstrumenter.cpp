@@ -130,10 +130,15 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
                           static_cast<int64_t>(ckpt.regId) * 2) // disp = &__nvm_regs + regId*2
         .addReg(srcReg);                                        // source register
 
-    // Debug counter: increment cnt_save_reg by 1.
-    if (addDebugMarkers_ && cntSaveGV_) {
-        emitCounterIncrement(*MBB, InsertPt, DL, cntSaveGV_, 1);
-    }
+    // NOTE: Per-save debug counters are disabled to control code size.
+    // Each distributed save-point increment injects a flag-preserving
+    // PUSH/ADD/ADDC/POP sequence, which bloats large benchmarks enough
+    // to overflow FRAM. Keep the register save itself, but skip the
+    // counter update.
+    //
+    // if (addDebugMarkers_ && cntSaveGV_) {
+    //     emitCounterIncrement(*MBB, InsertPt, DL, cntSaveGV_, 1);
+    // }
 }
 
 unsigned

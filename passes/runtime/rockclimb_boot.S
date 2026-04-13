@@ -69,10 +69,9 @@ _do_recovery:
     mov.w   &__nvm_regs+22, R15
 
 #ifdef DEVICE_DEBUG
-    /* Preserve SR across counter increment — ADD clobbers flags. */
-    push    SR
-    add_u32_to_nvm_counter cnt_restore_reg, 14
-    pop     SR
+    /* Per-register restore counting is disabled to keep debug builds small.
+       The distributed save/restore data still lives in FRAM; only the
+       counter update is omitted. */
 #endif
 
     /* Jump to saved PC (pops from stack).
@@ -116,7 +115,6 @@ __region_boundary:
        and in nop halt mode this function returns to the caller. */
     push    SR
     add_u32_to_nvm_counter cnt_boundary, 1
-    add_u32_to_nvm_counter cnt_save_reg, 2
     pop     SR
 #endif
 
