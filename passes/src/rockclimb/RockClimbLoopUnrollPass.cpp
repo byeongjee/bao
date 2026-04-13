@@ -347,7 +347,6 @@ static PlanResult computePlan(Loop *L, const DenseMap<const BasicBlock *, double
 
         K = static_cast<uint64_t>(rawK);
         K = std::min<uint64_t>(K, maxUnrollFactor);
-        K = std::min<uint64_t>(K, *tripCount - 1);
     }
 
     if (K <= 1) {
@@ -389,9 +388,10 @@ selectLoopsToUnroll(LoopInfo &LI, const DenseMap<const BasicBlock *, double> &bl
     return selected;
 }
 
-static bool applyUnrollPlan(const LoopUnrollPlan &plan, LoopInfo &LI, ScalarEvolution &SE,
-                            DominatorTree &DT, AssumptionCache &AC, AAResults &AA,
-                            const TargetTransformInfo &TTI, OptimizationRemarkEmitter &ORE) {
+static LoopUnrollResult applyUnrollPlan(const LoopUnrollPlan &plan, LoopInfo &LI,
+                                        ScalarEvolution &SE, DominatorTree &DT, AssumptionCache &AC,
+                                        AAResults &AA, const TargetTransformInfo &TTI,
+                                        OptimizationRemarkEmitter &ORE) {
     UnrollLoopOptions options{};
     options.Count = static_cast<unsigned>(plan.unrollCount);
     options.Force = true;
@@ -404,9 +404,8 @@ static bool applyUnrollPlan(const LoopUnrollPlan &plan, LoopInfo &LI, ScalarEvol
     options.AddAdditionalAccumulators = false;
 
     Loop *RemainderLoop = nullptr;
-    LoopUnrollResult result = UnrollLoop(plan.L, options, &LI, &SE, &DT, &AC, &TTI, &ORE,
-                                         /*PreserveLCSSA=*/true, &RemainderLoop, &AA);
-    return result != LoopUnrollResult::Unmodified;
+    return UnrollLoop(plan.L, options, &LI, &SE, &DT, &AC, &TTI, &ORE,
+                      /*PreserveLCSSA=*/true, &RemainderLoop, &AA);
 }
 
 } // namespace
@@ -480,18 +479,21 @@ PreservedAnalyses RockClimbLoopUnrollPass::run(Function &F, FunctionAnalysisMana
             continue;
         }
 
+        std::string loopHeaderName = getLoopHeaderName(L);
         item.plan.L = L;
-        if (!applyUnrollPlan(item.plan, LI, SE, DT, AC, AA, TTI, ORE)) {
+        LoopUnrollResult unrollResult = applyUnrollPlan(item.plan, LI, SE, DT, AC, AA, TTI, ORE);
+        if (unrollResult == LoopUnrollResult::Unmodified) {
             PLOGW << "RockClimbLoopUnrollPass: failed to unroll " << F.getName()
-                  << "::" << getLoopHeaderName(L) << " K=" << item.plan.unrollCount;
+                  << "::" << loopHeaderName << " K=" << item.plan.unrollCount;
             continue;
         }
 
         changed = true;
-        PLOGI << "RockClimbLoopUnrollPass: unrolled " << F.getName() << "::" << getLoopHeaderName(L)
-              << " N=" << item.plan.tripCount << " K=" << item.plan.unrollCount
-              << " E_iter_wc=" << item.plan.iterEnergy << " E_loop_wc=" << item.plan.loopEnergy
-              << " E_safe=" << params.calculateESafe();
+        PLOGI << "RockClimbLoopUnrollPass: "
+              << (unrollResult == LoopUnrollResult::FullyUnrolled ? "fully unrolled " : "unrolled ")
+              << F.getName() << "::" << loopHeaderName << " N=" << item.plan.tripCount
+              << " K=" << item.plan.unrollCount << " E_iter_wc=" << item.plan.iterEnergy
+              << " E_loop_wc=" << item.plan.loopEnergy << " E_safe=" << params.calculateESafe();
     }
 
     estimator->finalizeFunction(F);

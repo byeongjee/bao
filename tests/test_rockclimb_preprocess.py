@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -20,6 +21,8 @@ IR_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "sample_energy_config_ir.json"
 ASSEMBLY_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "assembly_params.json"
 CRC_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "crc.c"
 CRC_5UF_CONFIG = PROJECT_DIR / "benchmarks" / "config_5uF.json"
+AES_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "aes.c"
+AES_1UF_CONFIG = PROJECT_DIR / "benchmarks" / "config_1uF.json"
 
 pytestmark = pytest.mark.rockclimb
 
@@ -463,3 +466,32 @@ def test_crc_unroll_does_not_explode_distributed_checkpoints(tmp_path):
         f"Expected max-unroll=16 to avoid checkpoint explosion relative to "
         f"max-unroll=4, got {checkpoints4} vs {checkpoints16}"
     )
+
+
+def test_compile_rockclimb_handles_full_unroll_in_nested_loops(tmp_path):
+    env = ProjectEnv.from_environ(PROJECT_DIR)
+    tc = Toolchain.resolve(env)
+
+    result = compile_rockclimb(
+        tc, env,
+        RockClimbCompileOptions(
+            input_c=AES_BENCHMARK,
+            energy_config=ASSEMBLY_ENERGY_CONFIG,
+            rockclimb_config=AES_1UF_CONFIG,
+            output=tmp_path / "aes_u5",
+            pass_log_level="info",
+            precomputed_energy=True,
+            link=False,
+            device_debug=False,
+            halt_mode="nop",
+            cpu_freq=16_000_000,
+            clang_opt_level=3,
+            opt_level=3,
+            max_unroll=5,
+            save_temps=False,
+        ),
+    )
+
+    assert "Stack dump:" not in result.pass_output
+    assert re.search(r"RockClimbLoopUnrollPass: fully unrolled main::.* N=4 K=4",
+                     result.pass_output)
