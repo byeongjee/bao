@@ -18,6 +18,8 @@ from ckpt.toolchain import Toolchain
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 IR_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "sample_energy_config_ir.json"
 ASSEMBLY_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "assembly_params.json"
+CRC_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "crc.c"
+CRC_5UF_CONFIG = PROJECT_DIR / "benchmarks" / "config_5uF.json"
 
 pytestmark = pytest.mark.rockclimb
 
@@ -133,6 +135,14 @@ def _run_rockclimb_preprocess(tools, input_ll: Path, energy_config: Path,
 
 def _count_ir_loads(ir_text: str) -> int:
     return ir_text.count("load i32")
+
+
+def _parse_register_checkpoints(pass_output: str) -> int:
+    for line in pass_output.splitlines():
+        if "Register checkpoints:" not in line:
+            continue
+        return int(line.rsplit(":", 1)[1].strip())
+    raise AssertionError("Could not find register checkpoint count in pass output")
 
 
 def test_preprocess_partially_unrolls_constant_trip_loop(tools, compile_to_ir, tmp_path):
@@ -401,3 +411,55 @@ def test_run_rockclimb_preprocess_passes_max_unroll_flag(tmp_path, monkeypatch):
     )
 
     assert seen["max_unroll"] == 5
+
+
+def test_crc_unroll_does_not_explode_distributed_checkpoints(tmp_path):
+    env = ProjectEnv.from_environ(PROJECT_DIR)
+    tc = Toolchain.resolve(env)
+
+    out4 = compile_rockclimb(
+        tc, env,
+        RockClimbCompileOptions(
+            input_c=CRC_BENCHMARK,
+            energy_config=ASSEMBLY_ENERGY_CONFIG,
+            rockclimb_config=CRC_5UF_CONFIG,
+            output=tmp_path / "crc_u4",
+            pass_log_level="info",
+            precomputed_energy=True,
+            link=False,
+            device_debug=False,
+            halt_mode="nop",
+            cpu_freq=16_000_000,
+            clang_opt_level=3,
+            opt_level=3,
+            max_unroll=4,
+            save_temps=False,
+        ),
+    )
+    out16 = compile_rockclimb(
+        tc, env,
+        RockClimbCompileOptions(
+            input_c=CRC_BENCHMARK,
+            energy_config=ASSEMBLY_ENERGY_CONFIG,
+            rockclimb_config=CRC_5UF_CONFIG,
+            output=tmp_path / "crc_u16",
+            pass_log_level="info",
+            precomputed_energy=True,
+            link=False,
+            device_debug=False,
+            halt_mode="nop",
+            cpu_freq=16_000_000,
+            clang_opt_level=3,
+            opt_level=3,
+            max_unroll=16,
+            save_temps=False,
+        ),
+    )
+
+    checkpoints4 = _parse_register_checkpoints(out4.pass_output)
+    checkpoints16 = _parse_register_checkpoints(out16.pass_output)
+
+    assert checkpoints16 <= checkpoints4 * 3, (
+        f"Expected max-unroll=16 to avoid checkpoint explosion relative to "
+        f"max-unroll=4, got {checkpoints4} vs {checkpoints16}"
+    )

@@ -8,6 +8,7 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 
 #include <cassert>
+#include <set>
 
 using namespace llvm;
 
@@ -17,9 +18,8 @@ MachineDistributedCheckpointing::MachineDistributedCheckpointing(
     const std::vector<MachineRegionInfo> &regions, const MachineFunction &MF)
     : regions_(regions), MF_(MF) {}
 
-bool MachineDistributedCheckpointing::isCheckpointableReg(MCPhysReg /*reg*/) {
-    // Actual filtering done in analyze() using MRI.isReserved()
-    return true;
+bool MachineDistributedCheckpointing::isCheckpointableReg(MCPhysReg reg) {
+    return reg >= msp430::R4 && reg <= msp430::R15;
 }
 
 /// Normalize a register (possibly an 8-bit sub-register) to its 16-bit GPR.
@@ -51,29 +51,111 @@ unsigned MachineDistributedCheckpointing::assignRegId(MCPhysReg reg) {
     return id;
 }
 
-void MachineDistributedCheckpointing::findAllDefs(
+static bool instructionUsesOrDefsReg(const MachineInstr &MI, MCPhysReg reg,
+                                     const TargetRegisterInfo *TRI, bool &hasDef) {
+    bool hasUse = false;
+    hasDef = false;
+    for (const MachineOperand &MO : MI.operands()) {
+        if (!MO.isReg() || !MO.getReg().isPhysical())
+            continue;
+        if (!TRI->regsOverlap(MO.getReg(), reg))
+            continue;
+        if (MO.isUse() && !MO.isUndef())
+            hasUse = true;
+        if (MO.isDef())
+            hasDef = true;
+    }
+    return hasUse || hasDef;
+}
+
+static bool reverseTransferBlock(const MachineBasicBlock &MBB, MCPhysReg reg,
+                                 const TargetRegisterInfo *TRI, bool needAfterBlock,
+                                 std::vector<MachineCheckpointPoint> *checkpoints,
+                                 MachineBasicBlock *regionStart, unsigned regId) {
+    bool need = needAfterBlock;
+
+    for (auto It = MBB.instr_rbegin(), End = MBB.instr_rend(); It != End; ++It) {
+        const MachineInstr &MI = *It;
+        bool hasDef = false;
+        if (!instructionUsesOrDefsReg(MI, reg, TRI, hasDef))
+            continue;
+
+        if (hasDef && need && checkpoints != nullptr && !MI.isTerminator()) {
+            MachineCheckpointPoint ckpt;
+            ckpt.afterInst = const_cast<MachineInstr *>(&MI);
+            ckpt.reg = reg;
+            ckpt.regId = regId;
+            ckpt.regionStart = regionStart;
+            checkpoints->push_back(ckpt);
+        }
+
+        if (hasDef) {
+            // We want the last definition whose value can still reach the
+            // boundary. Once we have seen any later definition, earlier defs
+            // are no longer checkpoint candidates. Earlier values may still
+            // be used to compute this one, but they will be recomputed after
+            // recovery from the region start.
+            need = false;
+        }
+    }
+
+    return need;
+}
+
+void MachineDistributedCheckpointing::findLastReachingDefs(
     const SmallPtrSetImpl<const MachineBasicBlock *> &predBlockSet, MCPhysReg reg,
-    MachineBasicBlock *regionStart, std::vector<MachineCheckpointPoint> &checkpoints) {
+    bool boundaryLive, MachineBasicBlock *regionStart,
+    std::vector<MachineCheckpointPoint> &checkpoints) {
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
+    unsigned regId = assignRegId(reg);
+    DenseMap<const MachineBasicBlock *, bool> needIn;
     for (const MachineBasicBlock &MBB : MF_) {
         if (!predBlockSet.count(&MBB))
             continue;
-        for (const MachineInstr &MI : MBB) {
-            if (MI.isTerminator())
+        needIn[&MBB] = false;
+    }
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+
+        for (const MachineBasicBlock &MBB : MF_) {
+            if (!predBlockSet.count(&MBB))
                 continue;
-            for (const MachineOperand &MO : MI.operands()) {
-                if (MO.isReg() && MO.isDef() && !MO.isDead() && MO.getReg().isPhysical() &&
-                    TRI->regsOverlap(MO.getReg(), reg)) {
-                    MachineCheckpointPoint ckpt;
-                    ckpt.afterInst = const_cast<MachineInstr *>(&MI);
-                    ckpt.reg = reg;
-                    ckpt.regId = assignRegId(reg);
-                    ckpt.regionStart = regionStart;
-                    checkpoints.push_back(ckpt);
-                    break; // one save per instruction
+
+            bool needOut = false;
+            for (const MachineBasicBlock *Succ : MBB.successors()) {
+                if (predBlockSet.count(Succ) && needIn.lookup(Succ)) {
+                    needOut = true;
+                    break;
                 }
             }
+
+            bool newNeedIn =
+                reverseTransferBlock(MBB, reg, TRI, needOut, nullptr, regionStart, regId);
+            if (&MBB == regionStart)
+                newNeedIn = boundaryLive || newNeedIn;
+
+            if (needIn.lookup(&MBB) != newNeedIn) {
+                needIn[&MBB] = newNeedIn;
+                changed = true;
+            }
         }
+    }
+
+    for (const MachineBasicBlock &MBB : MF_) {
+        if (!predBlockSet.count(&MBB))
+            continue;
+
+        bool needOut = false;
+        for (const MachineBasicBlock *Succ : MBB.successors()) {
+            if (predBlockSet.count(Succ) && needIn.lookup(Succ)) {
+                needOut = true;
+                break;
+            }
+        }
+
+        reverseTransferBlock(MBB, reg, TRI, needOut, &checkpoints, regionStart, regId);
     }
 }
 
@@ -124,23 +206,39 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
                     MCPhysReg reg = MO.getReg().asMCReg();
                     if (MRI.isReserved(reg))
                         continue;
-                    defsInPreds.insert(reg);
+                    MCPhysReg gpr = normalizeToGPR16(reg, MF_);
+                    if (!gpr || !isCheckpointableReg(gpr))
+                        continue;
+                    defsInPreds.insert(gpr);
                 }
             }
         }
 
-        // Step 3: For each register live at the recovery point, create
-        // saves at EVERY definition in predecessor blocks.
+        // Step 3: For each register live at the recovery point, select
+        // only last-reaching definitions in predecessor blocks.
         // Liveness is checked from the start of the block because the
         // boundary CALL (inserted later by the instrumenter) goes at
         // the top — all original instructions follow it and re-execute
         // on recovery.
         for (MCPhysReg reg : defsInPreds) {
-            if (!isRegLiveFromBlock(region.startBlock, reg, TRI))
+            bool boundaryLive = isRegLiveFromBlock(region.startBlock, reg, TRI);
+            if (!boundaryLive)
                 continue;
-            findAllDefs(predBlockSet, reg, region.startBlock, checkpoints);
+            findLastReachingDefs(predBlockSet, reg, boundaryLive, region.startBlock, checkpoints);
         }
     }
+
+    std::set<std::pair<const MachineInstr *, unsigned>> seen;
+    std::vector<MachineCheckpointPoint> uniqueCheckpoints;
+    uniqueCheckpoints.reserve(checkpoints.size());
+    for (const MachineCheckpointPoint &ckpt : checkpoints) {
+        auto key = std::make_pair(static_cast<const MachineInstr *>(ckpt.afterInst),
+                                  static_cast<unsigned>(ckpt.reg));
+        if (!seen.insert(key).second)
+            continue;
+        uniqueCheckpoints.push_back(ckpt);
+    }
+    checkpoints.swap(uniqueCheckpoints);
 
     return checkpoints;
 }

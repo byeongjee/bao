@@ -175,6 +175,16 @@ def count_mir_reg_saves(mir: str) -> int:
     return len(re.findall(r"MOV16mr.*__nvm_regs", mir))
 
 
+def _extract_mir_block(mir: str, label: str) -> str:
+    match = re.search(
+        rf"^\s*{re.escape(label)}:\n(.*?)(?=^\s*bb\.\d|^\.\.\.$|\Z)",
+        mir,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match, f"Could not find MIR block {label}"
+    return match.group(1)
+
+
 # ---------------------------------------------------------------------------
 # Test C sources (inline)
 # ---------------------------------------------------------------------------
@@ -358,18 +368,21 @@ class TestMachinePassDistributedCkpt:
         )
         assert result.exit_code == 0, f"Pass failed:\n{result.stderr}"
 
-        # Parse checkpoint count from pass statistics.
-        # Without the fix (boundary block not in its own predBlockSet),
-        # there are 11 register checkpoints — the loop header's own
-        # definitions (r14 auto-increment) and the latch's read-modify-
-        # write definitions (r12, r15, r13) are missed.  With the fix
-        # all boundary blocks are included, raising the count to 15.
-        match = re.search(r"Register checkpoints:\s+(\d+)", result.stderr)
-        assert match, "Could not find register checkpoint count in stderr"
-        checkpoints = int(match.group(1))
-        assert checkpoints > 11, (
-            f"Expected >11 register checkpoints (boundary block defs "
-            f"should generate saves), got {checkpoints}"
+        header_block = _extract_mir_block(result.output_mir, "bb.5.for.body")
+        assert "MOV16rp" in header_block
+        assert re.search(r"MOV16mr.*__nvm_regs \+ 20, \$r14", header_block), (
+            "Expected loop-header auto-increment pointer def to be checkpointed"
+        )
+
+        latch_block = _extract_mir_block(result.output_mir, "bb.9.for.body")
+        assert re.search(r"MOV16mr.*__nvm_regs \+ 16, \$r12", latch_block), (
+            "Expected latch def of r12 to be checkpointed"
+        )
+        assert re.search(r"MOV16mr.*__nvm_regs \+ 22, \$r15", latch_block), (
+            "Expected latch def of r15 to be checkpointed"
+        )
+        assert re.search(r"MOV16mr.*__nvm_regs \+ 18, \$r13", latch_block), (
+            "Expected latch def of r13 to be checkpointed"
         )
 
     def test_register_saves_in_assembly(self, run_rockclimb_machine, tmp_path):
