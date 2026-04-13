@@ -107,7 +107,7 @@ theme_benchmark <- function() {
                                   margin = margin(t = 6)),
       axis.title.x = element_text(size = 17, margin = margin(t = 10)),
       axis.title.y = element_text(size = 17, margin = margin(r = 10)),
-      axis.text.x = element_text(size = 15, angle = 18, hjust = 1, vjust = 1),
+      axis.text.x = element_text(size = 17, angle = 18, hjust = 1, vjust = 1),
       axis.text.y = element_text(size = 14),
       legend.position = "top",
       legend.title = element_blank(),
@@ -119,7 +119,7 @@ theme_benchmark <- function() {
       panel.grid.minor = element_blank(),
       panel.grid.major.y = element_line(color = "grey90", linewidth = 0.3),
       panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.4),
-      plot.margin = margin(6, 12, 10, 24)
+      plot.margin = margin(4, 2, 8, 2)
     )
 }
 
@@ -234,14 +234,14 @@ discover_capacitors <- function(result_dir) {
 LOG_SCALE_METRICS <- c("execution_time", "runtime_region_boundary_calls")
 OUTLIER_RATIO_THRESHOLD <- 3.0
 OUTLIER_HEADROOM <- 1.15
-LINEAR_LABEL_CROWDING_THRESHOLD <- 0.03
+LINEAR_LABEL_CROWDING_THRESHOLD <- 0.04
 TRANSFORMED_LABEL_CROWDING_THRESHOLD <- 0.11
-LINEAR_LABEL_OFFSET_BASE <- 0.05
-LINEAR_LABEL_OFFSET_STEP <- 0.04
+LINEAR_LABEL_OFFSET_BASE <- 0.055
+LINEAR_LABEL_OFFSET_STEP <- 0.08
 TRANSFORMED_LABEL_OFFSET_BASE <- 0.08
 TRANSFORMED_LABEL_OFFSET_STEP <- 0.12
-LINEAR_TOP_HEADROOM_BASE <- 0.03
-LINEAR_TOP_HEADROOM_PER_TIER <- 0.04
+LINEAR_TOP_HEADROOM_BASE <- 0.05
+LINEAR_TOP_HEADROOM_PER_TIER <- 0.08
 TRANSFORMED_TOP_HEADROOM_BASE <- 0.04
 TRANSFORMED_TOP_HEADROOM_PER_TIER <- 0.12
 PATTERN_FILL_COLOUR <- "white"
@@ -355,7 +355,7 @@ assign_label_tiers <- function(df, threshold) {
     ungroup()
 
   ordered_df[order(ordered_df$row_id), , drop = FALSE] %>%
-    select(-row_id, -cluster_id)
+    select(-row_id)
 }
 
 compute_label_positions <- function(df, force_log, use_symlog) {
@@ -383,6 +383,12 @@ compute_label_positions <- function(df, force_log, use_symlog) {
     group_by(benchmark) %>%
     group_modify(~ assign_label_tiers(.x, threshold)) %>%
     ungroup() %>%
+    group_by(benchmark, cluster_id) %>%
+    mutate(
+      cluster_top_transformed = max(transformed_value, na.rm = TRUE),
+      cluster_top_display = max(display_value, na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
     mutate(label_hjust = 0.5)
 
   if (force_log || use_symlog) {
@@ -394,7 +400,7 @@ compute_label_positions <- function(df, force_log, use_symlog) {
     positioned_df <- positioned_df %>%
       mutate(
         label_y = trans$inverse(
-          transformed_value +
+          cluster_top_transformed +
             TRANSFORMED_LABEL_OFFSET_BASE +
             TRANSFORMED_LABEL_OFFSET_STEP * label_tier
         )
@@ -403,14 +409,15 @@ compute_label_positions <- function(df, force_log, use_symlog) {
     scale_ref <- max(positioned_df$display_value, na.rm = TRUE)
     positioned_df <- positioned_df %>%
       mutate(
-        label_y = display_value +
+        label_y = cluster_top_display +
           scale_ref * (LINEAR_LABEL_OFFSET_BASE +
                          LINEAR_LABEL_OFFSET_STEP * label_tier)
       )
   }
 
   positioned_df %>%
-    select(-transformed_value)
+    select(-transformed_value, -cluster_id, -cluster_top_transformed,
+           -cluster_top_display)
 }
 
 compute_max_label_tier <- function(df) {
@@ -557,7 +564,8 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
 
   bar_position <- position_dodge2(width = 0.84, preserve = "single",
                                   padding = 0.08)
-  text_position <- position_dodge(width = 0.84)
+  text_position <- position_dodge2(width = 0.84, preserve = "single",
+                                   padding = 0.08)
   color_map <- setNames(
     ALG_STYLE$color[match(active_algos, ALG_STYLE$algo)],
     label_map[active_algos]
@@ -603,7 +611,10 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
 
   p <- p +
     scale_fill_manual(values = color_map, drop = FALSE) +
-    scale_x_discrete(labels = format_benchmark_labels) +
+    scale_x_discrete(
+      labels = format_benchmark_labels,
+      expand = expansion(add = 0.35)
+    ) +
     labs(
       title = metric_info$title,
       x = NULL,
@@ -657,7 +668,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       ),
       position = text_position,
       vjust = 0,
-      size = 3.6, color = "grey25",
+      size = 4.2, color = "grey25",
       fill = alpha("white", 0.75),
       label.size = 0,
       label.padding = unit(0.12, "lines")
@@ -695,7 +706,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
         ),
         position = text_position,
         vjust = 0,
-        size = 3.7,
+        size = 4.3,
         color = "grey15",
         fontface = "bold",
         fill = alpha("white", 0.75),
