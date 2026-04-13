@@ -3,6 +3,7 @@
 #include "MachineEnergyEstimator.h"
 #include "RockClimbMachineInstrumenter.h"
 #include "RockClimbMachineOptimizer.h"
+#include "common/RockClimbConfig.h"
 
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -45,126 +46,6 @@ static cl::opt<bool> AddDebugMarkersOpt("add-debug-markers",
                                         cl::init(false));
 
 namespace checkpoint {
-
-/// Parameters parsed from the rockclimb machine config JSON.
-/// Mirrors RockClimbParams from the IR-level pass.
-struct MachineRockClimbParams {
-    double capacity = 0.0;
-    double E_pro = 0.0;
-    double E_epi = 0.0;
-    unsigned N_reg = 0;
-    double reg_restore_energy = 0.0;
-    bool distributedCheckpointing = true;
-    double reg_store_energy = 0.0; // required, parsed from root
-    bool addDebugMarkers = false;
-
-    double calculateESafe() const {
-        // N_reg - 2: PC and SP restore cost is already included in E_pro
-        return capacity - E_pro - E_epi - (N_reg - 2) * reg_restore_energy;
-    }
-};
-
-/// Parse rockclimb config from JSON. Same format as IR-level pass.
-static bool parseMachineRockClimbParams(StringRef configPath, MachineRockClimbParams &params) {
-    std::ifstream file(configPath.str());
-    if (!file.is_open()) {
-        PLOGE << "Error: Cannot open RockClimb machine config: " << configPath;
-        return false;
-    }
-
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
-
-    Expected<json::Value> parsed = json::parse(content);
-    if (!parsed) {
-        consumeError(parsed.takeError());
-        PLOGE << "Error: JSON parse error in config: " << configPath;
-        return false;
-    }
-
-    json::Object *root = parsed->getAsObject();
-    if (!root) {
-        PLOGE << "Error: Config is not a JSON object: " << configPath;
-        return false;
-    }
-
-    // Read capacity (or legacy E_input)
-    auto capacity = root->getNumber("capacity");
-    if (!capacity) {
-        auto E_input = root->getNumber("E_input");
-        if (!E_input) {
-            PLOGE << "Error: Missing 'capacity' in config";
-            return false;
-        }
-        capacity = E_input;
-    }
-
-    auto N_reg = root->getInteger("N_reg");
-    if (!N_reg) {
-        PLOGE << "Error: Missing 'N_reg' in config";
-        return false;
-    }
-
-    auto reg_store_energy = root->getNumber("reg_store_energy");
-    if (!reg_store_energy) {
-        PLOGE << "Error: Missing 'reg_store_energy' in config";
-        return false;
-    }
-
-    auto reg_restore_energy = root->getNumber("reg_restore_energy");
-    if (!reg_restore_energy) {
-        PLOGE << "Error: Missing 'reg_restore_energy' in config";
-        return false;
-    }
-
-    auto E_pro = root->getNumber("E_pro");
-    if (!E_pro) {
-        PLOGE << "Error: Missing 'E_pro' in config";
-        return false;
-    }
-
-    auto E_epi = root->getNumber("E_epi");
-    if (!E_epi) {
-        PLOGE << "Error: Missing 'E_epi' in config";
-        return false;
-    }
-
-    if (*N_reg < 2) {
-        PLOGE << "Error: N_reg must be >= 2 (must include at least PC and SP)";
-        return false;
-    }
-
-    params.capacity = *capacity;
-    params.E_pro = *E_pro;
-    params.E_epi = *E_epi;
-    params.N_reg = static_cast<unsigned>(*N_reg);
-    params.reg_store_energy = *reg_store_energy;
-    params.reg_restore_energy = *reg_restore_energy;
-
-    // distributed_checkpointing: check rockclimb section first, then root
-    json::Object *rcSection = nullptr;
-    if (auto *rcVal = root->get("rockclimb"))
-        rcSection = rcVal->getAsObject();
-
-    std::optional<bool> distributed;
-    if (rcSection) {
-        if (auto val = rcSection->getBoolean("distributed_checkpointing"))
-            distributed = val;
-    }
-    if (!distributed) {
-        if (auto val = root->getBoolean("distributed_checkpointing"))
-            distributed = val;
-    }
-    params.distributedCheckpointing = distributed.value_or(true);
-
-    // add_debug_markers (optional, default false)
-    if (auto val = root->getBoolean("add_debug_markers"))
-        params.addDebugMarkers = *val;
-
-    return true;
-}
-
 /// Build a CommonStats struct for RockClimb, computing edge count and timing.
 static CommonStats buildRockClimbStats(MachineFunction &MF,
                                        std::chrono::steady_clock::time_point totalStart) {
@@ -233,18 +114,18 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     }
 
     // Parse config
-    MachineRockClimbParams params;
-    if (!parseMachineRockClimbParams(RockClimbMachineConfigOpt, params))
+    RockClimbParams params;
+    if (!parseRockClimbParams(RockClimbMachineConfigOpt, params))
         return false;
 
     double E_safe = params.calculateESafe();
 
     PLOGI << "=== RockClimb Machine Pass on " << MF.getName() << " ===";
     PLOGI << "  Capacity: " << params.capacity;
-    PLOGI << "  E_pro: " << params.E_pro;
-    PLOGI << "  E_epi: " << params.E_epi;
+    PLOGI << "  E_pro: " << params.EPro;
+    PLOGI << "  E_epi: " << params.EEpi;
     PLOGI << "  E_safe: " << E_safe;
-    PLOGI << "  N_reg: " << params.N_reg;
+    PLOGI << "  N_reg: " << params.NReg;
     PLOGI << "  Distributed checkpointing: "
           << (params.distributedCheckpointing ? "enabled" : "disabled");
     PLOGI << "  Energy estimation: "
@@ -301,7 +182,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     auto &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
 
     // Algorithm 1: region partitioning
-    double regStoreEnergy = params.distributedCheckpointing ? params.reg_store_energy : 0.0;
+    double regStoreEnergy = params.distributedCheckpointing ? params.regStoreEnergy : 0.0;
     RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe, regStoreEnergy);
 
     MachineRockClimbResult result = optimizer.optimize();

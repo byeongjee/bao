@@ -70,6 +70,7 @@ src/common/LoopTripCount.cpp
     src/common/BBFreqCollectorPass.cpp
     src/common/PassRegistry.cpp
     src/common/PassStatistics.cpp
+    src/common/RockClimbConfig.cpp
     src/common/TripCountAnnotationPass.cpp
     src/common/EdgeSplitPass.cpp
     # Energy estimators
@@ -86,6 +87,8 @@ src/common/LoopTripCount.cpp
     src/milp/MILPCheckpointPass.cpp
     src/milp/CheckpointOptimizer.cpp
     src/milp/CheckpointInstrumenter.cpp
+    # RockClimb IR preprocess
+    src/rockclimb/RockClimbLoopUnrollPass.cpp
     # SCHEMATIC (greedy heuristic baseline)
     src/schematic/SchematicParams.cpp
     src/schematic/SchematicPass.cpp

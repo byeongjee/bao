@@ -100,15 +100,36 @@ def optimize_ir(
     opt_level: int,
 ) -> StepResult:
     """Run the LLVM default optimization pipeline with vectorization disabled."""
+    return optimize_ir_with_options(
+        tc,
+        input_ll,
+        output_ll,
+        opt_level=opt_level,
+        disable_loop_unrolling=False,
+    )
+
+
+def optimize_ir_with_options(
+    tc: Toolchain,
+    input_ll: Path,
+    output_ll: Path,
+    *,
+    opt_level: int,
+    disable_loop_unrolling: bool,
+) -> StepResult:
+    """Run the LLVM default optimization pipeline with explicit pass controls."""
+    cmd: list[str] = [
+        tc.opt,
+        f"-passes=default<O{opt_level}>",
+        "-vectorize-loops=false",
+        "-vectorize-slp=false",
+    ]
+    if disable_loop_unrolling:
+        cmd.append("-disable-loop-unrolling")
+    cmd += ["-S", str(input_ll), "-o", str(output_ll)]
+
     return run(
-        [
-            tc.opt,
-            f"-passes=default<O{opt_level}>",
-            "-vectorize-loops=false",
-            "-vectorize-slp=false",
-            "-S", str(input_ll),
-            "-o", str(output_ll),
-        ],
+        cmd,
         step_name=f"optimize-ir-O{opt_level}",
     )
 

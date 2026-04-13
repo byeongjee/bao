@@ -15,6 +15,7 @@ add_library(RockClimbMachinePass MODULE
     # Reuse shared sources
     ${CMAKE_SOURCE_DIR}/bb-energy-analyzer/EnergyModel.cpp
     ${CMAKE_SOURCE_DIR}/src/common/PassStatistics.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/RockClimbConfig.cpp
     ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
 )
 

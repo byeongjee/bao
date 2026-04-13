@@ -19,6 +19,9 @@ from .common import (
     annotate_tripcounts,
     compile_to_ir,
     link_algorithm,
+    optimize_ir_with_options,
+    run_assembly_energy,
+    write_assembly_energy_config,
 )
 
 
@@ -60,7 +63,8 @@ def compile_rockclimb(
     """Run the RockClimb machine-level checkpoint insertion pipeline.
 
     Pipeline:
-      C -> clang -> .ll -> tripcount-annotation ->
+      C -> clang(-O0) -> .ll -> tripcount-annotation -> optimize_ir(no auto-unroll) ->
+      pre-rockclimb assembly energy -> rockclimb-preprocess ->
       (if precomputed: assign-bb-debuginfo -> llc to obj -> bb-energy-analyzer) ->
       llc -stop-after=virtregrewriter -> .mir ->
       llc -run-pass=rockclimb -> .mir ->
@@ -80,7 +84,7 @@ def compile_rockclimb(
     with compilation_workdir(prefix="ckpt_rockclimb_") as tmp:
         output = opts.output
 
-        # Step 1: C -> LLVM IR
+        # Step 1: C -> LLVM IR at -O0 so RockClimb controls loop unrolling.
         raw_ll = tmp / "raw.ll"
         clang_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
         if opts.device_debug:
@@ -88,7 +92,7 @@ def compile_rockclimb(
 
         compile_to_ir(
             tc, env, opts.input_c, raw_ll,
-            clang_opt_level=opts.clang_opt_level,
+            clang_opt_level=0,
             debug=False,
             device_debug=opts.device_debug,
             extra_includes=[str(env.project_dir / "passes" / "runtime")],
@@ -99,10 +103,25 @@ def compile_rockclimb(
         annotated_ll = tmp / "annotated.ll"
         annotate_tripcounts(tc, env, raw_ll, annotated_ll)
 
+        # Step 1c: Frontend optimization with generic loop unrolling disabled.
+        rockclimb_input_ll = annotated_ll
+        if opts.clang_opt_level != 0:
+            optimized_ll = tmp / "optimized.ll"
+            optimize_ir_with_options(
+                tc, annotated_ll, optimized_ll,
+                opt_level=opts.clang_opt_level,
+                disable_loop_unrolling=True,
+            )
+            rockclimb_input_ll = optimized_ll
+
+        # Step 1d: Preprocess loops for RockClimb's energy-budgeted unroll policy.
+        preprocess_output = _run_rockclimb_preprocess(tc, env, opts, tmp, rockclimb_input_ll)
+        preprocessed_ll = tmp / "preprocessed.ll"
+
         if opts.precomputed_energy:
-            pass_output = _precomputed_pipeline(tc, env, opts, tmp, annotated_ll)
+            pass_output = preprocess_output + _precomputed_pipeline(tc, env, opts, tmp, preprocessed_ll)
         else:
-            pass_output = _mir_estimation_pipeline(tc, env, opts, tmp, annotated_ll)
+            pass_output = preprocess_output + _mir_estimation_pipeline(tc, env, opts, tmp, preprocessed_ll)
 
         # Copy stats JSON if available
         stats_json: Path | None = None
@@ -168,7 +187,7 @@ def _precomputed_pipeline(
     env: ProjectEnv,
     opts: RockClimbCompileOptions,
     tmp: Path,
-    annotated_ll: Path,
+    input_ll: Path,
 ) -> str:
     """Pipeline with assembly-based pre-computed BB energy at MIR granularity.
 
@@ -186,7 +205,7 @@ def _precomputed_pipeline(
             f"-load-pass-plugin={env.bb_debuginfo_lib}",
             "-passes=assign-bb-debuginfo",
             f"-bb-mapping={bb_mapping}",
-            "-S", str(annotated_ll),
+            "-S", str(input_ll),
             "-o", str(bbinfo_ll),
         ],
         step_name="assign-bb-debuginfo",
@@ -264,7 +283,7 @@ def _mir_estimation_pipeline(
     env: ProjectEnv,
     opts: RockClimbCompileOptions,
     tmp: Path,
-    annotated_ll: Path,
+    input_ll: Path,
 ) -> str:
     """Pipeline with MIR-level energy estimation (fallback).
 
@@ -276,7 +295,7 @@ def _mir_estimation_pipeline(
         [
             tc.llc, "-march=msp430",
             "-stop-after=virtregrewriter",
-            str(annotated_ll),
+            str(input_ll),
             "-o", str(mir_file),
         ],
         step_name="llc-to-mir",
@@ -288,6 +307,39 @@ def _mir_estimation_pipeline(
         energy_flag=("-rockclimb-energy-config", str(opts.energy_config)),
     )
     return pass_output
+
+
+def _run_rockclimb_preprocess(
+    tc: Toolchain,
+    env: ProjectEnv,
+    opts: RockClimbCompileOptions,
+    tmp: Path,
+    input_ll: Path,
+) -> str:
+    """Run RockClimb's IR preprocess pass after generating pre-pass energy."""
+    pre_bb_energy, pre_stderr = run_assembly_energy(
+        tc, env, input_ll, tmp / "preprocess", opts.energy_config, opts.pass_log_level,
+    )
+    preprocess_energy_config = write_assembly_energy_config(
+        tmp / "preprocess_energy_config.json",
+        pre_bb_energy,
+    )
+
+    preprocessed_ll = tmp / "preprocessed.ll"
+    result = run(
+        [
+            tc.opt,
+            f"-load-pass-plugin={env.pass_lib}",
+            "-passes=rockclimb-preprocess",
+            f"-energy-config={preprocess_energy_config}",
+            f"-rockclimb-config={opts.rockclimb_config}",
+            f"-ckpt-log-level={opts.pass_log_level}",
+            "-S", str(input_ll),
+            "-o", str(preprocessed_ll),
+        ],
+        step_name="rockclimb-preprocess",
+    )
+    return pre_stderr + result.output
 
 
 # ---------------------------------------------------------------------------
