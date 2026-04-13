@@ -59,6 +59,7 @@ def verify_rockclimb(
                 cpu_freq=cpu_freq,
                 clang_opt_level=3,
                 opt_level=3,
+                max_unroll=None,
             ),
         )
         return InstrumentedOutput(

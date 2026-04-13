@@ -118,12 +118,14 @@ def _prepare_ir_for_preprocess(tools, compile_to_ir, src: Path, tmp_path: Path) 
 
 
 def _run_rockclimb_preprocess(tools, input_ll: Path, energy_config: Path,
-                              rockclimb_config: Path, output_ll: Path) -> subprocess.CompletedProcess[str]:
+                              rockclimb_config: Path, output_ll: Path,
+                              max_unroll: int | None) -> subprocess.CompletedProcess[str]:
     return _run([
         tools["opt"], "-load-pass-plugin", tools["pass_lib"],
         "-passes=rockclimb-preprocess",
         f"-energy-config={energy_config}",
         f"-rockclimb-config={rockclimb_config}",
+        *([f"-rockclimb-max-unroll-factor={max_unroll}"] if max_unroll is not None else []),
         "-ckpt-log-level=info",
         "-S", str(input_ll), "-o", str(output_ll),
     ])
@@ -141,7 +143,7 @@ def test_preprocess_partially_unrolls_constant_trip_loop(tools, compile_to_ir, t
 
     before_ir = optimized_ll.read_text()
     result = _run_rockclimb_preprocess(
-        tools, optimized_ll, IR_ENERGY_CONFIG, config_path, output_ll,
+        tools, optimized_ll, IR_ENERGY_CONFIG, config_path, output_ll, None,
     )
 
     assert result.returncode == 0, result.stderr
@@ -159,7 +161,7 @@ def test_preprocess_caps_unroll_for_loop_that_fits_budget(tools, compile_to_ir, 
 
     before_ir = optimized_ll.read_text()
     result = _run_rockclimb_preprocess(
-        tools, optimized_ll, IR_ENERGY_CONFIG, config_path, output_ll,
+        tools, optimized_ll, IR_ENERGY_CONFIG, config_path, output_ll, None,
     )
 
     assert result.returncode == 0, result.stderr
@@ -170,6 +172,21 @@ def test_preprocess_caps_unroll_for_loop_that_fits_budget(tools, compile_to_ir, 
     assert "br i1 %exitcond.not" in after_ir
 
 
+def test_preprocess_honors_cli_max_unroll_factor(tools, compile_to_ir, tmp_path):
+    src = _write_src(tmp_path, CONSTANT_LOOP)
+    optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
+    output_ll = tmp_path / "preprocessed.ll"
+    config_path = _write_rockclimb_config(tmp_path, capacity=200.0)
+
+    result = _run_rockclimb_preprocess(
+        tools, optimized_ll, IR_ENERGY_CONFIG, config_path, output_ll, 4,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "RockClimbLoopUnrollPass: unrolled sum8::" in result.stdout + result.stderr
+    assert "K=4" in result.stdout + result.stderr
+
+
 def test_preprocess_skips_unknown_trip_count_loop(tools, compile_to_ir, tmp_path):
     src = _write_src(tmp_path, UNKNOWN_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
@@ -178,7 +195,7 @@ def test_preprocess_skips_unknown_trip_count_loop(tools, compile_to_ir, tmp_path
 
     before_ir = optimized_ll.read_text()
     result = _run_rockclimb_preprocess(
-        tools, optimized_ll, IR_ENERGY_CONFIG, config_path, output_ll,
+        tools, optimized_ll, IR_ENERGY_CONFIG, config_path, output_ll, None,
     )
 
     assert result.returncode == 0, result.stderr
@@ -216,6 +233,7 @@ def test_compile_rockclimb_runs_preprocess(tmp_path, monkeypatch):
             cpu_freq=1_000_000,
             clang_opt_level=3,
             opt_level=3,
+            max_unroll=None,
             save_temps=True,
         ),
     )
@@ -246,6 +264,7 @@ def test_compile_rockclimb_recovers_inlining_from_o0_ir(tmp_path):
             cpu_freq=1_000_000,
             clang_opt_level=3,
             opt_level=3,
+            max_unroll=None,
             save_temps=True,
         ),
     )
@@ -296,6 +315,7 @@ def test_compile_rockclimb_leaves_llvm_loop_unrolling_enabled(tmp_path, monkeypa
             cpu_freq=1_000_000,
             clang_opt_level=3,
             opt_level=3,
+            max_unroll=None,
             save_temps=False,
         ),
     )
@@ -334,6 +354,7 @@ def test_run_rockclimb_pass_skips_debug_marker_instrumentation(tmp_path, monkeyp
             cpu_freq=16_000_000,
             clang_opt_level=3,
             opt_level=3,
+            max_unroll=None,
             save_temps=False,
         ),
         tmp_path,
@@ -342,3 +363,41 @@ def test_run_rockclimb_pass_skips_debug_marker_instrumentation(tmp_path, monkeyp
     )
 
     assert "-add-debug-markers" not in seen["cmd"]
+
+
+def test_run_rockclimb_preprocess_passes_max_unroll_flag(tmp_path, monkeypatch):
+    env = ProjectEnv.from_environ(PROJECT_DIR)
+    tc = Toolchain.resolve(env)
+    src = _write_src(tmp_path, CONSTANT_LOOP)
+    config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
+
+    seen: dict[str, list[str]] = {}
+    real_preprocess = rockclimb_module._run_rockclimb_preprocess
+
+    def wrapped_preprocess(tc, env, opts, tmp, input_ll):
+        seen["max_unroll"] = opts.max_unroll
+        return real_preprocess(tc, env, opts, tmp, input_ll)
+
+    monkeypatch.setattr(rockclimb_module, "_run_rockclimb_preprocess", wrapped_preprocess)
+
+    compile_rockclimb(
+        tc, env,
+        RockClimbCompileOptions(
+            input_c=src,
+            energy_config=ASSEMBLY_ENERGY_CONFIG,
+            rockclimb_config=config_path,
+            output=tmp_path / "rockclimb_max_unroll",
+            pass_log_level="info",
+            precomputed_energy=False,
+            link=False,
+            device_debug=False,
+            halt_mode="nop",
+            cpu_freq=1_000_000,
+            clang_opt_level=3,
+            opt_level=3,
+            max_unroll=5,
+            save_temps=False,
+        ),
+    )
+
+    assert seen["max_unroll"] == 5

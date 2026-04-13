@@ -82,6 +82,7 @@ def run_rockclimb_benchmarks(
     halt_mode: str,
     energy_config: Path | None = None,
     cpu_freq: int,
+    max_unroll: int | None,
     pass_log_level: str,
     accumulate_keys_file: Path | None,
 ) -> None:
@@ -144,6 +145,7 @@ def run_rockclimb_benchmarks(
                     cpu_freq=cpu_freq,
                     clang_opt_level=3,
                     opt_level=3,
+                    max_unroll=max_unroll,
                 )
 
                 result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)

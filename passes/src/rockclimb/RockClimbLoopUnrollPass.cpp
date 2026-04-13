@@ -38,11 +38,14 @@ extern cl::opt<std::string> EnergyConfigOpt;
 
 namespace {
 
-constexpr uint64_t MaxRockClimbUnrollFactor = 2;
-
 cl::opt<std::string> RockClimbConfigOpt("rockclimb-config",
                                         cl::desc("Path to RockClimb config JSON"),
                                         cl::value_desc("filename"), cl::init(""));
+
+cl::opt<unsigned> RockClimbMaxUnrollFactorOpt(
+    "rockclimb-max-unroll-factor",
+    cl::desc("Maximum partial unroll factor for RockClimb loop preprocessing"), cl::value_desc("N"),
+    cl::init(2));
 
 enum class VisitState {
     Unvisited = 0,
@@ -329,10 +332,11 @@ static PlanResult computePlan(Loop *L, const DenseMap<const BasicBlock *, double
     }
 
     double loopEnergy = static_cast<double>(*tripCount) * iterEnergy.energy;
+    uint64_t maxUnrollFactor = RockClimbMaxUnrollFactorOpt;
 
     uint64_t K = 0;
     if (loopEnergy < ESafe) {
-        K = std::min<uint64_t>(*tripCount, MaxRockClimbUnrollFactor);
+        K = std::min<uint64_t>(*tripCount, maxUnrollFactor);
     } else {
         double strictBudget = std::nextafter(ESafe, -std::numeric_limits<double>::infinity());
         double rawK = std::floor(strictBudget / iterEnergy.energy);
@@ -342,7 +346,7 @@ static PlanResult computePlan(Loop *L, const DenseMap<const BasicBlock *, double
         }
 
         K = static_cast<uint64_t>(rawK);
-        K = std::min<uint64_t>(K, MaxRockClimbUnrollFactor);
+        K = std::min<uint64_t>(K, maxUnrollFactor);
         K = std::min<uint64_t>(K, *tripCount - 1);
     }
 

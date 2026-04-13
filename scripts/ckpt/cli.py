@@ -289,6 +289,11 @@ def compile_milp_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option(
+    "--max-unroll",
+    type=click.IntRange(min=1),
+    help="Maximum RockClimb partial unroll factor for the preprocess pass.",
+)
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
@@ -306,6 +311,7 @@ def compile_rockclimb_cmd(
     clang_opt_level: int,
     no_precomputed_energy: bool,
     cpu_freq: str,
+    max_unroll: int | None,
     save_temps: bool,
     accumulate_keys: str | None,
 ) -> None:
@@ -349,6 +355,7 @@ def compile_rockclimb_cmd(
             device_debug=device_debug,
             halt_mode=halt_mode,
             cpu_freq=cpu_freq_hz,
+            max_unroll=max_unroll,
             save_temps=save_temps,
         ),
     )
@@ -782,6 +789,11 @@ def bench_milp_cmd(
     default="16",
     help="CPU frequency in MHz (default: 16).",
 )
+@click.option(
+    "--max-unroll",
+    type=click.IntRange(min=1),
+    help="Maximum RockClimb partial unroll factor for the preprocess pass.",
+)
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def bench_rockclimb_cmd(
@@ -793,6 +805,7 @@ def bench_rockclimb_cmd(
     halt_mode: str,
     energy_config: str | None,
     cpu_freq: str,
+    max_unroll: int | None,
     accumulate_keys: str | None,
 ) -> None:
     """Run RockClimb benchmarks across programs and capacitor sizes."""
@@ -808,6 +821,7 @@ def bench_rockclimb_cmd(
         output_csv=Path(output) if output else None,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        max_unroll=max_unroll,
         pass_log_level=ctx.obj["pass_log_level"],
         accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
     )

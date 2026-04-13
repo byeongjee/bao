@@ -42,6 +42,7 @@ class RockClimbCompileOptions:
     cpu_freq: int
     clang_opt_level: int
     opt_level: int
+    max_unroll: int | None
     save_temps: bool = False
     linker_script: Path | None = None
 
@@ -340,6 +341,10 @@ def _run_rockclimb_preprocess(
             "-passes=rockclimb-preprocess",
             f"-energy-config={preprocess_energy_config}",
             f"-rockclimb-config={opts.rockclimb_config}",
+            *(
+                [f"-rockclimb-max-unroll-factor={opts.max_unroll}"]
+                if opts.max_unroll is not None else []
+            ),
             f"-ckpt-log-level={opts.pass_log_level}",
             "-S", str(input_ll),
             "-o", str(preprocessed_ll),
