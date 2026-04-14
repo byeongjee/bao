@@ -47,6 +47,13 @@ def main() -> None:
         + ["-o", str(RESULT_DIR / "uninstrumented.csv")]
     )
 
+    print("\n=== uninstrumentedO0 ===")
+    run(
+        ["uv", "run", "ckpt", "bench", "uninstrumentedO0"]
+        + benchmarks
+        + ["-o", str(RESULT_DIR / "uninstrumentedO0.csv")]
+    )
+
     print(f"\nDone. Results in {RESULT_DIR}/")
 
 

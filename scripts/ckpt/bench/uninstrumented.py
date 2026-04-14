@@ -42,6 +42,9 @@ def run_uninstrumented_benchmarks(
     benchmarks: list[str] | None,
     output_csv: Path | None,
     cpu_freq: int,
+    algorithm_label: str,
+    clang_opt_level: int,
+    opt_level: int,
 ) -> None:
     """Compile and measure uninstrumented baselines for all benchmarks.
 
@@ -56,7 +59,7 @@ def run_uninstrumented_benchmarks(
         raise ConfigError("No benchmarks to run")
 
     if output_csv is None:
-        output_csv = env.project_dir / "benchmarks" / "uninstrumented_benchmark_summary.csv"
+        output_csv = env.project_dir / "benchmarks" / f"{algorithm_label}_benchmark_summary.csv"
 
     if not check_device_available():
         raise ConfigError("No MSP430 device detected")
@@ -67,7 +70,7 @@ def run_uninstrumented_benchmarks(
     try:
         output_csv.parent.mkdir(parents=True, exist_ok=True)
 
-        with compilation_workdir(prefix="uninstrumented_bench_") as workdir, \
+        with compilation_workdir(prefix=f"{algorithm_label}_bench_") as workdir, \
              open(output_csv, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(_CSV_HEADER)
@@ -90,8 +93,8 @@ def run_uninstrumented_benchmarks(
                             output=out_dir / bench_name,
                             device_debug=False,
                             cpu_freq=cpu_freq,
-                            opt_level=3,
-                            clang_opt_level=3,
+                            opt_level=opt_level,
+                            clang_opt_level=clang_opt_level,
                             link=True,
                         ),
                     )

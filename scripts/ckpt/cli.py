@@ -1006,6 +1006,26 @@ def bench_uninstrumented_cmd(
     cpu_freq: str,
 ) -> None:
     """Run uninstrumented baselines and measure execution time."""
+    _bench_uninstrumented_impl(
+        ctx,
+        benchmarks,
+        output,
+        cpu_freq,
+        algorithm_label="uninstrumented",
+        clang_opt_level=3,
+        opt_level=3,
+    )
+
+
+def _bench_uninstrumented_impl(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    output: str | None,
+    cpu_freq: str,
+    algorithm_label: str,
+    clang_opt_level: int,
+    opt_level: int,
+) -> None:
     from .bench.uninstrumented import run_uninstrumented_benchmarks
 
     run_uninstrumented_benchmarks(
@@ -1014,6 +1034,37 @@ def bench_uninstrumented_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         output_csv=Path(output) if output else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
+        algorithm_label=algorithm_label,
+        clang_opt_level=clang_opt_level,
+        opt_level=opt_level,
+    )
+
+
+@bench.command("uninstrumentedO0")
+@click.argument("benchmarks", nargs=-1)
+@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="16",
+    help="CPU frequency in MHz (default: 16).",
+)
+@click.pass_context
+def bench_uninstrumented_o0_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    output: str | None,
+    cpu_freq: str,
+) -> None:
+    """Run uninstrumented baselines with O0 frontend IR and O3 backend."""
+    _bench_uninstrumented_impl(
+        ctx,
+        benchmarks,
+        output,
+        cpu_freq,
+        algorithm_label="uninstrumentedO0",
+        clang_opt_level=0,
+        opt_level=3,
     )
 
 

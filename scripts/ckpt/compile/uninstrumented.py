@@ -50,7 +50,8 @@ def compile_uninstrumented(
     """Compile without checkpoint insertion.
 
     Pipeline:
-      compile_to_ir(-O0) → optimize_ir(-O2) → compile_to_object → link
+      compile_to_ir(-O0) → optional optimize_ir(-O{clang_opt_level})
+      → compile_to_object(-O{opt_level}) → link
 
     No checkpoint pass, no energy estimation, no profiling.
     """
@@ -74,7 +75,8 @@ def compile_uninstrumented(
         extra_defines=[f"F_CPU={opts.cpu_freq}"],
     )
 
-    # Phase 2: Optimize IR
+    # Phase 2: Optional IR optimization. clang_opt_level=0 preserves the
+    # frontend O0 IR shape while still allowing llc/gcc backend optimization.
     optimized_ll = input_ll
     if opts.clang_opt_level != 0:
         optimized_ll = opts.output.with_suffix(".optimized.ll")
