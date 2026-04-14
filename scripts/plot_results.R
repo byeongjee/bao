@@ -42,6 +42,7 @@ HAS_GGPATTERN <- requireNamespace("ggpattern", quietly = TRUE)
 # -- Algorithm definitions ----------------------------------------------------
 
 ALGORITHMS <- c("milp", "schematic", "rockclimb", "schematicO3")
+REQUIRED_ALGO_FOR_BENCHMARKS <- NULL
 
 ALG_STYLE <- tribble(
   ~algo,             ~label,            ~color,     ~pattern,      ~pattern_angle,
@@ -428,6 +429,14 @@ compute_max_label_tier <- function(df) {
   as.integer(max(0, max(df$label_tier, na.rm = TRUE)))
 }
 
+extract_label_positions <- function(df) {
+  if (!"label_y" %in% names(df)) {
+    return(numeric())
+  }
+
+  df$label_y
+}
+
 compute_upper_limit <- function(max_value, max_label_tier, force_log, use_symlog,
                                 has_clipped_values) {
   if (!is.finite(max_value) || max_value <= 0) {
@@ -459,6 +468,21 @@ compute_upper_limit <- function(max_value, max_label_tier, force_log, use_symlog
 plot_metric_for_cap <- function(cap, metric_key, metric_info,
                                 algo_data, uninst_data, benchmarks, normalize,
                                 log_scale = FALSE) {
+  if (!is.null(REQUIRED_ALGO_FOR_BENCHMARKS)) {
+    required_benchmarks <- algo_data %>%
+      filter(
+        cap == !!cap,
+        algo == REQUIRED_ALGO_FOR_BENCHMARKS,
+        !is.na(value)
+      ) %>%
+      distinct(benchmark) %>%
+      pull(benchmark)
+
+    benchmarks <- benchmarks[benchmarks %in% required_benchmarks]
+  }
+
+  if (length(benchmarks) == 0) return(NULL)
+
   include_uninst <- metric_info$include_uninstrumented && nrow(uninst_data) > 0
 
   # Filter to this capacitor
@@ -670,7 +694,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       vjust = 0,
       size = 4.2, color = "grey25",
       fill = alpha("white", 0.75),
-      label.size = 0,
+      linewidth = 0,
       label.padding = unit(0.12, "lines")
     )
   }
@@ -710,7 +734,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
         color = "grey15",
         fontface = "bold",
         fill = alpha("white", 0.75),
-        label.size = 0,
+        linewidth = 0,
         label.padding = unit(0.12, "lines")
       )
   }
@@ -726,7 +750,11 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
     compute_max_label_tier(clipped_df)
   )
   top_display_value <- max(
-    c(plot_df$display_value, label_df$label_y, clipped_df$label_y),
+    c(
+      plot_df$display_value,
+      extract_label_positions(label_df),
+      extract_label_positions(clipped_df)
+    ),
     na.rm = TRUE
   )
   y_hi <- compute_upper_limit(
@@ -907,4 +935,6 @@ main <- function() {
   }
 }
 
-main()
+if (sys.nframe() == 0) {
+  main()
+}
