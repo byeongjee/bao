@@ -40,7 +40,7 @@ extern cl::opt<std::string> BBFreqFileOpt;
 namespace {
 
 void printAbstractCFGStats(const checkpoint::AbstractCFGStats &stats) {
-    PLOGI << "  Abstract CFG size:              " << stats.abstractNodes;
+    PLOGI << "  Abstract CFG blocks:            " << stats.abstractNodes;
     PLOGI << "  Abstract CFG edges:             " << stats.abstractEdges;
     PLOGI << "  Loops seen:                      " << stats.loopsSeen;
     PLOGI << "  Loops eligible:                  " << stats.loopsEligible;
@@ -58,6 +58,8 @@ void printAbstractCFGStats(const checkpoint::AbstractCFGStats &stats) {
 
 void appendAbstractCFGStatsToJSON(llvm::json::Object &root,
                                   const checkpoint::AbstractCFGStats &stats) {
+    root["abstract_cfg_blocks"] = static_cast<int64_t>(stats.abstractNodes);
+    root["abstract_cfg_edges"] = static_cast<int64_t>(stats.abstractEdges);
     root["abstract_cfg_size"] = static_cast<int64_t>(stats.abstractNodes);
 
     json::Object acfg;

@@ -7,7 +7,8 @@ from ckpt.output_parser import PassStatistics
 
 
 def test_milp_csv_includes_problem_size_columns() -> None:
-    assert "abstract_cfg_size" in _CSV_HEADER
+    assert "abstract_cfg_blocks" in _CSV_HEADER
+    assert "abstract_cfg_edges" in _CSV_HEADER
     assert "milp_allocation_mode" in _CSV_HEADER
     assert "milp_variables" in _CSV_HEADER
     assert "milp_constraints" in _CSV_HEADER

@@ -83,7 +83,8 @@ class TestParsePassOutput:
 --- Checkpoint Insertion Statistics ---
 Basic blocks (concrete): 24
 Edges (concrete): 30
-Abstract CFG size: 11
+Abstract CFG blocks: 11
+Abstract CFG edges: 14
 Regions: 3
 Candidate globals (V_elig): 5
 MILP allocation mode: coarse
@@ -103,6 +104,8 @@ Peak RSS (KB): 10240
         stats = parse_pass_output(self.REALISTIC_OUTPUT)
         assert stats.basic_blocks == 24
         assert stats.edges == 30
+        assert stats.abstract_cfg_blocks == 11
+        assert stats.abstract_cfg_edges == 14
         assert stats.abstract_cfg_size == 11
         assert stats.regions == 3
         assert stats.candidate_globals == 5
@@ -123,6 +126,8 @@ Peak RSS (KB): 10240
         stats = parse_pass_output(text)
         assert stats.basic_blocks == 10
         assert stats.edges == 5
+        assert stats.abstract_cfg_blocks is None
+        assert stats.abstract_cfg_edges is None
         assert stats.abstract_cfg_size is None
         assert stats.regions is None
         assert stats.milp_variables is None
@@ -134,7 +139,12 @@ Peak RSS (KB): 10240
 
     def test_legacy_abstract_cfg_label(self):
         stats = parse_pass_output("Basic blocks (abstract): 9\n")
+        assert stats.abstract_cfg_blocks == 9
         assert stats.abstract_cfg_size == 9
+
+    def test_abstract_cfg_edge_label(self):
+        stats = parse_pass_output("Abstract CFG edges: 12\n")
+        assert stats.abstract_cfg_edges == 12
 
     def test_legacy_milp_size_labels(self):
         stats = parse_pass_output("MILP variables: 17\nMILP constraints: 31\n")
@@ -290,12 +300,13 @@ class TestHasPassStatistics:
 # ---------------------------------------------------------------------------
 
 class TestLoadStatsJson:
-    def test_loads_top_level_abstract_cfg_size(self):
+    def test_loads_top_level_abstract_cfg_fields(self):
         stats, feasible, infeasibility_reason = load_stats_json(
             {
                 "basic_blocks": 24,
                 "edges": 30,
-                "abstract_cfg_size": 11,
+                "abstract_cfg_blocks": 11,
+                "abstract_cfg_edges": 14,
                 "milp_allocation_mode": "coarse",
                 "milp_variables": 100,
                 "milp_constraints": 200,
@@ -306,6 +317,8 @@ class TestLoadStatsJson:
         )
         assert feasible is True
         assert infeasibility_reason is None
+        assert stats.abstract_cfg_blocks == 11
+        assert stats.abstract_cfg_edges == 14
         assert stats.abstract_cfg_size == 11
         assert stats.milp_allocation_mode == "coarse"
         assert stats.milp_variables == 100
@@ -319,6 +332,7 @@ class TestLoadStatsJson:
             {
                 "abstract_cfg": {
                     "abstract_nodes": 7,
+                    "abstract_edges": 9,
                 },
                 "feasible": False,
                 "infeasibility_reason": "solver found no feasible solution",
@@ -326,4 +340,18 @@ class TestLoadStatsJson:
         )
         assert feasible is False
         assert infeasibility_reason == "solver found no feasible solution"
+        assert stats.abstract_cfg_blocks == 7
+        assert stats.abstract_cfg_edges == 9
         assert stats.abstract_cfg_size == 7
+
+    def test_falls_back_to_legacy_top_level_abstract_cfg_size(self):
+        stats, feasible, infeasibility_reason = load_stats_json(
+            {
+                "abstract_cfg_size": 5,
+            }
+        )
+        assert feasible is True
+        assert infeasibility_reason is None
+        assert stats.abstract_cfg_blocks == 5
+        assert stats.abstract_cfg_edges is None
+        assert stats.abstract_cfg_size == 5

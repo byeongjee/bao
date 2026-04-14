@@ -15,6 +15,8 @@ class PassStatistics:
 
     basic_blocks: int | None = None
     edges: int | None = None
+    abstract_cfg_blocks: int | None = None
+    abstract_cfg_edges: int | None = None
     abstract_cfg_size: int | None = None
     regions: int | None = None
     candidate_globals: int | None = None
@@ -41,7 +43,8 @@ class PassStatistics:
 _STAT_LABELS: dict[str, list[str]] = {
     "basic_blocks": ["Basic blocks (concrete)", "Basic blocks"],
     "edges": ["Edges (concrete)", "Edges"],
-    "abstract_cfg_size": ["Abstract CFG size", "Basic blocks (abstract)"],
+    "abstract_cfg_blocks": ["Abstract CFG blocks", "Abstract CFG size", "Basic blocks (abstract)"],
+    "abstract_cfg_edges": ["Abstract CFG edges"],
     "regions": ["Regions"],
     "candidate_globals": ["Candidate globals (V_elig)"],
     "milp_allocation_mode": ["MILP allocation mode"],
@@ -101,6 +104,7 @@ def parse_pass_output(text: str) -> PassStatistics:
             setattr(stats, field_name, raw)
         else:
             setattr(stats, field_name, _parse_int(raw))
+    stats.abstract_cfg_size = stats.abstract_cfg_blocks
     return stats
 
 
@@ -208,15 +212,25 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
     Returns (stats, feasible, infeasibility_reason).
     """
 
+    abstract_cfg_blocks = data.get("abstract_cfg_blocks")
+    abstract_cfg_edges = data.get("abstract_cfg_edges")
     abstract_cfg_size = data.get("abstract_cfg_size")
     abstract_cfg = data.get("abstract_cfg")
+    if abstract_cfg_blocks is None and abstract_cfg_size is not None:
+        abstract_cfg_blocks = abstract_cfg_size
     if abstract_cfg_size is None and isinstance(abstract_cfg, dict):
         abstract_cfg_size = abstract_cfg.get("abstract_nodes")
+    if abstract_cfg_blocks is None and isinstance(abstract_cfg, dict):
+        abstract_cfg_blocks = abstract_cfg.get("abstract_nodes")
+    if abstract_cfg_edges is None and isinstance(abstract_cfg, dict):
+        abstract_cfg_edges = abstract_cfg.get("abstract_edges")
 
     stats = PassStatistics(
         basic_blocks=data.get("basic_blocks"),
         edges=data.get("edges"),
-        abstract_cfg_size=abstract_cfg_size,
+        abstract_cfg_blocks=abstract_cfg_blocks,
+        abstract_cfg_edges=abstract_cfg_edges,
+        abstract_cfg_size=abstract_cfg_blocks if abstract_cfg_blocks is not None else abstract_cfg_size,
         regions=data.get("regions"),
         candidate_globals=data.get("candidate_globals"),
         milp_allocation_mode=data.get("milp_allocation_mode"),
