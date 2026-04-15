@@ -9,7 +9,7 @@
 #
 # Options:
 #   --result-dir DIR    Result directory (default: results/)
-#   --normalize         Normalize values (w.r.t. uninstrumented if available, else milp)
+#   --normalize         Normalize values (w.r.t. uninstrumented if available, else BAO)
 #   --output-dir DIR    Save plots to directory instead of showing
 #   --benchmarks B,...  Comma-separated benchmark filter (default: all)
 #   --metrics M,...     Comma-separated metric filter (default: all)
@@ -38,6 +38,7 @@ suppressPackageStartupMessages({
 })
 
 HAS_GGPATTERN <- requireNamespace("ggpattern", quietly = TRUE)
+PDF_DEVICE <- "pdf"
 
 # -- Algorithm definitions ----------------------------------------------------
 
@@ -46,9 +47,9 @@ REQUIRED_ALGO_FOR_BENCHMARKS <- NULL
 
 ALG_STYLE <- tribble(
   ~algo,             ~label,            ~color,     ~pattern,      ~pattern_angle,
-  "milp",            "MILP",            "#0072B2",  "stripe",      45,
+  "milp",            "BAO",             "#0072B2",  "stripe",      45,
   "schematic",       "SCHEMATIC",       "#D55E00",  "stripe",     -45,
-  "rockclimb",       "RockClimb",       "#009E73",  "stripe",      90,
+  "rockclimb",       "ROCKCLIMB",       "#009E73",  "stripe",      90,
   "schematicO3",     "SCHEMATIC-O3",    "#CC79A7",  "stripe",       0,
   "uninstrumented",  "Uninstrumented",  "#595959",  "none",         0,
 )
@@ -100,27 +101,26 @@ BENCHMARK_LABELS <- c(
 # -- Theme --------------------------------------------------------------------
 
 theme_benchmark <- function() {
-  theme_minimal(base_size = 16.5, base_family = "Helvetica") +
+  theme_minimal(base_size = 15, base_family = "Helvetica") +
     theme(
-      plot.title = element_text(face = "bold", size = 20, hjust = 0.5,
-                                margin = margin(b = 4)),
-      plot.caption = element_text(color = "grey35", size = 12, hjust = 0,
-                                  margin = margin(t = 6)),
-      axis.title.x = element_text(size = 17, margin = margin(t = 10)),
-      axis.title.y = element_text(size = 17, margin = margin(r = 10)),
-      axis.text.x = element_text(size = 17, angle = 18, hjust = 1, vjust = 1),
-      axis.text.y = element_text(size = 14),
+      plot.title = element_blank(),
+      plot.caption = element_text(color = "grey35", size = 10.5, hjust = 0,
+                                  margin = margin(t = 4)),
+      axis.title.x = element_text(size = 15.5, margin = margin(t = 7)),
+      axis.title.y = element_text(size = 15.5, margin = margin(r = 7)),
+      axis.text.x = element_text(size = 14, angle = 15, hjust = 1, vjust = 1),
+      axis.text.y = element_text(size = 12.5),
       legend.position = "top",
       legend.title = element_blank(),
-      legend.text = element_text(size = 15),
-      legend.key.size = unit(0.88, "cm"),
-      legend.box.spacing = unit(0.04, "cm"),
-      legend.margin = margin(0, 0, 2, 0),
+      legend.text = element_text(size = 13),
+      legend.key.size = unit(0.68, "cm"),
+      legend.box.spacing = unit(0.01, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
       panel.grid.major.x = element_blank(),
       panel.grid.minor = element_blank(),
       panel.grid.major.y = element_line(color = "grey90", linewidth = 0.3),
       panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.4),
-      plot.margin = margin(4, 2, 8, 2)
+      plot.margin = margin(2, 2, 4, 2)
     )
 }
 
@@ -390,7 +390,15 @@ compute_label_positions <- function(df, force_log, use_symlog) {
       cluster_top_display = max(display_value, na.rm = TRUE)
     ) %>%
     ungroup() %>%
-    mutate(label_hjust = 0.5)
+    mutate(
+      benchmark_index = as.integer(benchmark),
+      benchmark_count = max(benchmark_index, na.rm = TRUE),
+      label_hjust = case_when(
+        benchmark_index == 1L ~ 0,
+        benchmark_index == benchmark_count ~ 1,
+        TRUE ~ 0.5
+      )
+    )
 
   if (force_log || use_symlog) {
     trans <- if (force_log) {
@@ -418,7 +426,7 @@ compute_label_positions <- function(df, force_log, use_symlog) {
 
   positioned_df %>%
     select(-transformed_value, -cluster_id, -cluster_top_transformed,
-           -cluster_top_display)
+           -cluster_top_display, -benchmark_index, -benchmark_count)
 }
 
 compute_max_label_tier <- function(df) {
@@ -586,10 +594,10 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
     )
   }
 
-  bar_position <- position_dodge2(width = 0.84, preserve = "single",
-                                  padding = 0.08)
-  text_position <- position_dodge2(width = 0.84, preserve = "single",
-                                   padding = 0.08)
+  bar_position <- position_dodge2(width = 0.8, preserve = "single",
+                                  padding = 0.04)
+  text_position <- position_dodge2(width = 0.8, preserve = "single",
+                                   padding = 0.04)
   color_map <- setNames(
     ALG_STYLE$color[match(active_algos, ALG_STYLE$algo)],
     label_map[active_algos]
@@ -609,7 +617,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
     p <- p + ggpattern::geom_col_pattern(
       aes(pattern = algo_label, pattern_angle = algo_label),
       position = bar_position,
-      width = 0.72,
+      width = 0.78,
       key_glyph = ggpattern::draw_key_polygon_pattern,
       color = "grey20",
       linewidth = 0.35,
@@ -627,7 +635,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
   } else {
     p <- p + geom_col(
       position = bar_position,
-      width = 0.72,
+      width = 0.78,
       color = "grey20",
       linewidth = 0.35
     )
@@ -637,10 +645,9 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
     scale_fill_manual(values = color_map, drop = FALSE) +
     scale_x_discrete(
       labels = format_benchmark_labels,
-      expand = expansion(add = 0.35)
+      expand = expansion(add = c(0.32, 0.24))
     ) +
     labs(
-      title = metric_info$title,
       x = NULL,
       y = y_label,
       caption = if (length(plot_notes) > 0) paste(plot_notes, collapse = "\n") else NULL
@@ -692,7 +699,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       ),
       position = text_position,
       vjust = 0,
-      size = 4.2, color = "grey25",
+      size = 3.8, color = "grey25",
       fill = alpha("white", 0.75),
       linewidth = 0,
       label.padding = unit(0.12, "lines")
@@ -730,7 +737,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
         ),
         position = text_position,
         vjust = 0,
-        size = 4.3,
+        size = 3.9,
         color = "grey15",
         fontface = "bold",
         fill = alpha("white", 0.75),
@@ -914,10 +921,10 @@ main <- function() {
         filepath <- file.path(output_dir, filename)
 
         n_bm <- length(benchmarks) + 1  # +1 for geomean
-        w <- max(7.4, n_bm * 1.05 + 1.8)
+        w <- max(6.4, n_bm * 0.9 + 1.4)
 
         save_plot <- function() {
-          ggsave(filepath, p, width = w, height = 4.45, device = "pdf")
+          ggsave(filepath, p, width = w, height = 3.95, device = PDF_DEVICE)
         }
         if (HAS_GGPATTERN && log_scale && metric_key %in% LOG_SCALE_METRICS) {
           # ggpattern bars still originate at y = 0 internally, so log-scale
