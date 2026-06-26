@@ -1,13 +1,9 @@
 #include "RockClimbMachineInstrumenter.h"
-#include "MSP430Opcodes.h"
 
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
-#include "llvm/Support/raw_ostream.h"
-
-#include "common/Logger.h"
 
 using namespace llvm;
 
@@ -16,32 +12,9 @@ namespace checkpoint {
 RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(
     MachineFunction &MF, bool addDebugMarkers, GlobalVariable *nvmRegsGV,
     GlobalVariable *cntBoundaryGV, GlobalVariable *cntSaveGV, GlobalVariable *cntRestoreGV)
-    : MF_(MF), TII_(MF.getSubtarget().getInstrInfo()), addDebugMarkers_(addDebugMarkers),
-      nvmRegsGV_(nvmRegsGV), cntBoundaryGV_(cntBoundaryGV), cntSaveGV_(cntSaveGV),
-      cntRestoreGV_(cntRestoreGV) {}
-
-bool RockClimbMachineInstrumenter::verifyConstants() const {
-    bool ok = true;
-
-    // Verify opcode names match our hardcoded values
-    auto checkOpcode = [&](unsigned opcode, const char *expected) {
-        StringRef name = TII_->getName(opcode);
-        if (name != expected) {
-            PLOGD << "RockClimbMachineInstrumenter: opcode " << opcode << " is '" << name
-                  << "', expected '" << expected << "'";
-            ok = false;
-        }
-    };
-
-    checkOpcode(msp430::CALLi, "CALLi");
-    checkOpcode(msp430::MOV16mr, "MOV16mr");
-    checkOpcode(msp430::ADD16mi, "ADD16mi");
-    checkOpcode(msp430::ADDC16mc, "ADDC16mc");
-    checkOpcode(msp430::PUSH16r, "PUSH16r");
-    checkOpcode(msp430::POP16r, "POP16r");
-
-    return ok;
-}
+    : MF_(MF), TII_(MF.getSubtarget().getInstrInfo()), C_(MSP430Constants::resolve(MF)),
+      addDebugMarkers_(addDebugMarkers), nvmRegsGV_(nvmRegsGV), cntBoundaryGV_(cntBoundaryGV),
+      cntSaveGV_(cntSaveGV), cntRestoreGV_(cntRestoreGV) {}
 
 void RockClimbMachineInstrumenter::emitCounterIncrement(MachineBasicBlock &MBB,
                                                         MachineBasicBlock::iterator InsertPt,
@@ -50,19 +23,19 @@ void RockClimbMachineInstrumenter::emitCounterIncrement(MachineBasicBlock &MBB,
     // Wrap the 32-bit increment with PUSH SR / POP SR to preserve status flags.
     // ADD16mi and ADDC16mc clobber SR (V, N, Z, C), which can break
     // conditional branches that depend on flags set by earlier instructions.
-    BuildMI(MBB, InsertPt, DL, TII_->get(msp430::PUSH16r)).addReg(msp430::SR);
+    BuildMI(MBB, InsertPt, DL, TII_->get(C_.PUSH16r)).addReg(C_.SR);
 
-    BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADD16mi))
-        .addReg(msp430::SR)          // base = SR (absolute addressing)
+    BuildMI(MBB, InsertPt, DL, TII_->get(C_.ADD16mi))
+        .addReg(C_.SR)               // base = SR (absolute addressing)
         .addGlobalAddress(counterGV) // address of counter
         .addImm(amount);
 
-    BuildMI(MBB, InsertPt, DL, TII_->get(msp430::ADDC16mc))
-        .addReg(msp430::SR)             // base = SR (absolute addressing)
+    BuildMI(MBB, InsertPt, DL, TII_->get(C_.ADDC16mc))
+        .addReg(C_.SR)                  // base = SR (absolute addressing)
         .addGlobalAddress(counterGV, 2) // high half of uint32_t counter
         .addImm(0);
 
-    BuildMI(MBB, InsertPt, DL, TII_->get(msp430::POP16r)).addReg(msp430::SR, RegState::Define);
+    BuildMI(MBB, InsertPt, DL, TII_->get(C_.POP16r)).addReg(C_.SR, RegState::Define);
 }
 
 void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
@@ -82,12 +55,12 @@ void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
 
     // CALL __region_boundary
     MachineInstr *CallMI =
-        BuildMI(MBB, InsertPt, DL, TII_->get(msp430::CALLi)).addExternalSymbol("__region_boundary");
+        BuildMI(MBB, InsertPt, DL, TII_->get(C_.CALLi)).addExternalSymbol("__region_boundary");
 
     // Mark caller-saved registers as implicitly defined/clobbered by the call.
     // Post-regalloc, we must declare which registers the call may overwrite.
-    // MSP430 caller-saved: R11-R15
-    for (unsigned reg : {msp430::R11, msp430::R12, msp430::R13, msp430::R14, msp430::R15}) {
+    // MSP430 caller-saved: R11-R15 (contiguous, verified by MSP430Constants).
+    for (unsigned reg = C_.R15.id() - 4; reg <= C_.R15.id(); ++reg) {
         CallMI->addRegisterDefined(reg, TRI);
     }
 
@@ -115,17 +88,17 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
     // If the physical register is GR8, promote to its GR16 super-register.
     unsigned srcReg = ckpt.reg;
     const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(srcReg);
-    if (RC && RC->getID() == msp430::GR8RegClassID) {
-        MCPhysReg superReg = TRI->getMatchingSuperReg(srcReg, msp430::subreg_8bit,
-                                                      TRI->getMinimalPhysRegClass(msp430::R4));
+    if (RC && RC->getID() == C_.GR8RegClassID) {
+        MCPhysReg superReg =
+            TRI->getMatchingSuperReg(srcReg, C_.subreg_8bit, TRI->getMinimalPhysRegClass(C_.R4));
         if (superReg)
             srcReg = superReg;
     }
 
     // Inline save: MOV16mr physReg, &__nvm_regs[regId]
     // memdst operands: (base=SR for absolute addressing, disp=GlobalAddress+offset)
-    BuildMI(*MBB, InsertPt, DL, TII_->get(msp430::MOV16mr))
-        .addReg(msp430::SR) // base = SR (absolute addressing)
+    BuildMI(*MBB, InsertPt, DL, TII_->get(C_.MOV16mr))
+        .addReg(C_.SR) // base = SR (absolute addressing)
         .addGlobalAddress(nvmRegsGV_,
                           static_cast<int64_t>(ckpt.regId) * 2) // disp = &__nvm_regs + regId*2
         .addReg(srcReg);                                        // source register
@@ -145,11 +118,8 @@ unsigned
 RockClimbMachineInstrumenter::instrument(const std::vector<MachineBasicBlock *> &boundaries,
                                          const std::vector<MachineCheckpointPoint> &checkpoints,
                                          bool enableDistributedCkpt) {
-
-    if (!verifyConstants()) {
-        PLOGW << "WARNING: MSP430 opcode/register constants mismatch. "
-              << "Instrumentation may produce incorrect code.";
-    }
+    // MSP430 opcode/register constants are resolved by name (and validated) in
+    // the constructor via MSP430Constants::resolve, which aborts on any miss.
 
     unsigned count = 0;
 

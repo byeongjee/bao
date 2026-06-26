@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MSP430Constants.h"
 #include "MachineDistributedCheckpointing.h"
 
 #include "llvm/CodeGen/MachineFunction.h"
@@ -25,10 +26,6 @@ class RockClimbMachineInstrumenter {
                                           llvm::GlobalVariable *cntSaveGV,
                                           llvm::GlobalVariable *cntRestoreGV);
 
-    /// Verify that hardcoded MSP430 opcode/register constants match runtime values.
-    /// Call once at initialization. Returns false and prints errors if mismatched.
-    bool verifyConstants() const;
-
     /// Insert boundary check call at the start of MBB
     void insertBoundaryCheck(llvm::MachineBasicBlock &MBB);
 
@@ -51,6 +48,7 @@ class RockClimbMachineInstrumenter {
 
     llvm::MachineFunction &MF_;
     const llvm::TargetInstrInfo *TII_;
+    MSP430Constants C_;
     bool addDebugMarkers_;
     llvm::GlobalVariable *nvmRegsGV_;
     llvm::GlobalVariable *cntBoundaryGV_;

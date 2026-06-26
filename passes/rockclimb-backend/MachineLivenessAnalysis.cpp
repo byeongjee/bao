@@ -1,6 +1,6 @@
 #include "MachineLivenessAnalysis.h"
 
-#include "MSP430Opcodes.h"
+#include "MSP430Constants.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -62,6 +62,7 @@ bool isRegLiveFromBlock(const MachineBasicBlock *startMBB, MCPhysReg reg,
 DenseMap<const MachineBasicBlock *, SmallSet<MCPhysReg, 12>>
 computeBulkLiveIn(const MachineFunction &MF, const TargetRegisterInfo *TRI) {
     const MachineRegisterInfo &MRI = MF.getRegInfo();
+    const MSP430Constants C = MSP430Constants::resolve(MF);
 
     // Per-block use-before-def and def sets (checkpointable regs only)
     DenseMap<const MachineBasicBlock *, SmallSet<MCPhysReg, 12>> useSet, defSet;
@@ -77,7 +78,7 @@ computeBulkLiveIn(const MachineFunction &MF, const TargetRegisterInfo *TRI) {
                     continue;
                 // Normalize sub-regs to their 16-bit GPR
                 MCPhysReg gpr = 0;
-                for (unsigned r = msp430::R4; r <= msp430::R15; ++r) {
+                for (unsigned r = C.R4.id(); r <= C.R15.id(); ++r) {
                     if (TRI->regsOverlap(reg, r)) {
                         gpr = static_cast<MCPhysReg>(r);
                         break;

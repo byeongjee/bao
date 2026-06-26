@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MSP430Constants.h"
 #include "RockClimbMachineOptimizer.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -44,6 +45,7 @@ class MachineDistributedCheckpointing {
   private:
     const std::vector<MachineRegionInfo> &regions_;
     const llvm::MachineFunction &MF_;
+    MSP430Constants C_;
 
     /// Map physical register to unique NVM slot ID
     llvm::DenseMap<llvm::MCPhysReg, unsigned> regIdMap_;
@@ -51,7 +53,7 @@ class MachineDistributedCheckpointing {
     unsigned assignRegId(llvm::MCPhysReg reg);
 
     /// Check if a physical register should be checkpointed
-    static bool isCheckpointableReg(llvm::MCPhysReg reg);
+    bool isCheckpointableReg(llvm::MCPhysReg reg) const;
 
     /// Create checkpoint points at last-reaching definitions of `reg`
     /// in `predBlockSet`.

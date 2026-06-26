@@ -1,5 +1,4 @@
 #include "MachineDistributedCheckpointing.h"
-#include "MSP430Opcodes.h"
 #include "MachineLivenessAnalysis.h"
 
 #include "llvm/ADT/SmallSet.h"
@@ -16,19 +15,20 @@ namespace checkpoint {
 
 MachineDistributedCheckpointing::MachineDistributedCheckpointing(
     const std::vector<MachineRegionInfo> &regions, const MachineFunction &MF)
-    : regions_(regions), MF_(MF) {}
+    : regions_(regions), MF_(MF), C_(MSP430Constants::resolve(MF)) {}
 
-bool MachineDistributedCheckpointing::isCheckpointableReg(MCPhysReg reg) {
-    return reg >= msp430::R4 && reg <= msp430::R15;
+bool MachineDistributedCheckpointing::isCheckpointableReg(MCPhysReg reg) const {
+    return reg >= C_.R4.id() && reg <= C_.R15.id();
 }
 
 /// Normalize a register (possibly an 8-bit sub-register) to its 16-bit GPR.
 /// E.g., R4B → R4.  Returns 0 if the register doesn't overlap any GPR.
-static MCPhysReg normalizeToGPR16(MCPhysReg reg, const MachineFunction &MF) {
-    if (reg >= msp430::R4 && reg <= msp430::R15)
+static MCPhysReg normalizeToGPR16(MCPhysReg reg, const MachineFunction &MF,
+                                  const MSP430Constants &C) {
+    if (reg >= C.R4.id() && reg <= C.R15.id())
         return reg; // Already a 16-bit GPR
     const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-    for (unsigned gpr = msp430::R4; gpr <= msp430::R15; ++gpr) {
+    for (unsigned gpr = C.R4.id(); gpr <= C.R15.id(); ++gpr) {
         if (TRI->regsOverlap(reg, gpr))
             return static_cast<MCPhysReg>(gpr);
     }
@@ -37,7 +37,7 @@ static MCPhysReg normalizeToGPR16(MCPhysReg reg, const MachineFunction &MF) {
 
 unsigned MachineDistributedCheckpointing::assignRegId(MCPhysReg reg) {
     // Normalize sub-registers (e.g., 8-bit R4B) to their 16-bit GPR
-    MCPhysReg gpr = normalizeToGPR16(reg, MF_);
+    MCPhysReg gpr = normalizeToGPR16(reg, MF_, C_);
     assert(gpr && "Register does not map to any GPR R4-R15");
 
     auto it = regIdMap_.find(gpr);
@@ -45,7 +45,7 @@ unsigned MachineDistributedCheckpointing::assignRegId(MCPhysReg reg) {
         return it->second;
     // Deterministic mapping: R4=0, R5=1, ..., R15=11
     // This matches boot.S's fixed restore order (__nvm_regs[0] → R4, etc.)
-    unsigned id = static_cast<unsigned>(gpr) - msp430::R4;
+    unsigned id = static_cast<unsigned>(gpr) - C_.R4.id();
     assert(id < 12 && "Register ID out of range for __nvm_regs");
     regIdMap_[gpr] = id;
     return id;
@@ -206,7 +206,7 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
                     MCPhysReg reg = MO.getReg().asMCReg();
                     if (MRI.isReserved(reg))
                         continue;
-                    MCPhysReg gpr = normalizeToGPR16(reg, MF_);
+                    MCPhysReg gpr = normalizeToGPR16(reg, MF_, C_);
                     if (!gpr || !isCheckpointableReg(gpr))
                         continue;
                     defsInPreds.insert(gpr);

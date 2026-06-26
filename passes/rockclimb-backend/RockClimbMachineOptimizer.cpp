@@ -1,5 +1,5 @@
 #include "RockClimbMachineOptimizer.h"
-#include "MSP430Opcodes.h"
+#include "MSP430Constants.h"
 #include "MachineEnergyEstimator.h"
 #include "MachineLivenessAnalysis.h"
 
@@ -112,6 +112,7 @@ double RockClimbMachineOptimizer::getBlockCost(MachineBasicBlock *MBB) const {
 void RockClimbMachineOptimizer::collectBlockDefs(MachineBasicBlock *MBB) {
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
     const MachineRegisterInfo &MRI = MF_.getRegInfo();
+    const MSP430Constants C = MSP430Constants::resolve(MF_);
     for (const MachineInstr &MI : *MBB) {
         for (const MachineOperand &MO : MI.operands()) {
             if (!MO.isReg() || !MO.isDef() || !MO.getReg().isPhysical())
@@ -119,7 +120,7 @@ void RockClimbMachineOptimizer::collectBlockDefs(MachineBasicBlock *MBB) {
             MCPhysReg reg = MO.getReg().asMCReg();
             if (MRI.isReserved(reg))
                 continue;
-            for (unsigned r = msp430::R4; r <= msp430::R15; ++r) {
+            for (unsigned r = C.R4.id(); r <= C.R15.id(); ++r) {
                 if (TRI->regsOverlap(reg, r)) {
                     defsInRegion_.insert(static_cast<MCPhysReg>(r));
                     break;

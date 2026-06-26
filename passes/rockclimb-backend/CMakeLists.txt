@@ -12,6 +12,7 @@ add_library(RockClimbMachinePass MODULE
     MachineDistributedCheckpointing.cpp
     MachineLivenessAnalysis.cpp
     RockClimbMachineInstrumenter.cpp
+    MSP430Constants.cpp
     # Reuse shared sources
     ${CMAKE_SOURCE_DIR}/bb-energy-analyzer/EnergyModel.cpp
     ${CMAKE_SOURCE_DIR}/src/common/PassStatistics.cpp
