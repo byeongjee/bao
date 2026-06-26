@@ -44,6 +44,45 @@ _FLASH_TIMEOUT = 30              # seconds
 _AFTER_TRIGGER_SECONDS = 1.0     # seconds to record after falling edge
 _POST_CAPTURE_SETTLE_SECONDS = 2.0
 
+# CSV columns that can only be filled by running the linked ELF on a device
+# (Saleae timing + NVM counter readback). Compile-only CSVs omit these, and
+# device-less bench runs leave them blank.
+RUNTIME_CSV_FIELDS: frozenset[str] = frozenset({
+    "execution_time_us",
+    "result",
+    "runtime_region_boundary_calls",
+    "runtime_debug_save_reg_calls",
+    "runtime_debug_save_vreg_calls",
+    "runtime_debug_restore_reg_calls",
+    "runtime_debug_restore_vreg_calls",
+    "runtime_debug_store_mem_calls",
+    "runtime_debug_restore_mem_calls",
+})
+
+
+def static_csv_header(header: list[str]) -> list[str]:
+    """Return *header* with the device-only runtime columns removed."""
+    return [col for col in header if col not in RUNTIME_CSV_FIELDS]
+
+
+def build_common_fields(
+    stats: PassStatistics,
+    profiling_time_ms: int,
+    result_val: str,
+) -> dict[str, str | int | None]:
+    """Build the CSV fields shared by every algorithm from compile-time stats."""
+    return {
+        "basic_blocks": stats.basic_blocks or 0,
+        "edges": stats.edges or 0,
+        "abstract_cfg_blocks": stats.abstract_cfg_blocks or stats.abstract_cfg_size or 0,
+        "abstract_cfg_edges": stats.abstract_cfg_edges or 0,
+        "region_boundaries": stats.region_boundaries or 0,
+        "compilation_time_ms": stats.compilation_time_ms or 0,
+        "peak_rss_kb": stats.peak_rss_kb or 0,
+        "profiling_time_ms": profiling_time_ms,
+        "result": result_val,
+    }
+
 
 @dataclass
 class BenchmarkRow:
@@ -237,17 +276,16 @@ def run_benchmark_matrix(
                         all_required_keys.update(req)
                         all_missing_keys.update(miss)
 
-                # ----- Saleae timing + NVM read -----
+                # ----- Saleae timing + NVM read (only with a device) -----
                 nvm: NvmCounters | None = None
                 execution_time_us: float | None = None
-                if output_dir is not None:
+                if output_dir is not None and saleae_manager is not None:
                     elf = output_dir / f"{bench_name}.elf"
                     if elf.is_file():
                         try:
                             from ..device.saleae import saleae_run
                             from ..device.flash import read_nvm
 
-                            assert saleae_manager is not None
                             execution_time_us = saleae_run(
                                 elf, saleae_manager,
                                 _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
@@ -318,17 +356,9 @@ def run_benchmark_matrix(
                     result_val = str(nvm.result)
                 else:
                     result_val = extract_stat(full_output, "RESULT") or ""
-                common_fields: dict[str, str | int | None] = {
-                    "basic_blocks": stats.basic_blocks or 0,
-                    "edges": stats.edges or 0,
-                    "abstract_cfg_blocks": stats.abstract_cfg_blocks or stats.abstract_cfg_size or 0,
-                    "abstract_cfg_edges": stats.abstract_cfg_edges or 0,
-                    "region_boundaries": stats.region_boundaries or 0,
-                    "compilation_time_ms": stats.compilation_time_ms or 0,
-                    "peak_rss_kb": stats.peak_rss_kb or 0,
-                    "profiling_time_ms": compile_result_profiling_ms,
-                    "result": result_val,
-                }
+                common_fields = build_common_fields(
+                    stats, compile_result_profiling_ms, result_val
+                )
 
                 # ----- Build row (algorithm-specific fields on top) -----
                 row_fields = common_fields
@@ -390,6 +420,40 @@ def write_csv_row(
             val = row.fields.get(col)
             values.append("" if val is None else str(val))
     writer.writerow(values)
+
+
+def write_compile_stats_csv(
+    output_csv: Path,
+    full_header: list[str],
+    row_builder: RowBuilder,
+    *,
+    benchmark: str,
+    capacitor: str,
+    status: str,
+    stats: PassStatistics,
+    profiling_time_ms: int,
+    pass_output: str,
+) -> None:
+    """Write a single-row CSV of compile-time stats (no device/runtime columns).
+
+    Uses the algorithm's *full_header* and *row_builder* but drops the
+    device-only runtime columns, so the result is a strict subset of the
+    columns ``ckpt bench`` would emit for the same algorithm.
+    """
+    header = static_csv_header(full_header)
+    fields = build_common_fields(stats, profiling_time_ms, "")
+    fields.update(row_builder(benchmark, capacitor, stats, None, pass_output))
+    row = BenchmarkRow(
+        benchmark=benchmark,
+        capacitor=capacitor,
+        status=status,
+        fields=fields,
+    )
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_csv, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(header)
+        write_csv_row(writer, row, header)
 
 
 def print_benchmark_summary(

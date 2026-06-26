@@ -130,6 +130,60 @@ def _resolve_algorithm_config(
     )
 
 
+def _write_compile_csv(
+    csv_path: str,
+    *,
+    algorithm: str,
+    benchmark: str,
+    capacitor: str,
+    result,
+) -> None:
+    """Write a one-row CSV of compile-time stats for a single compilation.
+
+    Emits the same columns ``ckpt bench <algorithm>`` would, minus the
+    device-only runtime columns. *algorithm* selects the column schema
+    (``schematicO3`` shares SCHEMATIC's schema).
+    """
+    import json as _json
+
+    from .bench.runner import write_compile_stats_csv
+    from .output_parser import has_pass_statistics, load_stats_json, parse_pass_output
+
+    if algorithm == "milp":
+        from .bench.milp import CSV_HEADER, build_row
+    elif algorithm == "rockclimb":
+        from .bench.rockclimb import CSV_HEADER, build_row
+    else:  # schematic / schematicO3 share the SCHEMATIC schema
+        from .bench.schematic import CSV_HEADER, build_row
+
+    status = "ok"
+    stats = None
+    if result.stats_json is not None and result.stats_json.is_file():
+        data = _json.loads(result.stats_json.read_text())
+        stats, feasible, _ = load_stats_json(data)
+        if not feasible:
+            status = "infeasible"
+    elif has_pass_statistics(result.pass_output):
+        stats = parse_pass_output(result.pass_output)
+
+    if stats is None:
+        logger.warning("No pass statistics produced; stats CSV not written.")
+        return
+
+    write_compile_stats_csv(
+        Path(csv_path),
+        CSV_HEADER,
+        build_row,
+        benchmark=benchmark,
+        capacitor=capacitor,
+        status=status,
+        stats=stats,
+        profiling_time_ms=getattr(result, "profiling_time_ms", 0) or 0,
+        pass_output=result.pass_output,
+    )
+    logger.info("Stats CSV: %s", csv_path)
+
+
 @compile.command("milp")
 @click.argument("input_c")
 @click.option("-e", "--energy-config", type=click.Path(exists=True),
@@ -138,6 +192,8 @@ def _resolve_algorithm_config(
               help="MILP config (alternative to --cap).")
 @click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
 @click.option("-o", "--output", type=click.Path())
+@click.option("--csv", "csv_path", type=click.Path(),
+              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option(
     "--estimator-mode",
@@ -195,6 +251,7 @@ def compile_milp_cmd(
     milp_log_file: str,
     coarse_allocation: bool,
     accumulate_keys: str | None,
+    csv_path: str | None,
 ) -> None:
     """Run the MILP checkpoint insertion compilation pipeline.
 
@@ -259,6 +316,12 @@ def compile_milp_cmd(
         logger.info("ELF: %s", result.elf_file)
     logger.debug("Pass output:\n%s", result.pass_output)
 
+    if csv_path:
+        _write_compile_csv(
+            csv_path, algorithm="milp",
+            benchmark=input_path.stem, capacitor=cap or "", result=result,
+        )
+
 
 @compile.command("rockclimb")
 @click.argument("input_c")
@@ -298,6 +361,8 @@ def compile_milp_cmd(
 )
 @click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
+@click.option("--csv", "csv_path", type=click.Path(),
+              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
 @click.pass_context
 def compile_rockclimb_cmd(
     ctx: click.Context,
@@ -316,6 +381,7 @@ def compile_rockclimb_cmd(
     max_unroll: int,
     save_temps: bool,
     accumulate_keys: str | None,
+    csv_path: str | None,
 ) -> None:
     """Run the RockClimb machine-level compilation pipeline.
 
@@ -379,6 +445,12 @@ def compile_rockclimb_cmd(
         logger.info("ELF: %s", result.elf_file)
     logger.debug("Pass output:\n%s", result.pass_output)
 
+    if csv_path:
+        _write_compile_csv(
+            csv_path, algorithm="rockclimb",
+            benchmark=input_path.stem, capacitor=cap or "", result=result,
+        )
+
 
 def _compile_schematic_impl(
     ctx: click.Context,
@@ -403,6 +475,7 @@ def _compile_schematic_impl(
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
     recompute_energy_after_new_checkpoint: bool,
+    csv_path: str | None,
 ) -> None:
     from .bench.config import default_energy_config
     from .compile.schematic import SchematicCompileOptions, compile_schematic
@@ -473,6 +546,12 @@ def _compile_schematic_impl(
     if result.pass_output:
         logger.debug("Pass output:\n%s", result.pass_output)
 
+    if csv_path:
+        _write_compile_csv(
+            csv_path, algorithm=algorithm_label,
+            benchmark=input_path.stem, capacitor=cap or "", result=result,
+        )
+
 
 @compile.command("schematic")
 @click.argument("input_c")
@@ -516,6 +595,8 @@ def _compile_schematic_impl(
               help="Force checkpoint at loop header when inner loop allocations conflict.")
 @click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
               help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@click.option("--csv", "csv_path", type=click.Path(),
+              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
 @click.pass_context
 def compile_schematic_cmd(
     ctx: click.Context,
@@ -539,6 +620,7 @@ def compile_schematic_cmd(
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
     recompute_energy_after_new_checkpoint: bool,
+    csv_path: str | None,
 ) -> None:
     """Run the SCHEMATIC trace-based compilation pipeline.
 
@@ -552,6 +634,7 @@ def compile_schematic_cmd(
         accumulate_keys=accumulate_keys,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
         recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
+        csv_path=csv_path,
     )
 
 
@@ -597,6 +680,8 @@ def compile_schematic_cmd(
               help="Force checkpoint at loop header when inner loop allocations conflict.")
 @click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
               help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@click.option("--csv", "csv_path", type=click.Path(),
+              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
 @click.pass_context
 def compile_schematic_o3_cmd(
     ctx: click.Context,
@@ -620,6 +705,7 @@ def compile_schematic_o3_cmd(
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
     recompute_energy_after_new_checkpoint: bool,
+    csv_path: str | None,
 ) -> None:
     """Run the SCHEMATIC-O3 trace-based compilation pipeline (clang -O3).
 
@@ -633,6 +719,7 @@ def compile_schematic_o3_cmd(
         accumulate_keys=accumulate_keys,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
         recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
+        csv_path=csv_path,
     )
 
 
@@ -650,6 +737,8 @@ def compile_schematic_o3_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@click.option("--csv", "csv_path", type=click.Path(),
+              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
 @click.pass_context
 def compile_uninstrumented_cmd(
     ctx: click.Context,
@@ -661,17 +750,21 @@ def compile_uninstrumented_cmd(
     clang_opt_level: int,
     extra_includes: tuple[str, ...],
     cpu_freq: str,
+    csv_path: str | None,
 ) -> None:
     """Compile without checkpoint insertion (baseline).
 
     INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
     """
+    import time
+
     from .compile.uninstrumented import UninstrumentedCompileOptions, compile_uninstrumented
 
     input_path = _resolve_input(ctx.obj["env"], input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
     cpu_freq_hz = int(cpu_freq) * 1_000_000
 
+    t0 = time.monotonic()
     result = compile_uninstrumented(
         ctx.obj["tc"],
         ctx.obj["env"],
@@ -686,11 +779,27 @@ def compile_uninstrumented_cmd(
             extra_includes=list(extra_includes),
         ),
     )
+    compilation_time_ms = int((time.monotonic() - t0) * 1000)
 
     logger.info("Object: %s", result.object_file)
     logger.info("Assembly: %s", result.assembly_file)
     if result.elf_file:
         logger.info("ELF: %s", result.elf_file)
+
+    if csv_path:
+        import csv as _csv
+
+        from .bench.uninstrumented import CSV_HEADER as _UNINST_HEADER
+        from .bench.runner import static_csv_header
+
+        header = static_csv_header(_UNINST_HEADER)
+        out = Path(csv_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", newline="") as f:
+            writer = _csv.writer(f)
+            writer.writerow(header)
+            writer.writerow([input_path.stem, "ok", str(compilation_time_ms)])
+        logger.info("Stats CSV: %s", csv_path)
 
 
 # =========================================================================
@@ -706,7 +815,7 @@ def bench() -> None:
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
 @click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
-@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
@@ -772,7 +881,7 @@ def bench_milp_cmd(
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
 @click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
-@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
@@ -835,7 +944,7 @@ def bench_rockclimb_cmd(
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
 @click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
-@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
@@ -914,7 +1023,7 @@ def bench_schematic_cmd(
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
 @click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
-@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
     type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
@@ -991,7 +1100,7 @@ def bench_schematic_o3_cmd(
 
 @bench.command("uninstrumented")
 @click.argument("benchmarks", nargs=-1)
-@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--cpu-freq",
     type=click.Choice(["1", "8", "16"]),
@@ -1042,7 +1151,7 @@ def _bench_uninstrumented_impl(
 
 @bench.command("uninstrumentedO0")
 @click.argument("benchmarks", nargs=-1)
-@click.option("-o", "--output", type=click.Path(), help="Output CSV path.")
+@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--cpu-freq",
     type=click.Choice(["1", "8", "16"]),

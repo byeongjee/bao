@@ -102,17 +102,21 @@ The `scripts/ckpt/` package provides the compilation, benchmarking, and device i
 
 ```bash
 # Compilation pipelines (INPUT can be a benchmark name or path to .c file)
-ckpt compile milp           INPUT --cap CAP [--link] [--estimator-mode assembly|ir] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] ...
-ckpt compile rockclimb      INPUT --cap CAP [--link] [--no-precomputed-energy] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] ...
-ckpt compile schematic      INPUT --cap CAP [--link] [--trace-file FILE] [--trace-only] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] ...
-ckpt compile uninstrumented INPUT [--link] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] ...
+# --csv PATH writes a one-row CSV of compile-time stats only (no device/runtime columns).
+ckpt compile milp           INPUT --cap CAP [--link] [--estimator-mode assembly|ir] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
+ckpt compile rockclimb      INPUT --cap CAP [--link] [--no-precomputed-energy] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
+ckpt compile schematic      INPUT --cap CAP [--link] [--trace-file FILE] [--trace-only] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
+ckpt compile uninstrumented INPUT [--link] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--csv CSV] ...
 # Explicit config paths also accepted: -e ENERGY_CONFIG -m/-c/-s ALGO_CONFIG
 
-# Benchmark runners (compile + flash + NVM readback → CSV)
-ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--accumulate-keys FILE] [-o CSV]
-ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--accumulate-keys FILE] [-o CSV]
-ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--trace-config] [--accumulate-keys FILE] [-o CSV]
-ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [-o CSV]
+# Benchmark runners (compile + flash + NVM readback → CSV). The CSV output flag is
+# --csv (alias -o/--output), unified with `compile`. When no MSP430 device is detected,
+# bench logs a warning and degrades to compile-only: it still writes the CSV, but the
+# device-only runtime columns (execution_time_us, runtime_*) are left blank.
+ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--trace-config] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [--csv CSV]
 
 # Semantic verification (defaults to --halt-mode bor to exercise checkpoint/restore under resets)
 ckpt verify milp       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq]

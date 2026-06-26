@@ -24,7 +24,7 @@ from .runner import check_device_available
 
 logger = logging.getLogger(__name__)
 
-_CSV_HEADER: list[str] = [
+CSV_HEADER: list[str] = [
     "benchmark",
     "status",
     "compilation_time_ms",
@@ -61,19 +61,24 @@ def run_uninstrumented_benchmarks(
     if output_csv is None:
         output_csv = env.project_dir / "benchmarks" / f"{algorithm_label}_benchmark_summary.csv"
 
-    if not check_device_available():
-        raise ConfigError("No MSP430 device detected")
+    saleae_manager = None
+    if check_device_available():
+        from ..device.saleae import discover_saleae
 
-    from ..device.saleae import discover_saleae
+        saleae_manager = discover_saleae()
+    else:
+        logger.warning(
+            "No MSP430 device detected; running compile-only (no flash or "
+            "timing). The execution_time_us column will be left blank."
+        )
 
-    saleae_manager = discover_saleae()
     try:
         output_csv.parent.mkdir(parents=True, exist_ok=True)
 
         with compilation_workdir(prefix=f"{algorithm_label}_bench_") as workdir, \
              open(output_csv, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(_CSV_HEADER)
+            writer.writerow(CSV_HEADER)
 
             total = len(bench_paths)
             for i, bench_path in enumerate(bench_paths, 1):
@@ -109,6 +114,13 @@ def run_uninstrumented_benchmarks(
                     writer.writerow([bench_name, "failed", str(compilation_time_ms), ""])
                     continue
 
+                # Compile-only mode (no device): record compile time, skip timing.
+                if saleae_manager is None:
+                    logger.info("  OK (compile-only)  compilation_time=%dms",
+                                compilation_time_ms)
+                    writer.writerow([bench_name, "ok", str(compilation_time_ms), ""])
+                    continue
+
                 # Flash + measure
                 try:
                     from ..device.saleae import saleae_run
@@ -128,7 +140,8 @@ def run_uninstrumented_benchmarks(
                     logger.error("  DEVICE ERROR: %s", exc)
                     writer.writerow([bench_name, "device_error", str(compilation_time_ms), ""])
     finally:
-        saleae_manager.close()
+        if saleae_manager is not None:
+            saleae_manager.close()
 
     logger.info("")
     logger.info("==========================================")

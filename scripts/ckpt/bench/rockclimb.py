@@ -7,6 +7,7 @@ and writes a CSV summary of pass statistics and runtime counters.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from ..compile.rockclimb import (
@@ -30,7 +31,9 @@ from .config import (
 )
 from .runner import CompileResult, check_device_available, nvm_counter, run_benchmark_matrix
 
-_CSV_HEADER: list[str] = [
+logger = logging.getLogger(__name__)
+
+CSV_HEADER: list[str] = [
     "benchmark",
     "capacitor",
     "status",
@@ -56,7 +59,7 @@ _NVM_SYMBOLS: list[str] = [
 ]
 
 
-def _build_row(
+def build_row(
     bench_name: str,
     cap_label: str,
     stats: PassStatistics,
@@ -116,12 +119,17 @@ def run_rockclimb_benchmarks(
     if energy_config is None:
         energy_config = default_energy_config(env, "rockclimb")
 
-    if not check_device_available():
-        raise ConfigError("No MSP430 device detected")
+    saleae_manager = None
+    if check_device_available():
+        from ..device.saleae import discover_saleae
 
-    from ..device.saleae import discover_saleae
+        saleae_manager = discover_saleae()
+    else:
+        logger.warning(
+            "No MSP430 device detected; running compile-only (no flash, timing, "
+            "or NVM readback). Runtime CSV columns will be left blank."
+        )
 
-    saleae_manager = discover_saleae()
     try:
         with compilation_workdir(prefix="rockclimb_bench_") as workdir:
 
@@ -165,10 +173,11 @@ def run_rockclimb_benchmarks(
                 output_csv,
                 nvm_symbols=_NVM_SYMBOLS,
                 device_debug=device_debug,
-                csv_header=_CSV_HEADER,
-                row_builder=_build_row,
+                csv_header=CSV_HEADER,
+                row_builder=build_row,
                 saleae_manager=saleae_manager,
                 accumulate_keys_file=accumulate_keys_file,
             )
     finally:
-        saleae_manager.close()
+        if saleae_manager is not None:
+            saleae_manager.close()
