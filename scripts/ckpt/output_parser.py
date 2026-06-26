@@ -28,6 +28,8 @@ class PassStatistics:
     optimal_solution: str | None = None
     region_boundaries: int | None = None
     distributed_checkpoints: int | None = None
+    vm_placed_globals: int | None = None
+    vm_placed_variables: list | None = None
     solve_time_ms: int | None = None
     compilation_time_ms: int | None = None
     peak_rss_kb: int | None = None
@@ -55,6 +57,7 @@ _STAT_LABELS: dict[str, list[str]] = {
     "optimal_solution": ["Optimal solution"],
     "region_boundaries": ["Region boundaries"],
     "distributed_checkpoints": ["Distributed checkpoints inserted", "Boundary commits enabled"],
+    "vm_placed_globals": ["VM-placed globals (of cand.)"],
     "solve_time_ms": ["Solve time (ms)"],
     "compilation_time_ms": ["Compilation time (ms)"],
     "peak_rss_kb": ["Peak RSS (KB)"],
@@ -242,6 +245,8 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
         region_boundaries=data.get("region_boundaries"),
         # MILP writes "boundary_commits_enabled"; maps to distributed_checkpoints
         distributed_checkpoints=data.get("boundary_commits_enabled"),
+        vm_placed_globals=data.get("vm_placed_globals"),
+        vm_placed_variables=data.get("vm_placed_variables"),
         solve_time_ms=round(data["solve_time_ms"]) if "solve_time_ms" in data else None,
         compilation_time_ms=round(data["compilation_time_ms"]) if "compilation_time_ms" in data else None,
         peak_rss_kb=data.get("peak_rss_kb"),

@@ -101,6 +101,20 @@ void appendMILPAllocationModeToJSON(llvm::json::Object &root, bool coarseAllocat
     root["milp_allocation_mode"] = milpAllocationModeLabel(coarseAllocation);
 }
 
+void appendVMPlacementToJSON(llvm::json::Object &root, unsigned vmPlacedGlobals,
+                             const std::vector<std::pair<std::string, unsigned>> &vmPlacedDetail) {
+    root["vm_placed_globals"] = static_cast<int64_t>(vmPlacedGlobals);
+    json::Array vmVars;
+    vmVars.reserve(vmPlacedDetail.size());
+    for (const auto &[name, blocks] : vmPlacedDetail) {
+        json::Object item;
+        item["name"] = name;
+        item["blocks"] = static_cast<int64_t>(blocks);
+        vmVars.push_back(std::move(item));
+    }
+    root["vm_placed_variables"] = std::move(vmVars);
+}
+
 void printIneligibleStateStats(unsigned ineligGlobalCount, unsigned ineligAllocaCount,
                                unsigned ineligSSACount) {
     PLOGI << "  Ineligible globals:              " << ineligGlobalCount;
@@ -352,6 +366,25 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     unsigned commitCount = MILPSolution::countEnabled(solution.s);
     unsigned restoreCount = MILPSolution::countEnabled(solution.rHat);
 
+    // VM placement usage: among the eligible candidate globals (getVMObjs(),
+    // i.e. candidate_globals / V_elig), how many the optimizer actually placed
+    // in VM (m=true at >=1 block), with per-variable raw block counts.
+    // Ineligible objects (forced m=true in extractSolution) are excluded by
+    // iterating only over getVMObjs().
+    std::map<llvm::Value *, unsigned> vmBlockCounts;
+    for (const auto &[key, placed] : solution.m) {
+        if (placed)
+            ++vmBlockCounts[key.second];
+    }
+    std::vector<std::pair<std::string, unsigned>> vmPlacedDetail;
+    for (llvm::GlobalVariable *GV : ctx.stateAnalysis->getVMObjs()) {
+        auto it = vmBlockCounts.find(GV);
+        if (it != vmBlockCounts.end() && it->second > 0)
+            vmPlacedDetail.emplace_back(GV->getName().str(), it->second);
+    }
+    unsigned vmPlacedGlobals = vmPlacedDetail.size();
+    unsigned candidateGlobalCount = ctx.stateAnalysis->getVMObjs().size();
+
     if (solution.r.empty()) {
         PLOGI << "No region boundaries needed for function " << F.getName();
 
@@ -379,6 +412,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         }
         PLOGI << "  Boundary commits enabled:        " << commitCount;
         PLOGI << "  Boundary restores enabled:       " << restoreCount;
+        PLOGI << "  VM-placed globals (of cand.):    " << vmPlacedGlobals << " / "
+              << candidateGlobalCount;
+        for (const auto &[name, blocks] : vmPlacedDetail)
+            PLOGI << "      " << name << ": " << blocks << " block(s)";
         PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
 
         if (!StatsJsonOpt.empty()) {
@@ -403,6 +440,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             root["boundary_commits_enabled"] = static_cast<int64_t>(commitCount);
             root["boundary_restores_enabled"] = static_cast<int64_t>(restoreCount);
             root["solve_time_ms"] = solveTimeMs;
+            appendVMPlacementToJSON(root, vmPlacedGlobals, vmPlacedDetail);
             appendAbstractCFGStatsToJSON(root, abstractCFG.stats);
             root["ineligible_globals"] = static_cast<int64_t>(ineligGlobalCount);
             root["ineligible_allocas"] = static_cast<int64_t>(ineligAllocaCount);
@@ -450,6 +488,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     }
     PLOGI << "  Boundary commits enabled:        " << commitCount;
     PLOGI << "  Boundary restores enabled:       " << restoreCount;
+    PLOGI << "  VM-placed globals (of cand.):    " << vmPlacedGlobals << " / "
+          << candidateGlobalCount;
+    for (const auto &[name, blocks] : vmPlacedDetail)
+        PLOGI << "      " << name << ": " << blocks << " block(s)";
     PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
 
     if (!StatsJsonOpt.empty()) {
@@ -477,6 +519,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         root["boundary_commits_enabled"] = static_cast<int64_t>(commitCount);
         root["boundary_restores_enabled"] = static_cast<int64_t>(restoreCount);
         root["solve_time_ms"] = solveTimeMs;
+        appendVMPlacementToJSON(root, vmPlacedGlobals, vmPlacedDetail);
         appendAbstractCFGStatsToJSON(root, abstractCFG.stats);
         root["ineligible_globals"] = static_cast<int64_t>(ineligGlobalCount);
         root["ineligible_allocas"] = static_cast<int64_t>(ineligAllocaCount);

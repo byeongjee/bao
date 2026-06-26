@@ -53,6 +53,8 @@ _CSV_HEADER: list[str] = [
     "milp_presolved_constraints",
     "optimal_solution",
     "distributed_checkpoints_inserted",
+    "vm_placed_globals",
+    "vm_placed_global_names",
     "milp_solve_time_ms",
     "result",
 ]
@@ -66,6 +68,17 @@ _NVM_SYMBOLS: list[str] = [
     "cnt_store_mem",
     "cnt_restore_mem",
 ]
+
+
+def _format_vm_placed_names(vm_placed_variables: list | None) -> str:
+    """Render per-variable VM placement as a ``name:blocks`` semicolon list.
+
+    e.g. ``[{"name": "buf", "blocks": 3}, ...]`` -> ``"buf:3;state:7"``.
+    Returns an empty string when nothing was placed in VM.
+    """
+    if not vm_placed_variables:
+        return ""
+    return ";".join(f"{v['name']}:{v['blocks']}" for v in vm_placed_variables)
 
 
 def _build_row(
@@ -93,6 +106,8 @@ def _build_row(
         "milp_presolved_constraints": stats.milp_presolved_constraints or 0,
         "optimal_solution": optimal,
         "distributed_checkpoints_inserted": stats.distributed_checkpoints or 0,
+        "vm_placed_globals": stats.vm_placed_globals or 0,
+        "vm_placed_global_names": _format_vm_placed_names(stats.vm_placed_variables),
         "milp_solve_time_ms": stats.solve_time_ms or 0,
     }
 
