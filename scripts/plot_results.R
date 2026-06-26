@@ -68,7 +68,7 @@ METRICS <- list(
     source = "debug", column = "runtime_region_boundary_calls",
     include_uninstrumented = FALSE,
     ylabel = "# Runtime Region Boundary Calls",
-    relative_ylabel = "Relative Region Boundary Calls",
+    relative_ylabel = "Relative Region Boundary Hits",
     title = "Region Boundary Calls at Run-time"
   ),
   execution_time = list(
@@ -571,6 +571,19 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
   }
   clipped_df <- plot_df %>% filter(clipped)
 
+  # For log-scale plots, pre-transform values to log10 space and plot on a
+  # linear axis. Drawing bars from y = 0 under coord_transform(log10) makes
+  # ggpattern emit stripe segments over a huge clipped region, bloating the
+  # PDF by megabytes. Label positions are still computed in data space on
+  # plot_df_orig, then transformed.
+  plot_df_orig <- plot_df
+  log_t <- identity
+  if (force_log) {
+    log_y_lo <- min(pos_vals, na.rm = TRUE) * 0.88
+    log_t <- function(v) log10(v / log_y_lo)
+    plot_df <- plot_df %>% mutate(display_value = log_t(display_value))
+  }
+
   if (normalize && !is.null(norm_algo)) {
     y_label <- metric_info$relative_ylabel
   } else {
@@ -680,14 +693,18 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
 
   p <- p + theme_benchmark()
 
-  # Add value labels on bars
-  label_df <- plot_df %>%
+  # Add value labels on bars (positions computed in data space, then
+  # transformed to log space for force_log plots)
+  label_df <- plot_df_orig %>%
     filter(!is.na(display_value), display_value > 0, !clipped)
   if (normalize && !is.null(norm_algo)) {
     label_df <- label_df %>% filter(algo != norm_algo)
   }
   label_df <- label_df %>%
     compute_label_positions(force_log, use_symlog)
+  if (force_log && nrow(label_df) > 0) {
+    label_df <- label_df %>% mutate(label_y = log_t(label_y))
+  }
   if (nrow(label_df) > 0) {
     p <- p + geom_label(
       data = label_df,
@@ -712,11 +729,26 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
   clipped_df <- clipped_df %>%
     compute_label_positions(force_log, use_symlog)
   if (nrow(clipped_df) > 0) {
+    clipped_df <- clipped_df %>%
+      mutate(
+        seg_y_start = display_value / OUTLIER_HEADROOM,
+        seg_y_end = display_value
+      )
+    if (force_log) {
+      clipped_df <- clipped_df %>%
+        mutate(
+          seg_y_start = log_t(seg_y_start),
+          seg_y_end = log_t(seg_y_end),
+          label_y = log_t(label_y)
+        )
+    }
+  }
+  if (nrow(clipped_df) > 0) {
     p <- p +
       geom_segment(
         data = clipped_df,
         aes(x = benchmark, xend = benchmark,
-            y = display_value / OUTLIER_HEADROOM, yend = display_value,
+            y = seg_y_start, yend = seg_y_end,
             group = algo_label),
         inherit.aes = FALSE,
         position = text_position,
@@ -748,7 +780,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
 
   # Normalization reference line
   if (normalize && !is.null(norm_algo)) {
-    p <- p + geom_hline(yintercept = 1.0, linetype = "dashed",
+    p <- p + geom_hline(yintercept = log_t(1.0), linetype = "dashed",
                         color = "grey50", linewidth = 0.5)
   }
 
@@ -764,24 +796,38 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
     ),
     na.rm = TRUE
   )
-  y_hi <- compute_upper_limit(
-    top_display_value,
-    max_label_tier,
-    force_log,
-    use_symlog,
-    nrow(clipped_df) > 0
-  )
+  y_hi <- if (force_log) {
+    # Values are already in log10 space, so the transformed headroom of
+    # compute_upper_limit is applied additively here (same result).
+    headroom <- TRANSFORMED_TOP_HEADROOM_BASE +
+      TRANSFORMED_TOP_HEADROOM_PER_TIER * max_label_tier
+    if (nrow(clipped_df) > 0) {
+      headroom <- headroom + 0.05
+    }
+    top_display_value + headroom
+  } else {
+    compute_upper_limit(
+      top_display_value,
+      max_label_tier,
+      force_log,
+      use_symlog,
+      nrow(clipped_df) > 0
+    )
+  }
 
   if (force_log) {
-    # Log-scaled bar chart: use coord_trans so bars render properly,
-    # clip the y-axis just below the minimum value
-    y_lo <- min(pos_vals, na.rm = TRUE) * 0.88
+    # Log-scaled bar chart drawn in pre-transformed log10 space on a linear
+    # axis: bar polygons stay panel-sized, so ggpattern stripes don't bloat
+    # the PDF. Breaks are placed at transformed positions with original
+    # value labels, so the axis reads as a log axis.
+    breaks_orig <- compute_transformed_breaks(pos_vals, include_zero = FALSE)
     p <- p +
       scale_y_continuous(
-        labels = axis_labeler,
-        breaks = compute_transformed_breaks(pos_vals, include_zero = FALSE)
+        labels = axis_labeler(breaks_orig),
+        breaks = log_t(breaks_orig),
+        expand = expansion(mult = c(0, 0.05))
       ) +
-      coord_transform(y = "log10", ylim = c(y_lo, y_hi), clip = "on")
+      coord_cartesian(ylim = c(0, y_hi), clip = "on")
   } else if (use_symlog) {
     p <- p + scale_y_continuous(
       trans = pseudo_log_trans(base = 10),

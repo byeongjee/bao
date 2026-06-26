@@ -1345,6 +1345,49 @@ def analyze_strip_mining_cmd(log_file: str, output: str) -> None:
     write_strip_mining_csv(runs, Path(output))
 
 
+@analyze.command("milp-coarse")
+@click.option(
+    "--baseline-csv",
+    type=click.Path(exists=True),
+    default="results/milp_debug.csv",
+    show_default=True,
+    help="Baseline MILP debug CSV.",
+)
+@click.option(
+    "--coarse-csv",
+    type=click.Path(exists=True),
+    default="results/milp_coarse_debug.csv",
+    show_default=True,
+    help="Coarse-allocation MILP debug CSV.",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(),
+    help="Optional CSV output path for the summary table.",
+)
+def analyze_milp_coarse_cmd(
+    baseline_csv: str,
+    coarse_csv: str,
+    output: str | None,
+) -> None:
+    """Compare baseline and coarse-allocation MILP result CSVs."""
+    from .analysis.milp_coarse import (
+        format_milp_coarse_summary,
+        summarize_milp_coarse_allocation,
+        write_milp_coarse_summary_csv,
+    )
+
+    summary_rows = summarize_milp_coarse_allocation(
+        Path(baseline_csv),
+        Path(coarse_csv),
+    )
+    click.echo(format_milp_coarse_summary(summary_rows))
+
+    if output is not None:
+        write_milp_coarse_summary_csv(summary_rows, Path(output))
+
+
 @analyze.command("plot")
 @click.argument("csv_dir", type=click.Path(exists=True))
 @click.option(
