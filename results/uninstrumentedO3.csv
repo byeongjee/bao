@@ -1,0 +1,8 @@
+benchmark,status,compilation_time_ms,execution_time_us
+aes,ok,3189,25554.76
+crc,ok,935,10432.74
+rsa,ok,1437,43605.98
+dijkstra,ok,947,379224.17
+qsort,ok,1085,1190562.25
+activity_recognition,ok,2572,33544.99
+bitcount,ok,1093,4563862.19
