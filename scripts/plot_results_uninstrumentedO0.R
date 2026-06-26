@@ -1,6 +1,23 @@
 #!/usr/bin/env Rscript
-# Variant of plot_results.R that uses uninstrumentedO0.csv for execution-time
-# baselines while keeping the rest of the behavior unchanged.
+#
+# Thin wrapper around plot_results.R that adds the -O0 uninstrumented build as a
+# second execution-time baseline. It does NOT reimplement any plotting.
+#
+# How it works:
+#   1. Loads plot_results.R into an isolated environment via sys.source() (so its
+#      main() does not run on load), allowing the data/functions to be patched first.
+#   2. Registers an extra "uninstrumentedO0" series (label "Uninstrumented-O0") in
+#      ALGORITHMS and ALG_STYLE.
+#   3. Overrides load_uninstrumented_data so that, ONLY for the execution_time_us
+#      metric, it also loads uninstrumentedO0.csv alongside the usual
+#      uninstrumented.csv. All other metrics are unchanged.
+#   4. Runs main() from the patched environment.
+#
+# Net effect: identical to plot_results.R, except the execution-time chart shows
+# both the optimized and the -O0 uninstrumented baselines side by side. Use this
+# when comparing instrumented algorithms against the -O0 reference (apples-to-apples
+# for execution time, since the instrumentation passes run on -O0 IR).
+# Requires uninstrumentedO0.csv in the result dir (produced by run_benchmarks.py).
 
 script_args <- commandArgs(trailingOnly = FALSE)
 script_file_arg <- script_args[grepl("^--file=", script_args)]
