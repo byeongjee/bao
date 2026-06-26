@@ -842,6 +842,12 @@ def bench() -> None:
 )
 @click.option("--coarse-allocation", is_flag=True,
               help="Use one MILP placement variable per eligible value instead of per-region placement.")
+@click.option(
+    "--milp-gap",
+    type=float,
+    default=0.0,
+    help="MIP optimality gap (default: 0.0 = proven optimal).",
+)
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
 @click.pass_context
 def bench_milp_cmd(
@@ -855,6 +861,7 @@ def bench_milp_cmd(
     energy_config: str | None,
     cpu_freq: str,
     coarse_allocation: bool,
+    milp_gap: float,
     accumulate_keys: str | None,
 ) -> None:
     """Run MILP benchmarks across programs and capacitor sizes."""
@@ -872,6 +879,7 @@ def bench_milp_cmd(
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
         coarse_allocation=coarse_allocation,
+        milp_gap=milp_gap,
         pass_log_level=ctx.obj["pass_log_level"],
         accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
     )

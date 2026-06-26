@@ -128,6 +128,7 @@ def run_milp_benchmarks(
     energy_config: Path | None = None,
     cpu_freq: int,
     coarse_allocation: bool,
+    milp_gap: float,
     pass_log_level: str,
     accumulate_keys_file: Path | None,
 ) -> None:
@@ -205,7 +206,7 @@ def run_milp_benchmarks(
                     cpu_freq=cpu_freq,
                     opt_level=3,
                     clang_opt_level=3,
-                    milp_gap=0.0,
+                    milp_gap=milp_gap,
                     milp_log_file="",
                     coarse_allocation=coarse_allocation,
                 )
