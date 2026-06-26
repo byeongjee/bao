@@ -115,7 +115,8 @@ std::string IRBasedEstimator::getCostCategory(unsigned Opcode) const {
         return "store";
 
     // Control flow
-    case Instruction::Br:
+    case Instruction::UncondBr:
+    case Instruction::CondBr:
     case Instruction::Switch:
     case Instruction::Ret:
     case Instruction::IndirectBr:
