@@ -8,7 +8,16 @@ This tool analyzes LLVM IR, builds a control flow graph with energy cost estimat
 
 ## Requirements
 
-- **LLVM 22+** (built from source)
+- **LLVM** (built from source). Last verified against **LLVM 23.0.0git**, commit
+  [`384cecd5b201`](https://github.com/llvm/llvm-project/commit/384cecd5b20107e1453eaee008e8f4fd22b42c9e)
+  (`llvmorg-23-init-20751-g384cecd5b201`). Check your tree with `opt --version`.
+
+  > **Build all LLVM artifacts against the same LLVM tree.** The plugins
+  > (`CheckpointPass.so`, `BBDebugInfoPass.so`, `bb-energy-analyzer`) load into the
+  > `opt`/`llc` you run; if they were built against a *different* LLVM than that
+  > `opt`, you get ABI-mismatch crashes — e.g. `Assertion failed: ... isDeclaration`.
+  > A plain `make` will **not** detect this (it keys off source mtimes), so after
+  > updating LLVM rebuild everything: `cmake --build passes/build --clean-first`.
 - **Gurobi Optimizer** (with valid license - free for academic use)
 - **CMake 3.20+**
 - **C++17 compatible compiler**
