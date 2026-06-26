@@ -146,6 +146,7 @@ def compile_schematic(
         if opts.estimator_mode == "assembly":
             bb_energy, analyzer_stderr = run_assembly_energy(
                 tc, env, schematic_input_ll, tmp / "asm", opts.energy_config, opts.pass_log_level,
+                opt_level=opts.opt_level,
             )
             energy_config = write_assembly_energy_config(
                 tmp / "asm_energy_config.json",

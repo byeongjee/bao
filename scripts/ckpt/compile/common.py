@@ -117,10 +117,19 @@ def optimize_ir_with_options(
     opt_level: int,
     disable_loop_unrolling: bool,
 ) -> StepResult:
-    """Run the LLVM default optimization pipeline with explicit pass controls."""
+    """Run the LLVM default optimization pipeline with explicit pass controls.
+
+    A trailing ``scalarizer<load-store>`` expands any vector load/store the O3
+    pipeline forms (e.g. SROA promoting a small struct copy to ``<3 x i16>``)
+    back into scalars.  The MSP430 backend has no vector support and asserts in
+    type legalization on such vectors, so this keeps the optimized IR lowerable
+    by ``llc -march=msp430``.  It is a no-op on scalar-only IR, and runs at the
+    single optimization point shared by energy estimation and device codegen, so
+    both consume identical IR.
+    """
     cmd: list[str] = [
         tc.opt,
-        f"-passes=default<O{opt_level}>",
+        f"-passes=default<O{opt_level}>,scalarizer<load-store>",
         "-vectorize-loops=false",
         "-vectorize-slp=false",
     ]
@@ -211,6 +220,8 @@ def run_assembly_energy(
     prefix: Path,
     params_config: Path,
     pass_log_level: str,
+    *,
+    opt_level: int,
 ) -> tuple[Path, str]:
     """Run the assembly-based BB energy estimation pipeline.
 
@@ -218,6 +229,10 @@ def run_assembly_energy(
       1. assign-bb-debuginfo pass  ->  <prefix>.bbinfo.ll + <prefix>.bb_mapping.json
       2. llc -march=msp430 to obj  ->  <prefix>.energy.o
       3. bb-energy-analyzer         ->  <prefix>.bb_energy.json
+
+    *opt_level* is the ``llc`` optimization level; pass the same value used for
+    device codegen (``compile_to_object``) so the assembly measured for energy
+    matches the assembly that actually runs.
 
     Returns (bb_energy_path, analyzer_stderr).
     """
@@ -239,12 +254,13 @@ def run_assembly_energy(
         step_name="assign-bb-debuginfo",
     )
 
-    # Step 2: llc to object
+    # Step 2: llc to object (same -O as device codegen for a faithful estimate)
     run(
         [
             tc.llc,
             "-march=msp430",
             "-filetype=obj",
+            f"-O{opt_level}",
             str(bbinfo_ll),
             "-o", str(energy_obj),
         ],

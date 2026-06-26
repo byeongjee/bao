@@ -327,6 +327,7 @@ def _run_rockclimb_preprocess(
     """Run RockClimb's IR preprocess pass after generating pre-pass energy."""
     pre_bb_energy, pre_stderr = run_assembly_energy(
         tc, env, input_ll, tmp / "preprocess", opts.energy_config, opts.pass_log_level,
+        opt_level=opts.opt_level,
     )
     preprocess_energy_config = write_assembly_energy_config(
         tmp / "preprocess_energy_config.json",
