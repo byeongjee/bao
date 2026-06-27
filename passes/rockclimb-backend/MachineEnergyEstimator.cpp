@@ -3,6 +3,7 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "common/Logger.h"
@@ -11,11 +12,25 @@
 #include <cctype>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <sstream>
 
 using namespace llvm;
 
 namespace checkpoint {
+
+/// Resolve a call instruction's target name (for target-aware call energy).
+/// Returns the global/symbol name for a direct call, or "" for an indirect
+/// (register) call where the target is statically unknown.
+static std::string callTargetName(const MachineInstr &MI) {
+    for (const MachineOperand &MO : MI.operands()) {
+        if (MO.isGlobal() && MO.getGlobal())
+            return MO.getGlobal()->getName().str();
+        if (MO.isSymbol())
+            return MO.getSymbolName();
+    }
+    return "";
+}
 
 MachineEnergyEstimator::MachineEnergyEstimator(const std::string &configPath)
     : model_(configPath) {}
@@ -107,6 +122,16 @@ double MachineEnergyEstimator::estimateInstruction(const MachineInstr &MI) const
     std::string mnemonic = extractMnemonic(opName);
     std::string suffix = extractSuffix(opName);
     std::string addrMode = getAddressingMode(MI, suffix);
+
+    // Calls are costed with the target-aware call-energy path so that
+    // external/library calls (memcpy, __mspabi_*) are charged as expensive
+    // single instructions, while in-module calls fall back to the cheap
+    // generic call cost (call_<addrMode>). This matches the precomputed
+    // (assembly) estimator, which the production pipeline uses. (Per-byte
+    // memcpy/memset sizing is only applied in the precomputed path.)
+    if (MI.isCall() && !MI.isInlineAsm()) {
+        return model_.getCallEnergy(addrMode, callTargetName(MI), std::nullopt);
+    }
 
     return model_.getEnergy(mnemonic, addrMode);
 }
@@ -271,6 +296,19 @@ void MachineEnergyEstimator::collectRequiredKeys(const MachineFunction &MF,
             std::string mnemonic = extractMnemonic(opName);
             std::string suffix = extractSuffix(opName);
             std::string addrMode = getAddressingMode(MI, suffix);
+
+            // Mirror estimateInstruction's target-aware call costing so the
+            // required/missing report reflects the keys actually consulted.
+            if (MI.isCall() && !MI.isInlineAsm()) {
+                std::string target = callTargetName(MI);
+                std::string callKey = target.empty() ? ("call_" + addrMode) : ("call_" + target);
+                allKeys.insert(callKey);
+                bool present = (!target.empty() && model_.hasEnergy("call", target)) ||
+                               model_.hasEnergy("call", addrMode);
+                if (!present)
+                    missingKeys.insert(callKey);
+                continue;
+            }
 
             std::string key = addrMode.empty() ? mnemonic : mnemonic + "_" + addrMode;
             allKeys.insert(key);

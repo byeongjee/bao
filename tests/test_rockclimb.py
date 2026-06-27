@@ -185,6 +185,36 @@ def _extract_mir_block(mir: str, label: str) -> str:
     return match.group(1)
 
 
+def _extract_function_mir(mir: str, name: str) -> str:
+    """Extract the MIR body of a single function by its `name:` header."""
+    match = re.search(
+        rf"^name:\s+{re.escape(name)}\s*$(.*?)(?=^name:\s|\Z)",
+        mir,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match, f"Could not find function {name} in MIR"
+    return match.group(1)
+
+
+def _region_boundaries_per_func(stderr: str) -> dict[str, int]:
+    """Parse per-function 'Region boundaries:' counts from pass stats."""
+    counts: dict[str, int] = {}
+    current: str | None = None
+    for line in stderr.splitlines():
+        m = re.search(r"Function:\s+(\S+)", line)
+        if m:
+            current = m.group(1)
+        m = re.search(r"Region boundaries:\s+(\d+)", line)
+        if m and current is not None:
+            counts[current] = int(m.group(1))
+    return counts
+
+
+def count_inmodule_calls(mir: str, func_name: str) -> int:
+    """Count CALLi @func_name (direct in-module calls use @, externals use &)."""
+    return len(re.findall(rf"CALLi\s+@{re.escape(func_name)}", mir))
+
+
 # ---------------------------------------------------------------------------
 # Test C sources (inline)
 # ---------------------------------------------------------------------------
@@ -467,3 +497,112 @@ class TestMachinePassStatistics:
         assert "Boundary checks:" in result.stderr
         assert "Register checkpoints:" in result.stderr
         assert "Compilation time (ms):" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Faithful PFI/ROCKCLIMB call-handling model
+#   - boundaries at function entry and exit (NOT at call sites)
+#   - entry boundary saves the function's live-in argument registers
+#   - external/library calls are costed as single expensive instructions
+# ---------------------------------------------------------------------------
+TWO_ARG_LEAF = """\
+int leaf(int a, int b) { return a + b; }
+"""
+
+CALLER_CALLEE_TWICE = """\
+int __attribute__((noinline)) callee(int a, int b) { return a + b; }
+int caller(int x) { return callee(x, 1) + callee(x, 2); }
+"""
+
+# fib keeps a real recursive call at -O2 (unlike a tail/linear recursion,
+# which the optimizer rewrites into a loop).
+RECURSION = """\
+int fib(int n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+"""
+
+
+class TestCallHandling:
+    """Region boundaries follow the paper's function entry/exit model."""
+
+    def test_entry_boundary_saves_args_first(self, run_rockclimb_machine, tmp_path):
+        """The entry block emits a boundary, preceded by saves of the live-in
+        argument registers (so recovery into the first region restores args)."""
+        src = _write_src(tmp_path, TWO_ARG_LEAF)
+        result = run_rockclimb_machine(
+            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+        )
+        assert result.exit_code == 0, result.stderr
+        mir = result.output_mir
+        # Entry boundary is now emitted (no longer skipped).
+        assert count_mir_calls(mir, "__region_boundary") >= 1
+        # Both argument registers (a, b) are saved at entry.
+        assert count_mir_reg_saves(mir) >= 2, mir
+        # The saves precede the boundary checkpoint.
+        save_m = re.search(r"MOV16mr[^\n]*__nvm_regs", mir)
+        bnd_m = re.search(r"CALLi &__region_boundary", mir)
+        assert save_m and bnd_m and save_m.start() < bnd_m.start(), (
+            "argument saves must come before the entry boundary"
+        )
+
+    def test_no_boundary_at_callsite_callee_bracketed(
+        self, run_rockclimb_machine, tmp_path
+    ):
+        """Calls are not boundary sites in the caller; the callee carries its
+        own entry/exit boundaries (shared across call sites)."""
+        src = _write_src(tmp_path, CALLER_CALLEE_TWICE)
+        result = run_rockclimb_machine(
+            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+        )
+        assert result.exit_code == 0, result.stderr
+        mir = result.output_mir
+
+        # Both call sites survive to MIR (callee is not inlined).
+        assert count_inmodule_calls(mir, "callee") >= 2, mir
+
+        # Boundaries are per-function, not per-call-site: the caller is a single
+        # block, so it has exactly one (entry=exit) boundary despite 2 calls.
+        per_func = _region_boundaries_per_func(result.stderr)
+        assert per_func.get("caller") == 1, per_func
+        assert per_func.get("callee") == 1, per_func
+
+        # No post-call boundary: a callsite is never immediately followed by one.
+        assert not re.search(
+            r"CALLi @callee[^\n]*\n\s*CALLi &__region_boundary", mir
+        ), "there must be no boundary inserted after a call site"
+
+        # The callee is bracketed by its own entry boundary + arg saves.
+        callee_mir = _extract_function_mir(mir, "callee")
+        assert "CALLi &__region_boundary" in callee_mir
+        assert re.search(r"MOV16mr[^\n]*__nvm_regs", callee_mir), (
+            "callee entry must save its incoming argument registers"
+        )
+
+    def test_external_call_costed_as_expensive_instruction(
+        self, run_rockclimb_machine, tmp_path
+    ):
+        """An external library call with no entry/exit boundaries of its own is
+        costed as a single expensive instruction. Integer division
+        (__mspabi_divi ~752) exceeds E_safe (~472) for the default config, so a
+        block containing it cannot fit one charge."""
+        src = _write_src(tmp_path, "int divfn(int a, int b) { return a / b; }")
+        result = run_rockclimb_machine(
+            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+        )
+        assert (
+            "does not fit one charge" in result.stderr
+            or "exceeds E_safe" in result.stderr
+        ), result.stderr
+
+    def test_recursion_compiles_with_entry_exit_boundaries(
+        self, run_rockclimb_machine, tmp_path
+    ):
+        """Direct recursion needs no special handling: the (in-module) callee
+        carries its own entry/exit boundaries, and the recursive call is cheap."""
+        src = _write_src(tmp_path, RECURSION)
+        result = run_rockclimb_machine(
+            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+        )
+        assert result.exit_code == 0, result.stderr
+        mir = result.output_mir
+        assert count_inmodule_calls(mir, "fib") >= 1, "recursive call should remain"
+        assert count_mir_calls(mir, "__region_boundary") >= 1

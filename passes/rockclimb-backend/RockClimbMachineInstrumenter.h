@@ -29,6 +29,12 @@ class RockClimbMachineInstrumenter {
     /// Insert boundary check call at the start of MBB
     void insertBoundaryCheck(llvm::MachineBasicBlock &MBB);
 
+    /// Insert the function-entry boundary plus saves of the function's live-in
+    /// argument registers. The arg saves precede the boundary call so that
+    /// recovery into the callee's first region restores correct argument values
+    /// (the per-function distributed analysis cannot reach the caller).
+    void insertEntryBoundary(llvm::MachineBasicBlock &entryMBB);
+
     /// Insert inline register save (and optional debug counter) after the given instruction
     void insertRegisterCheckpoint(const MachineCheckpointPoint &ckpt);
 

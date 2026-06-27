@@ -1,4 +1,5 @@
 #include "RockClimbMachineInstrumenter.h"
+#include "MachineLivenessAnalysis.h"
 
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
@@ -69,6 +70,51 @@ void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
     // MILP and SCHEMATIC.
 }
 
+void RockClimbMachineInstrumenter::insertEntryBoundary(MachineBasicBlock &entryMBB) {
+    MachineBasicBlock::iterator InsertPt = entryMBB.begin();
+    while (InsertPt != entryMBB.end() && InsertPt->isPHI())
+        ++InsertPt;
+
+    DebugLoc DL;
+    if (InsertPt != entryMBB.end())
+        DL = InsertPt->getDebugLoc();
+
+    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
+
+    // Determine the function's live-in (argument) registers BEFORE inserting the
+    // boundary call (which marks R11–R15 clobbered). A register is a live-in arg
+    // if it is read before being written from the entry block. isRegLiveFromBlock
+    // correctly treats a two-address read-modify-write (e.g. `$r12 = ADD $r12,
+    // $r13`) as a use of $r12, which a naive def-first scan would miss. Locals
+    // are written before read (not live-in) and are preserved across power loss
+    // via the FRAM stack, so this set is exactly the register arguments.
+    SmallVector<MCPhysReg, 8> argRegs;
+    for (unsigned r = C_.R4.id(); r <= C_.R15.id(); ++r) {
+        MCPhysReg reg = static_cast<MCPhysReg>(r);
+        if (isRegLiveFromBlock(&entryMBB, reg, TRI))
+            argRegs.push_back(reg);
+    }
+
+    // Boundary checkpoint at function entry (recovery point for the callee's
+    // first region; bounds the caller→callee span together with the caller's
+    // own region cutting).
+    MachineInstr *CallMI =
+        BuildMI(entryMBB, InsertPt, DL, TII_->get(C_.CALLi)).addExternalSymbol("__region_boundary");
+    for (unsigned reg = C_.R15.id() - 4; reg <= C_.R15.id(); ++reg)
+        CallMI->addRegisterDefined(reg, TRI);
+
+    // Save the function's live-in (argument) registers immediately BEFORE the
+    // boundary call, so recovery into the entry region restores correct args.
+    MachineBasicBlock::iterator SavePt(CallMI); // saves go before the boundary
+    for (MCPhysReg reg : argRegs) {
+        unsigned regId = reg - C_.R4.id();
+        BuildMI(entryMBB, SavePt, DL, TII_->get(C_.MOV16mr))
+            .addReg(C_.SR) // base = SR (absolute addressing)
+            .addGlobalAddress(nvmRegsGV_, static_cast<int64_t>(regId) * 2)
+            .addReg(reg);
+    }
+}
+
 void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpointPoint &ckpt) {
     if (!ckpt.afterInst)
         return;
@@ -123,12 +169,16 @@ RockClimbMachineInstrumenter::instrument(const std::vector<MachineBasicBlock *> 
 
     unsigned count = 0;
 
-    // Insert boundary checks (skip entry block — execution just started)
+    // Function entry and exit(s) are both region boundaries (PFI model): the
+    // entry boundary (with live-in arg saves) bounds the call-in span and the
+    // exit boundary bounds the return span. The entry boundary is emitted (no
+    // longer skipped) so the callee's first region has a recovery point.
     MachineBasicBlock *entryMBB = &MF_.front();
     for (MachineBasicBlock *MBB : boundaries) {
         if (MBB == entryMBB)
-            continue;
-        insertBoundaryCheck(*MBB);
+            insertEntryBoundary(*MBB);
+        else
+            insertBoundaryCheck(*MBB);
         ++count;
     }
 

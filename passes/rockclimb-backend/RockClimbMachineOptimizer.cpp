@@ -13,27 +13,6 @@
 using namespace llvm;
 
 namespace checkpoint {
-namespace {
-
-/// Check if a MachineInstr is a real function call (not pseudo or inline asm)
-static bool isMachineCallSite(const MachineInstr &MI) {
-    if (!MI.isCall())
-        return false;
-    // Skip inline asm calls
-    if (MI.isInlineAsm())
-        return false;
-    return true;
-}
-
-static bool blockHasMachineCallSite(const MachineBasicBlock &MBB) {
-    for (const MachineInstr &MI : MBB) {
-        if (isMachineCallSite(MI))
-            return true;
-    }
-    return false;
-}
-
-} // namespace
 
 RockClimbMachineOptimizer::RockClimbMachineOptimizer(MachineFunction &MF, MachineLoopInfo &MLI,
                                                      const MachineEnergyEstimator &estimator,
@@ -45,7 +24,7 @@ RockClimbMachineOptimizer::RockClimbMachineOptimizer(MachineFunction &MF, Machin
         energyCosts_[&MBB] = estimator_.estimateBlock(MBB);
 
     identifyLoopHeaders();
-    identifyPostCallBlocks();
+    identifyExitBlocks();
     computeTopologicalOrder();
 
     if (regStoreEnergy_ > 0) {
@@ -73,13 +52,16 @@ void RockClimbMachineOptimizer::identifyLoopHeaders() {
     }
 }
 
-void RockClimbMachineOptimizer::identifyPostCallBlocks() {
-    postCallBlocks_.clear();
+void RockClimbMachineOptimizer::identifyExitBlocks() {
+    // Faithful to the PFI/ROCKCLIMB region-formation algorithm: boundaries are
+    // placed at every function's entry and exit points. The entry boundary is
+    // added in partitionRegions(); here we mark every return block as a
+    // mandatory boundary. Calls are NOT boundary sites in the caller — each
+    // callee is bracketed by its own entry/exit boundaries instead.
+    exitBlocks_.clear();
     for (MachineBasicBlock &MBB : MF_) {
-        if (blockHasMachineCallSite(MBB)) {
-            for (MachineBasicBlock *succ : MBB.successors())
-                postCallBlocks_.insert(succ);
-        }
+        if (MBB.isReturnBlock())
+            exitBlocks_.insert(&MBB);
     }
 }
 
@@ -181,9 +163,10 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
         MachineBasicBlock *MBB = topoOrder_[i];
         double Cycle_bbi = getBlockCost(MBB);
 
-        // Mandatory boundaries: loop headers and post-call blocks
+        // Mandatory boundaries: loop headers and function exit (return) blocks.
+        // (The entry block is already a boundary, inserted above.)
         if (MBB != entryMBB) {
-            if (loopHeaders_.count(MBB) || postCallBlocks_.count(MBB))
+            if (loopHeaders_.count(MBB) || exitBlocks_.count(MBB))
                 boundarySet.insert(MBB);
         }
 
@@ -207,12 +190,16 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
             }
         }
 
-        // Single-block infeasibility check
+        // Single-block infeasibility: one block (e.g. an expensive external
+        // call such as integer division, or an over-large unrolled body) costs
+        // more than a full charge can afford. Such a block cannot be made
+        // power-failure-immune, so report it.
         if (accum_cycle >= E_safe_) {
             result.feasible = false;
             result.errorMessage = "Block '" + std::string(MBB->getName()) + "' (BB#" +
                                   std::to_string(MBB->getNumber()) + ") exceeds E_safe (" +
-                                  std::to_string(E_safe_) + "); block splitting is not implemented";
+                                  std::to_string(E_safe_) +
+                                  "); single block does not fit one charge";
             return result;
         }
 

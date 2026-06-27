@@ -53,8 +53,10 @@ class RockClimbMachineOptimizer {
     /// Loop headers (mandatory region boundaries)
     llvm::SmallPtrSet<llvm::MachineBasicBlock *, 16> loopHeaders_;
 
-    /// Successors of blocks containing function calls (mandatory boundaries)
-    llvm::SmallPtrSet<llvm::MachineBasicBlock *, 16> postCallBlocks_;
+    /// Blocks containing a return (function exit points; mandatory boundaries).
+    /// Together with the entry boundary, these bracket every callee so a call
+    /// crosses a checkpoint on the way in and on the way out (PFI region model).
+    llvm::SmallPtrSet<llvm::MachineBasicBlock *, 16> exitBlocks_;
 
     /// Blocks in reverse post-order
     std::vector<llvm::MachineBasicBlock *> topoOrder_;
@@ -64,7 +66,7 @@ class RockClimbMachineOptimizer {
     llvm::SmallSet<llvm::MCPhysReg, 12> defsInRegion_;
 
     void identifyLoopHeaders();
-    void identifyPostCallBlocks();
+    void identifyExitBlocks();
     void computeTopologicalOrder();
     double getBlockCost(llvm::MachineBasicBlock *MBB) const;
 

@@ -248,10 +248,9 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
         edgeCount += MBB.succ_size();
 
     // Print statistics
-    // Boundary checks = boundaries - 1 (entry block skipped)
-    unsigned boundaryChecks = result.regionBoundaries.empty()
-                                  ? 0
-                                  : static_cast<unsigned>(result.regionBoundaries.size()) - 1;
+    // Boundary checks = all region boundaries (the entry boundary is now
+    // emitted too, with live-in argument saves).
+    unsigned boundaryChecks = static_cast<unsigned>(result.regionBoundaries.size());
     PLOGI << "=== Checkpoint Insertion Statistics ===";
     PLOGI << "  Pass:                            RockClimb-Machine";
     PLOGI << "  Function:                        " << MF.getName();
