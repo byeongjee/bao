@@ -5,6 +5,7 @@
   "N_reg": 16,
   "reg_store_energy": 4.712573998475123,
   "reg_restore_energy": 1.90,
+  "call_cost": 6.61,
   "nvm_access_penalty": 2.23,
   "mem_store_energy_per_byte": 7.38,
   "mem_restore_energy_per_byte": 8.13,

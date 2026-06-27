@@ -19,6 +19,10 @@ const BlockInfo &CFGAnalysis::getBlockInfo(const llvm::BasicBlock *BB) const {
     return it->second;
 }
 
+void CFGAnalysis::setBlockEnergyCost(const llvm::BasicBlock *BB, double cost) {
+    blockInfo_[BB].energyCost = cost;
+}
+
 void CFGAnalysis::analyze(llvm::Function &F, llvm::LoopInfo &LI, EnergyEstimator &estimator) {
     // Process each basic block
     for (llvm::BasicBlock &BB : F) {

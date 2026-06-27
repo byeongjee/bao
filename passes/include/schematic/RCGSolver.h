@@ -31,7 +31,7 @@ class RCGSolver {
               const std::unordered_map<SchematicBlock *, BlockMetadata> &existingMeta,
               const std::unordered_map<SchematicBlock *, std::shared_ptr<RegionAllocation>>
                   &blockAllocation,
-              VMAddressTracker *tracker);
+              const std::set<SchematicBlock *> &functionCallBlocks, VMAddressTracker *tracker);
 
     /// Top-level solve: calls the three functions below in sequence.
     RCGResult solve();
@@ -58,7 +58,13 @@ class RCGSolver {
     const SchematicParams &params_;
     const std::unordered_map<SchematicBlock *, BlockMetadata> &existingMeta_;
     const std::unordered_map<SchematicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation_;
+    const std::set<SchematicBlock *> &functionCallBlocks_;
     VMAddressTracker *tracker_;
+
+    /// True if b is an isolated call_entry / call_exit block. The interior edge
+    /// call_entry -> call_exit is never a valid checkpoint location (ref:
+    /// schematic.py:148, is_function_call), so it is excluded from the RCG.
+    bool isCallBlock(SchematicBlock *b) const { return functionCallBlocks_.count(b) != 0; }
 
     std::vector<Node> nodes_;
     std::vector<std::vector<RCGEdge>> adj_;

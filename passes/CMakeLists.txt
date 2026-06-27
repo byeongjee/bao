@@ -103,6 +103,8 @@ src/common/LoopTripCount.cpp
     src/schematic/TraceCollectorPass.cpp
     src/schematic/TraceLoader.cpp
     src/schematic/SchematicBlock.cpp
+    src/schematic/CallIsolation.cpp
+    src/schematic/CallFold.cpp
 )
 
 # Use C++17 and disable RTTI/exceptions to match LLVM
@@ -141,3 +143,32 @@ add_subdirectory(bb-energy-analyzer)
 
 # Build RockClimb machine-level pass (post-regalloc, no Gurobi dependency)
 add_subdirectory(rockclimb-backend)
+
+# ---------------------------------------------------------------------------
+# C++ unit tests (GoogleTest). Off by default; enable with
+#   cmake -S passes -B passes/build -DSCHEMATIC_BUILD_TESTS=ON
+# Tests cover pure logic (e.g. SCHEMATIC folding arithmetic) that needs neither
+# LLVM nor Gurobi, so the test target links only GoogleTest.
+# ---------------------------------------------------------------------------
+option(SCHEMATIC_BUILD_TESTS "Build SCHEMATIC C++ unit tests" OFF)
+if(SCHEMATIC_BUILD_TESTS)
+    FetchContent_Declare(googletest
+        URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    enable_testing()
+    add_executable(schematic_unit_tests
+        src/schematic/CallFold.cpp
+        tests/cpp/test_call_fold.cpp
+    )
+    set_target_properties(schematic_unit_tests PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+    )
+    target_include_directories(schematic_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_link_libraries(schematic_unit_tests PRIVATE GTest::gtest_main)
+
+    include(GoogleTest)
+    gtest_discover_tests(schematic_unit_tests)
+endif()

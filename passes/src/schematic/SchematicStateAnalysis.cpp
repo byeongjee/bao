@@ -1,6 +1,8 @@
 #include "schematic/SchematicStateAnalysis.h"
 
 #include "common/BlockUtils.h"
+#include "common/FunctionFilters.h"
+#include "schematic/CallIsolation.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -184,15 +186,22 @@ bool SchematicStateAnalysis::isAllowedDirectCall(const llvm::CallBase &CB) const
     llvm::StringRef Name = Callee->getName();
     if (Name == "__loop_tripcount")
         return true;
-    if (Name == "debug_init" || Name == "debug_exit" || Name == "bench_halt")
+    if (Name == "bench_halt")
         return true;
-    if (Name.starts_with("timing_gpio_"))
+    // Benchmark-infrastructure functions (timing/IO/debug) are treated as helpers
+    // everywhere: not isolated, skipped by the driver, and allowed here as
+    // inline-cost calls (consistent whitelists). Covers debug_*/timing_gpio*/
+    // _timing_delay*/uart_*, whether declared or defined.
+    if (isBenchmarkInfrastructureFunction(Name))
         return true;
     if (isWhitelistedHelperName(Name))
         return true;
 
+    // Calls to defined functions are allowed only when isolated by the
+    // schematic-isolate pass: their effects are folded at the call site, not
+    // analyzed here (D8). Non-isolated calls to defined functions remain errors.
     if (!Callee->isDeclaration())
-        return false;
+        return isIsolatedCallEntry(CB);
 
     if (CB.doesNotAccessMemory() || CB.onlyReadsMemory())
         return true;
@@ -246,6 +255,13 @@ void SchematicStateAnalysis::computeAccessMaps() {
 
         for (llvm::Instruction &I : BB) {
             validateInstructionForStrictMode(I);
+
+            // An isolated call's transitive memory effects belong to the callee
+            // (folded onto call_entry's energy), not to the call site. Skip it so
+            // call blocks have empty access maps and getBlockExecEnergy returns
+            // exactly the folded value with no VM-savings adjustment (D8).
+            if (isIsolatedCallEntry(I))
+                continue;
 
             // Process candidate globals via AA.
             for (llvm::GlobalVariable *GV : candidateGlobals_) {

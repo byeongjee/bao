@@ -336,7 +336,7 @@ def run_schematic(tools, compile_to_ir):
         output_ll = str(tmp_path / "output.ll")
         r = _run([
             tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-            "-passes=tripcount-annotation,schematic",
+            "-passes=schematic",
             f"-energy-config={energy_config}",
             f"-schematic-config={schematic_config}",
             f"-schematic-trace={trace_json}",

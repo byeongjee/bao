@@ -392,7 +392,7 @@ bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution 
         }
 
         RCGSolver solver(subPath, state, cfg, params, solution.blockMeta, solution.blockAllocation,
-                         tracker);
+                         solution.functionCallBlocks, tracker);
         RCGResult result = solver.solve();
 
         if (!result.feasible) {

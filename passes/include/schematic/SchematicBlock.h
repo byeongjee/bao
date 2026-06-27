@@ -1,6 +1,7 @@
 #pragma once
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/BasicBlock.h"
 
 #include <algorithm>
@@ -9,6 +10,20 @@
 #include <vector>
 
 namespace checkpoint {
+
+/// Names of the synthetic per-function boundary blocks prepended/appended to
+/// every function trace (ref: schematic.py %START_/%END_, trace.py:288-289).
+/// Shared so the RCG seed can recognize the function-entry sub-path and charge
+/// call_cost exactly once (ref: schematic.py:184-186).
+inline constexpr llvm::StringRef kStartFuncName = "START_Func";
+inline constexpr llvm::StringRef kEndFuncName = "END_Func";
+
+/// Names of the synthetic per-loop boundary blocks (ref: schematic.py %START_Loop
+/// / %END_Loop, loop_utils.py). The reference subtracts call_cost on the loop RCG
+/// seed too (cfg.first_bb == trace[0] holds for the loop cfg), so the RCG charges
+/// call_cost when the sub-path front is START_Func OR START_Loop.
+inline constexpr llvm::StringRef kStartLoopName = "START_Loop";
+inline constexpr llvm::StringRef kEndLoopName = "END_Loop";
 
 class SchematicBlock {
   public:

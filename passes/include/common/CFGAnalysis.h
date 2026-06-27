@@ -33,6 +33,12 @@ class CFGAnalysis {
     /// Get information about a specific block.
     const BlockInfo &getBlockInfo(const llvm::BasicBlock *BB) const;
 
+    /// Override a block's energy cost. Used by the inter-procedural fold to bake a
+    /// solved callee's summary onto its caller's call_entry / call_exit blocks
+    /// (reference: f_entry.cost_all_nvm = f_entry.final_cost, schematic.py:121,129).
+    /// Both energy readers (getBlockExecEnergy, computeCost) then observe it.
+    void setBlockEnergyCost(const llvm::BasicBlock *BB, double cost);
+
     /// Get all edges as (source, destination) pairs.
     const std::vector<std::pair<const llvm::BasicBlock *, const llvm::BasicBlock *>> &
     getEdges() const {

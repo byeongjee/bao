@@ -16,9 +16,10 @@ RCGSolver::RCGSolver(
     const CFGAnalysis &cfg, const SchematicParams &params,
     const std::unordered_map<SchematicBlock *, BlockMetadata> &existingMeta,
     const std::unordered_map<SchematicBlock *, std::shared_ptr<RegionAllocation>> &blockAllocation,
-    VMAddressTracker *tracker)
+    const std::set<SchematicBlock *> &functionCallBlocks, VMAddressTracker *tracker)
     : pathBlocks_(pathBlocks), state_(state), cfg_(cfg), params_(params),
-      existingMeta_(existingMeta), blockAllocation_(blockAllocation), tracker_(tracker) {}
+      existingMeta_(existingMeta), blockAllocation_(blockAllocation),
+      functionCallBlocks_(functionCallBlocks), tracker_(tracker) {}
 
 void RCGSolver::getCheckpointsFromTrace() {
     nodes_.clear();
@@ -28,6 +29,13 @@ void RCGSolver::getCheckpointsFromTrace() {
 
     // Candidate edge nodes: one for each consecutive pair of blocks.
     for (unsigned i = 0; i + 1 < pathBlocks_.size(); ++i) {
+        // Never offer a checkpoint inside an isolated call: the call-interior
+        // edge call_entry -> call_exit is skipped (ref: schematic.py:148). The
+        // callee's energy already rides on call_entry's folded cost. Node indices
+        // stay absolute (blockIndex), so dropping this node is safe for the
+        // interval math.
+        if (isCallBlock(pathBlocks_[i]) && isCallBlock(pathBlocks_[i + 1]))
+            continue;
         Node n;
         n.kind = Node::CandidateEdge;
         n.edge = CFGEdge{pathBlocks_[i], pathBlocks_[i + 1]};
@@ -74,6 +82,18 @@ void RCGSolver::createReachableCheckpointGraph() {
         auto it = existingMeta_.find(pathBlocks_.back());
         if (it != existingMeta_.end() && it->second.E_to_leave != 0.0)
             energyToLeave = it->second.E_to_leave;
+    }
+
+    // call_cost: the reference subtracts it whenever cfg.first_bb == trace[0]
+    // (schematic.py:184-186). That holds for the function cfg (front == START_Func)
+    // AND for a loop cfg analyzed via analyse_trace (front == START_Loop). Not-fixed
+    // paths front on a fixed real BB, so they keep the full seed. Applied only here
+    // in the RCG seed, never in the persistent blockMeta, so it does not leak into
+    // propagation reuse (D3).
+    if (!pathBlocks_.empty()) {
+        llvm::StringRef frontName = pathBlocks_.front()->getName();
+        if (frontName == kStartFuncName || frontName == kStartLoopName)
+            energyLeft -= params_.callCost;
     }
 
     // Internal checkpoint indices (all CandidateEdge nodes)

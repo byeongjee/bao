@@ -67,8 +67,8 @@ static LoopBoundaryBlocks createLoopBoundaryBlocks(llvm::Loop *L, SchematicGraph
         latch,
         graph.getOrCreate(header),
         latch ? graph.getOrCreate(latch) : nullptr,
-        graph.createSynthetic("START_Loop"),
-        graph.createSynthetic("END_Loop"),
+        graph.createSynthetic(kStartLoopName.str()),
+        graph.createSynthetic(kEndLoopName.str()),
     };
 }
 

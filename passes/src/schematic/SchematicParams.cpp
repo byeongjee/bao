@@ -29,7 +29,8 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
                                                      "nvm_access_penalty",
                                                      "mem_store_energy_per_byte",
                                                      "mem_restore_energy_per_byte",
-                                                     "loop_increment_cost_nvm"};
+                                                     "loop_increment_cost_nvm",
+                                                     "call_cost"};
 
     for (const auto &field : requiredDouble) {
         if (!config.contains(field)) {
@@ -65,6 +66,7 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     params.memRestoreEnergyPerByte = config["mem_restore_energy_per_byte"].get<double>();
     params.vmCapacityBytes = config["vm_capacity_bytes"].get<unsigned>();
     params.loopIncrementCostNvm = config["loop_increment_cost_nvm"].get<double>();
+    params.callCost = config["call_cost"].get<double>();
 
     // max_paths: check schematic section first, then root.
     if (schSection.contains("max_paths")) {

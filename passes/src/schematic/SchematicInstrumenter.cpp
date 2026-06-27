@@ -60,24 +60,44 @@ void SchematicInstrumenter::createShadowGlobals(llvm::Function &F,
         llvm::Type *shadowType = nullptr;
         std::string shadowName;
         llvm::MaybeAlign shadowAlign;
+        bool isGlobalShadow = false;
 
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
             shadowType = GV->getValueType();
+            // Unqualified: one global placed in VM by several functions shares a
+            // single module-scoped shadow (deduped below).
             shadowName = "__vm_shadow_" + GV->getName().str();
             shadowAlign = GV->getAlign();
+            isGlobalShadow = true;
         } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
             shadowType = AI->getAllocatedType();
-            shadowName = "__vm_shadow_" + (AI->hasName() ? AI->getName().str() : "alloca");
+            // Function-qualified so same-named locals in different functions get
+            // distinct shadows under the module pass.
+            shadowName = "__vm_shadow_" + F.getName().str() + "." +
+                         (AI->hasName() ? AI->getName().str() : "alloca");
             shadowAlign = AI->getAlign();
         } else {
             continue;
         }
 
-        auto *shadow = new llvm::GlobalVariable(
-            M_, shadowType, /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
-            llvm::Constant::getNullValue(shadowType), shadowName);
-        if (shadowAlign)
-            shadow->setAlignment(*shadowAlign);
+        // Only GLOBALS are deduped across functions: a global placed in VM by
+        // several functions must share ONE module-scoped shadow (D7). Allocas are
+        // per-function stack slots and must NEVER be shared — always create a
+        // fresh shadow (LLVM uniquifies the name), otherwise two distinct unnamed
+        // allocas (both named "<F>.alloca") would collapse onto one SRAM slot.
+        llvm::GlobalVariable *shadow = nullptr;
+        if (isGlobalShadow) {
+            shadow = M_.getNamedGlobal(shadowName);
+            if (shadow && shadow->getValueType() != shadowType)
+                shadow = nullptr; // name clash with a different type: make a fresh one
+        }
+        if (!shadow) {
+            shadow = new llvm::GlobalVariable(M_, shadowType, /*isConstant=*/false,
+                                              llvm::GlobalValue::InternalLinkage,
+                                              llvm::Constant::getNullValue(shadowType), shadowName);
+            if (shadowAlign)
+                shadow->setAlignment(*shadowAlign);
+        }
         shadowMap_[V] = shadow;
     }
 }

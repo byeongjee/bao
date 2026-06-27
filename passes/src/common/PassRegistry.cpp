@@ -4,6 +4,7 @@
 #include "milp/LoopStripMiningPass.h"
 #include "milp/MILPCheckpointPass.h"
 #include "rockclimb/RockClimbLoopUnrollPass.h"
+#include "schematic/CallIsolation.h"
 #include "schematic/SchematicPass.h"
 #include "schematic/TraceCollectorPass.h"
 
@@ -115,12 +116,6 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
                     }
-                    if (Name == "schematic") {
-                        FPM.addPass(LoopSimplifyPass());
-                        FPM.addPass(LCSSAPass());
-                        FPM.addPass(checkpoint::SchematicPass());
-                        return true;
-                    }
                     if (Name == "trace-collect") {
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
@@ -164,6 +159,26 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                     }
                     if (Name == "bb-freq-collect-only") {
                         FPM.addPass(checkpoint::BBFreqCollectorPass());
+                        return true;
+                    }
+                    return false;
+                });
+                // Module-level passes (inter-procedural). Registered separately
+                // because the new PM matches pipeline names per IR-unit type.
+                PB.registerPipelineParsingCallback([](StringRef Name, ModulePassManager &MPM,
+                                                      ArrayRef<PassBuilder::PipelineElement>) {
+                    if (Name == "schematic-isolate") {
+                        MPM.addPass(checkpoint::CallIsolationPass());
+                        return true;
+                    }
+                    if (Name == "schematic") {
+                        // Canonicalize loops per function, then run the
+                        // inter-procedural SCHEMATIC module pass.
+                        FunctionPassManager FPM;
+                        FPM.addPass(LoopSimplifyPass());
+                        FPM.addPass(LCSSAPass());
+                        MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+                        MPM.addPass(checkpoint::SchematicPass());
                         return true;
                     }
                     return false;

@@ -88,6 +88,32 @@ def annotate_tripcounts(
     )
 
 
+def isolate_calls(
+    tc: Toolchain,
+    env: ProjectEnv,
+    input_ll: Path,
+    output_ll: Path,
+) -> StepResult:
+    """Run the SCHEMATIC call-isolation pass on LLVM IR.
+
+    Splits every isolatable call into pre -> call_entry -> call_exit -> post and
+    marks the split blocks so the (inter-procedural) SCHEMATIC pass can fold each
+    callee's summary onto its call sites. Replaces the old inline_functions step:
+    instead of flattening the module into one function, calls are kept and solved
+    bottom-up. Recursion is rejected here with a fatal error.
+    """
+    return run(
+        [
+            tc.opt,
+            f"-load-pass-plugin={env.pass_lib}",
+            "-passes=schematic-isolate",
+            "-S", str(input_ll),
+            "-o", str(output_ll),
+        ],
+        step_name="schematic-isolate",
+    )
+
+
 # ---------------------------------------------------------------------------
 # IR optimization
 # ---------------------------------------------------------------------------

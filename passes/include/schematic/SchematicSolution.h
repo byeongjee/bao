@@ -24,6 +24,7 @@ enum class CheckpointState {
     Potential,
     Disabled,
     Active,
+    Virtual, // call_entry -> call_exit edge when the callee contains a checkpoint
     LoopLatch,
 };
 
@@ -147,6 +148,9 @@ struct SchematicSolution {
     /// Multiple blocks in the same region share the same allocation object.
     /// Reference: memory_allocation.py MemoryAllocation class.
     std::unordered_map<SchematicBlock *, std::shared_ptr<RegionAllocation>> blockAllocation;
+    /// call_entry / call_exit blocks created by call isolation. The RCG skips the
+    /// call-interior edge (call_entry -> call_exit). Ref: bb.is_function_call.
+    std::set<SchematicBlock *> functionCallBlocks;
     unsigned pathsAnalyzed = 0;
     unsigned totalVmVariables = 0;
     unsigned totalNvmVariables = 0;
@@ -203,6 +207,37 @@ inline void disableCheckpoint(SchematicSolution &solution, const CFGEdge &edge) 
 
 inline void setLoopLatchCheckpoint(SchematicSolution &solution, const CFGEdge &edge) {
     setCheckpointState(solution, edge, CheckpointState::LoopLatch);
+}
+
+/// True if the solved function contains any non-DISABLED checkpoint, i.e. the
+/// inter-procedural fold must treat a call to it as a VIRTUAL (wall) boundary
+/// rather than a transparent DISABLED fold. Faithful to the reference's
+/// `not has_only_disabled_checkpoints()` (schematic.py:688). Active/LoopLatch/
+/// Virtual checkpoint states, an enabled checkpoint, or a loop that takes a
+/// back-edge checkpoint / charges per-iteration all count as "has checkpoint".
+inline bool hasNonDisabledCheckpoint(const SchematicSolution &solution) {
+    if (!solution.enabledCheckpoints.empty())
+        return true;
+    for (const auto &[edge, st] : solution.checkpointStates) {
+        (void)edge;
+        if (st == CheckpointState::Active || st == CheckpointState::LoopLatch ||
+            st == CheckpointState::Virtual)
+            return true;
+    }
+    for (const auto &[block, dec] : solution.loopDecisions) {
+        (void)block;
+        // A loop that fits entirely in one charge takes NO checkpoint (the latch
+        // is DISABLED), so it must not count — even though numIterationsPerCharge
+        // is set to the trip count. Genuine loop checkpoints (alloc-mismatch =>
+        // Active, conditional => LoopLatch, nested-call wall => Virtual) are
+        // already captured by the checkpointStates loop above. Ref: a fits-entirely
+        // loop sets chkpt.type = DISABLED (schematic.py:620-622).
+        if (dec.loopFitsEntirely)
+            continue;
+        if (dec.mandatoryBackEdge || dec.numIterationsPerCharge > 0 || dec.hadEnabledCheckpoints)
+            return true;
+    }
+    return false;
 }
 
 } // namespace checkpoint

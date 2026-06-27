@@ -4,6 +4,9 @@
 #include "common/Logger.h"
 #include "common/PassStatistics.h"
 #include "milp/CheckpointContext.h"
+#include "schematic/CallFold.h"
+#include "schematic/CallIsolation.h"
+#include "schematic/CallSummary.h"
 #include "schematic/LoopAnalyzer.h"
 #include "schematic/MemoryAllocator.h"
 #include "schematic/SchematicBlock.h"
@@ -16,15 +19,19 @@
 
 #include "common/FunctionFilters.h"
 
+#include "llvm/ADT/SCCIterator.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include <chrono>
+#include <map>
 #include <set>
 
 using namespace llvm;
@@ -147,14 +154,128 @@ static void printSchematicStats(const Function &F, const CFGAnalysis &cfg,
     }
 }
 
-PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
-    initLogging();
-    const auto totalStart = std::chrono::steady_clock::now();
+// Fold each solved-callee summary onto its caller's isolated call sites. Faithful
+// port of update_function_basic_blocks (schematic.py:95-131): a checkpoint-free
+// callee folds transparently (DISABLED — the whole callee energy is baked into
+// call_entry as one scalar); a callee that contains a checkpoint becomes a
+// VIRTUAL wall with fixed entry/exit energies so caller regions stop at the call.
+// Ref: §12.4. Must run before LoopAnalyzer (D5).
+static bool foldCalleeSummaries(Function &F, SchematicGraph &graph, CFGAnalysis &cfg,
+                                const SchematicParams &params,
+                                const std::map<Function *, CallSummary> &summaries,
+                                SchematicSolution &solution) {
+    for (const IsolatedCall &ic : collectIsolatedCalls(F)) {
+        auto sumIt = summaries.find(ic.callee);
+        if (sumIt == summaries.end() || !sumIt->second.feasible) {
+            // No usable callee summary (callee failed to solve or was skipped).
+            // We cannot account for the callee's energy at this call site, so
+            // leaving it unfolded would UNDER-count the caller's region energy and
+            // risk an energy-unsafe region. Bail and skip this caller instead.
+            PLOGE << "SCHEMATIC: no usable summary for callee '" << ic.callee->getName()
+                  << "' called from '" << F.getName() << "'; skipping caller (cannot fold)";
+            return false;
+        }
+        const CallSummary &S = sumIt->second;
 
-    if (isBenchmarkInfrastructureFunction(F.getName())) {
-        PLOGI << "SCHEMATIC: skipping benchmark infrastructure function " << F.getName();
-        return PreservedAnalyses::all();
+        SchematicBlock *ceB = graph.getOrCreate(ic.entry);
+        SchematicBlock *cxB = graph.getOrCreate(ic.exit);
+        solution.functionCallBlocks.insert(ceB);
+        solution.functionCallBlocks.insert(cxB);
+
+        double c0 = cfg.getBlockInfo(ic.entry).energyCost; // raw CALL block energy
+        double cx0 = cfg.getBlockInfo(ic.exit).energyCost; // empty exit block (~0)
+
+        // Copy the callee's boundary allocations onto the call blocks (both
+        // regimes): call_entry <- callee.first_bb, call_exit <- callee.last_bb.
+        solution.blockAllocation[ceB] = std::make_shared<RegionAllocation>(S.sfAllocation);
+        solution.blockAllocation[cxB] = std::make_shared<RegionAllocation>(S.efAllocation);
+        solution.decidedPlacements[ceB] = S.sfPlacements;
+        solution.decidedPlacements[cxB] = S.efPlacements;
+
+        FoldedCallCosts fold =
+            computeFoldedCallCosts(c0, cx0, S.sfEToLeave, S.sfELeft, S.efEToLeave, S.efELeft,
+                                   params.capacity, S.checkpointInFunction);
+
+        cfg.setBlockEnergyCost(ic.entry, fold.entryCost);
+        cfg.setBlockEnergyCost(ic.exit, fold.exitCost);
+
+        if (fold.regime == FoldRegime::Virtual) {
+            // VIRTUAL: call_entry/call_exit become fixed barriers.
+            BlockMetadata &ceMeta = solution.blockMeta[ceB];
+            ceMeta.analyzed = true;
+            ceMeta.E_left = fold.entryELeft;
+            ceMeta.E_to_leave = fold.entryEToLeave;
+            BlockMetadata &cxMeta = solution.blockMeta[cxB];
+            cxMeta.analyzed = true;
+            cxMeta.E_left = fold.exitELeft;
+            cxMeta.E_to_leave = fold.exitEToLeave;
+            setCheckpointState(solution, CFGEdge{ceB, cxB}, CheckpointState::Virtual);
+        } else {
+            // DISABLED: call blocks stay interior (analyzed=false); call_entry
+            // carries the whole callee energy as one scalar.
+            disableCheckpoint(solution, CFGEdge{ceB, cxB});
+        }
     }
+    return true;
+}
+
+// Capture this function's summary for folding into its callers. Reads the
+// synthetic START_Func/END_Func boundary metadata (= reference cfg.first_bb /
+// last_bb energy_to_leave/energy_left) and the has-checkpoint predicate. Must run
+// before the FuncScopeGuard erases the synthetic nodes (§12.5).
+static void captureCallSummary(CallSummary &out, const SchematicSolution &solution,
+                               SchematicBlock *startFunc, SchematicBlock *endFunc) {
+    auto metaOr = [&](SchematicBlock *b) -> BlockMetadata {
+        auto it = solution.blockMeta.find(b);
+        return it != solution.blockMeta.end() ? it->second : BlockMetadata{};
+    };
+    // A call summary may only carry module-scope GLOBALS: callee-local allocas are
+    // dead in any caller and must not be folded onto a call site (they would
+    // reference a foreign function's stack slot). Filter them out here.
+    auto allocOr = [&](SchematicBlock *b) -> RegionAllocation {
+        auto it = solution.blockAllocation.find(b);
+        RegionAllocation a =
+            (it != solution.blockAllocation.end() && it->second) ? *it->second : RegionAllocation{};
+        RegionAllocation g;
+        g.vmBytesUsed = a.vmBytesUsed;
+        g.intervalEnergy = a.intervalEnergy;
+        for (const auto &[v, va] : a.vars)
+            if (llvm::isa<llvm::GlobalVariable>(v))
+                g.vars[v] = va;
+        for (const auto &[v, off] : a.vmOffsets)
+            if (llvm::isa<llvm::GlobalVariable>(v))
+                g.vmOffsets[v] = off;
+        return g;
+    };
+    auto placeOr = [&](SchematicBlock *b) -> std::map<llvm::Value *, Placement> {
+        std::map<llvm::Value *, Placement> g;
+        auto it = solution.decidedPlacements.find(b);
+        if (it != solution.decidedPlacements.end())
+            for (const auto &[v, p] : it->second)
+                if (llvm::isa<llvm::GlobalVariable>(v))
+                    g[v] = p;
+        return g;
+    };
+
+    BlockMetadata sf = metaOr(startFunc);
+    BlockMetadata ef = metaOr(endFunc);
+    out.feasible = true;
+    out.sfEToLeave = sf.E_to_leave;
+    out.sfELeft = sf.E_left;
+    out.efEToLeave = ef.E_to_leave;
+    out.efELeft = ef.E_left;
+    out.sfAllocation = allocOr(startFunc);
+    out.efAllocation = allocOr(endFunc);
+    out.sfPlacements = placeOr(startFunc);
+    out.efPlacements = placeOr(endFunc);
+    out.checkpointInFunction = hasNonDisabledCheckpoint(solution);
+}
+
+bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
+                                  const SchematicParams &params, VMAddressTracker &sharedVMTracker,
+                                  const std::map<Function *, CallSummary> &summaries,
+                                  CallSummary &out) {
+    const auto totalStart = std::chrono::steady_clock::now();
 
     // Step 1: Obtain LLVM analyses.
     auto &LI = AM.getResult<LoopAnalysis>(F);
@@ -166,25 +287,11 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip())
             PLOGE << ctxResult.errorMessage;
-        return PreservedAnalyses::all();
+        return false;
     }
     auto &ctx = *ctxResult.context;
 
-    // Step 3: Parse SCHEMATIC params.
-    auto paramsOpt = parseSchematicParams(SchematicConfigOpt.getValue());
-    if (!paramsOpt) {
-        PLOGE << "Error: Failed to parse SCHEMATIC config: " << SchematicConfigOpt.getValue();
-        return PreservedAnalyses::all();
-    }
-    SchematicParams params = *paramsOpt;
-
-    // Override flags from CLI.
-    if (AddDebugMarkersOpt.getValue())
-        params.addDebugMarkers = true;
-    if (ForceCheckpointOnIncompatibleLoopsOpt.getValue())
-        params.forceCheckpointOnIncompatibleLoops = true;
-    if (RecomputeEnergyAfterNewCheckpointOpt.getValue())
-        params.recomputeEnergyAfterNewCheckpoint = true;
+    // Step 3: SCHEMATIC params + CLI overrides are resolved once by the driver.
 
     // Step 4: Hoist non-entry static allocas to the entry block.
     BasicBlock &entryBB = F.getEntryBlock();
@@ -204,7 +311,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         state.printAnalysisErrors(errs());
         PLOGE << "Skipping SCHEMATIC instrumentation for function " << F.getName()
               << " due to unresolved memory/call effects.";
-        return PreservedAnalyses::all();
+        return false;
     }
 
     // Create the SchematicGraph that owns all SchematicBlock instances.
@@ -212,7 +319,15 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
     graph.addCFGEdges(F);
 
     SchematicSolution solution;
-    VMAddressTracker vmTracker;
+    VMAddressTracker &vmTracker = sharedVMTracker;
+
+    // Step 5b: Fold solved-callee summaries onto this function's isolated call
+    // sites — BEFORE loop analysis (D5), so a call nested in a loop is costed
+    // with the callee energy baked in. Ref: schematic.py:95-131,676-695. If a
+    // callee summary is missing (callee failed to solve), skip this caller rather
+    // than instrument it with an under-counted energy budget.
+    if (!foldCalleeSummaries(F, graph, *ctx.cfg, params, summaries, solution))
+        return false;
 
     // Step 6: Load traces (optional).
     std::optional<LoadedTraces> loadedTraces;
@@ -221,7 +336,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         loadedTraces = loader.load(SchematicTraceOpt.getValue());
         if (!loadedTraces) {
             PLOGE << "SCHEMATIC: failed to load traces for " << F.getName();
-            return PreservedAnalyses::all();
+            return false;
         }
         PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
     }
@@ -233,21 +348,21 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
 
     if (!loopAnalyzer.analyzeLoops(solution)) {
         PLOGE << "SCHEMATIC: loop analysis failed for " << F.getName() << " — aborting";
-        return PreservedAnalyses::all();
+        return false;
     }
 
     // Step 8: Get paths from traces (required).
     if (!loadedTraces || loadedTraces->functionPaths.empty()) {
         PLOGE << "SCHEMATIC: no traces loaded for " << F.getName() << " — traces are required";
-        return PreservedAnalyses::all();
+        return false;
     }
     std::vector<EnumeratedPath> paths = loadedTraces->functionPaths;
 
     // Create synthetic START_Func/END_Func boundary blocks for function traces.
     // These match the Python reference's %START_ / %END_ synthetic nodes that
     // are prepended/appended to every function trace (trace.py:288-289).
-    SchematicBlock *startFunc = graph.createSynthetic("START_Func");
-    SchematicBlock *endFunc = graph.createSynthetic("END_Func");
+    SchematicBlock *startFunc = graph.createSynthetic(kStartFuncName.str());
+    SchematicBlock *endFunc = graph.createSynthetic(kEndFuncName.str());
 
     // Mark synthetic boundaries as analyzed with default energy values
     // (same pattern as LoopAnalyzer's START_Loop/END_Loop).
@@ -314,7 +429,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
                 writeStatsJSON(StatsJsonOpt, std::move(root));
             }
-            return PreservedAnalyses::all();
+            return false;
         }
     }
 
@@ -346,7 +461,7 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
                 root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
                 writeStatsJSON(StatsJsonOpt, std::move(root));
             }
-            return PreservedAnalyses::all();
+            return false;
         }
     }
 
@@ -395,7 +510,64 @@ PreservedAnalyses SchematicPass::run(Function &F, FunctionAnalysisManager &AM) {
         writeStatsJSON(StatsJsonOpt, std::move(root));
     }
 
-    return PreservedAnalyses::none();
+    // Capture the callee summary while START_Func/END_Func still live (the
+    // FuncScopeGuard erases them when this function returns).
+    captureCallSummary(out, solution, startFunc, endFunc);
+    return true;
+}
+
+PreservedAnalyses SchematicPass::run(Module &M, ModuleAnalysisManager &MAM) {
+    initLogging();
+
+    // Parse SCHEMATIC params once for the whole module.
+    auto paramsOpt = parseSchematicParams(SchematicConfigOpt.getValue());
+    if (!paramsOpt) {
+        PLOGE << "Error: Failed to parse SCHEMATIC config: " << SchematicConfigOpt.getValue();
+        return PreservedAnalyses::all();
+    }
+    SchematicParams params = *paramsOpt;
+
+    // Override flags from CLI.
+    if (AddDebugMarkersOpt.getValue())
+        params.addDebugMarkers = true;
+    if (ForceCheckpointOnIncompatibleLoopsOpt.getValue())
+        params.forceCheckpointOnIncompatibleLoops = true;
+    if (RecomputeEnergyAfterNewCheckpointOpt.getValue())
+        params.recomputeEnergyAfterNewCheckpoint = true;
+
+    FunctionAnalysisManager &FAM =
+        MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
+
+    // ONE program-wide VM address tracker: globals get stable VM addresses and
+    // the VM capacity budget is enforced across all functions (ref: the single
+    // MemoryAllocator/top_address in schematic.py).
+    VMAddressTracker vmTracker;
+
+    // Bottom-up over the call graph (callees before callers). scc_begin yields
+    // SCCs in reverse-topological order, so leaf functions are solved first and
+    // each callee summary exists before its caller is solved (ref:
+    // schematic.py:676-695). Recursion is rejected by the schematic-isolate pass.
+    CallGraph CG(M);
+    std::map<Function *, CallSummary> summaries;
+    bool changed = false;
+    for (scc_iterator<CallGraph *> I = scc_begin(&CG); !I.isAtEnd(); ++I) {
+        for (CallGraphNode *node : *I) {
+            Function *F = node->getFunction();
+            if (!F || F->isDeclaration())
+                continue;
+            if (isBenchmarkInfrastructureFunction(F->getName())) {
+                PLOGI << "SCHEMATIC: skipping benchmark infrastructure function " << F->getName();
+                continue;
+            }
+            CallSummary summary;
+            if (solveFunction(*F, FAM, params, vmTracker, summaries, summary)) {
+                summaries[F] = std::move(summary);
+                changed = true;
+            }
+        }
+    }
+
+    return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 } // namespace checkpoint

@@ -22,7 +22,7 @@ from .common import (
     canonicalize_ir_for_native_profiling,
     compile_to_ir,
     compile_to_object,
-    inline_functions,
+    isolate_calls,
     link_algorithm,
     now_ms,
     optimize_ir,
@@ -107,16 +107,21 @@ def compile_schematic(
         tripcount_ll = tmp / "tripcount.ll"
         annotate_tripcounts(tc, env, input_ll, tripcount_ll)
 
-        # Inline functions so trace and schematic pass see a single function
-        inlined_ll = tmp / "inlined.ll"
-        inline_functions(tc, tripcount_ll, inlined_ll)
+        # Isolate function calls so the inter-procedural SCHEMATIC pass can fold
+        # each callee's summary onto its call sites (replaces full inlining). The
+        # same isolated IR feeds trace collection, energy analysis, and the solve
+        # pass. At -O0 the calls survive (no inliner has run); at -O>=1 the
+        # optimize_ir step below re-inlines and strips the isolation metadata, so
+        # the run degrades gracefully to the single-function path.
+        isolated_ll = tmp / "isolated.ll"
+        isolate_calls(tc, env, tripcount_ll, isolated_ll)
 
         # Frontend optimization
-        schematic_input_ll = inlined_ll
+        schematic_input_ll = isolated_ll
         if opts.clang_opt_level != 0:
             optimized_ll = tmp / "input_optimized.ll"
             optimize_ir(
-                tc, inlined_ll, optimized_ll,
+                tc, isolated_ll, optimized_ll,
                 opt_level=opts.clang_opt_level,
             )
             schematic_input_ll = optimized_ll
@@ -356,7 +361,7 @@ def _run_schematic_pass(
     cmd: list[str] = [
         tc.opt,
         f"-load-pass-plugin={env.pass_lib}",
-        "-passes=tripcount-annotation,schematic",
+        "-passes=schematic",
         f"-energy-config={cfg}",
         f"-schematic-config={schematic_cfg}",
         f"-schematic-trace={trace_json}",
