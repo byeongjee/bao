@@ -154,7 +154,16 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
     // Track which blocks are region boundaries
     SmallPtrSet<MachineBasicBlock *, 16> boundarySet;
     MachineBasicBlock *entryMBB = topoOrder_[0];
-    boundarySet.insert(entryMBB);
+    // The program-entry function ("main") needs no entry boundary: a power
+    // failure in its first region is recovered by a normal cold boot (the
+    // runtime re-runs from _start, and that first region is idempotent setup).
+    // An entry checkpoint there is redundant and, on the debug device, executes
+    // before debug_init's __nvm_done readback guard — which exists because
+    // mspdebug's tilib driver resets the target on connect — corrupting NVM
+    // readback. Callees still get entry boundaries (PFI call model).
+    const bool entryIsBoundary = MF_.getName() != "main";
+    if (entryIsBoundary)
+        boundarySet.insert(entryMBB);
 
     defsInRegion_.clear();
 
@@ -217,7 +226,9 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
     result.regionBoundaries.clear();
     result.regions.clear();
 
-    MachineBasicBlock *currentRegionStart = nullptr;
+    // Region 0 starts at the entry block even when the entry is not itself a
+    // boundary (program-entry function); its recovery is the cold-boot path.
+    MachineBasicBlock *currentRegionStart = entryMBB;
     std::vector<MachineBasicBlock *> currentRegionBlocks;
     double currentRegionEnergy = 0.0;
 
