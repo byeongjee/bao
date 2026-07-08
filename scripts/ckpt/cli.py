@@ -802,6 +802,89 @@ def compile_uninstrumented_cmd(
         logger.info("Stats CSV: %s", csv_path)
 
 
+@compile.command("chunked")
+@click.argument("input_c")
+@click.option("-e", "--energy-config", type=click.Path(exists=True),
+              help="Energy estimator config. Defaults to assembly params.")
+@click.option("-m", "--milp-config", type=click.Path(exists=True),
+              help="MILP config JSON (for chunk size K).")
+@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
+@click.option("-o", "--output", type=click.Path())
+@click.option("--link/--no-link", default=True, help="Link with boot.S and runtime (default: on).")
+@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
+@click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
+@click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
+@click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="1",
+    help="CPU frequency in MHz (default: 1).",
+)
+@click.pass_context
+def compile_chunked_cmd(
+    ctx: click.Context,
+    input_c: str,
+    energy_config: str | None,
+    milp_config: str | None,
+    cap: str | None,
+    output: str | None,
+    link: bool,
+    device_debug: bool,
+    opt_level: int,
+    clang_opt_level: int,
+    extra_includes: tuple[str, ...],
+    cpu_freq: str,
+) -> None:
+    """Compile with loop chunking but no checkpoint insertion.
+
+    Runs the MILP preprocessing phases (loop canonicalization +
+    strip-mining + reclamp), then compiles like the uninstrumented
+    baseline. Isolates the control-flow overhead of loop chunking.
+
+    INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
+    """
+    from .bench.config import default_energy_config
+    from .compile.chunked import ChunkedCompileOptions, compile_chunked
+
+    env = ctx.obj["env"]
+
+    input_path = _resolve_input(env, input_c)
+    output_path = Path(output) if output else Path("build") / input_path.stem
+
+    milp_config_path = _resolve_algorithm_config(
+        env, "milp", milp_config, cap, "-m/--milp-config",
+    )
+
+    energy_config_path = (
+        Path(energy_config) if energy_config is not None
+        else default_energy_config(env, "milp")
+    )
+
+    result = compile_chunked(
+        ctx.obj["tc"],
+        env,
+        ChunkedCompileOptions(
+            input_c=input_path,
+            energy_config=energy_config_path,
+            milp_config=milp_config_path,
+            output=output_path,
+            pass_log_level=ctx.obj["pass_log_level"],
+            device_debug=device_debug,
+            cpu_freq=int(cpu_freq) * 1_000_000,
+            opt_level=opt_level,
+            clang_opt_level=clang_opt_level,
+            link=link,
+            extra_includes=list(extra_includes),
+        ),
+    )
+
+    logger.info("Object: %s", result.object_file)
+    logger.info("Assembly: %s", result.assembly_file)
+    if result.elf_file:
+        logger.info("ELF: %s", result.elf_file)
+
+
 # =========================================================================
 # bench group
 # =========================================================================
@@ -1182,6 +1265,46 @@ def bench_uninstrumented_o0_cmd(
         algorithm_label="uninstrumentedO0",
         clang_opt_level=0,
         opt_level=3,
+    )
+
+
+@bench.command("chunked")
+@click.argument("benchmarks", nargs=-1)
+@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
+@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Override default energy config.",
+)
+@click.option(
+    "--cpu-freq",
+    type=click.Choice(["1", "8", "16"]),
+    default="16",
+    help="CPU frequency in MHz (default: 16).",
+)
+@click.pass_context
+def bench_chunked_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    cap: tuple[str, ...],
+    output: str | None,
+    energy_config: str | None,
+    cpu_freq: str,
+) -> None:
+    """Run chunking-only baselines across programs and capacitor sizes."""
+    from .bench.chunked import run_chunked_benchmarks
+
+    run_chunked_benchmarks(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=list(benchmarks) if benchmarks else None,
+        caps=list(cap) if cap else None,
+        output_csv=Path(output) if output else None,
+        energy_config=Path(energy_config) if energy_config else None,
+        cpu_freq=int(cpu_freq) * 1_000_000,
+        pass_log_level=ctx.obj["pass_log_level"],
     )
 
 
