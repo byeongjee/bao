@@ -81,30 +81,25 @@ llvm::PreservedAnalyses TripCountAnnotationPass::run(llvm::Function &F,
     if (MarkerFn && MarkerFn->use_empty())
         MarkerFn->eraseFromParent();
 
-    // Step 5: Verify that every loop in the function now has a tripcount
-    // annotation.  Missing annotations produce hard-to-diagnose skip reasons
-    // downstream, so we catch them here.
-    bool missingAnnotation = false;
+    // Note: loops without a __loop_tripcount annotation are allowed. Downstream,
+    // the MILP pass skips summarization for loops with unknown trip counts
+    // (skip reason "unknown-loop-trip-count") and forces a region start inside
+    // them instead — correct but with higher checkpoint overhead. Warn so the
+    // degradation is diagnosable.
     for (llvm::Loop *L : LI) {
         llvm::SmallVector<llvm::Loop *, 8> worklist;
         worklist.push_back(L);
         while (!worklist.empty()) {
             llvm::Loop *Current = worklist.pop_back_val();
             if (!getMarkerTripCount(Current)) {
-                PLOGE << "Error: loop in " << F.getName() << " at block '"
+                PLOGW << "Warning: loop in " << F.getName() << " at block '"
                       << Current->getHeader()->getName()
-                      << "' is missing a __loop_tripcount annotation";
-                missingAnnotation = true;
+                      << "' has no __loop_tripcount annotation; it will not be "
+                         "summarized unless its trip count is provable";
             }
             for (llvm::Loop *Sub : *Current)
                 worklist.push_back(Sub);
         }
-    }
-
-    if (missingAnnotation) {
-        llvm::report_fatal_error("TripCountAnnotationPass: not all loops are annotated with "
-                                 "__loop_tripcount(); add annotations to the source or the pass "
-                                 "will not be able to determine trip counts");
     }
 
     return llvm::PreservedAnalyses::none();
