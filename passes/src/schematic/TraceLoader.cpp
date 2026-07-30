@@ -26,14 +26,14 @@ static LoadedLoopTrace makeCanonicalLoopTrace(Loop *L, SchematicGraph &graph) {
     else
         llt.latch = nullptr;
     llt.depth = L->getLoopDepth();
-    for (BasicBlock *BB : L->getBlocksVector())
+    for (BasicBlock *BB : L->blocks())
         llt.members.push_back(graph.getOrCreate(BB));
     return llt;
 }
 
 static SmallPtrSet<BasicBlock *, 16> collectLoopMemberSet(Loop *L) {
     SmallPtrSet<BasicBlock *, 16> members;
-    for (BasicBlock *BB : L->getBlocksVector())
+    for (BasicBlock *BB : L->blocks())
         members.insert(BB);
     return members;
 }

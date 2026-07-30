@@ -402,7 +402,7 @@ static std::vector<const RegionAllocation *>
 collectLoopMemoryAllocations(llvm::Loop *L, const SchematicSolution &solution,
                              SchematicGraph &graph) {
     std::vector<const RegionAllocation *> allocations;
-    for (llvm::BasicBlock *BB : L->getBlocksVector()) {
+    for (llvm::BasicBlock *BB : L->blocks()) {
         SchematicBlock *block = graph.getOrCreate(BB);
         auto it = solution.blockAllocation.find(block);
         if (it == solution.blockAllocation.end())
@@ -450,7 +450,7 @@ static void applyLoopIterationAdjustment(llvm::Loop *L, unsigned maxTripCount,
         adjIter = maxTripCount;
     LoopMark mark{L, adjIter, ELoop};
     double adjustment = (adjIter - 1) * ELoop;
-    for (llvm::BasicBlock *BB : L->getBlocksVector()) {
+    for (llvm::BasicBlock *BB : L->blocks()) {
         SchematicBlock *block = graph.getOrCreate(BB);
         auto &meta = solution.blockMeta[block];
         meta.loop = mark;
@@ -558,7 +558,7 @@ static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAl
 
     // Reset loop-local energy state and apply the converged body allocation.
     std::set<SchematicBlock *> loopBlocks;
-    for (llvm::BasicBlock *BB : L->getBlocksVector())
+    for (llvm::BasicBlock *BB : L->blocks())
         loopBlocks.insert(graph.getOrCreate(BB));
 
     for (SchematicBlock *block : loopBlocks) {
