@@ -31,7 +31,7 @@ clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
 opt -load-pass-plugin=./passes/build/CheckpointPass.so \
     -passes=checkpoint \
     -energy-config=./benchmarks/sample_energy_config_ir.json \
-    -milp-config=./benchmarks/sample_milp_config.json \
+    -milp-config=./benchmarks/config_1uF.json \
     -S input.ll -o instrumented.ll
 
 # RockClimb (PFI baseline — machine-level, post-regalloc via llc)
@@ -54,7 +54,6 @@ Loop canonicalization (LoopSimplify + LCSSA) is required before LoopStripMining 
 | `-rockclimb-config=<path>` | RockClimb parameters JSON (machine pass, via llc) |
 | `-milp-accept-feasible` | Accept feasible (non-optimal) MILP solutions |
 | `-loop-strip-mining-enabled` | Enable loop strip-mining before MILP (also settable in milp-config) |
-| `-checkpoint-function=<name>` | Checkpoint function name (default: `__checkpoint`) |
 
 ## Test Suite
 
@@ -68,15 +67,13 @@ uv run pytest tests/
 uv run pytest tests/ -m milp            # MILP pass tests + scenarios
 uv run pytest tests/ -m rockclimb       # RockClimb pass tests
 uv run pytest tests/ -m schematic       # SCHEMATIC pass tests
-uv run pytest tests/ -m energy_validation  # Energy validation runtime tests
 uv run pytest tests/ -m vm_nvm          # VM/NVM placement tests
+uv run pytest tests/ -m unit            # Pure-function unit tests (no subprocess, no device)
 
-# Shell wrapper (same flags)
+# Shell wrapper
 ./tests/run_tests.sh                # all tests
 ./tests/run_tests.sh --milp         # MILP only
 ./tests/run_tests.sh --rockclimb    # RockClimb only
-./tests/run_tests.sh --schematic    # SCHEMATIC only
-./tests/run_tests.sh --validate     # Energy validation only
 
 # DWARF mapping validation (assembly-based workflow, separate)
 ./tests/dwarf-validation/validate_dwarf.sh
@@ -86,11 +83,13 @@ uv run pytest tests/ -m vm_nvm          # VM/NVM placement tests
 
 | File | What it tests |
 |------|---------------|
-| `test_milp.py` | Basic MILP pass (11 cases: success, infeasible, missing bb-freq) |
+| `test_milp.py` | Basic MILP pass (success, infeasible, missing bb-freq) |
 | `test_milp_vm_nvm.py` | VM/NVM placement enforcement, overflow, basic placement |
 | `test_rockclimb.py` | RockClimb machine-level pass (post-regalloc) |
-| `test_scenarios.py` | 20 MILP scenarios with structural IR assertions |
-| `test_schematic.py` | SCHEMATIC full trace pipeline (7 scenarios) |
+| `test_scenarios.py` | MILP scenarios with structural IR assertions |
+| `test_schematic.py` | SCHEMATIC full trace pipeline |
+
+Plus many `unit`-marked tests for the Python toolchain (e.g., `test_output_parser.py`, `test_bench_helpers.py`, `test_nvm_parsing.py`).
 
 Requires `passes/build/CheckpointPass.so` to be built first. Test configs live in `tests/` and `tests/scenarios/configs/`.
 
@@ -103,33 +102,37 @@ The `scripts/ckpt/` package provides the compilation, benchmarking, and device i
 ```bash
 # Compilation pipelines (INPUT can be a benchmark name or path to .c file)
 # --csv PATH writes a one-row CSV of compile-time stats only (no device/runtime columns).
-ckpt compile milp           INPUT --cap CAP [--link] [--estimator-mode assembly|ir] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
-ckpt compile rockclimb      INPUT --cap CAP [--link] [--no-precomputed-energy] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
-ckpt compile schematic      INPUT --cap CAP [--link] [--trace-file FILE] [--trace-only] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
-ckpt compile uninstrumented INPUT [--link] [--save-temps] [--halt-mode nop|bor|lpm4] [--cpu-freq 1|8|16] [--device-debug] [--csv CSV] ...
+ckpt compile milp           INPUT --cap CAP [--link] [--estimator-mode assembly|ir] [--save-temps] [--halt-mode nop|bor|lpm4|swbor] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
+ckpt compile rockclimb      INPUT --cap CAP [--link] [--no-precomputed-energy] [--save-temps] [--halt-mode nop|bor|lpm4|swbor] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
+ckpt compile schematic      INPUT --cap CAP [--link] [--trace-file FILE] [--trace-only] [--save-temps] [--halt-mode nop|bor|lpm4|swbor] [--cpu-freq 1|8|16] [--device-debug] [--accumulate-keys FILE] [--csv CSV] ...
+ckpt compile uninstrumented INPUT [--link] [--save-temps] [--halt-mode nop|bor|lpm4|swbor] [--cpu-freq 1|8|16] [--device-debug] [--csv CSV] ...
 # Explicit config paths also accepted: -e ENERGY_CONFIG -m/-c/-s ALGO_CONFIG
 
 # Benchmark runners (compile + flash + NVM readback → CSV). The CSV output flag is
 # --csv (alias -o/--output), unified with `compile`. When no MSP430 device is detected,
 # bench logs a warning and degrades to compile-only: it still writes the CSV, but the
 # device-only runtime columns (execution_time_us, runtime_*) are left blank.
-ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--accumulate-keys FILE] [--csv CSV]
-ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--accumulate-keys FILE] [--csv CSV]
-ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--debug-counters] [--halt-mode] [--estimator-mode] [--trace-config] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--trace-config] [--accumulate-keys FILE] [--csv CSV]
 ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [--csv CSV]
 
-# Semantic verification (defaults to --halt-mode bor to exercise checkpoint/restore under resets)
+# Semantic verification (defaults to --halt-mode swbor to exercise checkpoint/restore under resets;
+# bor is flaky on-device)
 ckpt verify milp       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq]
 ckpt verify rockclimb  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--cpu-freq]
 ckpt verify schematic  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq]
 
 # Analysis
 ckpt analyze strip-mining LOG_FILE [-o CSV]
+ckpt analyze milp-coarse  ...    # coarse-allocation MILP analysis
 ckpt analyze plot       CSV_DIR [--metric M] [--algorithms A...]
 
 # Device interaction
 ckpt device read-serial [--timeout N] [--end-marker M]
 ```
+
+Additional variants: `compile|bench|verify schematicO3`, `compile|bench chunked`, and `bench uninstrumentedO0`.
 
 `--accumulate-keys FILE` writes required energy keys (identifiers the energy estimator uses to look up instruction costs) to a file as a sorted comma-separated list. The file is read-merge-written on each invocation, so keys accumulate across multiple runs. Not available on `uninstrumented` commands (no energy pass).
 
@@ -151,6 +154,7 @@ scripts/ckpt/
 │   ├── milp.py          # MilpCompileOptions + compile_milp() (two-pass assembly + single-pass IR)
 │   ├── rockclimb.py     # RockClimbCompileOptions + compile_rockclimb() (MIR pipeline)
 │   ├── schematic.py     # SchematicCompileOptions + compile_schematic() (trace + insertion)
+│   ├── chunked.py       # Chunked-loop variant pipeline
 │   └── uninstrumented.py # UninstrumentedCompileOptions + compile_uninstrumented() (baseline)
 ├── device/
 │   ├── nvm.py           # Symbol resolution, hex dump parsing
@@ -163,6 +167,7 @@ scripts/ckpt/
 │   ├── milp.py          # MILP benchmark runner
 │   ├── rockclimb.py     # RockClimb benchmark runner
 │   ├── schematic.py     # SCHEMATIC benchmark runner (two-phase: trace once, then per-cap)
+│   ├── chunked.py       # Chunked-loop benchmark runner
 │   └── uninstrumented.py # Baseline execution time measurement (no checkpoints)
 ├── verify/
 │   ├── common.py        # Shared verification infrastructure (verify_algorithm callback pattern)
@@ -171,6 +176,7 @@ scripts/ckpt/
 │   └── schematic.py     # SCHEMATIC semantic verification
 └── analysis/
     ├── strip_mining.py  # Parse verbose logs for strip-mining K values
+    ├── milp_coarse.py   # Coarse-allocation MILP analysis
     └── plot.py          # Plot benchmark CSV results (requires `uv sync --extra plot`)
 ```
 
@@ -192,15 +198,13 @@ Rscript scripts/plot_results.R [--output-dir DIR] [--normalize] [--benchmarks B,
 
 ```
 passes/
-├── include/
-│   ├── common/        # Shared infrastructure
-│   ├── estimator/     # Energy estimation interfaces
-│   ├── milp/          # MILP-specific headers
-│   └── schematic/     # SCHEMATIC-specific headers
+├── include/           # Headers: common/, estimator/, milp/, rockclimb/, schematic/
 ├── src/
-│   ├── common/        # PassRegistry, CFGAnalysis, LoopTripCount, BBFreqCollector, TripCountAnnotation
+│   ├── common/        # PassRegistry, CFGAnalysis, LoopTripCount, BBFreqCollector,
+│   │                  #   TripCountAnnotation, EdgeSplit, BlockSplitter, RockClimbConfig
 │   ├── estimator/     # IRBased, AssemblyBased estimators + factory
 │   ├── milp/          # MILP pass pipeline components
+│   ├── rockclimb/     # RockClimbLoopUnrollPass (IR-level preprocessing)
 │   └── schematic/     # SCHEMATIC pass pipeline components
 ├── bb-debuginfo/      # Separate LLVM pass: assigns BB indices as DWARF line numbers
 ├── bb-energy-analyzer/ # Standalone tool: computes per-BB energy from MSP430 assembly
@@ -255,7 +259,7 @@ The optimizer uses binary and continuous decision variables:
 | `vmPending[b,v]` | binary | VM-placed pending state |
 | `energyAccumulated[b]` | continuous | accumulated energy at block b |
 
-**Objective:** Minimize weighted sum of region starts, NVM access penalties, save/restore costs, weighted by block frequency and reboot probability.
+**Objective:** Minimize weighted sum of region starts, NVM access penalties, save/restore costs, weighted by block frequency.
 
 **Constraint groups:** C1 (entry region start), C3 (VM capacity), C4 (need-restore linearization), C5 (placement propagation), C6 (pending propagation), C7 (commit model), C8 (energy init), C9 (energy propagation), C10 (buffer safety).
 
@@ -265,7 +269,7 @@ Machine-level (post-regalloc) greedy pass in `rockclimb-backend/`. Operates on M
 
 ## Configuration
 
-Two main config files. All fields are required (no silent defaults).
+Two main config files. The per-capacitor configs `benchmarks/config_{cap}.json` (e.g. `config_1uF.json`) are unified: shared fields at the root plus optional nested `milp`/`rockclimb`/`schematic` sections, so one file serves as the algorithm config for every pass.
 
 ### Energy Estimator Config (`-energy-config`)
 
@@ -273,11 +277,11 @@ Shared by MILP and RockClimb. `estimator_type` is `"ir"` (instruction cost mappi
 
 ### MILP Config (`-milp-config`)
 
-Fields: `capacity`, `E_pro`, `E_epi`, `reg_store_energy`, `reg_restore_energy`, `nvm_access_penalty`, `mem_store_energy_per_byte`, `mem_restore_energy_per_byte`, `vm_capacity_bytes`, `q_reboot_probability`. Optional: `loop_strip_mining_enabled`.
+Required: `capacity`, `E_pro`, `E_epi`, `reg_store_energy`, `reg_restore_energy`, `nvm_access_penalty`, `mem_store_energy_per_byte`, `mem_restore_energy_per_byte`, `vm_capacity_bytes`. Optional: `N_reg` (default 16), and MILP-specific fields like `loop_strip_mining_enabled` (in the nested `milp` section or at root).
 
 ### RockClimb Config (`-rockclimb-config`, machine pass via llc)
 
-Fields: `capacity` (or `E_input`), `N_reg`, `reg_store_energy`, `reg_restore_energy`, `distributed_checkpointing`. Optional: `add_debug_markers`.
+Fields: `capacity` (or legacy `E_input`), `N_reg`, `reg_store_energy`, `reg_restore_energy`, `E_pro`, `E_epi`, `distributed_checkpointing` (in the nested `rockclimb` section or at root). Optional: `add_debug_markers`.
 
 Sample configs are in `benchmarks/` and `tests/`.
 
