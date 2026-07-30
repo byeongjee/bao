@@ -38,7 +38,7 @@ _rockclimb_boot:
 
 _do_recovery:
     hw_init
-    poison_reset_sram
+    poison_bor_sram
 
     /* R14 holds saved PC. Clear recovery marker first to prevent
        infinite recovery loops on next reboot. */
@@ -50,7 +50,7 @@ _do_recovery:
     /* Push saved PC onto restored stack (for ret-based jump) */
     push    R14
 
-    poison_reset_gprs
+    poison_bor_gprs
 
     /*
      * Restore all general-purpose registers R4-R15 from NVM.
@@ -114,8 +114,7 @@ _normal_boot:
 
 __region_boundary:
 #ifdef DEVICE_DEBUG
-    /* Preserve SR across counter increments — ADD clobbers flags,
-       and in nop halt mode this function returns to the caller. */
+    /* Preserve SR in case LPM4 wakes without a reset. */
     push    SR
     add_u32_to_nvm_counter cnt_boundary, 1
     pop     SR

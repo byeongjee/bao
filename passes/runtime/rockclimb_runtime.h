@@ -57,12 +57,12 @@ extern uint32_t cnt_restore_reg NVM_SECTION;
  * Region boundary: save state and halt.
  *
  * Saves return address (region body start) and SP to NVM. Halt behavior
- * depends on compile-time mode (set via --halt-mode in compile_rockclimb.sh):
- *   - nop (default): returns immediately (GDB-compatible, no halt)
- *   - bor  (HALT_BOR):  triggers software BOR reset (FRAM survives)
- *   - lpm4 (HALT_LPM4): enters LPM4 deep sleep (real deployment)
+ * depends on the compile-time mode:
+ *   - swbor (HALT_SWBOR, default): jumps to _start without destroying state
+ *   - bor   (HALT_BOR): triggers reset and destroys modeled volatile state
+ *   - lpm4  (HALT_LPM4): enters LPM4 deep sleep (real deployment)
  *
- * On reboot (BOR or LPM4), boot.S recovers from saved NVM state.
+ * On reboot, boot.S recovers from saved NVM state.
  *
  * Provided by rockclimb_boot.S (assembly).
  */

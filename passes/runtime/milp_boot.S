@@ -42,7 +42,7 @@ _milp_boot:
 
 _do_recovery:
     hw_init
-    poison_reset_sram
+    poison_bor_sram
 
     /* R14 holds saved PC. Clear recovery marker first to prevent
        infinite recovery loops on next reboot. */
@@ -54,7 +54,7 @@ _do_recovery:
     /* Push saved PC onto restored stack (for ret-based jump) */
     push    R14
 
-    poison_reset_gprs
+    poison_bor_gprs
 
     /* No register restore needed — MILP commits/restores all live state
        at IR level. After regalloc, these become physical register

@@ -38,7 +38,7 @@ class RockClimbCompileOptions:
     precomputed_energy: bool
     link: bool
     device_debug: bool
-    halt_mode: str
+    halt_mode: str | None
     cpu_freq: int
     clang_opt_level: int
     opt_level: int

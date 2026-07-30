@@ -47,7 +47,7 @@ class SchematicCompileOptions:
     trace_only: bool
     link: bool
     device_debug: bool
-    halt_mode: str
+    halt_mode: str | None
     cpu_freq: int
     opt_level: int
     clang_opt_level: int

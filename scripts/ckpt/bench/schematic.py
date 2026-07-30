@@ -207,7 +207,7 @@ def run_schematic_benchmarks(
     device_debug:
         Link the debug-counter runtime and attempt NVM readback.
     halt_mode:
-        Halt mode at region boundaries (nop/bor/lpm4).
+        Halt mode at region boundaries (bor/lpm4/swbor).
     """
     bench_paths = discover_benchmarks(env, benchmarks)
     if not bench_paths:

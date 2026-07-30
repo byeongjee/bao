@@ -42,7 +42,7 @@ class MilpCompileOptions:
     pass_log_level: str
     debug: bool
     link: bool
-    halt_mode: str
+    halt_mode: str | None
     device_debug: bool
     cpu_freq: int
     opt_level: int

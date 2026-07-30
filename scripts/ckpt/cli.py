@@ -24,6 +24,8 @@ from .log import python_to_cpp_log_level, setup_logging
 
 logger = logging.getLogger(__name__)
 
+HALT_MODES = ("bor", "lpm4", "swbor")
+
 # Exit code mapping for CkptError subclasses.
 _EXIT_CODES: list[tuple[type[CkptError], int]] = [
     (ConfigError, 2),
@@ -205,9 +207,9 @@ def _write_compile_csv(
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
-    default="nop",
-    help="Halt mode for linked binary.",
+    type=click.Choice(HALT_MODES),
+    default="swbor",
+    help="Halt mode for linked binary (default: swbor).",
 )
 @click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
@@ -335,9 +337,9 @@ def compile_milp_cmd(
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
-    default="nop",
-    help="Halt mode for linked binary.",
+    type=click.Choice(HALT_MODES),
+    default="swbor",
+    help="Halt mode for linked binary (default: swbor).",
 )
 @click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
@@ -566,9 +568,9 @@ def _compile_schematic_impl(
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
-    default="nop",
-    help="Halt mode for linked binary.",
+    type=click.Choice(HALT_MODES),
+    default="swbor",
+    help="Halt mode for linked binary (default: swbor).",
 )
 @click.option(
     "--trace-file", type=click.Path(exists=True), help="Pre-collected trace JSON."
@@ -651,9 +653,9 @@ def compile_schematic_cmd(
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
-    default="nop",
-    help="Halt mode for linked binary.",
+    type=click.Choice(HALT_MODES),
+    default="swbor",
+    help="Halt mode for linked binary (default: swbor).",
 )
 @click.option(
     "--trace-file", type=click.Path(exists=True), help="Pre-collected trace JSON."
@@ -901,7 +903,7 @@ def bench() -> None:
 @click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    type=click.Choice(HALT_MODES),
     default="swbor",
     help="Halt mode for linked binary.",
 )
@@ -975,7 +977,7 @@ def bench_milp_cmd(
 @click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    type=click.Choice(HALT_MODES),
     default="swbor",
     help="Halt mode for linked binary.",
 )
@@ -1038,7 +1040,7 @@ def bench_rockclimb_cmd(
 @click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    type=click.Choice(HALT_MODES),
     default="swbor",
     help="Halt mode for linked binary.",
 )
@@ -1117,7 +1119,7 @@ def bench_schematic_cmd(
 @click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
+    type=click.Choice(HALT_MODES),
     default="swbor",
     help="Halt mode for linked binary.",
 )
@@ -1326,13 +1328,12 @@ def verify() -> None:
     type=click.Path(exists=True),
     help="Override default energy config.",
 )
-# Default swbor (still exercises the checkpoint/restore recovery path).
-# bor gives flaky on-device results; root cause not yet diagnosed.
+# Verification uses BOR, which destroys modeled volatile state before recovery.
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
-    default="swbor",
-    help="Halt mode for linked binary (default: swbor).",
+    type=click.Choice(HALT_MODES),
+    default="bor",
+    help="Halt mode for linked binary (default: bor).",
 )
 @click.option(
     "--cpu-freq",
@@ -1375,13 +1376,12 @@ def verify_rockclimb_cmd(
     type=click.Path(exists=True),
     help="Override default energy config.",
 )
-# Default swbor (still exercises the checkpoint/restore recovery path).
-# bor gives flaky on-device results; root cause not yet diagnosed.
+# Verification uses BOR, which destroys modeled volatile state before recovery.
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
-    default="swbor",
-    help="Halt mode for linked binary (default: swbor).",
+    type=click.Choice(HALT_MODES),
+    default="bor",
+    help="Halt mode for linked binary (default: bor).",
 )
 @click.option(
     "--estimator-mode",
@@ -1436,13 +1436,12 @@ def verify_milp_cmd(
     type=click.Path(exists=True),
     help="Override default energy config.",
 )
-# Default swbor (still exercises the checkpoint/restore recovery path).
-# bor gives flaky on-device results; root cause not yet diagnosed.
+# Verification uses BOR, which destroys modeled volatile state before recovery.
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
-    default="swbor",
-    help="Halt mode for linked binary (default: swbor).",
+    type=click.Choice(HALT_MODES),
+    default="bor",
+    help="Halt mode for linked binary (default: bor).",
 )
 @click.option(
     "--estimator-mode",
@@ -1503,13 +1502,12 @@ def verify_schematic_cmd(
     type=click.Path(exists=True),
     help="Override default energy config.",
 )
-# Default swbor (still exercises the checkpoint/restore recovery path).
-# bor gives flaky on-device results; root cause not yet diagnosed.
+# Verification uses BOR, which destroys modeled volatile state before recovery.
 @click.option(
     "--halt-mode",
-    type=click.Choice(["nop", "bor", "lpm4", "swbor"]),
-    default="swbor",
-    help="Halt mode for linked binary (default: swbor).",
+    type=click.Choice(HALT_MODES),
+    default="bor",
+    help="Halt mode for linked binary (default: bor).",
 )
 @click.option(
     "--estimator-mode",

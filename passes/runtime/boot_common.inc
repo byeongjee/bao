@@ -5,6 +5,14 @@
  * Requires F_CPU to be defined via -D at assembly time.
  */
 
+#if !defined(HALT_BOR) && !defined(HALT_LPM4) && !defined(HALT_SWBOR)
+#error "Define one of HALT_BOR, HALT_LPM4, or HALT_SWBOR"
+#endif
+
+#if (defined(HALT_BOR) + defined(HALT_LPM4) + defined(HALT_SWBOR)) > 1
+#error "Define only one halt mode"
+#endif
+
 /*
  * hw_init — Disable WDT, unlock GPIO, configure FRAM wait states + DCO.
  *
@@ -34,16 +42,15 @@
 .endm
 
 /*
- * poison_reset_sram — Model volatile SRAM loss for debug reset runs.
+ * poison_bor_sram — Model volatile SRAM loss for BOR verification.
  *
- * Software-triggered resets leave SRAM intact on the FR5994.  Semantic
- * verification must not rely on that retention, so erase the device SRAM
- * range before restoring checkpointed state.  The linker scripts provide
- * the bounds; RockClimb and SCHEMATIC place mutable state in FRAM, so the
- * same operation is harmless for their recovery paths.
+ * Software-triggered BOR leaves SRAM intact on the FR5994. BOR is the
+ * correctness mode, so erase the device SRAM range before restoring
+ * checkpointed state regardless of whether debug counters are enabled.
+ * SWBOR deliberately retains SRAM for continuous-power measurement.
  */
-.macro poison_reset_sram
-#if (defined(HALT_BOR) || defined(HALT_SWBOR)) && defined(DEVICE_DEBUG)
+.macro poison_bor_sram
+#if defined(HALT_BOR)
     mov.w   #__ram_start, R4
 1:
     clr.w   0(R4)
@@ -54,16 +61,15 @@
 .endm
 
 /*
- * poison_reset_gprs — Model volatile CPU state loss for debug reset runs.
+ * poison_bor_gprs — Model volatile CPU state loss for BOR verification.
  *
  * PMMSWBOR resets the MSP430 but leaves R4-R15 unchanged on the FR5994.
- * That can hide missing checkpoint restores.  Device-debug builds are used
- * for semantic verification, so clear the registers after saving the resume
- * PC and before algorithm-specific restoration.  Non-debug benchmark timing
- * remains unmodified.
+ * That can hide missing checkpoint restores, so BOR mode clears them after
+ * saving the resume PC and before algorithm-specific restoration. SWBOR
+ * deliberately retains them for continuous-power measurement.
  */
-.macro poison_reset_gprs
-#if (defined(HALT_BOR) || defined(HALT_SWBOR)) && defined(DEVICE_DEBUG)
+.macro poison_bor_gprs
+#if defined(HALT_BOR)
     clr     R4
     clr     R5
     clr     R6
@@ -100,10 +106,8 @@
  *
  * Expects __nvm_pc and __nvm_sp to be .extern'd by the caller.
  * Halt mode selected by HALT_BOR / HALT_LPM4 / HALT_SWBOR defines.
- * If none is defined, this is debug/nop mode (no save, no halt).
  */
 .macro save_pc_sp_and_halt
-#if defined(HALT_BOR) || defined(HALT_LPM4) || defined(HALT_SWBOR)
     /* Save return address as recovery PC.
        0(SP) holds the return address pushed by CALL. */
     mov.w   0(SP), &__nvm_pc
@@ -133,13 +137,6 @@
     /* If woken by interrupt (not full reboot), fall through to ret */
 
 #endif /* BOR vs SWBOR vs LPM4 */
-
-#else
-    /* Debug/nop mode: no state save, no halt. Saving __nvm_pc here would
-       leave a non-zero value in FRAM that triggers a spurious recovery on
-       the next boot if the flash programmer doesn't reprogram the .nvm
-       segment (FRAM retains data across power cycles and reflashes). */
-#endif
 .endm
 
 /*
