@@ -34,16 +34,36 @@
 .endm
 
 /*
- * poison_bor_gprs — Model volatile CPU state loss for debug BOR runs.
+ * poison_reset_sram — Model volatile SRAM loss for debug reset runs.
+ *
+ * Software-triggered resets leave SRAM intact on the FR5994.  Semantic
+ * verification must not rely on that retention, so erase the device SRAM
+ * range before restoring checkpointed state.  The linker scripts provide
+ * the bounds; RockClimb and SCHEMATIC place mutable state in FRAM, so the
+ * same operation is harmless for their recovery paths.
+ */
+.macro poison_reset_sram
+#if (defined(HALT_BOR) || defined(HALT_SWBOR)) && defined(DEVICE_DEBUG)
+    mov.w   #__ram_start, R4
+1:
+    clr.w   0(R4)
+    add.w   #2, R4
+    cmp.w   #__ram_end, R4
+    jne     1b
+#endif
+.endm
+
+/*
+ * poison_reset_gprs — Model volatile CPU state loss for debug reset runs.
  *
  * PMMSWBOR resets the MSP430 but leaves R4-R15 unchanged on the FR5994.
  * That can hide missing checkpoint restores.  Device-debug builds are used
  * for semantic verification, so clear the registers after saving the resume
  * PC and before algorithm-specific restoration.  Non-debug benchmark timing
- * remains an unmodified hardware BOR.
+ * remains unmodified.
  */
-.macro poison_bor_gprs
-#if defined(HALT_BOR) && defined(DEVICE_DEBUG)
+.macro poison_reset_gprs
+#if (defined(HALT_BOR) || defined(HALT_SWBOR)) && defined(DEVICE_DEBUG)
     clr     R4
     clr     R5
     clr     R6

@@ -115,6 +115,9 @@ MEMORY {
 
 SECTIONS
 {
+  PROVIDE (__ram_start = ORIGIN(RAM));
+  PROVIDE (__ram_end = ORIGIN(RAM) + LENGTH(RAM));
+
   .leaRAM             : {} > LEARAM
   .jtagsignature      : {} > JTAGSIGNATURE
   .bslsignature       : {} > BSLSIGNATURE
