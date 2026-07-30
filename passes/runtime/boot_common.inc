@@ -28,7 +28,7 @@
     mov.b   #0x00, &0x0161      /* CSCTL0_H = 0 (lock) */
 #elif F_CPU == 8000000
     mov.b   #0xA5, &0x0161
-    mov.w   #0x0006, &0x0162    /* CSCTL1 = DCOFSEL_6 = 8 MHz */
+    mov.w   #0x000C, &0x0162    /* CSCTL1 = DCOFSEL_6 = 8 MHz */
     mov.b   #0x00, &0x0161
 #endif
 .endm
