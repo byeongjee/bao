@@ -34,6 +34,32 @@
 .endm
 
 /*
+ * poison_bor_gprs — Model volatile CPU state loss for debug BOR runs.
+ *
+ * PMMSWBOR resets the MSP430 but leaves R4-R15 unchanged on the FR5994.
+ * That can hide missing checkpoint restores.  Device-debug builds are used
+ * for semantic verification, so clear the registers after saving the resume
+ * PC and before algorithm-specific restoration.  Non-debug benchmark timing
+ * remains an unmodified hardware BOR.
+ */
+.macro poison_bor_gprs
+#if defined(HALT_BOR) && defined(DEVICE_DEBUG)
+    clr     R4
+    clr     R5
+    clr     R6
+    clr     R7
+    clr     R8
+    clr     R9
+    clr     R10
+    clr     R11
+    clr     R12
+    clr     R13
+    clr     R14
+    clr     R15
+#endif
+.endm
+
+/*
  * add_u32_to_nvm_counter — Add an immediate to a uint32_t counter in .nvm.
  *
  * Counter layout is little-endian, two 16-bit words:

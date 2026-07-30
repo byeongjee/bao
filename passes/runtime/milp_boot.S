@@ -53,6 +53,8 @@ _do_recovery:
     /* Push saved PC onto restored stack (for ret-based jump) */
     push    R14
 
+    poison_bor_gprs
+
     /* No register restore needed — MILP commits/restores all live state
        at IR level. After regalloc, these become physical register
        saves/restores automatically. */

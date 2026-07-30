@@ -53,6 +53,8 @@ _do_recovery:
     /* Push saved PC onto restored stack (for ret-based jump) */
     push    R14
 
+    poison_bor_gprs
+
     /*
      * Restore all general-purpose registers R4-R15 from NVM.
      * Slot layout matches deterministic regId mapping:
