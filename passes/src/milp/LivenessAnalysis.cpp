@@ -6,6 +6,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 
+#include <cassert>
 #include <map>
 
 namespace checkpoint {
@@ -27,11 +28,13 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
     std::map<std::pair<const llvm::BasicBlock *, llvm::GlobalVariable *>, BlockGVInfo> blockGVInfo;
 
     // Phase 1: Per-instruction scan (iterate F for non-const access).
+    const llvm::DataLayout &DL = F.getParent()->getDataLayout();
     for (llvm::BasicBlock &BB : F) {
         for (llvm::GlobalVariable *GV : vmObjs) {
             auto key = std::make_pair(static_cast<const llvm::BasicBlock *>(&BB), GV);
             BlockGVInfo info;
             bool seenMustStore = false;
+            uint64_t gvBytes = DL.getTypeAllocSize(GV->getValueType()).getFixedValue();
 
             for (llvm::Instruction &I : BB) {
                 auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
@@ -40,9 +43,15 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
                 if (llvm::isRefSet(MRI) && !seenMustStore)
                     info.loadBeforeMustStore = true;
 
+                // A store kills liveness only when it provably overwrites the
+                // entire global. An element store like g[0] = x folds its
+                // all-zero GEP away and looks like a store to the global
+                // itself, but only covers part of an aggregate.
                 if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
                     llvm::Value *Ptr = SI->getPointerOperand()->stripPointerCasts();
-                    if (Ptr == GV) {
+                    if (Ptr == GV &&
+                        DL.getTypeStoreSize(SI->getValueOperand()->getType()).getFixedValue() >=
+                            gvBytes) {
                         info.hasMustStore = true;
                         seenMustStore = true;
                     }
@@ -65,8 +74,10 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
         while (changed) {
             changed = false;
             for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
-                auto key = std::make_pair(BB, GV);
-                const BlockGVInfo &info = blockGVInfo[key];
+                auto infoIt = blockGVInfo.find(std::make_pair(BB, GV));
+                assert(infoIt != blockGVInfo.end() &&
+                       "phase 1 scanned a different block set than cfg.getBlocks()");
+                const BlockGVInfo &info = infoIt->second;
 
                 bool newLiveOut = false;
                 for (const llvm::BasicBlock *Succ : llvm::successors(BB)) {
@@ -175,8 +186,10 @@ computeIneligAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAna
         while (changed) {
             changed = false;
             for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
-                auto key = std::make_pair(BB, V);
-                const BlockVarInfo &info = blockVarInfo[key];
+                auto infoIt = blockVarInfo.find(std::make_pair(BB, V));
+                assert(infoIt != blockVarInfo.end() &&
+                       "phase 1 scanned a different block set than cfg.getBlocks()");
+                const BlockVarInfo &info = infoIt->second;
 
                 bool newLiveOut = false;
                 for (const llvm::BasicBlock *Succ : llvm::successors(BB)) {
