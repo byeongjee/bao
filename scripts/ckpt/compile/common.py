@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -692,12 +693,64 @@ def now_ms() -> int:
 
 def save_temps(tmp: Path, dest_dir: Path) -> None:
     """Copy all intermediate files from *tmp* to *dest_dir*."""
-    import shutil
-
     dest_dir.mkdir(parents=True, exist_ok=True)
     for f in sorted(tmp.iterdir()):
         if f.is_file():
             shutil.copy2(f, dest_dir / f.name)
+
+
+def copy_stats_json(tmp: Path, output: Path) -> Path | None:
+    """Copy tmp/stats.json next to *output* as <output>.stats.json if present."""
+    src = tmp / "stats.json"
+    if not src.is_file():
+        return None
+    dst = output.with_suffix(".stats.json")
+    shutil.copy2(src, dst)
+    return dst
+
+
+def finalize_checkpointed_object(
+    tc: Toolchain,
+    env: ProjectEnv,
+    *,
+    tmp: Path,
+    output: Path,
+    opt_level: int,
+    link: bool,
+    link_fn,
+    pass_output: str,
+    stats_json: Path | None,
+    save_temps_dir: Path | None,
+) -> Path | None:
+    """Compile tmp/ckpt.ll to <output>.s/.o and optionally link via *link_fn*.
+
+    Failures raise CompilationError carrying *pass_output* and *stats_json*
+    so pass statistics survive post-pass errors. Temps are saved to
+    *save_temps_dir* (when set) on both success and failure. Returns the
+    ELF path when linked, else None.
+    """
+    elf_file: Path | None = None
+    try:
+        out_s = tmp / "ckpt.s"
+        out_o = tmp / "ckpt.o"
+        compile_to_object(tc, env, tmp / "ckpt.ll", out_s, out_o, opt_level=opt_level)
+
+        if save_temps_dir is not None:
+            save_temps(tmp, save_temps_dir)
+
+        shutil.copy2(out_o, output.with_suffix(".o"))
+        shutil.copy2(out_s, output.with_suffix(".s"))
+
+        if link:
+            elf_file = link_fn()
+    except ToolError as exc:
+        if save_temps_dir is not None:
+            save_temps(tmp, save_temps_dir)
+        err = CompilationError(exc.step, exc.result)
+        err.pass_output = pass_output
+        err.stats_json = stats_json
+        raise err from exc
+    return elf_file
 
 
 # ---------------------------------------------------------------------------
