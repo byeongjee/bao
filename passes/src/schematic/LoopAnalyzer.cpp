@@ -142,12 +142,6 @@ collectLoopBodyPaths(const LoadedLoopTrace &loopTrace) {
     return bodyPaths;
 }
 
-static std::string getBlockName(const SchematicBlock *block) {
-    if (const llvm::BasicBlock *BB = block->getLLVMBlock())
-        return BB->getName().str();
-    return block->getName().str();
-}
-
 static bool tracedLoopContainsBlock(const LoadedLoopTrace &loopTrace, SchematicBlock *block) {
     for (SchematicBlock *member : loopTrace.members) {
         if (member == block)
@@ -188,7 +182,7 @@ collectUnexplainedUncoveredLoopMembers(const LoadedLoopTrace &loopTrace,
             continue;
         if (blockCoveredByNestedTracedLoop(loopTrace, member, loadedLoopTraces))
             continue;
-        uncovered.push_back(getBlockName(member));
+        uncovered.push_back(member->displayName());
     }
     return uncovered;
 }
@@ -212,7 +206,7 @@ collectLoopTraceCoverageErrors(llvm::LoopInfo &LI, SchematicGraph &graph,
             collectUnexplainedUncoveredLoopMembers(loopTrace, loadedLoopTraces);
         if (uncovered.empty())
             continue;
-        errors.push_back("loop trace for header '" + getBlockName(loopTrace.header) +
+        errors.push_back("loop trace for header '" + loopTrace.header->displayName() +
                          "' does not cover loop members without traced subloop coverage: " +
                          joinNames(uncovered));
     }

@@ -46,12 +46,6 @@ extern cl::opt<bool> RecomputeEnergyAfterNewCheckpointOpt;
 
 namespace checkpoint {
 
-static std::string getSchematicBlockName(const SchematicBlock *block) {
-    if (const llvm::BasicBlock *BB = block->getLLVMBlock())
-        return BB->getName().str();
-    return block->getName().str();
-}
-
 static json::Array buildLoopDecisionDetails(const SchematicSolution &solution) {
     struct LoopDecisionRow {
         std::string headerName;
@@ -64,14 +58,7 @@ static json::Array buildLoopDecisionDetails(const SchematicSolution &solution) {
         if (!block)
             continue;
 
-        std::string headerName;
-        if (llvm::BasicBlock *BB = block->getLLVMBlock()) {
-            headerName = BB->getName().str();
-        } else {
-            headerName = block->getName().str();
-        }
-
-        rows.push_back({headerName, &decision});
+        rows.push_back({block->displayName(), &decision});
     }
 
     std::sort(rows.begin(), rows.end(), [](const LoopDecisionRow &lhs, const LoopDecisionRow &rhs) {
@@ -149,8 +136,8 @@ static void printSchematicStats(const Function &F, const CFGAnalysis &cfg,
             mergedOrigins += origins[i];
         }
 
-        PLOGI << "    - " << getSchematicBlockName(edge.src) << " -> "
-              << getSchematicBlockName(edge.dst) << " : " << mergedOrigins;
+        PLOGI << "    - " << edge.src->displayName() << " -> " << edge.dst->displayName() << " : "
+              << mergedOrigins;
     }
 }
 

@@ -107,8 +107,7 @@ void RCGSolver::createReachableCheckpointGraph() {
     std::ostringstream pathStream;
     pathStream << "[DEBUG RCG] === createRCG: pathBlocks:";
     for (auto *b : pathBlocks_)
-        pathStream << " "
-                   << (b->getLLVMBlock() ? b->getLLVMBlock()->getName().str() : b->getName().str());
+        pathStream << " " << b->displayName();
     PLOGD << pathStream.str();
 
     PLOGD << "[DEBUG RCG] energyLeft=" << energyLeft << " energyToLeave=" << energyToLeave
@@ -244,7 +243,7 @@ RCGResult RCGSolver::getShortestPathInRCG() {
                 if (i > 0)
                     msg += " -> ";
                 auto *b = minRejectedBlocks_[i];
-                msg += b->getLLVMBlock() ? b->getLLVMBlock()->getName().str() : b->getName();
+                msg += b->displayName();
             }
             msg += "] requires energy " + std::to_string(minRejectedEnergy_) + " but budget is " +
                    std::to_string(minRejectedBudget_) + ")";
