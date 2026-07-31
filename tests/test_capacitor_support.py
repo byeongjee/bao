@@ -9,11 +9,9 @@ from ckpt.analysis.plot import _sort_key
 from ckpt.analysis.strip_mining import parse_strip_mining_log
 from ckpt.bench.config import discover_capacitors
 from ckpt.env import ProjectEnv
+from conftest import PROJECT_DIR
 
 pytestmark = pytest.mark.unit
-
-
-PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 
 def test_discover_capacitors_includes_50uf_by_default() -> None:

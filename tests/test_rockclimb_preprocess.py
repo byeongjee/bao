@@ -13,8 +13,8 @@ from ckpt.compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 from ckpt.env import ProjectEnv
 from ckpt.runner import StepResult
 from ckpt.toolchain import Toolchain
+from conftest import PROJECT_DIR, _run, write_src
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
 IR_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "sample_energy_config_ir.json"
 ASSEMBLY_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "assembly_params.json"
 CRC_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "crc.c"
@@ -69,16 +69,6 @@ int sumN(int *a, int n) {
     return s;
 }
 """
-
-
-def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, check=False)
-
-
-def _write_src(tmp_path: Path, code: str) -> Path:
-    src = tmp_path / "test.c"
-    src.write_text(code)
-    return src
 
 
 def _write_rockclimb_config(tmp_path: Path, *, capacity: float) -> Path:
@@ -181,7 +171,7 @@ def _parse_register_checkpoints(pass_output: str) -> int:
 def test_preprocess_partially_unrolls_constant_trip_loop(
     tools, compile_to_ir, tmp_path
 ):
-    src = _write_src(tmp_path, CONSTANT_LOOP)
+    src = write_src(tmp_path, CONSTANT_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
     config_path = _write_rockclimb_config(tmp_path, capacity=20.0)
@@ -206,7 +196,7 @@ def test_preprocess_partially_unrolls_constant_trip_loop(
 def test_preprocess_caps_unroll_for_loop_that_fits_budget(
     tools, compile_to_ir, tmp_path
 ):
-    src = _write_src(tmp_path, CONSTANT_LOOP)
+    src = write_src(tmp_path, CONSTANT_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
     config_path = _write_rockclimb_config(tmp_path, capacity=200.0)
@@ -230,7 +220,7 @@ def test_preprocess_caps_unroll_for_loop_that_fits_budget(
 
 
 def test_preprocess_honors_cli_max_unroll_factor(tools, compile_to_ir, tmp_path):
-    src = _write_src(tmp_path, CONSTANT_LOOP)
+    src = write_src(tmp_path, CONSTANT_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
     config_path = _write_rockclimb_config(tmp_path, capacity=200.0)
@@ -250,7 +240,7 @@ def test_preprocess_honors_cli_max_unroll_factor(tools, compile_to_ir, tmp_path)
 
 
 def test_preprocess_skips_unknown_trip_count_loop(tools, compile_to_ir, tmp_path):
-    src = _write_src(tmp_path, UNKNOWN_LOOP)
+    src = write_src(tmp_path, UNKNOWN_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
     config_path = _write_rockclimb_config(tmp_path, capacity=15.0)
@@ -274,7 +264,7 @@ def test_compile_rockclimb_runs_preprocess(tmp_path, monkeypatch):
     env = ProjectEnv.from_environ(PROJECT_DIR)
     tc = Toolchain.resolve(env)
 
-    src = _write_src(tmp_path, CONSTANT_LOOP)
+    src = write_src(tmp_path, CONSTANT_LOOP)
     config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
 
     real_preprocess = rockclimb_module._run_rockclimb_preprocess
@@ -317,7 +307,7 @@ def test_compile_rockclimb_recovers_inlining_from_o0_ir(tmp_path):
     env = ProjectEnv.from_environ(PROJECT_DIR)
     tc = Toolchain.resolve(env)
 
-    src = _write_src(tmp_path, HELPER_LOOP)
+    src = write_src(tmp_path, HELPER_LOOP)
     config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
 
     compile_rockclimb(
@@ -351,7 +341,7 @@ def test_compile_rockclimb_leaves_llvm_loop_unrolling_enabled(tmp_path, monkeypa
     env = ProjectEnv.from_environ(PROJECT_DIR)
     tc = Toolchain.resolve(env)
 
-    src = _write_src(tmp_path, CONSTANT_LOOP)
+    src = write_src(tmp_path, CONSTANT_LOOP)
     config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
 
     real_optimize = rockclimb_module.optimize_ir_with_options
@@ -446,7 +436,7 @@ def test_run_rockclimb_pass_skips_debug_marker_instrumentation(tmp_path, monkeyp
 def test_run_rockclimb_preprocess_passes_max_unroll_flag(tmp_path, monkeypatch):
     env = ProjectEnv.from_environ(PROJECT_DIR)
     tc = Toolchain.resolve(env)
-    src = _write_src(tmp_path, CONSTANT_LOOP)
+    src = write_src(tmp_path, CONSTANT_LOOP)
     config_path = _write_rockclimb_config(tmp_path, capacity=30.0)
 
     seen: dict[str, list[str]] = {}
