@@ -571,19 +571,9 @@ static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAl
             solution.blockAllocation[block] = sharedAlloc;
     }
 
-    double energyLeftStart =
-        params.capacity - params.E_pro - params.N_reg * params.regRestoreEnergy;
-    for (const auto &[gv, va] : bodyAlloc.vars) {
-        if (va.placement == Placement::VM)
-            energyLeftStart -= params.memRestoreEnergyPerByte * state.getVarSizeBytes(gv);
-    }
-
+    double energyLeftStart = computeLoopEntryEnergyLeft(bodyAlloc, state, params);
     double eToLeave =
-        params.E_epi + params.N_reg * params.regStoreEnergy + params.loopIncrementCostNvm;
-    for (const auto &[gv, va] : bodyAlloc.vars) {
-        if (va.placement == Placement::VM)
-            eToLeave += params.memStoreEnergyPerByte * state.getVarSizeBytes(gv);
-    }
+        computeLoopExitEnergyToLeave(bodyAlloc, state, params, /*includeLoopIncrementCost=*/true);
 
     auto isCurrentLoopBackedge = [&](SchematicBlock *src, SchematicBlock *dst) {
         return src == latchBlock && dst == headerBlock;
