@@ -66,6 +66,16 @@ if ! $RUN_MILP && ! $RUN_ROCKCLIMB; then
     RUN_ROCKCLIMB=true
 fi
 
+# RockClimb coverage lives in pytest (test_rockclimb*.py); delegate.
+if $RUN_ROCKCLIMB; then
+    echo "Running RockClimb pytest suite (uv run pytest tests/ -m rockclimb)..."
+    (cd "$PROJECT_DIR" && uv run pytest tests/ -m rockclimb)
+    RUN_ROCKCLIMB=false
+    if ! $RUN_MILP; then
+        exit 0
+    fi
+fi
+
 # Check prerequisites
 if [ ! -f "$PASS_LIB" ]; then
     echo -e "${RED}Error: Pass library not found at $PASS_LIB${NC}"
@@ -133,15 +143,11 @@ MILP_TESTS=(
     "test_vm_nvm_placement:VM/NVM placement - global memory assignment:checkpoint:estimator_ir_uniform.json:milp_params_small.json:O3:pass"
 )
 
-ROCKCLIMB_TESTS=()
 
 # Collect tests to run
 TESTS=()
 if $RUN_MILP; then
     TESTS+=("${MILP_TESTS[@]}")
-fi
-if $RUN_ROCKCLIMB; then
-    TESTS+=("${ROCKCLIMB_TESTS[@]}")
 fi
 
 # Header
