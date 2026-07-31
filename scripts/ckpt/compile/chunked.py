@@ -17,8 +17,7 @@ from ..runner import run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .common import (
-    annotate_tripcounts,
-    compile_to_ir,
+    compile_annotated_ir,
     compile_to_object,
     link_algorithm,
     optimize_ir,
@@ -76,26 +75,16 @@ def compile_chunked(
     opts.output.parent.mkdir(parents=True, exist_ok=True)
 
     with compilation_workdir(prefix="ckpt_chunked_") as tmp:
-        # Phase 1: C -> LLVM IR at -O0 (preserves loops for tripcount)
-        input_ll = tmp / "input.ll"
-        extra_includes = list(opts.extra_includes)
-        extra_includes.append(str(env.project_dir / "passes" / "runtime"))
-
-        compile_to_ir(
+        tripcount_ll = compile_annotated_ir(
             tc,
             env,
-            opts.input_c,
-            input_ll,
-            clang_opt_level=0,
+            input_c=opts.input_c,
+            tmp=tmp,
             debug=False,
             device_debug=opts.device_debug,
-            extra_includes=extra_includes,
-            extra_defines=[f"F_CPU={opts.cpu_freq}"],
+            cpu_freq=opts.cpu_freq,
+            extra_includes=opts.extra_includes,
         )
-
-        # Tripcount annotation (before optimization)
-        tripcount_ll = tmp / "tripcount.ll"
-        annotate_tripcounts(tc, env, input_ll, tripcount_ll)
 
         # Frontend optimization
         chunk_input_ll = tripcount_ll

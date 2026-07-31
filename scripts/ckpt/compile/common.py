@@ -90,6 +90,45 @@ def compile_to_ir(
     return run(cmd, step_name="compile_to_ir")
 
 
+def compile_annotated_ir(
+    tc: Toolchain,
+    env: ProjectEnv,
+    *,
+    input_c: Path,
+    tmp: Path,
+    debug: bool,
+    device_debug: bool,
+    cpu_freq: int,
+    extra_includes: list[str],
+) -> Path:
+    """Shared phase 1 of the instrumented pipelines: C -> -O0 IR -> tripcounts.
+
+    Compiles at -O0 (preserving loop structure for exact trip-count
+    annotation) with the runtime headers on the include path, then runs the
+    tripcount-annotation pass. Later stages re-optimize as needed.
+    Returns the annotated IR path (tmp/tripcount.ll).
+    """
+    input_ll = tmp / "input.ll"
+    includes = list(extra_includes)
+    includes.append(str(env.project_dir / "passes" / "runtime"))
+
+    compile_to_ir(
+        tc,
+        env,
+        input_c,
+        input_ll,
+        clang_opt_level=0,
+        debug=debug,
+        device_debug=device_debug,
+        extra_includes=includes,
+        extra_defines=[f"F_CPU={cpu_freq}"],
+    )
+
+    tripcount_ll = tmp / "tripcount.ll"
+    annotate_tripcounts(tc, env, input_ll, tripcount_ll)
+    return tripcount_ll
+
+
 # ---------------------------------------------------------------------------
 # Trip-count annotation
 # ---------------------------------------------------------------------------

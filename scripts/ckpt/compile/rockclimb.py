@@ -16,8 +16,7 @@ from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from . import common
 from .common import (
-    annotate_tripcounts,
-    compile_to_ir,
+    compile_annotated_ir,
     link_algorithm,
     optimize_ir_with_options,
     run_assembly_energy,
@@ -88,28 +87,18 @@ def compile_rockclimb(
     with compilation_workdir(prefix="ckpt_rockclimb_") as tmp:
         output = opts.output
 
-        # Step 1: C -> LLVM IR at -O0 so later opt passes can rebuild the
-        # frontend shape while preserving exact loop-trip annotations.
-        raw_ll = tmp / "raw.ll"
-        clang_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
-        if opts.device_debug:
-            clang_defines.append("DEVICE_DEBUG")
-
-        compile_to_ir(
+        # Step 1: C -> -O0 IR -> tripcount annotation, so later opt passes can
+        # rebuild the frontend shape while preserving exact loop-trip counts.
+        annotated_ll = compile_annotated_ir(
             tc,
             env,
-            opts.input_c,
-            raw_ll,
-            clang_opt_level=0,
+            input_c=opts.input_c,
+            tmp=tmp,
             debug=False,
             device_debug=opts.device_debug,
-            extra_includes=[str(env.project_dir / "passes" / "runtime")],
-            extra_defines=clang_defines,
+            cpu_freq=opts.cpu_freq,
+            extra_includes=[],
         )
-
-        # Step 1b: Tripcount annotation
-        annotated_ll = tmp / "annotated.ll"
-        annotate_tripcounts(tc, env, raw_ll, annotated_ll)
 
         # Step 1c: Strip clang -O0 noinline attributes so the normal
         # optimization pipeline can recover the old clang -O3 frontend shape.
