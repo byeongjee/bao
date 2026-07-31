@@ -40,10 +40,10 @@ opt -load-pass-plugin=./passes/build/CheckpointPass.so \
 
 ### Pass Pipeline
 
-The `checkpoint`/`milp` pass name registers a pipeline of four passes:
-`LoopSimplifyPass → LCSSAPass → LoopStripMiningPass → MILPCheckpointPass`
+The `checkpoint`/`milp` pass name registers a pipeline of six passes:
+`LoopSimplifyPass → LCSSAPass → LoopRotatePass → IndVarSimplifyPass → LoopStripMiningPass → MILPCheckpointPass`
 
-Loop canonicalization (LoopSimplify + LCSSA) is required before LoopStripMining can transform loops.
+Loop canonicalization (LoopSimplify + LCSSA + LoopRotate + IndVarSimplify) is required before LoopStripMining can transform loops.
 
 ### CLI Options
 
