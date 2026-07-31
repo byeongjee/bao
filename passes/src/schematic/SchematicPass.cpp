@@ -277,12 +277,12 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
                                   CallSummary &out, bool &mutatedIR) {
     const auto totalStart = std::chrono::steady_clock::now();
 
-    // Step 1: Obtain LLVM analyses.
+    // Obtain LLVM analyses.
     auto &LI = AM.getResult<LoopAnalysis>(F);
     auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
     auto &AA = AM.getResult<AAManager>(F);
 
-    // Step 2: Hoist non-entry static allocas to the entry block. Must happen
+    // Hoist non-entry static allocas to the entry block. Must happen
     // BEFORE the checkpoint context is created: the context computes per-block
     // energy costs, and hoisting afterwards would leave the costs attributed to
     // the blocks the allocas were moved out of.
@@ -299,7 +299,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
         }
     }
 
-    // Step 3: Create base checkpoint context (estimator + CFG).
+    // Create base checkpoint context (estimator + CFG).
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(), "schematic pass");
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip())
@@ -308,9 +308,9 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     }
     auto &ctx = *ctxResult.context;
 
-    // Step 4: SCHEMATIC params + CLI overrides are resolved once by the driver.
+    // SCHEMATIC params + CLI overrides are resolved once by the driver.
 
-    // Step 5: Run SchematicStateAnalysis.
+    // Run SchematicStateAnalysis.
     SchematicStateAnalysis state(F, AA);
     if (state.hasAnalysisErrors()) {
         state.printAnalysisErrors(errs());
@@ -326,7 +326,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     SchematicSolution solution;
     VMAddressTracker &vmTracker = sharedVMTracker;
 
-    // Step 5b: Fold solved-callee summaries onto this function's isolated call
+    // Fold solved-callee summaries onto this function's isolated call
     // sites — BEFORE loop analysis (D5), so a call nested in a loop is costed
     // with the callee energy baked in. Ref: schematic.py:95-131,676-695. If a
     // callee summary is missing (callee failed to solve), skip this caller rather
@@ -334,7 +334,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     if (!foldCalleeSummaries(F, graph, *ctx.cfg, params, summaries, solution))
         return false;
 
-    // Step 6: Load traces (optional).
+    // Load traces (optional).
     std::optional<LoadedTraces> loadedTraces;
     if (!SchematicTraceOpt.getValue().empty()) {
         TraceLoader loader(F, LI, graph);
@@ -346,7 +346,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
         PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
     }
 
-    // Step 7: Loop analysis.
+    // Loop analysis.
     LoopAnalyzer loopAnalyzer(LI, SE, *ctx.cfg, state, params, &vmTracker, graph);
     if (loadedTraces)
         loopAnalyzer.setLoadedLoopTraces(loadedTraces->loopTraces);
@@ -356,7 +356,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
         return false;
     }
 
-    // Step 8: Get paths from traces (required).
+    // Get paths from traces (required).
     if (!loadedTraces || loadedTraces->functionPaths.empty()) {
         PLOGE << "SCHEMATIC: no traces loaded for " << F.getName() << " — traces are required";
         return false;
@@ -395,7 +395,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
         ~FuncScopeGuard() { fn(); }
     } funcGuard{cleanupFunc};
 
-    // Step 9: Analyze each path.
+    // Analyze each path.
     for (const auto &ep : paths) {
         solution.pathsAnalyzed++;
         // Prepend/append synthetic boundary blocks (ref: trace.py:288-289).
@@ -438,7 +438,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
         }
     }
 
-    // Step 9b: Analyze uncovered blocks (Python: find_and_analyse_not_fixed_paths).
+    // Analyze uncovered blocks (Python: find_and_analyse_not_fixed_paths).
     {
         std::string uncoveredError;
         if (!findAndAnalyzeNotFixedPaths(*ctx.cfg, solution, state, params, &vmTracker, LI,
@@ -470,10 +470,10 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
         }
     }
 
-    // Step 10: Resolve remaining potential edges (reference: schematic.py:468-502).
+    // Resolve remaining potential edges (reference: schematic.py:468-502).
     removePotentialCheckpointsBetweenFixedBBs(*ctx.cfg, solution, state, params, LI, graph);
 
-    // Step 11: Collect statistics.
+    // Collect statistics.
     for (const auto &region : solution.regions) {
         for (const auto &[gv, va] : region.allocation.vars) {
             if (va.placement == Placement::VM)
@@ -483,7 +483,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
         }
     }
 
-    // Step 12: Instrument.
+    // Instrument.
     SchematicInstrumenter instrumenter(*F.getParent(), params.addDebugMarkers);
     unsigned inserted = instrumenter.instrumentFunction(F, solution, state);
 
@@ -491,7 +491,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     double totalExecutionTimeMs =
         std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
-    // Step 13: Print statistics.
+    // Print statistics.
     printSchematicStats(F, *ctx.cfg, state, solution, instrumenter, inserted, totalExecutionTimeMs);
 
     if (!StatsJsonOpt.empty()) {

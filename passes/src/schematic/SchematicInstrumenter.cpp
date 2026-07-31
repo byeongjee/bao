@@ -190,7 +190,7 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
     unsigned inserted = 0;
     llvm::IRBuilder<> builder(ckptBB, ckptBB->getFirstInsertionPt());
 
-    // Phase 1: Save ending region's VM vars with live_end=true.
+    // Save ending region's VM vars with live_end=true.
     // For globals: memcpy shadow -> GV (SRAM -> FRAM).
     // For allocas: memcpy shadow -> alloca (SRAM -> FRAM stack).
     if (endingAlloc) {
@@ -222,14 +222,14 @@ unsigned SchematicInstrumenter::insertCheckpointSequence(llvm::BasicBlock *ckptB
         }
     }
 
-    // Phase 2: Call __region_boundary.
+    // Call __region_boundary.
     // Assembly handles bulk register save/restore, cnt_boundary, cnt_save_reg,
     // cnt_restore_reg internally via #ifdef DEVICE_DEBUG.
     builder.CreateCall(boundaryFn_);
     inserted++;
     boundaryCalls_++;
 
-    // Phase 3: Restore starting region's VM vars with live_start=true.
+    // Restore starting region's VM vars with live_start=true.
     // For globals: memcpy GV -> shadow (FRAM -> SRAM).
     // For allocas: memcpy alloca -> shadow (FRAM stack -> SRAM).
     if (startingAlloc) {
@@ -363,10 +363,10 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
     storeMemCalls_ = 0;
     restoreMemCalls_ = 0;
 
-    // Step 1: Declare runtime functions.
+    // Declare runtime functions.
     declareRuntimeFunctions();
 
-    // Step 2: Ensure candidate globals have a FRAM section if not already annotated.
+    // Ensure candidate globals have a FRAM section if not already annotated.
     for (llvm::Value *V : state.getCandidates()) {
         if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
             if (GV->getSection().empty())
@@ -374,12 +374,12 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
         }
     }
 
-    // Step 3: Create shadow globals.
+    // Create shadow globals.
     createShadowGlobals(F, solution, state);
 
-    // Step 4: Build per-block allocation map from blockAllocation.
-    // Allocations were already extended during analysis (SchematicPass Step 9c)
-    // to contain all accessed candidate variables.
+    // Build per-block allocation map from blockAllocation.
+    // Allocations were already extended during trace analysis
+    // (applyMemoryAllocation) to contain all accessed candidate variables.
     // No two SchematicBlock* entries may map to the same BasicBlock*: the last
     // one would silently win in blockToAlloc and the rewriting/checkpoint logic
     // below would use inconsistent allocations, so fail hard before using the map.
@@ -401,7 +401,7 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
         blockToAlloc[BB] = allocPtr.get();
     }
 
-    // Step 5: Rewrite accesses per-block based on each block's allocation.
+    // Rewrite accesses per-block based on each block's allocation.
     // VM-placed variables get rewritten to use the shadow global.
     // NVM-placed variables keep the original alloca/GV.
     for (llvm::BasicBlock &BB : F) {
@@ -411,11 +411,11 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
         rewriteAccessesInRegion({&BB}, *it->second);
     }
 
-    // Step 7: Entry block — no boundary call (consistent with RockClimb,
+    // Entry block — no boundary call (consistent with RockClimb,
     // which skips the entry block boundary). The first region starts at
     // program entry without a checkpoint.
 
-    // Step 8: Insert checkpoints at enabled edges.
+    // Insert checkpoints at enabled edges.
 
     for (const CFGEdge &edge : solution.enabledCheckpoints) {
         // Skip synthetic blocks — they have no real IR.
@@ -426,7 +426,8 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
         llvm::BasicBlock *dstBB = edge.dst->getLLVMBlock();
 
         // Skip only the true loop back-edge (latch -> header) when loop
-        // checkpoint logic (mandatory or conditional) handles it in Step 7.
+        // checkpoint logic (mandatory or conditional) handles it in the
+        // loop-decision handling below.
         bool isLoopBackEdge = false;
         for (const auto &[header, dec] : solution.loopDecisions) {
             bool handledByLoopLogic =
@@ -499,7 +500,7 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
         }
     }
 
-    // Step 7: Handle loop conditional checkpoints.
+    // Handle loop conditional checkpoints.
     for (const auto &[header, decision] : solution.loopDecisions) {
         // Skip synthetic headers (shouldn't happen, but guard).
         if (header->isSynthetic())

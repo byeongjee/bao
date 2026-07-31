@@ -31,7 +31,7 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
                             SchematicSolution &solution, const CFGAnalysis &cfg,
                             const SchematicStateAnalysis &state, const SchematicParams &params,
                             llvm::LoopInfo &LI, llvm::Loop *loopScope) {
-    // Phase 2: BFS backward from seedEdge through disabled edges to build DAG
+    // BFS backward from seedEdge through disabled edges to build DAG
     std::deque<CFGEdge> toVisit = {seedEdge};
     std::set<CFGEdge> visited;
     std::map<CFGEdge, std::vector<CFGEdge>> dagAdj;
@@ -75,7 +75,7 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
         }
     }
 
-    // Phase 3: Kahn's algorithm for topological sort, then longest-path propagation
+    // Kahn's algorithm for topological sort, then longest-path propagation
     std::map<CFGEdge, unsigned> inDeg;
     for (auto &[node, children] : dagAdj) {
         if (inDeg.find(node) == inDeg.end())
@@ -137,7 +137,7 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
     // instead: build the DAG of reachable disabled edges first, then propagate
     // the worst-case (max) accumulated cost in topological order.
 
-    // Phase 2: BFS forward from seedEdge through disabled edges to build DAG
+    // BFS forward from seedEdge through disabled edges to build DAG
     std::deque<CFGEdge> toVisit = {seedEdge};
     std::set<CFGEdge> visited;
     std::map<CFGEdge, std::vector<CFGEdge>> dagAdj;
@@ -179,7 +179,7 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
         }
     }
 
-    // Phase 3: Kahn's algorithm for topological sort, then longest-path propagation
+    // Kahn's algorithm for topological sort, then longest-path propagation
     std::map<CFGEdge, unsigned> inDeg;
     for (auto &[node, children] : dagAdj) {
         if (inDeg.find(node) == inDeg.end())
