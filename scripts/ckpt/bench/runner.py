@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from saleae.automation import Manager
 
 from ..env import ProjectEnv
-from ..errors import DeviceError
+from ..errors import CkptError, DeviceError
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
@@ -464,6 +464,102 @@ def run_benchmark_matrix(
             accumulate_keys_to_file(all_required_keys, accumulate_keys_file)
 
     # ----- Final summary -----
+    logger.info("")
+    logger.info("==========================================")
+    logger.info("Results written to: %s", output_csv)
+    logger.info("==========================================")
+
+
+# Compile callback for the simple timing loop: returns the ELF path (or None
+# when linking produced nothing). The capacitor is None for per-benchmark runs.
+TimingCompileFn = Callable[[Path, "CapacitorConfig | None"], "Path | None"]
+
+
+def run_timing_matrix(
+    *,
+    bench_paths: list[Path],
+    capacitors: list[CapacitorConfig] | None,
+    compile_fn: TimingCompileFn,
+    output_csv: Path,
+    csv_header: list[str],
+    saleae_manager: Manager | None,
+    capture_timeout_seconds: float,
+) -> None:
+    """Compile + flash + time benchmarks without pass statistics or NVM readback.
+
+    A lighter sibling of :func:`run_benchmark_matrix` for the uninstrumented
+    and chunked baselines: rows carry only compile time and execution time.
+    When *capacitors* is None the loop is per-benchmark only and the CSV has
+    no capacitor column.
+    """
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_csv, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(csv_header)
+
+        items: list[tuple[Path, CapacitorConfig | None]]
+        if capacitors is None:
+            items = [(b, None) for b in bench_paths]
+        else:
+            items = [(b, c) for b in bench_paths for c in capacitors]
+
+        total = len(items)
+        for i, (bench_path, cap) in enumerate(items, 1):
+            bench_name = bench_path.stem
+            row_name = bench_name if cap is None else f"{bench_name} ({cap.label})"
+            logger.info("[%d/%d] Running %s ...", i, total, row_name)
+
+            def emit(status: str, fields: dict[str, str | int | None]) -> None:
+                row = BenchmarkRow(
+                    benchmark=bench_name,  # noqa: B023 — called within iteration
+                    capacitor=cap.label if cap is not None else "",  # noqa: B023
+                    status=status,
+                    fields=fields,
+                )
+                write_csv_row(writer, row, csv_header)
+
+            try:
+                t0 = time.monotonic()
+                elf = compile_fn(bench_path, cap)
+                compilation_time_ms = int((time.monotonic() - t0) * 1000)
+            except CkptError as exc:
+                logger.error("  FAILED (compilation): %s", exc)
+                emit("failed", {})
+                continue
+
+            if elf is None or not elf.exists():
+                logger.error("  FAILED (no ELF produced)")
+                emit("failed", {"compilation_time_ms": compilation_time_ms})
+                continue
+
+            if saleae_manager is None:
+                logger.info(
+                    "  OK (compile-only)  compilation_time=%dms",
+                    compilation_time_ms,
+                )
+                emit("ok", {"compilation_time_ms": compilation_time_ms})
+                continue
+
+            try:
+                execution_time_us = measure_execution_time(
+                    elf, saleae_manager, capture_timeout_seconds
+                )
+                logger.info(
+                    "  OK  compilation_time=%dms execution_time=%.2fus",
+                    compilation_time_ms,
+                    execution_time_us,
+                )
+                emit(
+                    "ok",
+                    {
+                        "compilation_time_ms": compilation_time_ms,
+                        "execution_time_us": str(round(execution_time_us, 2)),
+                    },
+                )
+            except DeviceError as exc:
+                logger.error("  DEVICE ERROR: %s", exc)
+                emit("device_error", {"compilation_time_ms": compilation_time_ms})
+
     logger.info("")
     logger.info("==========================================")
     logger.info("Results written to: %s", output_csv)
