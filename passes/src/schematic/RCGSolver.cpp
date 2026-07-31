@@ -131,10 +131,6 @@ void RCGSolver::createReachableCheckpointGraph() {
     // Python reference calls compute_cost([]) which returns (MemoryAllocation(), 0).
     // The C++ getIntervalBlocks returns empty when the checkpoint is adjacent to
     // start/end, but we must still create the edge with just overhead costs.
-    // Helper: compute interval cost, handling empty intervals (zero execution cost).
-    // Python reference calls compute_cost([]) which returns (MemoryAllocation(), 0).
-    // The C++ getIntervalBlocks returns empty when the checkpoint is adjacent to
-    // start/end, but we must still create the edge with just overhead costs.
     auto computeIntervalCost = [&](const std::vector<SchematicBlock *> &blocks,
                                    const RegionAllocation *sa,
                                    const RegionAllocation *ea) -> ComputeCostResult {

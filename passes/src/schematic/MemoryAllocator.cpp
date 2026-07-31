@@ -292,7 +292,7 @@ chooseMemoryAllocation(const std::map<llvm::Value *, VariableAccessEstimate> &va
                        const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
                        const std::vector<const RegionAllocation *> &memoryAllocations,
                        VMAddressTracker *tracker) {
-    // Step 1: Merge allocations (reference: memory_allocator.py:153-163).
+    // Merge allocations (reference: memory_allocator.py:153-163).
     RegionAllocation constrainedAlloc;
     {
         std::optional<RegionAllocation> merged;
@@ -346,7 +346,7 @@ chooseMemoryAllocation(const std::map<llvm::Value *, VariableAccessEstimate> &va
     RegionAllocation result = constrainedAlloc;
     double totalGain = 0.0;
 
-    // Step 2: Subtract save/restore costs for constrained variables.
+    // Subtract save/restore costs for constrained variables.
     // Reference lines 167-170: use need_restore/need_save from merged allocation.
     for (const auto &[v, va] : result.vars) {
         unsigned size = state.getVarSizeBytes(v);
@@ -356,7 +356,7 @@ chooseMemoryAllocation(const std::map<llvm::Value *, VariableAccessEstimate> &va
             totalGain -= params.memStoreEnergyPerByte * size;
     }
 
-    // Step 3: Evaluate candidates not in constrained allocation.
+    // Evaluate candidates not in constrained allocation.
     // Candidate struct for greedy packing.
     struct CandidateEntry {
         llvm::Value *v;
@@ -555,7 +555,7 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
     if (trace.size() < 3)
         llvm::report_fatal_error("Trace should be at least 3 bb long (start, bb and end)");
 
-    // 1. Mark checkpoints as enabled
+    // Mark checkpoints as enabled
     updateCheckpointType(trace, result.selectedCheckpoints, solution, origin);
 
     // 1b. Boundary allocation extension (reference: schematic.py:402-421).
@@ -620,7 +620,7 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
         }
     }
 
-    // 2. Record allocations and mark blocks as analyzed.
+    // Record allocations and mark blocks as analyzed.
     // Reference: schematic.py:427-447 — walk entire trace applying allocations.
     // When a block already has an allocation (from a previous trace or loop analysis),
     // EXTEND it (add missing variables only) rather than replacing it.
@@ -672,7 +672,7 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
         }
     }
 
-    // 3. Per-checkpoint energy propagation (reference: apply_memory_allocation lines 449-466)
+    // Per-checkpoint energy propagation (reference: apply_memory_allocation lines 449-466)
     struct SeedCkpt {
         SchematicBlock *bbBefore;
         SchematicBlock *bbAfter;

@@ -136,7 +136,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
     auto &LI = AM.getResult<LoopAnalysis>(F);
 
     // -----------------------------------------------------------------------
-    // 1. Assign sequential BB indices
+    // Assign sequential BB indices
     // -----------------------------------------------------------------------
     DenseMap<BasicBlock *, unsigned> bbIndex;
     std::vector<std::string> bbNames;
@@ -149,7 +149,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
     unsigned bbCount = idx;
 
     // -----------------------------------------------------------------------
-    // 2. Collect loop metadata
+    // Collect loop metadata
     // -----------------------------------------------------------------------
     struct LoopMeta {
         int loopId;
@@ -208,7 +208,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
     unsigned loopCount = loops.size();
 
     // -----------------------------------------------------------------------
-    // 3. Declare runtime function prototypes
+    // Declare runtime function prototypes
     // -----------------------------------------------------------------------
     Type *VoidTy = Type::getVoidTy(Ctx);
     Type *I32Ty = Type::getInt32Ty(Ctx);
@@ -222,7 +222,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
     FunctionCallee funcExitFn = M.getOrInsertFunction("__trace_func_exit", VoidTy);
 
     // -----------------------------------------------------------------------
-    // 4. Emit per-function metadata as a FuncTraceMeta struct
+    // Emit per-function metadata as a FuncTraceMeta struct
     // -----------------------------------------------------------------------
     // The C runtime defines:
     //   typedef struct {
@@ -297,7 +297,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
                                       GlobalValue::PrivateLinkage, metaStruct, metaPrefix);
 
     // -----------------------------------------------------------------------
-    // 5. Insert __trace_func_enter at function entry
+    // Insert __trace_func_enter at function entry
     // -----------------------------------------------------------------------
     BasicBlock &entryBB = F.getEntryBlock();
     // Find first non-alloca instruction
@@ -315,7 +315,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
     entryBuilder.CreateCall(funcEnterFn, {metaGV});
 
     // -----------------------------------------------------------------------
-    // 6. Insert __trace_bb at start of each BB (after PHIs)
+    // Insert __trace_bb at start of each BB (after PHIs)
     // -----------------------------------------------------------------------
     for (BasicBlock &BB : F) {
         BasicBlock::iterator insertIt = BB.getFirstNonPHIIt();
@@ -342,7 +342,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
     }
 
     // -----------------------------------------------------------------------
-    // 7. Insert loop instrumentation (innermost first)
+    // Insert loop instrumentation (innermost first)
     // -----------------------------------------------------------------------
     for (const auto &lm : loops) {
         Value *loopIdVal = ConstantInt::get(I32Ty, lm.loopId);
@@ -376,7 +376,7 @@ PreservedAnalyses TraceCollectorPass::run(Function &F, FunctionAnalysisManager &
     }
 
     // -----------------------------------------------------------------------
-    // 8. Insert __trace_func_exit before each ret
+    // Insert __trace_func_exit before each ret
     // -----------------------------------------------------------------------
     for (BasicBlock &BB : F) {
         Instruction *term = BB.getTerminator();

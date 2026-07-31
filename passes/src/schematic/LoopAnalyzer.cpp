@@ -894,7 +894,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         ~ScopeGuard() { fn(); }
     } guard{cleanup};
 
-    // Step 1: Get max trip count.
+    // Get max trip count.
     auto tcOpt = getMaxTripCount(L);
     if (!tcOpt) {
         PLOGE << "SCHEMATIC: loop at " << blocks.header->getName()
@@ -903,7 +903,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     }
     uint64_t maxTripCount = *tcOpt;
 
-    // Step 2: Get loop body paths (header-to-latch).
+    // Get loop body paths (header-to-latch).
     const LoadedLoopTrace *matchedLoopTrace =
         findLoadedLoopTraceForHeader(blocks.headerBlock, loadedLoopTraces_);
     std::vector<std::vector<SchematicBlock *>> bodyPaths =
@@ -915,7 +915,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return false;
     }
 
-    // Step 3: Run RCG solver on each body path.
+    // Run RCG solver on each body path.
     initializeSyntheticLoopBoundaryState(solution, state_, params_, blocks);
     std::string errorMsg;
     if (!analyzeLoopBodyPaths(bodyPaths, blocks, solution, state_, cfg_, params_, tracker_, LI_, L,
@@ -925,7 +925,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return false;
     }
 
-    // Step 3b: Analyze uncovered blocks within this loop (reference: schematic.py:554).
+    // Analyze uncovered blocks within this loop (reference: schematic.py:554).
     errorMsg.clear();
     if (!findAndAnalyzeNotFixedPaths(cfg_, solution, state_, params_, tracker_, LI_, L, graph_,
                                      errorMsg)) {
@@ -934,11 +934,11 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return false;
     }
 
-    // Step 3c: Resolve loop-internal edges (reference: schematic.py:555).
+    // Resolve loop-internal edges (reference: schematic.py:555).
     removePotentialCheckpointsBetweenFixedBBs(cfg_, solution, state_, params_, LI_, graph_, L);
     refreshDisabledCheckpointEnergy(cfg_, solution, state_, params_, LI_, graph_, L);
 
-    // Step 5: Reconcile header and latch allocations.
+    // Reconcile header and latch allocations.
     LoopBoundaryPlacements placements = resolveLoopBoundaryPlacements(solution, blocks);
 
     LoopCheckpointDecision decision;
@@ -959,7 +959,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         return true;
     }
 
-    // Step 7: Compute E_loop and nb_it_with_budget.
+    // Compute E_loop and nb_it_with_budget.
     // E_loop = START_Loop.E_to_leave - END_Loop.E_to_leave + loop_increment_cost_nvm
     // (reference schematic.py:566-569, using synthetic boundary nodes).
     RegionAllocation bodyAlloc = buildBoundaryAllocation(placements.headerAlloc);
@@ -975,8 +975,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.initialEndEToLeave = budget.endEToLeave;
     decision.initialELoop = budget.ELoop;
 
-    // Inner loop multi-iteration costs are handled by Step 10's direct
-    // E_to_leave/E_left adjustment on loop blocks (matching Python reference
+    // Inner loop multi-iteration costs are handled by applyLoopIterationAdjustment's
+    // direct E_to_leave/E_left adjustment on loop blocks (matching Python reference
     // schematic.py:643-664) and by propagation's seenLoops scaling (which
     // applies unconditionally, without loopScope filtering).
 
@@ -1009,7 +1009,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     decision.initialRawNumIterations = budget.rawNumIterations;
 
-    // Step 8: Convergence loop (reference lines 574-617).
+    // Convergence loop (reference lines 574-617).
     refineLoopBudgetWithConvergence(L, *matchedLoopTrace, maxTripCount, blocks, solution, cfg_,
                                     state_, params_, LI_, tracker_, graph_, budget, bodyAlloc,
                                     decision);
@@ -1019,7 +1019,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.finalAvailableEnergy = budget.availableEnergy;
     decision.finalRawNumIterations = budget.rawNumIterations;
 
-    // Step 9: Decide checkpoint type.
+    // Decide checkpoint type.
     PLOGD << "[LoopAnalyzer] loop=" << blocks.header->getName() << " numIt=" << budget.numIterations
           << " maxTripCount=" << maxTripCount << " availableEnergy=" << budget.availableEnergy;
     applyLoopCheckpointPolicy(L, static_cast<unsigned>(maxTripCount), blocks, budget, solution,
@@ -1027,7 +1027,7 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
 
     solution.loopDecisions[blocks.headerBlock] = decision;
 
-    // Step 10: Set LoopMark on blocks and adjust energy (reference: schematic.py:643-664).
+    // Set LoopMark on blocks and adjust energy (reference: schematic.py:643-664).
     applyLoopIterationAdjustment(L, static_cast<unsigned>(maxTripCount), decision, budget.ELoop,
                                  solution, graph_);
 
