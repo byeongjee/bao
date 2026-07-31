@@ -1,372 +1,130 @@
-# MILP-based Checkpoint Insertion for LLVM IR
+# MILP-Based Checkpoint Insertion for Intermittent Computing
 
-An LLVM pass that automatically inserts checkpoints into programs for intermittent computing. The pass uses Mixed-Integer Linear Programming (MILP) to find optimal checkpoint placements that minimize runtime overhead while guaranteeing energy constraints are satisfied.
+Batteryless devices powered by energy harvesting compute on small bursts of
+energy buffered in a capacitor, and lose power whenever the buffer runs out.
+To make progress across power failures, programs must checkpoint their state
+to non-volatile memory — but checkpoints are expensive, so *where* the
+compiler places them determines most of the runtime overhead.
 
-## Overview
+This repository is a compiler toolchain that inserts checkpoints
+automatically into any program compiled to LLVM IR (the bundled pipelines
+and benchmarks use C, the most common case). Its core is an LLVM pass that
+formulates checkpoint placement as a
+**Mixed-Integer Linear Program** (solved with Gurobi):
+minimize expected runtime overhead — checkpoint calls, state save/restore,
+and volatile-vs-non-volatile data placement — subject to the constraint that
+no execution path can exceed the energy available in the capacitor.
 
-This tool analyzes LLVM IR, builds a control flow graph with energy cost estimates, solves an optimization problem to determine where checkpoints should be placed, and instruments the IR with checkpoint function calls.
+The repository also includes two baselines used for comparison:
+
+- **RockClimb (PFI)** — a greedy machine-level pass that runs after register
+  allocation and inserts region boundaries when accumulated energy exceeds a
+  safe threshold.
+- **SCHEMATIC** — a trace-based checkpoint insertion pipeline.
+
+The target platform is the TI **MSP430FR5994**, an FRAM-based
+microcontroller commonly used in intermittent-computing research.
+
+## How It Works
+
+For each function, the MILP pass:
+
+1. estimates per-basic-block energy costs (from an IR-level cost model, or
+   from measured MSP430 assembly costs),
+2. builds a loop-aware control-flow graph annotated with block frequencies
+   measured by an instrumented profiling run,
+3. solves a MILP that chooses checkpoint region boundaries and
+   volatile/non-volatile placement of program state, subject to the
+   capacitor's energy capacity, and
+4. instruments the IR with checkpoint and state save/restore calls.
 
 ## Requirements
 
-- **LLVM** (built from source). Last verified against **LLVM 23.0.0git**, commit
-  [`384cecd5b201`](https://github.com/llvm/llvm-project/commit/384cecd5b20107e1453eaee008e8f4fd22b42c9e)
-  (`llvmorg-23-init-20751-g384cecd5b201`). Check your tree with `opt --version`.
-
-  > **Build all LLVM artifacts against the same LLVM tree.** The plugins
-  > (`CheckpointPass.so`, `BBDebugInfoPass.so`, `bb-energy-analyzer`) load into the
-  > `opt`/`llc` you run; if they were built against a *different* LLVM than that
-  > `opt`, you get ABI-mismatch crashes — e.g. `Assertion failed: ... isDeclaration`.
-  > A plain `make` will **not** detect this (it keys off source mtimes), so after
-  > updating LLVM rebuild everything: `cmake --build passes/build --clean-first`.
-- **Gurobi Optimizer** (with valid license - free for academic use)
-- **CMake 3.20+**
-- **C++17 compatible compiler**
-
-## Project Structure
-
-```
-checkpoint-insertion/
-├── passes/                    # C++ LLVM pass implementation
-│   ├── CMakeLists.txt
-│   └── include/
-│   ├── include/
-│   │   ├── EnergyEstimator.h       # Abstract energy estimation interface
-│   │   ├── IRBasedEstimator.h      # IR-based energy estimator
-│   │   ├── EnergyEstimatorFactory.h # Factory for creating estimators
-│   │   ├── CFGAnalysis.h           # CFG construction with loop info
-│   │   ├── CheckpointOptimizer.h   # Gurobi MILP solver
-│   │   ├── CheckpointPass.h        # Main LLVM pass
-│   │   ├── LoopTripCount.h         # Loop bound extraction
-│   │   └── LoopStripMiningPass.h   # Loop strip-mining pass
-│   └── src/
-│       ├── IRBasedEstimator.cpp
-│       ├── EnergyEstimatorFactory.cpp
-│       ├── CFGAnalysis.cpp
-│       ├── CheckpointOptimizer.cpp
-│       ├── CheckpointPass.cpp
-│       ├── LoopTripCount.cpp
-│       └── LoopStripMiningPass.cpp
-├── tests/                     # Test suite
-│   ├── run_tests.sh
-│   └── *.c                    # Test cases
-└── src/                       # Python reference implementation
-    ├── main.py
-    ├── ir_parser.py
-    ├── optimizer.py
-    └── energy_model.py
-```
+- **LLVM** built from source. Last verified against LLVM 23.0.0git, commit
+  [`384cecd5b201`](https://github.com/llvm/llvm-project/commit/384cecd5b20107e1453eaee008e8f4fd22b42c9e).
+  All plugins must be built against the same LLVM tree as the `opt`/`llc`
+  you run; after updating LLVM, rebuild with
+  `cmake --build passes/build --clean-first`.
+- **Gurobi Optimizer** (free academic licenses available)
+- **CMake 3.20+** and a C++17 compiler
+- **Python 3.14+** with [uv](https://docs.astral.sh/uv/)
+- **MSP430 GCC toolchain** (`msp430-elf-gcc`) — only needed for linking
+  binaries and running on hardware
 
 ## Building
 
-### 1. Set up environment variables
-
 ```bash
 export LLVM_DIR=/path/to/llvm-project/build
-export GUROBI_HOME=/path/to/gurobi  # e.g., /Library/gurobi1300/macos_universal2
-export PATH=$LLVM_DIR/bin:$PATH
-```
+export GUROBI_HOME=/path/to/gurobi   # e.g., /Library/gurobi1300/macos_universal2
 
-### 2. Build the pass
-
-```bash
-cd passes
-mkdir build && cd build
+cd passes && mkdir -p build && cd build
 cmake .. -DLLVM_DIR=$LLVM_DIR/lib/cmake/llvm
 make
 ```
 
-This produces `CheckpointPass.so`.
+## Quick Start
 
-### 3. Enable git hooks (one-time, for contributors)
+The `ckpt` CLI drives the full pipeline (profiling, energy estimation,
+MILP solving, instrumentation):
 
 ```bash
-git config core.hooksPath .githooks
+uv sync
+
+# Compile a benchmark with checkpoints sized for a 1 µF capacitor.
+# INPUT is a benchmark name from benchmarks/intermittent/ or a path to a .c file.
+uv run ckpt compile milp test --cap 1uF
+
+# Compile + flash + measure on an attached MSP430 board. Running the bench
+# itself requires a Saleae Logic analyzer driven through the Logic 2
+# automation server (`uv sync --extra saleae`). Degrades to compile-only
+# if no device is detected:
+uv run ckpt bench milp test --cap 1uF --csv results.csv
 ```
 
-This activates the pre-commit hook in `.githooks/`, which auto-formats staged C/C++ files with clang-format and runs `ruff format` + `ruff check` on staged Python files.
+Other pipelines follow the same shape: `ckpt compile rockclimb ...`,
+`ckpt compile schematic ...`, `ckpt compile uninstrumented ...`. See
+`uv run ckpt --help`.
 
-clang-tidy is intentionally excluded from the hook (too slow). Run it manually with `scripts/run_clang_tidy.sh` (changed files) or `scripts/run_clang_tidy.sh --all`.
+## Running the Pass Directly
 
-## Usage
-
-### 1. Compile C to LLVM IR
-
-MILP now requires profile-guided block frequencies. Generate profile data first,
-then compile IR with `-fprofile-instr-use`:
-
-```bash
-# 1) Build + run training binary
-clang -O0 -Xclang -disable-O0-optnone \
-    -fprofile-instr-generate=default.profraw \
-    input.c -o input_train
-LLVM_PROFILE_FILE=default.profraw ./input_train || true
-
-# 2) Merge profile data
-llvm-profdata merge -o default.profdata default.profraw
-
-# 3) Emit profiled LLVM IR
-clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
-    -fprofile-instr-use=default.profdata \
-    input.c -o input.ll
-```
-
-> **Note:** The `-Xclang -disable-O0-optnone` flag is required to allow optimization passes to run on `-O0` compiled code.
-
-### 2. Run the checkpoint pass
+The `ckpt` CLI automates the steps below. The MILP pass reads block
+frequencies from a JSON file produced by the repository's own profiling
+instrumentation (the `bb-freq-collect` pass), passed via `-bb-freq-file`:
 
 ```bash
-opt -load-pass-plugin=./CheckpointPass.so \
+# -O0 emits IR whose loops still mirror the source, so trip-count markers can
+# be annotated first; optimization happens later in opt (-passes=default<O3>).
+# -disable-O0-optnone lets passes run on -O0 IR.
+clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
+
+# Instrument for BB-frequency profiling, run natively → bb_freq.json
+opt -load-pass-plugin=./passes/build/CheckpointPass.so \
+    -passes=bb-freq-collect -S input.ll -o input_freq.ll
+clang input_freq.ll passes/runtime/bb_freq_runtime.c -o freq_run
+./freq_run    # writes bb_freq.json
+
+# Insert checkpoints
+opt -load-pass-plugin=./passes/build/CheckpointPass.so \
     -passes=milp \
-    -energy-config=./benchmarks/sample_ir_energy_config.json \
-    -milp-config=./tests/milp_params.json \
-    -checkpoint-function=__milp_checkpoint \
+    -energy-config=./benchmarks/sample_energy_config_ir.json \
+    -milp-config=./benchmarks/config_1uF.json \
+    -bb-freq-file=bb_freq.json \
     -S input.ll -o instrumented.ll
 ```
 
-> **Note:** `-passes=checkpoint` is still supported; `-passes=milp` is a clearer alias for the MILP-based pass.
-> **Note:** MILP fails fast if profile metadata is missing in the input IR.
-
-### Command-line Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-energy-config=<path>` | Path to JSON energy configuration file | (required) |
-| `-checkpoint-function=<name>` | Name of checkpoint function to call | `__checkpoint` |
-
-### 3. Link with checkpoint implementation
-
-The pass inserts calls to a checkpoint function with signature `void fn(const char* block_name)`.
-
-For MILP mode, the recommended symbol name is `__milp_checkpoint` (and the repo also provides embedded runtime stubs under `passes/runtime/`).
-
-Provide your own implementation:
-
-```c
-// checkpoint_impl.c
-#include <stdio.h>
-
-void __milp_checkpoint(const char* block_name) {
-    // Save program state here
-    printf("Checkpoint at: %s\n", block_name);
-}
-```
-
-Compile and link:
+## Tests
 
 ```bash
-clang instrumented.ll checkpoint_impl.c -o program
+uv run pytest tests/
 ```
 
-## Example
+Requires `passes/build/CheckpointPass.so` to be built first.
 
-```bash
-# Create test program
-cat > test.c << 'EOF'
-int sum_squares(int n) {
-    int total = 0;
-    for (int i = 0; i < n; i++) {
-        total += i * i;
-    }
-    return total;
-}
-int main() { return sum_squares(100); }
-EOF
+## More Documentation
 
-# Build/run training binary, then emit profiled IR
-clang -O0 -Xclang -disable-O0-optnone \
-    -fprofile-instr-generate=test.profraw \
-    test.c -o test_train
-LLVM_PROFILE_FILE=test.profraw ./test_train || true
-llvm-profdata merge -o test.profdata test.profraw
-clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone \
-    -fprofile-instr-use=test.profdata \
-    test.c -o test.ll
-
-# Run checkpoint insertion
-opt -load-pass-plugin=./passes/build/CheckpointPass.so \
-    -passes=milp \
-    -energy-config=./benchmarks/sample_ir_energy_config.json \
-    -milp-config=./tests/milp_params.json \
-    -checkpoint-function=__milp_checkpoint \
-    -S test.ll -o instrumented.ll
-
-# View inserted checkpoints
-grep "__milp_checkpoint" instrumented.ll
-```
-
-## Energy Model
-
-The energy estimation system uses a pluggable architecture that allows different estimation strategies.
-
-### Configuration File
-
-Energy parameters are specified in a JSON configuration file. The `estimator_type` field is **required** to ensure explicit configuration:
-
-```json
-{
-  "estimator_type": "ir",
-  "energy_parameters": {
-    "capacity": 100.0,
-    "instruction_costs": {
-      "simple_arithmetic": 1,
-      "complex_arithmetic": 3,
-      "floating_point": 5,
-      "load": 4,
-      "store": 5,
-      "control_flow": 1,
-      "comparison": 1,
-      "conversion": 2,
-      "call": 10,
-      "phi_select": 0,
-      "gep": 1,
-      "alloca": 1,
-      "atomic": 10,
-      "default": 1
-    }
-  }
-}
-```
-
-### Instruction Categories
-
-| Category | LLVM Instructions |
-|----------|-------------------|
-| `simple_arithmetic` | add, sub, and, or, xor, shl, lshr, ashr |
-| `complex_arithmetic` | mul, sdiv, udiv, srem, urem |
-| `floating_point` | fadd, fsub, fmul, fdiv, frem |
-| `load` | load |
-| `store` | store |
-| `control_flow` | br, switch, ret, indirectbr |
-| `comparison` | icmp, fcmp |
-| `conversion` | trunc, zext, sext, fptoui, fptosi, uitofp, sitofp, fptrunc, fpext, ptrtoint, inttoptr, bitcast, addrspacecast |
-| `call` | call, invoke |
-| `phi_select` | phi, select |
-| `gep` | getelementptr |
-| `alloca` | alloca |
-| `atomic` | atomicrmw, cmpxchg, fence |
-
-### Built-in Estimators
-
-- **`ir`**: Estimates energy by summing instruction costs from LLVM IR
-
-## Extending with Custom Estimators
-
-The energy estimation system is designed to be extensible. You can add custom estimators (e.g., assembly-based, ML-based) without modifying existing code.
-
-### Step 1: Implement the EnergyEstimator Interface
-
-Create a new class that inherits from `EnergyEstimator`:
-
-```cpp
-// passes/src/AssemblyBasedEstimator.cpp
-#include "EnergyEstimator.h"
-#include "EnergyEstimatorFactory.h"
-
-namespace checkpoint {
-
-class AssemblyBasedEstimator : public EnergyEstimator {
-public:
-    explicit AssemblyBasedEstimator(const std::string &configPath) {
-        // Load configuration and initialize
-    }
-
-    EnergyEstimate estimate(const llvm::BasicBlock &BB) override {
-        // Your custom energy estimation logic
-        double cost = /* compute cost */;
-        return EnergyEstimate{cost, "assembly-based"};
-    }
-
-    double getCapacity() const override {
-        return capacity_;
-    }
-
-    std::string getName() const override {
-        return "assembly-based";
-    }
-
-private:
-    double capacity_;
-};
-
-} // namespace checkpoint
-```
-
-### Step 2: Register with the Factory
-
-Add your estimator type to `EnergyEstimatorFactory::createDefault()` in `passes/src/EnergyEstimatorFactory.cpp`:
-
-```cpp
-EnergyEstimatorFactory EnergyEstimatorFactory::createDefault() {
-    EnergyEstimatorFactory factory;
-    // Built-in IR-based estimator
-    factory.registerType("ir", [](const std::string &configPath) {
-        return std::make_unique<IRBasedEstimator>(configPath);
-    });
-    // Add your custom estimator
-    factory.registerType("assembly", [](const std::string &configPath) {
-        return std::make_unique<AssemblyBasedEstimator>(configPath);
-    });
-    return factory;
-}
-```
-
-### Step 3: Update CMakeLists.txt
-
-Add your new source file to the build:
-
-```cmake
-add_library(CheckpointPass MODULE
-    src/IRBasedEstimator.cpp
-    src/AssemblyBasedEstimator.cpp  # Add this line
-    # ... other files
-)
-```
-
-### Step 4: Use Your Estimator
-
-Set the `estimator_type` field in your configuration file:
-
-```json
-{
-  "estimator_type": "assembly",
-  "energy_parameters": {
-    "capacity": 100.0,
-    // ... your estimator's parameters
-  }
-}
-```
-
-The factory will automatically use your custom estimator when processing the configuration.
-
-### EnergyEstimator Interface
-
-```cpp
-class EnergyEstimator {
-public:
-    virtual ~EnergyEstimator() = default;
-
-    /// Estimate energy for a basic block
-    virtual EnergyEstimate estimate(const llvm::BasicBlock &BB) = 0;
-
-    /// Get configured energy capacity
-    virtual double getCapacity() const = 0;
-
-    /// Get estimator name for diagnostics
-    virtual std::string getName() const = 0;
-
-    /// Optional: called before processing a function
-    virtual void prepareForFunction(const llvm::Function &F) {}
-
-    /// Optional: called after processing a function
-    virtual void finalizeFunction(const llvm::Function &F) {}
-};
-```
-
-## Running Tests
-
-```bash
-./tests/run_tests.sh
-```
+Architecture, the MILP formulation, configuration reference, the full CLI,
+and contributor setup (git hooks, clang-tidy) are documented in
+[`AGENTS.md`](AGENTS.md).
 
 ## License
 
