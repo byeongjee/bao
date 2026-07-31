@@ -85,6 +85,8 @@ git config core.hooksPath .githooks
 
 This activates the pre-commit hook in `.githooks/`, which auto-formats staged C/C++ files with clang-format and runs `ruff format` + `ruff check` on staged Python files.
 
+clang-tidy is intentionally excluded from the hook (too slow). Run it manually with `scripts/run_clang_tidy.sh` (changed files) or `scripts/run_clang_tidy.sh --all`.
+
 ## Usage
 
 ### 1. Compile C to LLVM IR

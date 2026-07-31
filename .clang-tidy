@@ -1,8 +1,19 @@
+# Disabled exception checks: the codebase builds with -fno-exceptions, so
+# bugprone-throwing-static-initialization (fires on the mandatory static
+# cl::opt registration idiom) and bugprone-exception-escape cannot represent
+# real failures here.
+# bugprone-unchecked-optional-access is dataflow-based and dominates runtime
+# (~10s/file); bugprone-std-namespace-modification crashes trunk clang-tidy
+# on some files (upstream assertion bug).
 Checks: >
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
+  -bugprone-unchecked-optional-access,
+  -bugprone-std-namespace-modification,
+  -bugprone-throwing-static-initialization,
+  -bugprone-exception-escape,
   misc-unused-using-decls,
   modernize-use-override,
   modernize-use-nullptr,
@@ -25,3 +36,5 @@ HeaderFilterRegex: 'passes/(include|src)/.*\.h$'
 CheckOptions:
   - key: modernize-use-auto.MinTypeNameLength
     value: 5
+  - key: bugprone-unused-return-value.AllowCastToVoid
+    value: true
