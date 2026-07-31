@@ -533,8 +533,15 @@ def collect_schematic_trace(tools, compile_to_ir):
 # IR assertion helpers
 # ---------------------------------------------------------------------------
 def count_calls(ir: str, func_name: str) -> int:
-    """Count 'call ... @func_name(' occurrences in IR."""
-    return len(re.findall(rf"call\s+[^@]*@{re.escape(func_name)}\s*\(", ir))
+    """Count calls to func_name in IR.
+
+    Matches both direct calls ('call ... @func_name(') and inline-asm
+    calls ('call ... asm ... "call #func_name"'), which the instrumenter
+    emits for region boundaries so all GPRs can be declared clobbered.
+    """
+    direct = len(re.findall(rf"call\s+[^@]*@{re.escape(func_name)}\s*\(", ir))
+    inline_asm = len(re.findall(rf'asm[^"]*"call\s+#{re.escape(func_name)}"', ir))
+    return direct + inline_asm
 
 
 def calls_in_block(ir: str, block_label: str, func_name: str) -> int:
