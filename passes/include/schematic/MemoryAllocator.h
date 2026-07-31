@@ -61,13 +61,12 @@ mergeAllocations(const std::vector<const RegionAllocation *> &allocations,
 /// Reference: memory_allocator.py:choose_memory_allocation (line 124).
 /// Merges memoryAllocations + startAlloc/endAlloc internally;
 /// returns (MemoryAllocation(), -99999) on incompatible allocations.
-/// accessScale: multiplier for variable access counts (convergence loop).
 std::pair<RegionAllocation, double>
 chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
                        const SchematicStateAnalysis &state, const SchematicParams &params,
                        const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
                        const std::vector<const RegionAllocation *> &memoryAllocations,
-                       VMAddressTracker *tracker, unsigned accessScale);
+                       VMAddressTracker *tracker);
 
 /// Compute optimal greedy allocation from precomputed variable access estimates.
 /// Used by the loop convergence path to match the reference's

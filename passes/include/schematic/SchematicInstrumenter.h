@@ -54,8 +54,6 @@ class SchematicInstrumenter {
     void rewriteAccessesInRegion(const std::vector<llvm::BasicBlock *> &blocks,
                                  const RegionAllocation &allocation);
 
-    void rewriteAllShadowAccesses(llvm::Function &F);
-
     unsigned insertLoopConditionalCheckpoint(llvm::BasicBlock *header,
                                              const LoopCheckpointDecision &decision,
                                              const SchematicStateAnalysis &state);

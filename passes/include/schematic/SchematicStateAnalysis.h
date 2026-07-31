@@ -1,7 +1,5 @@
 #pragma once
 
-#include "common/CFGAnalysis.h"
-
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Value.h"
@@ -9,7 +7,6 @@
 
 #include <map>
 #include <optional>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -18,19 +15,17 @@ namespace checkpoint {
 /// State analysis for SCHEMATIC pass.
 ///
 /// Unlike MILP's StateAnalysis, this treats both globals and allocas as
-/// placement candidates (eligible for VM/NVM optimization). Only cross-block
-/// SSA values are ineligible.
+/// placement candidates (eligible for VM/NVM optimization).
 ///
 /// No liveness analysis is performed — MemoryAllocator computes
-/// interval-local liveness via computeLivenessFlags().
+/// interval-local save/restore needs via computeSaveRestoreFlags().
 class SchematicStateAnalysis {
   public:
-    SchematicStateAnalysis(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg);
+    SchematicStateAnalysis(llvm::Function &F, llvm::AAResults &AA);
 
     // -- Placement candidates (globals + allocas) --
 
     const std::vector<llvm::Value *> &getCandidates() const { return candidates_; }
-    bool isCandidate(llvm::Value *v) const { return candidateSet_.count(v) > 0; }
 
     // -- Access counts --
 
@@ -47,11 +42,6 @@ class SchematicStateAnalysis {
 
     unsigned getVarSizeBytes(llvm::Value *v) const;
 
-    // -- Ineligible objects (cross-block SSA values only) --
-
-    const std::vector<llvm::Value *> &getIneligibleObjs() const { return ineligibleObjs_; }
-    bool isIneligible(llvm::Value *v) const { return ineligibleObjSet_.count(v) > 0; }
-
     // -- Strict-analysis diagnostics --
 
     bool hasAnalysisErrors() const { return !analysisErrors_.empty(); }
@@ -64,14 +54,9 @@ class SchematicStateAnalysis {
 
     // Placement candidates: globals + allocas
     std::vector<llvm::Value *> candidates_;
-    std::set<llvm::Value *> candidateSet_;
 
     // Candidate globals subset (for AA-based access counting)
     std::vector<llvm::GlobalVariable *> candidateGlobals_;
-
-    // Ineligible objects: cross-block SSA values only
-    std::vector<llvm::Value *> ineligibleObjs_;
-    std::set<llvm::Value *> ineligibleObjSet_;
 
     // Variable sizes
     std::map<llvm::Value *, unsigned> varSizeBytes_;
@@ -90,7 +75,6 @@ class SchematicStateAnalysis {
     void reportStrictError(const llvm::Instruction &I, const std::string &reason);
 
     void identifyCandidates();
-    void identifyIneligibleSSAValues();
     void computeAccessMaps();
 };
 

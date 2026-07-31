@@ -311,7 +311,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     // Step 4: SCHEMATIC params + CLI overrides are resolved once by the driver.
 
     // Step 5: Run SchematicStateAnalysis.
-    SchematicStateAnalysis state(F, AA, *ctx.cfg);
+    SchematicStateAnalysis state(F, AA);
     if (state.hasAnalysisErrors()) {
         state.printAnalysisErrors(errs());
         PLOGE << "Skipping SCHEMATIC instrumentation for function " << F.getName()

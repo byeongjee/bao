@@ -263,7 +263,7 @@ chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
                        const SchematicStateAnalysis &state, const SchematicParams &params,
                        const RegionAllocation *startAlloc, const RegionAllocation *endAlloc,
                        const std::vector<const RegionAllocation *> &memoryAllocations,
-                       VMAddressTracker *tracker, unsigned accessScale) {
+                       VMAddressTracker *tracker) {
     std::map<llvm::Value *, VariableAccessEstimate> variableAccesses;
     for (llvm::Value *v : state.getCandidates()) {
         unsigned nR = 0;
@@ -279,8 +279,7 @@ chooseMemoryAllocation(const std::vector<SchematicBlock *> &intervalBlocks,
             continue;
 
         auto [needRestore, needSave] = computeSaveRestoreFlags(v, intervalBlocks, state);
-        variableAccesses[v] = {static_cast<unsigned>((nR + nW) * accessScale), needRestore,
-                               needSave};
+        variableAccesses[v] = {nR + nW, needRestore, needSave};
     }
 
     return chooseMemoryAllocation(variableAccesses, state, params, startAlloc, endAlloc,
@@ -479,7 +478,7 @@ ComputeCostResult computeCost(
     // Choose memory allocation and subtract gain.
     // Reference: memory_allocator.py:compute_cost lines 260-263.
     auto [alloc, gain] = chooseMemoryAllocation(blocks, state, params, startAlloc, endAlloc,
-                                                memoryAllocations, tracker, 1);
+                                                memoryAllocations, tracker);
     energy -= gain;
 
     return {std::move(alloc), energy};

@@ -73,7 +73,6 @@ class RCGSolver {
     double minRejectedEnergy_ = std::numeric_limits<double>::infinity();
     double minRejectedBudget_ = 0.0;
     std::vector<SchematicBlock *> minRejectedBlocks_;
-    std::string minRejectedLoopKind_; // "ckpt->ckpt", "start->ckpt", etc.
 
     /// Reference: get_checkpoints_from_trace — build candidate checkpoint nodes.
     void getCheckpointsFromTrace();
