@@ -353,9 +353,6 @@ augmentLoopTraces(const std::vector<LoadedLoopTrace> &parsedLoopTraces, LoopInfo
         }
     }
 
-    std::stable_sort(
-        augmented.begin(), augmented.end(),
-        [](const LoadedLoopTrace &a, const LoadedLoopTrace &b) { return a.depth > b.depth; });
     return augmented;
 }
 
