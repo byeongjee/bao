@@ -3,6 +3,14 @@ description: >
   Restore (or build and cache) clang, clang-tidy, opt, and llc from the
   pinned llvm-project commit. Exports LLVM_COMMIT and LLVM_ROOT into the
   job environment.
+inputs:
+  mode:
+    description: >
+      "ensure" restores the cache and builds + saves it on a miss.
+      "restore" is restore-only and fails on a miss; use it in jobs that
+      depend (via needs) on an ensure-mode job, so LLVM is only ever
+      built once per cache key.
+    default: ensure
 runs:
   using: composite
   steps:
@@ -15,6 +23,7 @@ runs:
         echo "LLVM_COMMIT=384cecd5b20107e1453eaee008e8f4fd22b42c9e" >> "$GITHUB_ENV"
         echo "LLVM_ROOT=/home/runner/llvm-project" >> "$GITHUB_ENV"
     - name: Restore LLVM build cache
+      if: ${{ inputs.mode == 'ensure' }}
       id: llvm-cache
       uses: actions/cache@v4
       with:
@@ -49,8 +58,40 @@ runs:
           /home/runner/llvm-project/build/lib/libLLVMTargetParser.a
           /home/runner/llvm-project/build/lib/libLLVMTextAPI.a
         key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-v2
+    - name: Restore LLVM build cache (restore-only)
+      if: ${{ inputs.mode == 'restore' }}
+      uses: actions/cache/restore@v4
+      with:
+        # Same paths/key as the ensure-mode step above.
+        path: |
+          /home/runner/llvm-project/llvm/include
+          /home/runner/llvm-project/llvm/cmake
+          /home/runner/llvm-project/build/bin/clang*
+          /home/runner/llvm-project/build/bin/opt
+          /home/runner/llvm-project/build/bin/llc
+          /home/runner/llvm-project/build/include
+          /home/runner/llvm-project/build/lib/cmake
+          /home/runner/llvm-project/build/lib/clang
+          /home/runner/llvm-project/build/lib/libLLVMAsmParser.a
+          /home/runner/llvm-project/build/lib/libLLVMBinaryFormat.a
+          /home/runner/llvm-project/build/lib/libLLVMBitReader.a
+          /home/runner/llvm-project/build/lib/libLLVMBitstreamReader.a
+          /home/runner/llvm-project/build/lib/libLLVMCore.a
+          /home/runner/llvm-project/build/lib/libLLVMDebugInfoDWARF.a
+          /home/runner/llvm-project/build/lib/libLLVMDebugInfoDWARFLowLevel.a
+          /home/runner/llvm-project/build/lib/libLLVMDemangle.a
+          /home/runner/llvm-project/build/lib/libLLVMIRReader.a
+          /home/runner/llvm-project/build/lib/libLLVMMC.a
+          /home/runner/llvm-project/build/lib/libLLVMMCParser.a
+          /home/runner/llvm-project/build/lib/libLLVMObject.a
+          /home/runner/llvm-project/build/lib/libLLVMRemarks.a
+          /home/runner/llvm-project/build/lib/libLLVMSupport.a
+          /home/runner/llvm-project/build/lib/libLLVMTargetParser.a
+          /home/runner/llvm-project/build/lib/libLLVMTextAPI.a
+        key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-v2
+        fail-on-cache-miss: true
     - name: Build LLVM (clang + tools) at pinned commit
-      if: steps.llvm-cache.outputs.cache-hit != 'true'
+      if: ${{ inputs.mode == 'ensure' && steps.llvm-cache.outputs.cache-hit != 'true' }}
       shell: bash
       run: |
         # Free disk space; a Release build of clang needs more than the
