@@ -37,7 +37,7 @@ StateAnalysis::StateAnalysis(llvm::Function &F, llvm::AAResults &AA, const CFGAn
     identifyIneligibleSSAValues();
     computeAccessMaps();
     computeEligLiveness();
-    computeIneligGlobalAllocaLiveness();
+    computeIneligAllocaLiveness();
     computeIneligSSALiveness();
 }
 
@@ -456,9 +456,9 @@ void StateAnalysis::computeEligLiveness() {
     eligLiveIn_ = checkpoint::computeEligibleLiveness(F_, AA_, cfg_, vmObjs_);
 }
 
-void StateAnalysis::computeIneligGlobalAllocaLiveness() {
-    auto gaLive = checkpoint::computeIneligGlobalAllocaLiveness(F_, AA_, cfg_, ineligibleObjs_);
-    for (auto &[BB, vals] : gaLive)
+void StateAnalysis::computeIneligAllocaLiveness() {
+    auto allocaLive = checkpoint::computeIneligAllocaLiveness(F_, cfg_, ineligibleObjs_);
+    for (auto &[BB, vals] : allocaLive)
         ineligLiveIn_[BB].insert(vals.begin(), vals.end());
 }
 

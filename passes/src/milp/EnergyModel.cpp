@@ -109,7 +109,7 @@ void EnergyModel::computeFrequenciesFromFile(const BBFreqLoader &freqLoader, llv
 
 void EnergyModel::computeNvmPenalties() {
     // E_nvm[b,v] = (loads + stores to v in b) * nvm_access_penalty
-    // NVM penalties only apply to globals (eligible + ineligible globals).
+    // NVM penalties only apply to eligible globals.
     auto computeForGV = [&](llvm::GlobalVariable *GV, const llvm::BasicBlock *BB) {
         unsigned loads = state_.getLoadCount(BB, GV);
         unsigned stores = state_.getStoreCount(BB, GV);

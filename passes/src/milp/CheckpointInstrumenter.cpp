@@ -259,10 +259,10 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 for (llvm::Value *V : solution.getSaveVarsAt(n))
                     commitVars.push_back(V);
 
-            // Ineligible live-in values must also be committed so that the
-            // restore loads after the boundary read correct values.  The MILP
-            // solver only tracks eligible (global) objects in its save set;
-            // ineligible SSA values and allocas are handled here.
+            // All ineligible live-in values are committed here regardless of
+            // the solver's save decisions: the restore phase below reloads
+            // every ineligible live-in from its NVM backup unconditionally,
+            // so each one must have a current backup before the boundary.
             for (llvm::Value *V : state.getIneligLiveIn(&BB))
                 commitVars.push_back(V);
             stableSortAndUniqueValues(commitVars);

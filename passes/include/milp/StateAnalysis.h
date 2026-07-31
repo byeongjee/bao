@@ -45,7 +45,7 @@ class StateAnalysis {
 
     // -- Ineligible objects (V_inelig) --
 
-    /// All ineligible objects: non-candidate globals, allocas, cross-block SSA values.
+    /// All ineligible objects: allocas and cross-block SSA values.
     const std::vector<llvm::Value *> &getIneligibleObjs() const;
     bool isIneligible(llvm::Value *v) const;
 
@@ -71,8 +71,8 @@ class StateAnalysis {
 
     // -- Mappings --
 
-    /// Get variable size in bytes (works for candidates, ineligible globals,
-    /// allocas, and SSA values). Returns 0 for unknown.
+    /// Get variable size in bytes (works for candidate globals, allocas,
+    /// and SSA values). Returns 0 for unknown.
     unsigned getVarSizeBytes(llvm::Value *v) const;
 
   private:
@@ -85,7 +85,7 @@ class StateAnalysis {
     std::set<llvm::GlobalVariable *> vmObjSet_;
     std::vector<std::string> analysisErrors_;
 
-    // Ineligible objects (V_inelig): non-candidate globals, allocas, SSA values
+    // Ineligible objects (V_inelig): allocas, cross-block SSA values
     std::vector<llvm::Value *> ineligibleObjs_;
     std::set<llvm::Value *> ineligibleObjSet_;
 
@@ -117,7 +117,7 @@ class StateAnalysis {
     void identifyIneligibleSSAValues();
     void computeAccessMaps();
     void computeEligLiveness();
-    void computeIneligGlobalAllocaLiveness();
+    void computeIneligAllocaLiveness();
     void computeIneligSSALiveness();
 };
 

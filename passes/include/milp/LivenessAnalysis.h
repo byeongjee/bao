@@ -20,12 +20,12 @@ llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::GlobalVariable *>>
 computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
                         const std::vector<llvm::GlobalVariable *> &vmObjs);
 
-/// Compute liveness for ineligible globals and allocas using
+/// Compute liveness for ineligible allocas using
 /// load-before-must-store analysis.
 /// Returns BB -> set of live-in Values.
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
-computeIneligGlobalAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
-                                  const std::vector<llvm::Value *> &ineligibleObjs);
+computeIneligAllocaLiveness(llvm::Function &F, const CFGAnalysis &cfg,
+                            const std::vector<llvm::Value *> &ineligibleObjs);
 
 /// Compute edge-aware SSA liveness for ineligible cross-block SSA values.
 ///
