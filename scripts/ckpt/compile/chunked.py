@@ -22,6 +22,7 @@ from .common import (
     compile_to_object,
     link_algorithm,
     optimize_ir,
+    raises_compilation_error,
     run_assembly_energy,
     write_assembly_energy_config,
 )
@@ -53,6 +54,7 @@ class ChunkedCompileResult:
     elf_file: Path | None
 
 
+@raises_compilation_error
 def compile_chunked(
     tc: Toolchain,
     env: ProjectEnv,

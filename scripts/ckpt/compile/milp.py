@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import CompilationError, run
+from ..runner import CompilationError, ToolError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from . import common
@@ -66,6 +66,7 @@ class MilpCompileResult:
     stats_json: Path | None
 
 
+@common.raises_compilation_error
 def compile_milp(
     tc: Toolchain,
     env: ProjectEnv,
@@ -151,7 +152,7 @@ def compile_milp(
                     milp_input_ll,
                     milp_extra_flags,
                 )
-        except CompilationError:
+        except ToolError:
             if opts.save_temps:
                 common.save_temps(tmp, opts.output.parent)
             raise
@@ -192,12 +193,13 @@ def compile_milp(
 
             if link:
                 elf_file = _link_milp(tc, env, opts)
-        except CompilationError as exc:
+        except ToolError as exc:
             if opts.save_temps:
                 common.save_temps(tmp, opts.output.parent)
-            exc.pass_output = pass_output
-            exc.stats_json = stats_json
-            raise
+            err = CompilationError(exc.step, exc.result)
+            err.pass_output = pass_output
+            err.stats_json = stats_json
+            raise err from exc
 
     return MilpCompileResult(
         object_file=opts.output.with_suffix(".o"),

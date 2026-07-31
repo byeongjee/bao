@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import CompilationError, run
+from ..runner import CompilationError, ToolError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from . import common
@@ -57,6 +57,7 @@ class RockClimbCompileResult:
     stats_json: Path | None
 
 
+@common.raises_compilation_error
 def compile_rockclimb(
     tc: Toolchain,
     env: ProjectEnv,
@@ -187,10 +188,11 @@ def compile_rockclimb(
 
             if link:
                 elf_file = _link_rockclimb(tc, env, opts)
-        except CompilationError as exc:
-            exc.pass_output = pass_output
-            exc.stats_json = stats_json
-            raise
+        except ToolError as exc:
+            err = CompilationError(exc.step, exc.result)
+            err.pass_output = pass_output
+            err.stats_json = stats_json
+            raise err from exc
 
     return RockClimbCompileResult(
         assembly_file=output.with_suffix(".s"),

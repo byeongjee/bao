@@ -47,7 +47,9 @@ def run(
 ) -> StepResult:
     """Run a subprocess, capturing output and timing.
 
-    Raises CompilationError on non-zero exit if check=True.
+    Raises ToolError on non-zero exit if check=True. Compile pipelines
+    convert it to CompilationError at their entry points (see
+    compile.common.raises_compilation_error).
     """
     if step_name:
         logger.info("Running %s...", step_name)
@@ -81,6 +83,6 @@ def run(
     )
 
     if check and result.returncode != 0:
-        raise CompilationError(step_name or " ".join(cmd[:3]), step)
+        raise ToolError(step_name or " ".join(cmd[:3]), step)
 
     return step

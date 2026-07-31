@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import CompilationError, StepResult, run
+from ..runner import CompilationError, StepResult, ToolError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from . import common
@@ -72,6 +72,7 @@ class SchematicCompileResult:
     stats_json: Path | None
 
 
+@common.raises_compilation_error
 def compile_schematic(
     tc: Toolchain,
     env: ProjectEnv,
@@ -224,10 +225,11 @@ def compile_schematic(
 
             if opts.link or opts.device_debug:
                 elf_file = _link_schematic(tc, env, opts)
-        except CompilationError as exc:
-            exc.pass_output = pass_output
-            exc.stats_json = stats_json
-            raise
+        except ToolError as exc:
+            err = CompilationError(exc.step, exc.result)
+            err.pass_output = pass_output
+            err.stats_json = stats_json
+            raise err from exc
 
     return SchematicCompileResult(
         object_file=opts.output.with_suffix(".o"),
