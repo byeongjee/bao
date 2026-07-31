@@ -8,19 +8,17 @@ Supports two estimator modes:
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import CompilationError, ToolError, run
+from ..runner import ToolError, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from . import common
 from .common import (
     collect_bb_freq,
     compile_annotated_ir,
-    compile_to_object,
     link_algorithm,
     now_ms,
     optimize_ir,
@@ -148,38 +146,20 @@ def compile_milp(
 
         _merge_strip_mining_stats(tmp / "stats.json", strip_mining_stats_json)
 
-        # Copy stats JSON if available
-        stats_json: Path | None = None
-        stats_json_src = tmp / "stats.json"
-        if stats_json_src.is_file():
-            stats_json_dst = opts.output.with_suffix(".stats.json")
-            shutil.copy2(stats_json_src, stats_json_dst)
-            stats_json = stats_json_dst
+        stats_json = common.copy_stats_json(tmp, opts.output)
 
-        # Compile to MSP430 object + optional link
-        # Wrap post-pass steps so pass_output is preserved on failure.
-        elf_file: Path | None = None
-        try:
-            ckpt_ll = tmp / "ckpt.ll"
-            out_s = tmp / "ckpt.s"
-            out_o = tmp / "ckpt.o"
-            compile_to_object(tc, env, ckpt_ll, out_s, out_o, opt_level=opts.opt_level)
-
-            if opts.save_temps:
-                common.save_temps(tmp, opts.output.parent)
-
-            shutil.copy2(out_o, opts.output.with_suffix(".o"))
-            shutil.copy2(out_s, opts.output.with_suffix(".s"))
-
-            if link:
-                elf_file = _link_milp(tc, env, opts)
-        except ToolError as exc:
-            if opts.save_temps:
-                common.save_temps(tmp, opts.output.parent)
-            err = CompilationError(exc.step, exc.result)
-            err.pass_output = pass_output
-            err.stats_json = stats_json
-            raise err from exc
+        elf_file = common.finalize_checkpointed_object(
+            tc,
+            env,
+            tmp=tmp,
+            output=opts.output,
+            opt_level=opts.opt_level,
+            link=link,
+            link_fn=lambda: _link_milp(tc, env, opts),
+            pass_output=pass_output,
+            stats_json=stats_json,
+            save_temps_dir=opts.output.parent if opts.save_temps else None,
+        )
 
     return MilpCompileResult(
         object_file=opts.output.with_suffix(".o"),

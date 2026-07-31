@@ -132,13 +132,7 @@ def compile_rockclimb(
                 tc, env, opts, tmp, preprocessed_ll
             )
 
-        # Copy stats JSON if available
-        stats_json: Path | None = None
-        stats_json_src = tmp / "stats.json"
-        if stats_json_src.is_file():
-            stats_json_dst = opts.output.with_suffix(".stats.json")
-            shutil.copy2(stats_json_src, stats_json_dst)
-            stats_json = stats_json_dst
+        stats_json = common.copy_stats_json(tmp, opts.output)
 
         if opts.save_temps:
             common.save_temps(tmp, opts.output.parent)
