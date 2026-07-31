@@ -311,7 +311,7 @@ def _write_compile_csv(
     device-only runtime columns. *algorithm* selects the column schema
     (``schematicO3`` shares SCHEMATIC's schema).
     """
-    import json as _json
+    import json
 
     from .bench.runner import write_compile_stats_csv
     from .output_parser import has_pass_statistics, load_stats_json, parse_pass_output
@@ -326,7 +326,7 @@ def _write_compile_csv(
     status = "ok"
     stats = None
     if result.stats_json is not None and result.stats_json.is_file():
-        data = _json.loads(result.stats_json.read_text())
+        data = json.loads(result.stats_json.read_text())
         stats, feasible, _ = load_stats_json(data)
         if not feasible:
             status = "infeasible"
@@ -841,7 +841,7 @@ def compile_uninstrumented_cmd(
         logger.info("ELF: %s", result.elf_file)
 
     if csv_path:
-        import csv as _csv
+        import csv
 
         from .bench.runner import static_csv_header
         from .bench.uninstrumented import CSV_HEADER as _UNINST_HEADER
@@ -850,7 +850,7 @@ def compile_uninstrumented_cmd(
         out = Path(csv_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", newline="") as f:
-            writer = _csv.writer(f)
+            writer = csv.writer(f)
             writer.writerow(header)
             writer.writerow([input_path.stem, "ok", str(compilation_time_ms)])
         logger.info("Stats CSV: %s", csv_path)
@@ -1499,11 +1499,11 @@ def analyze_plot_cmd(
     plot_benchmarks(
         csv_dir=Path(csv_dir),
         metric=metric,
-        algorithms=list(algorithms) if algorithms else None,
-        benchmarks=list(benchmarks) if benchmarks else None,
-        capacitors=list(capacitors) if capacitors else None,
+        algorithms=_list_or_none(algorithms),
+        benchmarks=_list_or_none(benchmarks),
+        capacitors=_list_or_none(capacitors),
         normalize=normalize,
-        output_file=Path(output) if output else None,
+        output_file=_path_or_none(output),
     )
 
 
