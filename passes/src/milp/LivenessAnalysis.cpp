@@ -1,8 +1,10 @@
 #include "milp/LivenessAnalysis.h"
 
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Module.h"
 
 #include <map>
 
@@ -94,7 +96,7 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
 }
 
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
-computeIneligAllocaLiveness(llvm::Function &F, const CFGAnalysis &cfg,
+computeIneligAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
                             const std::vector<llvm::Value *> &ineligibleObjs) {
 
     llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>> result;
@@ -123,27 +125,36 @@ computeIneligAllocaLiveness(llvm::Function &F, const CFGAnalysis &cfg,
             bool seenMustStore = false;
 
             auto *AI = llvm::cast<llvm::AllocaInst>(V);
+            const llvm::DataLayout &DL = F.getParent()->getDataLayout();
+            auto allocaBytes = AI->getAllocationSize(DL);
             for (llvm::Instruction &I : BB) {
-                if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
-                    if (LI->getPointerOperand()->stripPointerCasts() == AI && !seenMustStore)
-                        info.loadBeforeMustStore = true;
-                }
+                // Reads are detected via alias analysis so accesses through
+                // GEPs (array elements, struct fields) are visible.  A
+                // write counts as a must-store only when it provably
+                // overwrites the entire alloca: a direct store of a value
+                // covering the full size, or a mem intrinsic writing at
+                // least the full size.  Partial writes (element stores,
+                // partial memsets) must not kill liveness of the rest.
+                auto Loc = llvm::MemoryLocation::getBeforeOrAfter(AI);
+                llvm::ModRefInfo MRI = AA.getModRefInfo(&I, Loc);
+
+                if (llvm::isRefSet(MRI) && !seenMustStore)
+                    info.loadBeforeMustStore = true;
+
                 if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-                    if (SI->getPointerOperand()->stripPointerCasts() == AI) {
+                    if (SI->getPointerOperand()->stripPointerCasts() == AI && allocaBytes &&
+                        DL.getTypeStoreSize(SI->getValueOperand()->getType()).getFixedValue() >=
+                            allocaBytes->getFixedValue()) {
                         info.hasMustStore = true;
                         seenMustStore = true;
                     }
                 }
                 if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
-                    llvm::Value *dst = MI->getRawDest()->stripPointerCasts();
-                    if (dst == AI) {
+                    auto *LenCI = llvm::dyn_cast<llvm::ConstantInt>(MI->getLength());
+                    if (MI->getRawDest()->stripPointerCasts() == AI && allocaBytes && LenCI &&
+                        LenCI->getZExtValue() >= allocaBytes->getFixedValue()) {
                         info.hasMustStore = true;
                         seenMustStore = true;
-                    }
-                    if (auto *MT = llvm::dyn_cast<llvm::MemTransferInst>(MI)) {
-                        llvm::Value *src = MT->getRawSource()->stripPointerCasts();
-                        if (src == AI && !seenMustStore)
-                            info.loadBeforeMustStore = true;
                     }
                 }
             }
