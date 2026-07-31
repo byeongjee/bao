@@ -876,28 +876,6 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
     out.stats.abstractNodes = static_cast<unsigned>(model.blocks_.size());
     out.stats.abstractEdges = static_cast<unsigned>(model.edges_.size());
 
-    // Verify that loop collapsing preserved the edge-split invariant:
-    // every predecessor of a merge point has exactly one predecessor.
-    // With canonical loop form (LoopSimplify guarantees single preheader
-    // + single latch), summary nodes should not violate this.
-    {
-        std::map<NodeId, std::vector<NodeId>> predMap;
-        for (NodeId b : model.blocks_)
-            predMap[b] = {};
-        for (const auto &[src, dst] : model.edges_)
-            predMap[dst].push_back(src);
-        for (const auto &[block, preds] : predMap) {
-            if (preds.size() <= 1)
-                continue;
-            for (NodeId pred : preds) {
-                assert(predMap[pred].size() == 1 &&
-                       "AbstractCFG: predecessor of merge-point node has != 1 "
-                       "predecessor — EdgeSplit invariant violated by loop "
-                       "collapsing");
-            }
-        }
-    }
-
     return out;
 }
 

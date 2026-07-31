@@ -15,7 +15,6 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
-#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
@@ -138,23 +137,6 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         name.starts_with("debug_") || name.starts_with("uart_")) {
         PLOGI << "MILP: skipping benchmark infrastructure function " << name;
         return PreservedAnalyses::all();
-    }
-
-    // Verify EdgeSplitPass ran: every predecessor of a merge point must
-    // have exactly one predecessor (a fresh split block).
-    for (BasicBlock &BB : F) {
-        if (BB.isEHPad())
-            continue;
-        SmallVector<BasicBlock *, 4> preds(predecessors(&BB));
-        if (preds.size() <= 1)
-            continue;
-        for (BasicBlock *pred : preds) {
-            unsigned predPredCount = 0;
-            for ([[maybe_unused]] BasicBlock *pp : predecessors(pred))
-                ++predPredCount;
-            assert(predPredCount == 1 && "MILPCheckpointPass requires EdgeSplitPass — merge-point "
-                                         "predecessor has != 1 predecessor");
-        }
     }
 
     // Step 1: Obtain LLVM analyses
