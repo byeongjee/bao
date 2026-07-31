@@ -1,13 +1,9 @@
 """Saleae Logic 2 automation for execution timing measurement.
 
-Captures GPIO waveform (P3.4 -> digital channel 0) during benchmark
-execution and computes the time from the start-pulse falling edge to
-the stop-pulse rising edge.
+Captures a GPIO pulse waveform during benchmark execution and computes
+the time from the start-pulse falling edge to the stop-pulse rising edge.
 
-Requires the Logic 2 desktop app with automation server enabled
-(localhost:10430) and the ``logic2-automation`` package::
-
-    uv sync --extra saleae
+Hardware wiring and Logic 2 app setup are documented in ``docs/saleae.md``.
 """
 
 from __future__ import annotations
