@@ -14,7 +14,8 @@ import logging
 import re
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -41,9 +42,9 @@ from .config import CapacitorConfig
 
 logger = logging.getLogger(__name__)
 
-_FLASH_TIMEOUT = 30  # seconds
-_AFTER_TRIGGER_SECONDS = 1.0  # seconds to record after falling edge
-_POST_CAPTURE_SETTLE_SECONDS = 2.0
+FLASH_TIMEOUT = 30  # seconds
+AFTER_TRIGGER_SECONDS = 1.0  # seconds to record after falling edge
+POST_CAPTURE_SETTLE_SECONDS = 2.0
 
 # CSV columns that can only be filled by running the linked ELF on a device
 # (Saleae timing + NVM counter readback). Compile-only CSVs omit these, and
@@ -132,6 +133,55 @@ def check_device_available() -> bool:
         return result.returncode == 0
     except subprocess.TimeoutExpired, FileNotFoundError, OSError:
         return False
+
+
+@contextmanager
+def optional_saleae(compile_only_warning: str) -> Iterator[Manager | None]:
+    """Yield a Saleae manager when an MSP430 device is present, else None.
+
+    Logs *compile_only_warning* and yields None when no device is detected.
+    The manager is closed on exit.
+    """
+    manager: Manager | None = None
+    if check_device_available():
+        from ..device.saleae import discover_saleae
+
+        manager = discover_saleae()
+    else:
+        logger.warning(compile_only_warning)
+    try:
+        yield manager
+    finally:
+        if manager is not None:
+            manager.close()
+
+
+def measure_execution_time(
+    elf: Path,
+    saleae_manager: Manager,
+    capture_timeout_seconds: float,
+) -> float:
+    """Flash *elf* and measure execution time (us) via Saleae GPIO capture."""
+    from ..device.saleae import saleae_run
+
+    return saleae_run(
+        elf,
+        saleae_manager,
+        FLASH_TIMEOUT,
+        AFTER_TRIGGER_SECONDS,
+        capture_timeout_seconds,
+    )
+
+
+MATRIX_COMPILE_ONLY_WARNING = (
+    "No MSP430 device detected; running compile-only (no flash, timing, "
+    "or NVM readback). Runtime CSV columns will be left blank."
+)
+
+TIMING_COMPILE_ONLY_WARNING = (
+    "No MSP430 device detected; running compile-only (no flash or "
+    "timing). The execution_time_us column will be left blank."
+)
 
 
 # Type alias for the row-builder callback.
@@ -292,22 +342,19 @@ def run_benchmark_matrix(
                     if elf.is_file():
                         try:
                             from ..device.flash import read_nvm
-                            from ..device.saleae import saleae_run
 
-                            execution_time_us = saleae_run(
+                            execution_time_us = measure_execution_time(
                                 elf,
                                 saleae_manager,
-                                _FLASH_TIMEOUT,
-                                _AFTER_TRIGGER_SECONDS,
                                 capture_timeout_seconds,
                             )
 
                             if device_debug and nvm_symbols:
-                                time.sleep(_POST_CAPTURE_SETTLE_SECONDS)
+                                time.sleep(POST_CAPTURE_SETTLE_SECONDS)
                                 nvm_dict = read_nvm(
                                     tc,
                                     elf,
-                                    _FLASH_TIMEOUT,
+                                    FLASH_TIMEOUT,
                                     nvm_symbols,
                                 )
                                 nvm_text = "\n".join(
