@@ -601,19 +601,21 @@ static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAl
     };
 
     // Forward propagation over the real loop CFG (LoopBodyNoBackedge).
+    // Like propagateEnergyLeft, this deliberately diverges from the reference's
+    // greedy max-first walk (which can drop the worst-case path at joins whose
+    // costlier side has more hops): build the DAG of reachable disabled edges
+    // first, then propagate the max accumulated cost in topological order,
+    // mirroring the backward pass below.
     {
-        std::map<CFGEdge, double> pending;
+        CFGEdge seedEdge{startSynth, headerBlock};
+        std::deque<CFGEdge> toVisit = {seedEdge};
         std::set<CFGEdge> visited;
-        std::set<llvm::BasicBlock *> seenLoops;
-        pending[CFGEdge{startSynth, headerBlock}] = 0.0;
+        std::map<CFGEdge, std::vector<CFGEdge>> dagAdj;
+        dagAdj[seedEdge];
 
-        while (!pending.empty()) {
-            auto maxIt =
-                std::max_element(pending.begin(), pending.end(),
-                                 [](const auto &a, const auto &b) { return a.second < b.second; });
-            CFGEdge edge = maxIt->first;
-            double cost = maxIt->second;
-            pending.erase(maxIt);
+        while (!toVisit.empty()) {
+            CFGEdge edge = toVisit.front();
+            toVisit.pop_front();
             if (!visited.insert(edge).second)
                 continue;
 
@@ -621,37 +623,77 @@ static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAl
             if (!isBlockInLoop(block))
                 continue;
 
-            auto metaIt = solution.blockMeta.find(block);
-            if (metaIt != solution.blockMeta.end()) {
-                const auto &loopOpt = metaIt->second.loop;
-                if (loopOpt.has_value()) {
-                    llvm::BasicBlock *loopHeader = loopOpt->loop->getHeader();
-                    if (!seenLoops.count(loopHeader)) {
-                        seenLoops.insert(loopHeader);
-                        cost += (loopOpt->nbIter - 1) * loopOpt->costOneIt;
-                    }
-                }
-            }
-
-            cost += getBlockExecEnergy(block, solution, cfg, state, params);
-            double energyLeft = energyLeftStart - cost;
-            if (energyLeft < solution.blockMeta[block].E_left)
-                solution.blockMeta[block].E_left = energyLeft;
-
             llvm::BasicBlock *BB = block->getLLVMBlock();
             for (llvm::BasicBlock *succBB : llvm::successors(BB)) {
                 if (!L->contains(succBB))
                     continue;
                 SchematicBlock *succ = graph.getOrCreate(succBB);
                 CFGEdge childEdge{block, succ};
+                if (visited.count(childEdge))
+                    continue;
                 if (isCurrentLoopBackedge(block, succ))
                     continue;
                 if (!isDisabledCheckpoint(solution, childEdge))
                     continue;
-                if (visited.count(childEdge))
-                    continue;
-                if (pending.find(childEdge) == pending.end() || cost < pending[childEdge])
-                    pending[childEdge] = cost;
+                dagAdj[childEdge];
+                dagAdj[edge].push_back(childEdge);
+                toVisit.push_back(childEdge);
+            }
+        }
+
+        std::map<CFGEdge, unsigned> inDeg;
+        for (auto &[node, children] : dagAdj) {
+            if (inDeg.find(node) == inDeg.end())
+                inDeg[node] = 0;
+            for (auto &child : children)
+                inDeg[child]++;
+        }
+
+        std::deque<CFGEdge> topoQueue;
+        for (auto &[node, deg] : inDeg)
+            if (deg == 0)
+                topoQueue.push_back(node);
+
+        std::map<CFGEdge, double> maxCost;
+        std::set<llvm::BasicBlock *> seenLoops;
+        maxCost[seedEdge] = 0.0;
+
+        while (!topoQueue.empty()) {
+            CFGEdge edge = topoQueue.front();
+            topoQueue.pop_front();
+
+            double cost = maxCost.count(edge) ? maxCost[edge] : 0.0;
+            maxCost.erase(edge);
+
+            SchematicBlock *block = edge.dst;
+            if (isBlockInLoop(block)) {
+                auto metaIt = solution.blockMeta.find(block);
+                if (metaIt != solution.blockMeta.end()) {
+                    const auto &loopOpt = metaIt->second.loop;
+                    if (loopOpt.has_value()) {
+                        llvm::BasicBlock *loopHeader = loopOpt->loop->getHeader();
+                        if (!seenLoops.count(loopHeader)) {
+                            seenLoops.insert(loopHeader);
+                            cost += (loopOpt->nbIter - 1) * loopOpt->costOneIt;
+                        }
+                    }
+                }
+
+                cost += getBlockExecEnergy(block, solution, cfg, state, params);
+                double energyLeft = energyLeftStart - cost;
+                if (energyLeft < solution.blockMeta[block].E_left)
+                    solution.blockMeta[block].E_left = energyLeft;
+
+                for (auto &childEdge : dagAdj[edge]) {
+                    if (maxCost.find(childEdge) == maxCost.end() || cost > maxCost[childEdge])
+                        maxCost[childEdge] = cost;
+                }
+            }
+
+            for (auto &childEdge : dagAdj[edge]) {
+                inDeg[childEdge]--;
+                if (inDeg[childEdge] == 0)
+                    topoQueue.push_back(childEdge);
             }
         }
     }
