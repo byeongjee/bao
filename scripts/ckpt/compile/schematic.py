@@ -18,9 +18,8 @@ from ..toolchain import Toolchain
 from . import common
 from .common import (
     MATH_LINK_FLAGS,
-    annotate_tripcounts,
     canonicalize_ir_for_native_profiling,
-    compile_to_ir,
+    compile_annotated_ir,
     compile_to_object,
     isolate_calls,
     link_algorithm,
@@ -97,26 +96,16 @@ def compile_schematic(
     opts.output.parent.mkdir(parents=True, exist_ok=True)
 
     with compilation_workdir(prefix="ckpt_schematic_") as tmp:
-        # Phase 1: C -> LLVM IR at -O0
-        input_ll = tmp / "input.ll"
-        extra_includes = list(opts.extra_includes)
-        extra_includes.append(str(env.project_dir / "passes" / "runtime"))
-
-        compile_to_ir(
+        tripcount_ll = compile_annotated_ir(
             tc,
             env,
-            opts.input_c,
-            input_ll,
-            clang_opt_level=0,
+            input_c=opts.input_c,
+            tmp=tmp,
             debug=opts.debug,
             device_debug=opts.device_debug,
-            extra_includes=extra_includes,
-            extra_defines=[f"F_CPU={opts.cpu_freq}"],
+            cpu_freq=opts.cpu_freq,
+            extra_includes=opts.extra_includes,
         )
-
-        # Tripcount annotation
-        tripcount_ll = tmp / "tripcount.ll"
-        annotate_tripcounts(tc, env, input_ll, tripcount_ll)
 
         # Isolate function calls so the inter-procedural SCHEMATIC pass can fold
         # each callee's summary onto its call sites (replaces full inlining). The
