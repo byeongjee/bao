@@ -175,15 +175,28 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
                                                      "mem_store_energy_per_byte",
                                                      "mem_restore_energy_per_byte"};
 
+    // Presence AND type must be checked before get<T>(): with
+    // JSON_NOEXCEPTION defined, a type mismatch calls std::abort() with no
+    // diagnostic instead of throwing.
     for (const auto &field : requiredDouble) {
         if (!config.contains(field)) {
             PLOGE << "Error: Missing required field '" << field
                   << "' in MILP config: " << configPath;
             return std::nullopt;
         }
+        if (!config[field].is_number()) {
+            PLOGE << "Error: Field '" << field
+                  << "' must be numeric in MILP config: " << configPath;
+            return std::nullopt;
+        }
     }
     if (!config.contains("vm_capacity_bytes")) {
         PLOGE << "Error: Missing required field 'vm_capacity_bytes'"
+              << " in MILP config: " << configPath;
+        return std::nullopt;
+    }
+    if (!config["vm_capacity_bytes"].is_number_unsigned()) {
+        PLOGE << "Error: Field 'vm_capacity_bytes' must be a non-negative integer"
               << " in MILP config: " << configPath;
         return std::nullopt;
     }
@@ -200,8 +213,14 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
     params.vmCapacityBytes = config["vm_capacity_bytes"].get<unsigned>();
 
     // N_reg: optional shared field (default 16).
-    if (config.contains("N_reg"))
+    if (config.contains("N_reg")) {
+        if (!config["N_reg"].is_number_unsigned()) {
+            PLOGE << "Error: Field 'N_reg' must be a non-negative integer"
+                  << " in MILP config: " << configPath;
+            return std::nullopt;
+        }
         params.N_reg = config["N_reg"].get<unsigned>();
+    }
 
     // MILP-specific fields: check "milp" section first, then root (backward compat).
     nlohmann::json milpSection;

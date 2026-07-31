@@ -169,20 +169,42 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
 
     auto &ctx = *ctxResult.context;
 
+    // All exit paths report the same base fields; per-path fields
+    // (regions, boundaries, runtime calls) are set at each site.
+    auto makeCommonStats = [&F, &ctx](double compilationTimeMs) {
+        CommonStats c;
+        c.passName = "MILP";
+        c.functionName = F.getName().str();
+        c.basicBlocks = ctx.cfg->getBlocks().size();
+        c.edges = ctx.cfg->getEdges().size();
+        c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+        c.compilationTimeMs = compilationTimeMs;
+        c.peakRSSKb = getPeakRSSKb();
+        return c;
+    };
+
     // Step 2b: Hoist non-entry static allocas to the entry block.
     // At -O2, inlining can leave constant-size allocas in non-entry blocks.
     // StateAnalysis needs them in the entry block so they dominate all uses
     // and liveness is computed correctly.
     BasicBlock &entryBB = F.getEntryBlock();
+    bool movedAllocas = false;
     for (BasicBlock &BB : F) {
         if (&BB == &entryBB)
             continue;
         for (auto it = BB.begin(); it != BB.end();) {
             auto *AI = dyn_cast<AllocaInst>(&*it++);
-            if (AI && isa<ConstantInt>(AI->getArraySize()))
+            if (AI && isa<ConstantInt>(AI->getArraySize())) {
                 AI->moveBefore(entryBB, entryBB.getFirstInsertionPt());
+                movedAllocas = true;
+            }
         }
     }
+    // Exit paths below this point must not claim all analyses are preserved
+    // if the hoisting above already mutated the IR.
+    auto preservedOnSkip = [&movedAllocas] {
+        return movedAllocas ? PreservedAnalyses::none() : PreservedAnalyses::all();
+    };
 
     // Step 3: Run StateAnalysis (Pass B)
     ctx.stateAnalysis = std::make_unique<StateAnalysis>(F, AA, *ctx.cfg);
@@ -190,14 +212,14 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         ctx.stateAnalysis->printAnalysisErrors(errs());
         PLOGW << "Skipping MILP instrumentation for function " << F.getName()
               << " due to unresolved memory/call effects.";
-        return PreservedAnalyses::all();
+        return preservedOnSkip();
     }
 
     // Step 4: Parse MILP energy params and build EnergyModel (Pass C/D)
     auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
     if (!milpParamsOpt) {
         PLOGE << "Error: Failed to parse MILP config: " << MILPConfigOpt.getValue();
-        return PreservedAnalyses::all();
+        return preservedOnSkip();
     }
     ctx.milpParams = *milpParamsOpt;
     ctx.energyModel =
@@ -238,14 +260,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
 
         const auto totalEnd = std::chrono::steady_clock::now();
         double totalMs = std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
-        CommonStats common;
-        common.passName = "MILP";
-        common.functionName = F.getName().str();
-        common.basicBlocks = ctx.cfg->getBlocks().size();
-        common.edges = ctx.cfg->getEdges().size();
-        common.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
-        common.compilationTimeMs = totalMs;
-        common.peakRSSKb = getPeakRSSKb();
+        CommonStats common = makeCommonStats(totalMs);
         printCommonStats(common);
 
         PLOGI << "  --- MILP-specific ---";
@@ -255,14 +270,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  Optimal solution:                no (blocks exceed energy capacity)";
 
         if (!StatsJsonOpt.empty()) {
-            CommonStats c;
-            c.passName = "MILP";
-            c.functionName = F.getName().str();
-            c.basicBlocks = ctx.cfg->getBlocks().size();
-            c.edges = ctx.cfg->getEdges().size();
-            c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
-            c.compilationTimeMs = totalMs;
-            c.peakRSSKb = getPeakRSSKb();
+            CommonStats c = makeCommonStats(totalMs);
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = false;
             root["infeasibility_reason"] = "blocks exceed energy capacity";
@@ -274,7 +282,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             root["ineligible_ssa"] = static_cast<int64_t>(ineligSSACount);
             writeStatsJSON(StatsJsonOpt, std::move(root));
         }
-        return PreservedAnalyses::all();
+        return preservedOnSkip();
     }
 
     const auto &problemSizeStats = optimizer.getProblemSizeStats();
@@ -292,17 +300,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGE << "Optimization failed";
 
         {
-            CommonStats common;
-            common.passName = "MILP";
-            common.functionName = F.getName().str();
-            common.basicBlocks = ctx.cfg->getBlocks().size();
-            common.edges = ctx.cfg->getEdges().size();
-            common.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+            CommonStats common = makeCommonStats(totalExecutionTimeMs);
             common.regions = 0;
             common.regionBoundaries = 0;
             common.runtimeCallsInserted = 0;
-            common.compilationTimeMs = totalExecutionTimeMs;
-            common.peakRSSKb = getPeakRSSKb();
             printCommonStats(common);
         }
 
@@ -315,14 +316,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
 
         if (!StatsJsonOpt.empty()) {
-            CommonStats c;
-            c.passName = "MILP";
-            c.functionName = F.getName().str();
-            c.basicBlocks = ctx.cfg->getBlocks().size();
-            c.edges = ctx.cfg->getEdges().size();
-            c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
-            c.compilationTimeMs = totalExecutionTimeMs;
-            c.peakRSSKb = getPeakRSSKb();
+            CommonStats c = makeCommonStats(totalExecutionTimeMs);
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = false;
             root["infeasibility_reason"] = "solver found no feasible solution";
@@ -339,7 +333,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             writeStatsJSON(StatsJsonOpt, std::move(root));
         }
 
-        return PreservedAnalyses::all();
+        return preservedOnSkip();
     }
     auto solveEnd = std::chrono::steady_clock::now();
     double solveTimeMs = std::chrono::duration<double, std::milli>(solveEnd - solveStart).count();
@@ -372,14 +366,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
 
         const auto totalEnd = std::chrono::steady_clock::now();
         double totalMs = std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
-        CommonStats common;
-        common.passName = "MILP";
-        common.functionName = F.getName().str();
-        common.basicBlocks = ctx.cfg->getBlocks().size();
-        common.edges = ctx.cfg->getEdges().size();
-        common.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
-        common.compilationTimeMs = totalMs;
-        common.peakRSSKb = getPeakRSSKb();
+        CommonStats common = makeCommonStats(totalMs);
         printCommonStats(common);
 
         PLOGI << "  --- MILP-specific ---";
@@ -401,14 +388,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
 
         if (!StatsJsonOpt.empty()) {
-            CommonStats c;
-            c.passName = "MILP";
-            c.functionName = F.getName().str();
-            c.basicBlocks = ctx.cfg->getBlocks().size();
-            c.edges = ctx.cfg->getEdges().size();
-            c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
-            c.compilationTimeMs = totalMs;
-            c.peakRSSKb = getPeakRSSKb();
+            CommonStats c = makeCommonStats(totalMs);
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = true;
             appendMILPAllocationModeToJSON(root, coarseAllocation);
@@ -429,7 +409,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
             root["ineligible_ssa"] = static_cast<int64_t>(ineligSSACount);
             writeStatsJSON(StatsJsonOpt, std::move(root));
         }
-        return PreservedAnalyses::all();
+        return preservedOnSkip();
     }
 
     // Step 7: Instrument IR (Pass F)
@@ -444,17 +424,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
 
     // Statistics summary
     {
-        CommonStats common;
-        common.passName = "MILP";
-        common.functionName = F.getName().str();
-        common.basicBlocks = ctx.cfg->getBlocks().size();
-        common.edges = ctx.cfg->getEdges().size();
-        common.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+        CommonStats common = makeCommonStats(totalExecutionTimeMs);
         common.regions = solution.r.size();
         common.regionBoundaries = solution.r.size();
         common.runtimeCallsInserted = inserted;
-        common.compilationTimeMs = totalExecutionTimeMs;
-        common.peakRSSKb = getPeakRSSKb();
         printCommonStats(common);
     }
 
@@ -477,17 +450,10 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
 
     if (!StatsJsonOpt.empty()) {
-        CommonStats c;
-        c.passName = "MILP";
-        c.functionName = F.getName().str();
-        c.basicBlocks = ctx.cfg->getBlocks().size();
-        c.edges = ctx.cfg->getEdges().size();
-        c.candidateGlobals = ctx.stateAnalysis->getVMObjs().size();
+        CommonStats c = makeCommonStats(totalExecutionTimeMs);
         c.regions = solution.r.size();
         c.regionBoundaries = solution.r.size();
         c.runtimeCallsInserted = inserted;
-        c.compilationTimeMs = totalExecutionTimeMs;
-        c.peakRSSKb = getPeakRSSKb();
         json::Object root = commonStatsToJSON(c);
         root["feasible"] = true;
         appendMILPAllocationModeToJSON(root, coarseAllocation);
