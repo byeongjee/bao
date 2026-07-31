@@ -394,19 +394,6 @@ class TestMachinePassLoop:
 class TestMachinePassDistributedCkpt:
     """Distributed checkpointing (register save) tests."""
 
-    def test_register_saves_in_mir(self, run_rockclimb_machine, tmp_path):
-        src = _write_src(tmp_path, MULTI_LIVEOUT)
-        result = run_rockclimb_machine(
-            src,
-            ASSEMBLY_ENERGY_CONFIG,
-            ROCKCLIMB_PARAMS,
-            tmp_path,
-        )
-        assert result.exit_code == 0
-        saves = count_mir_reg_saves(result.output_mir)
-        # Functions with live-out registers should have save points
-        assert saves >= 0  # May be 0 if no cross-region liveness
-
     def test_loop_backedge_register_saves(self, run_rockclimb_machine, tmp_path):
         """Registers modified in a loop body and used via back-edge must be saved."""
         src = _write_src(tmp_path, LOOP_BACKEDGE_LIVEOUT)

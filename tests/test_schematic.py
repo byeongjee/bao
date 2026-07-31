@@ -208,19 +208,17 @@ def test_schematic(
     check_assertions(result, assertions)
 
 
-def test_schematic_alloca_placement(run_schematic_o0, tmp_path_factory):
+def test_schematic_alloca_placement(run_schematic, tmp_path_factory):
     """Test that O0 allocas become placement candidates in SCHEMATIC.
 
     At O0, local variables are alloca+load/store pairs. With
     SchematicStateAnalysis, these allocas are eligible for VM/NVM placement.
     VM-placed allocas get __vm_shadow_ globals; NVM-placed allocas don't.
     """
-    import re
-
     tmp_path = tmp_path_factory.mktemp("alloca_placement")
     src = SCENARIOS_DIR / "scenario_alloca_placement.c"
 
-    result = run_schematic_o0(src, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path)
+    result = run_schematic(src, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path)
 
     # Must succeed.
     assert result.exit_code == 0, (
@@ -417,7 +415,7 @@ def test_schematic_debug_loop_logs_respect_log_level(
 
 def test_schematic_skips_debug_helper_functions(
     collect_schematic_trace,
-    run_schematic_o0,
+    run_schematic,
     tmp_path_factory,
 ):
     tmp_path = tmp_path_factory.mktemp("schematic_skips_debug_helpers")
@@ -426,7 +424,7 @@ def test_schematic_skips_debug_helper_functions(
     trace = collect_schematic_trace(src, ENERGY_CONFIG, tmp_path, 0)
     assert sorted(trace.keys()) == ["main"]
 
-    result = run_schematic_o0(src, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path)
+    result = run_schematic(src, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path)
     assert result.exit_code == 0, (
         f"Expected exit=0 but got {result.exit_code}.\nstderr: {result.stderr[:1000]}"
     )

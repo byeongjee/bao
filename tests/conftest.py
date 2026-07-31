@@ -452,12 +452,6 @@ def run_schematic(tools, compile_to_ir):
 
 
 @pytest.fixture(scope="session")
-def run_schematic_o0(run_schematic):
-    """Alias for run_schematic (SCHEMATIC always uses O0/no-mem2reg mode)."""
-    return run_schematic
-
-
-@pytest.fixture(scope="session")
 def run_schematic_o3(tools, compile_to_ir):
     """Return a callable that runs an optimized SCHEMATIC pipeline."""
 

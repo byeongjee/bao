@@ -14,11 +14,13 @@ from ckpt.runner import StepResult
 pytestmark = pytest.mark.unit
 
 
-def test_collect_bb_freq_links_math_library(tmp_path, monkeypatch):
-    input_ll = tmp_path / "input.ll"
-    input_ll.write_text("; test\n")
+def _make_fake_run(calls, on_step):
+    """Build a ``ckpt.runner.run`` replacement that records calls.
 
-    calls: list[tuple[str, list[str], str | None]] = []
+    Appends ``(step_name, cmd, cwd)`` to *calls* and invokes ``on_step(step_name)``
+    for per-step side effects (pass None for none). Mirrors ``run``'s signature
+    so monkeypatched callers keep working if the interface changes.
+    """
 
     def fake_run(
         cmd: list[str],
@@ -29,12 +31,26 @@ def test_collect_bb_freq_links_math_library(tmp_path, monkeypatch):
         timeout: int = 300,
         input: str | None = None,
     ) -> StepResult:
+        del check, timeout, input
         calls.append((step_name, cmd, cwd))
-        if step_name == "bb-freq-run":
-            (tmp_path / "bb_freq.json").write_text("{}")
+        if on_step is not None:
+            on_step(step_name)
         return StepResult(returncode=0, stdout="", stderr="", duration_ms=0)
 
-    monkeypatch.setattr(common, "run", fake_run)
+    return fake_run
+
+
+def test_collect_bb_freq_links_math_library(tmp_path, monkeypatch):
+    input_ll = tmp_path / "input.ll"
+    input_ll.write_text("; test\n")
+
+    calls: list[tuple[str, list[str], str | None]] = []
+
+    def on_step(step_name: str) -> None:
+        if step_name == "bb-freq-run":
+            (tmp_path / "bb_freq.json").write_text("{}")
+
+    monkeypatch.setattr(common, "run", _make_fake_run(calls, on_step))
     monkeypatch.setattr(
         common,
         "strip_ir_for_native",
@@ -64,22 +80,9 @@ def test_collect_bb_freq_links_math_library(tmp_path, monkeypatch):
 
 
 def test_assemble_and_link_links_math_library(tmp_path, monkeypatch):
-    calls: list[tuple[str, list[str]]] = []
+    calls: list[tuple[str, list[str], str | None]] = []
 
-    def fake_run(
-        cmd: list[str],
-        *,
-        check: bool = True,
-        step_name: str = "",
-        cwd: str | None = None,
-        timeout: int = 300,
-        input: str | None = None,
-    ) -> StepResult:
-        del check, cwd, timeout, input
-        calls.append((step_name, cmd))
-        return StepResult(returncode=0, stdout="", stderr="", duration_ms=0)
-
-    monkeypatch.setattr(common, "run", fake_run)
+    monkeypatch.setattr(common, "run", _make_fake_run(calls, None))
 
     tc = SimpleNamespace(gcc="msp430-elf-gcc")
     env = SimpleNamespace(
@@ -97,7 +100,7 @@ def test_assemble_and_link_links_math_library(tmp_path, monkeypatch):
         linker_script=tmp_path / "linker.ld",
     )
 
-    link_cmd = next(cmd for step_name, cmd in calls if step_name == "link")
+    link_cmd = next(cmd for step_name, cmd, _cwd in calls if step_name == "link")
     assert "-lm" in link_cmd
     assert link_cmd[link_cmd.index("-lm") + 1] == "-o"
 
@@ -105,22 +108,11 @@ def test_assemble_and_link_links_math_library(tmp_path, monkeypatch):
 def test_schematic_trace_compile_links_math_library(tmp_path, monkeypatch):
     calls: list[tuple[str, list[str], str | None]] = []
 
-    def fake_run(
-        cmd: list[str],
-        *,
-        check: bool = True,
-        step_name: str = "",
-        cwd: str | None = None,
-        timeout: int = 300,
-        input: str | None = None,
-    ) -> StepResult:
-        del check, timeout, input
-        calls.append((step_name, cmd, cwd))
+    def on_step(step_name: str) -> None:
         if step_name == "trace-run":
             (tmp_path / "schematic_trace.json").write_text("{}")
-        return StepResult(returncode=0, stdout="", stderr="", duration_ms=0)
 
-    monkeypatch.setattr(schematic, "run", fake_run)
+    monkeypatch.setattr(schematic, "run", _make_fake_run(calls, on_step))
     monkeypatch.setattr(
         schematic,
         "canonicalize_ir_for_native_profiling",
@@ -183,22 +175,9 @@ def test_schematic_trace_compile_links_math_library(tmp_path, monkeypatch):
 
 
 def test_schematic_pass_forwards_recompute_flag(tmp_path, monkeypatch):
-    calls: list[list[str]] = []
+    calls: list[tuple[str, list[str], str | None]] = []
 
-    def fake_run(
-        cmd: list[str],
-        *,
-        check: bool = True,
-        step_name: str = "",
-        cwd: str | None = None,
-        timeout: int = 300,
-        input: str | None = None,
-    ) -> StepResult:
-        del check, step_name, cwd, timeout, input
-        calls.append(cmd)
-        return StepResult(returncode=0, stdout="", stderr="", duration_ms=0)
-
-    monkeypatch.setattr(schematic, "run", fake_run)
+    monkeypatch.setattr(schematic, "run", _make_fake_run(calls, None))
 
     tc = SimpleNamespace(opt="opt")
     env = SimpleNamespace(pass_lib=Path("/passes/CheckpointPass.so"))
@@ -237,7 +216,7 @@ def test_schematic_pass_forwards_recompute_flag(tmp_path, monkeypatch):
         tmp_path / "trace.json",
         energy_config=tmp_path / "energy.json",
     )
-    assert "-recompute-energy-after-new-checkpoint" not in calls.pop()
+    assert "-recompute-energy-after-new-checkpoint" not in calls.pop()[1]
 
     schematic._run_schematic_pass(
         tc,
@@ -248,4 +227,4 @@ def test_schematic_pass_forwards_recompute_flag(tmp_path, monkeypatch):
         tmp_path / "trace.json",
         energy_config=tmp_path / "energy.json",
     )
-    assert "-recompute-energy-after-new-checkpoint" in calls.pop()
+    assert "-recompute-energy-after-new-checkpoint" in calls.pop()[1]

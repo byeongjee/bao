@@ -14,6 +14,7 @@ DISABLED checkpoint, never an active boundary.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -40,8 +41,6 @@ FUNC_CALL_CHAIN = SCENARIOS_DIR / "func_call_chain.c"
 
 def _func_stats(stderr: str, fn: str) -> dict[str, str]:
     """Parse the per-function SCHEMATIC stats block out of stderr."""
-    import re
-
     # Each function prints a block starting at "Function:   <name>".
     blocks = re.split(r"=== Checkpoint Insertion Statistics ===", stderr)
     for b in blocks:
@@ -201,8 +200,6 @@ def test_shared_global_vm_uses_one_module_scoped_shadow(tools, compile_to_ir, tm
     auto-renamed __vm_shadow_a.1), so they cache `a` in different SRAM slots and
     a transparent call reads a stale value.
     """
-    import re
-
     r = _run_schematic_interproc(
         tools, compile_to_ir, FUNC_SHARED_VM, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path
     )
