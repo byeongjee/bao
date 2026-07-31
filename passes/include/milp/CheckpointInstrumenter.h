@@ -50,7 +50,7 @@ class CheckpointInstrumenter {
     void createShadowGlobals(llvm::Function &F, const MILPSolution &solution,
                              const StateAnalysis &state);
     void createNVMBackupGlobals(llvm::Function &F, const MILPSolution &solution,
-                                const StateAnalysis &state, const ICFGView &cfg);
+                                const StateAnalysis &state);
     void rewriteAccessesInVMRegions(llvm::Function &F, const MILPSolution &solution,
                                     const ICFGView &cfg);
 
