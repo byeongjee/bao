@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from ckpt.env import ProjectEnv
+from ckpt.toolchain import Toolchain
+from conftest import PROJECT_DIR, TESTS_DIR, write_src
 
 # ---------------------------------------------------------------------------
 # Directory layout
 # ---------------------------------------------------------------------------
-TESTS_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = TESTS_DIR.parent
 MACHINE_PASS_LIB = (
     PROJECT_DIR / "passes" / "build" / "rockclimb-backend" / "RockClimbMachinePass.so"
 )
@@ -44,37 +43,12 @@ class MachinePassResult:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _resolve_llc() -> str:
-    """Find llc, preferring LLVM_DIR if set."""
-    llvm_dir = os.environ.get("LLVM_DIR", "")
-    if llvm_dir:
-        return os.path.join(llvm_dir, "bin", "llc")
-    return shutil.which("llc") or "llc"
-
-
-def _resolve_clang() -> str:
-    """Find clang, preferring LLVM_DIR if set."""
-    llvm_dir = os.environ.get("LLVM_DIR", "")
-    if llvm_dir:
-        return os.path.join(llvm_dir, "bin", "clang")
-    return shutil.which("clang") or "clang"
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 def machine_tools():
     """Resolve tool paths and skip if pass library isn't built."""
-    # Load .env if present
-    env_file = PROJECT_DIR / ".env"
-    if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                os.environ.setdefault(k.strip(), v.strip())
-
     if not MACHINE_PASS_LIB.exists():
         pytest.skip(
             f"Machine pass library not built: {MACHINE_PASS_LIB}\n"
@@ -82,9 +56,11 @@ def machine_tools():
             allow_module_level=True,
         )
 
+    env = ProjectEnv.from_environ(PROJECT_DIR)
+    tc = Toolchain.resolve(env)
     return {
-        "clang": _resolve_clang(),
-        "llc": _resolve_llc(),
+        "clang": tc.clang,
+        "llc": tc.llc,
         "machine_pass_lib": str(MACHINE_PASS_LIB),
     }
 
@@ -319,12 +295,6 @@ int boundary_block_defs(int *arr, int n) {
 """
 
 
-def _write_src(tmp_path: Path, code: str) -> Path:
-    src = tmp_path / "test.c"
-    src.write_text(code)
-    return src
-
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -332,7 +302,7 @@ class TestMachinePassBasic:
     """Basic pass loading and execution tests."""
 
     def test_pass_runs_successfully(self, run_rockclimb_machine, tmp_path):
-        src = _write_src(tmp_path, SIMPLE_LINEAR)
+        src = write_src(tmp_path, SIMPLE_LINEAR)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -343,7 +313,7 @@ class TestMachinePassBasic:
         assert "Checkpoint Insertion Statistics" in result.stderr
 
     def test_produces_boundary_checks(self, run_rockclimb_machine, tmp_path):
-        src = _write_src(tmp_path, SIMPLE_LINEAR)
+        src = write_src(tmp_path, SIMPLE_LINEAR)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -356,7 +326,7 @@ class TestMachinePassBasic:
         assert checks_mir >= 1, f"Expected >=1 boundary checks in MIR, got {checks_mir}"
 
     def test_produces_assembly_calls(self, run_rockclimb_machine, tmp_path):
-        src = _write_src(tmp_path, SIMPLE_LINEAR)
+        src = write_src(tmp_path, SIMPLE_LINEAR)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -376,7 +346,7 @@ class TestMachinePassLoop:
     """Loop-containing function tests."""
 
     def test_loop_creates_regions(self, run_rockclimb_machine, tmp_path):
-        src = _write_src(tmp_path, SIMPLE_LOOP)
+        src = write_src(tmp_path, SIMPLE_LOOP)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -396,7 +366,7 @@ class TestMachinePassDistributedCkpt:
 
     def test_loop_backedge_register_saves(self, run_rockclimb_machine, tmp_path):
         """Registers modified in a loop body and used via back-edge must be saved."""
-        src = _write_src(tmp_path, LOOP_BACKEDGE_LIVEOUT)
+        src = write_src(tmp_path, LOOP_BACKEDGE_LIVEOUT)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -434,7 +404,7 @@ class TestMachinePassDistributedCkpt:
             )
         )
 
-        src = _write_src(tmp_path, BOUNDARY_BLOCK_DEF)
+        src = write_src(tmp_path, BOUNDARY_BLOCK_DEF)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -461,7 +431,7 @@ class TestMachinePassDistributedCkpt:
         )
 
     def test_register_saves_in_assembly(self, run_rockclimb_machine, tmp_path):
-        src = _write_src(tmp_path, MULTI_LIVEOUT)
+        src = write_src(tmp_path, MULTI_LIVEOUT)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -481,7 +451,7 @@ class TestMachinePassDistributedCkpt:
     ):
         """With reg_store_energy > 0, inline overhead estimation should
         produce equal or more region boundaries than without."""
-        src = _write_src(tmp_path, SIMPLE_LOOP)
+        src = write_src(tmp_path, SIMPLE_LOOP)
         (tmp_path / "base").mkdir()
         (tmp_path / "store").mkdir()
 
@@ -550,7 +520,7 @@ class TestMachinePassStatistics:
     """Verify pass statistics output."""
 
     def test_statistics_format(self, run_rockclimb_machine, tmp_path):
-        src = _write_src(tmp_path, SIMPLE_LINEAR)
+        src = write_src(tmp_path, SIMPLE_LINEAR)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -592,7 +562,7 @@ class TestCallHandling:
     def test_entry_boundary_saves_args_first(self, run_rockclimb_machine, tmp_path):
         """The entry block emits a boundary, preceded by saves of the live-in
         argument registers (so recovery into the first region restores args)."""
-        src = _write_src(tmp_path, TWO_ARG_LEAF)
+        src = write_src(tmp_path, TWO_ARG_LEAF)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -617,7 +587,7 @@ class TestCallHandling:
     ):
         """Calls are not boundary sites in the caller; the callee carries its
         own entry/exit boundaries (shared across call sites)."""
-        src = _write_src(tmp_path, CALLER_CALLEE_TWICE)
+        src = write_src(tmp_path, CALLER_CALLEE_TWICE)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -655,7 +625,7 @@ class TestCallHandling:
         costed as a single expensive instruction. Integer division
         (__mspabi_divi ~752) exceeds E_safe (~472) for the default config, so a
         block containing it cannot fit one charge."""
-        src = _write_src(tmp_path, "int divfn(int a, int b) { return a / b; }")
+        src = write_src(tmp_path, "int divfn(int a, int b) { return a / b; }")
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,
@@ -672,7 +642,7 @@ class TestCallHandling:
     ):
         """Direct recursion needs no special handling: the (in-module) callee
         carries its own entry/exit boundaries, and the recursive call is cheap."""
-        src = _write_src(tmp_path, RECURSION)
+        src = write_src(tmp_path, RECURSION)
         result = run_rockclimb_machine(
             src,
             ASSEMBLY_ENERGY_CONFIG,

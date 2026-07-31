@@ -97,6 +97,13 @@ def _run(
     )
 
 
+def write_src(tmp_path: Path, code: str) -> Path:
+    """Write inline C source to tmp_path/test.c and return its path."""
+    src = tmp_path / "test.c"
+    src.write_text(code)
+    return src
+
+
 def _prepare_schematic_ir(
     tools,
     compile_to_ir,
