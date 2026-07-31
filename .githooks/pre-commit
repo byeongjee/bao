@@ -30,19 +30,19 @@ fi
 staged_py=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py' || true)
 
 if [ -n "$staged_py" ]; then
-    if command -v uvx &>/dev/null; then
+    if command -v uv &>/dev/null; then
         echo "Running ruff format..."
         for file in $staged_py; do
             if [ -f "$file" ]; then
-                uvx ruff format "$file"
+                uv run ruff format "$file"
                 git add "$file"
             fi
         done
         echo "Running ruff check..."
         # shellcheck disable=SC2086
-        uvx ruff check $staged_py
+        uv run ruff check $staged_py
     else
-        echo "Warning: uvx not found, skipping ruff."
+        echo "Warning: uv not found, skipping ruff."
     fi
 fi
 
