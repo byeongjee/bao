@@ -32,3 +32,72 @@ jobs:
         with:
           clang-format-version: 18
           check-path: passes/include
+
+  cpp-tidy:
+    name: C++ (clang-tidy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      # Pin to the exact llvm-project commit used for the local LLVM build.
+      # Update this when the local LLVM checkout is updated; the cache is
+      # keyed on it, so a bump triggers a one-time rebuild (~2-3 h).
+      LLVM_COMMIT: 384cecd5b20107e1453eaee008e8f4fd22b42c9e
+      LLVM_ROOT: /home/runner/llvm-project
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore LLVM build cache
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          # Only what clang-tidy and find_package(LLVM) need from the build
+          # tree: binaries, generated headers, cmake config, clang resource
+          # dir, plus the in-source headers/cmake modules that the build-tree
+          # LLVMConfig.cmake points back into.
+          path: |
+            /home/runner/llvm-project/llvm/include
+            /home/runner/llvm-project/llvm/cmake
+            /home/runner/llvm-project/build/bin/clang*
+            /home/runner/llvm-project/build/include
+            /home/runner/llvm-project/build/lib/cmake
+            /home/runner/llvm-project/build/lib/clang
+          key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-v1
+      - name: Build LLVM (clang + clang-tidy) at pinned commit
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          # Free disk space; a Release build of clang needs more than the
+          # runner has left with the preinstalled toolchains present.
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache /usr/share/dotnet
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          mkdir -p "$LLVM_ROOT" && cd "$LLVM_ROOT"
+          git init -q . && git remote add origin https://github.com/llvm/llvm-project.git
+          git fetch --depth 1 origin "$LLVM_COMMIT"
+          git checkout -q FETCH_HEAD
+          # Matches the local build (Release + assertions), minus lldb/mlir
+          # and the non-native codegen targets: clang-tidy only parses and
+          # analyzes sources, so backends are irrelevant to it.
+          cmake -S llvm -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_ENABLE_PROJECTS='clang;clang-tools-extra' \
+            -DLLVM_TARGETS_TO_BUILD=X86 \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_PARALLEL_LINK_JOBS=2
+          ninja -C build clang clang-tidy
+      # Gurobi headers/libs are a free unauthenticated download; a license is
+      # only checked when the solver actually runs (GRBEnv creation), and this
+      # job only compiles — it never runs the solver.
+      - name: Install Gurobi
+        run: |
+          curl -fsSL https://packages.gurobi.com/13.0/gurobi13.0.0_linux64.tar.gz \
+            | tar xz -C "$RUNNER_TEMP"
+          echo "GUROBI_HOME=$RUNNER_TEMP/gurobi1300/linux64" >> "$GITHUB_ENV"
+      - name: Generate compile_commands.json
+        run: |
+          cmake -S passes -B passes/build \
+            -DCMAKE_C_COMPILER="$LLVM_ROOT/build/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$LLVM_ROOT/build/bin/clang++" \
+            -DLLVM_DIR="$LLVM_ROOT/build/lib/cmake/llvm"
+      - name: Run clang-tidy
+        run: CLANG_TIDY="$LLVM_ROOT/build/bin/clang-tidy" scripts/run_clang_tidy.sh --all
