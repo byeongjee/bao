@@ -1,0 +1,80 @@
+name: Set up pinned LLVM
+description: >
+  Restore (or build and cache) clang, clang-tidy, opt, and llc from the
+  pinned llvm-project commit. Exports LLVM_COMMIT and LLVM_ROOT into the
+  job environment.
+runs:
+  using: composite
+  steps:
+    - name: Export LLVM paths
+      shell: bash
+      # Pin to the exact llvm-project commit used for the local LLVM build.
+      # Update this when the local LLVM checkout is updated; the cache is
+      # keyed on it, so a bump triggers a one-time rebuild (~2-3 h).
+      run: |
+        echo "LLVM_COMMIT=384cecd5b20107e1453eaee008e8f4fd22b42c9e" >> "$GITHUB_ENV"
+        echo "LLVM_ROOT=/home/runner/llvm-project" >> "$GITHUB_ENV"
+    - name: Restore LLVM build cache
+      id: llvm-cache
+      uses: actions/cache@v4
+      with:
+        # Only what the consumers need from the build tree: tool binaries,
+        # generated headers, cmake config, clang resource dir, the in-source
+        # headers/cmake modules that the build-tree LLVMConfig.cmake points
+        # back into, and the static libs bb-energy-analyzer links against
+        # (llvm-config --libnames core support object debuginfodwarf).
+        path: |
+          /home/runner/llvm-project/llvm/include
+          /home/runner/llvm-project/llvm/cmake
+          /home/runner/llvm-project/build/bin/clang*
+          /home/runner/llvm-project/build/bin/opt
+          /home/runner/llvm-project/build/bin/llc
+          /home/runner/llvm-project/build/include
+          /home/runner/llvm-project/build/lib/cmake
+          /home/runner/llvm-project/build/lib/clang
+          /home/runner/llvm-project/build/lib/libLLVMAsmParser.a
+          /home/runner/llvm-project/build/lib/libLLVMBinaryFormat.a
+          /home/runner/llvm-project/build/lib/libLLVMBitReader.a
+          /home/runner/llvm-project/build/lib/libLLVMBitstreamReader.a
+          /home/runner/llvm-project/build/lib/libLLVMCore.a
+          /home/runner/llvm-project/build/lib/libLLVMDebugInfoDWARF.a
+          /home/runner/llvm-project/build/lib/libLLVMDebugInfoDWARFLowLevel.a
+          /home/runner/llvm-project/build/lib/libLLVMDemangle.a
+          /home/runner/llvm-project/build/lib/libLLVMIRReader.a
+          /home/runner/llvm-project/build/lib/libLLVMMC.a
+          /home/runner/llvm-project/build/lib/libLLVMMCParser.a
+          /home/runner/llvm-project/build/lib/libLLVMObject.a
+          /home/runner/llvm-project/build/lib/libLLVMRemarks.a
+          /home/runner/llvm-project/build/lib/libLLVMSupport.a
+          /home/runner/llvm-project/build/lib/libLLVMTargetParser.a
+          /home/runner/llvm-project/build/lib/libLLVMTextAPI.a
+        key: llvm-${{ runner.os }}-${{ env.LLVM_COMMIT }}-v2
+    - name: Build LLVM (clang + tools) at pinned commit
+      if: steps.llvm-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        # Free disk space; a Release build of clang needs more than the
+        # runner has left with the preinstalled toolchains present.
+        sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache /usr/share/dotnet
+        sudo apt-get update && sudo apt-get install -y ninja-build
+        mkdir -p "$LLVM_ROOT" && cd "$LLVM_ROOT"
+        git init -q . && git remote add origin https://github.com/llvm/llvm-project.git
+        git fetch --depth 1 origin "$LLVM_COMMIT"
+        git checkout -q FETCH_HEAD
+        # Matches the local build (Release + assertions), minus lldb/mlir.
+        # X86 covers the host tools; MSP430 is needed by the pass tests
+        # (clang --target=msp430, llc -march=msp430).
+        cmake -S llvm -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLLVM_ENABLE_ASSERTIONS=ON \
+          -DLLVM_ENABLE_PROJECTS='clang;clang-tools-extra' \
+          -DLLVM_TARGETS_TO_BUILD='X86;MSP430' \
+          -DLLVM_INCLUDE_TESTS=OFF \
+          -DLLVM_INCLUDE_EXAMPLES=OFF \
+          -DLLVM_INCLUDE_BENCHMARKS=OFF \
+          -DLLVM_PARALLEL_LINK_JOBS=2
+        ninja -C build clang clang-tidy opt llc \
+          LLVMAsmParser LLVMBinaryFormat LLVMBitReader LLVMBitstreamReader \
+          LLVMCore LLVMDebugInfoDWARF LLVMDebugInfoDWARFLowLevel LLVMDemangle \
+          LLVMIRReader LLVMMC LLVMMCParser LLVMObject LLVMRemarks LLVMSupport \
+          LLVMTargetParser LLVMTextAPI
