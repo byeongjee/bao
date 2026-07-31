@@ -66,5 +66,3 @@ class InfeasibleError(CkptError):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(f"Infeasible: {reason}")
-
-

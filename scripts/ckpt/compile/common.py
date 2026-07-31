@@ -23,6 +23,7 @@ MATH_LINK_FLAGS = ["-lm"]
 # C -> LLVM IR
 # ---------------------------------------------------------------------------
 
+
 def compile_to_ir(
     tc: Toolchain,
     env: ProjectEnv,
@@ -39,12 +40,15 @@ def compile_to_ir(
     cmd: list[str] = [
         tc.clang,
         "--target=msp430-elf",
-        "-S", "-emit-llvm",
+        "-S",
+        "-emit-llvm",
         f"-O{clang_opt_level}",
         "-D__MSP430FR5994__",
         f"-I{env.project_dir / 'passes' / 'include'}",
-        "-isystem", str(env.msp430gcc_support_path / "include"),
-        "-isystem", str(env.msp430gcc_support_path / "msp430-elf" / "include"),
+        "-isystem",
+        str(env.msp430gcc_support_path / "include"),
+        "-isystem",
+        str(env.msp430gcc_support_path / "msp430-elf" / "include"),
     ]
 
     if clang_opt_level == 0:
@@ -69,6 +73,7 @@ def compile_to_ir(
 # Trip-count annotation
 # ---------------------------------------------------------------------------
 
+
 def annotate_tripcounts(
     tc: Toolchain,
     env: ProjectEnv,
@@ -81,8 +86,10 @@ def annotate_tripcounts(
             tc.opt,
             f"-load-pass-plugin={env.pass_lib}",
             "-passes=tripcount-annotation",
-            "-S", str(input_ll),
-            "-o", str(output_ll),
+            "-S",
+            str(input_ll),
+            "-o",
+            str(output_ll),
         ],
         step_name="tripcount-annotation",
     )
@@ -107,8 +114,10 @@ def isolate_calls(
             tc.opt,
             f"-load-pass-plugin={env.pass_lib}",
             "-passes=schematic-isolate",
-            "-S", str(input_ll),
-            "-o", str(output_ll),
+            "-S",
+            str(input_ll),
+            "-o",
+            str(output_ll),
         ],
         step_name="schematic-isolate",
     )
@@ -117,6 +126,7 @@ def isolate_calls(
 # ---------------------------------------------------------------------------
 # IR optimization
 # ---------------------------------------------------------------------------
+
 
 def optimize_ir(
     tc: Toolchain,
@@ -169,14 +179,16 @@ def optimize_ir_with_options(
     )
 
 
-_NOINLINE_FUNCTIONS = frozenset({
-    "timing_gpio_init",
-    "timing_gpio_start",
-    "timing_gpio_stop",
-    "_timing_delay_cycles",
-    "bench_halt",
-    "main",
-})
+_NOINLINE_FUNCTIONS = frozenset(
+    {
+        "timing_gpio_init",
+        "timing_gpio_start",
+        "timing_gpio_stop",
+        "_timing_delay_cycles",
+        "bench_halt",
+        "main",
+    }
+)
 """Benchmark infrastructure functions that must never be inlined."""
 
 
@@ -227,8 +239,10 @@ def inline_functions(
         [
             tc.opt,
             "-passes=always-inline,inline",
-            "-S", str(stripped_ll),
-            "-o", str(output_ll),
+            "-S",
+            str(stripped_ll),
+            "-o",
+            str(output_ll),
         ],
         step_name="inline-functions",
     )
@@ -274,8 +288,10 @@ def run_assembly_energy(
             f"-load-pass-plugin={env.bb_debuginfo_lib}",
             "-passes=assign-bb-debuginfo",
             f"-bb-mapping={bb_mapping}",
-            "-S", str(input_ll),
-            "-o", str(bbinfo_ll),
+            "-S",
+            str(input_ll),
+            "-o",
+            str(bbinfo_ll),
         ],
         step_name="assign-bb-debuginfo",
     )
@@ -288,7 +304,8 @@ def run_assembly_energy(
             "-filetype=obj",
             f"-O{opt_level}",
             str(bbinfo_ll),
-            "-o", str(energy_obj),
+            "-o",
+            str(energy_obj),
         ],
         step_name="llc-energy-obj",
     )
@@ -297,8 +314,10 @@ def run_assembly_energy(
     result = run(
         [
             str(env.bb_analyzer),
-            "--energy-params", str(params_config),
-            "--bb-mapping", str(bb_mapping),
+            "--energy-params",
+            str(params_config),
+            "--bb-mapping",
+            str(bb_mapping),
             f"-ckpt-log-level={pass_log_level}",
             str(energy_obj),
         ],
@@ -369,8 +388,10 @@ def canonicalize_ir_for_native_profiling(
         [
             tc.opt,
             "-passes=sroa,instcombine,gvn",
-            "-S", str(input_ll),
-            "-o", str(output_ll),
+            "-S",
+            str(input_ll),
+            "-o",
+            str(output_ll),
         ],
         step_name="native-profile-canonicalize",
     )
@@ -404,13 +425,15 @@ def collect_bb_freq(
 
     # Compile native binary
     compile_cmd: list[str] = [
-        tc.clang, "-O0",
+        tc.clang,
+        "-O0",
         *env.sysroot_flags,
         str(native_ll),
         str(env.bb_freq_runtime),
         str(stubs_c),
         *MATH_LINK_FLAGS,
-        "-o", str(freq_bin),
+        "-o",
+        str(freq_bin),
     ]
     run(compile_cmd, step_name="bb-freq-compile")
 
@@ -435,6 +458,7 @@ def collect_bb_freq(
 # Compile IR to MSP430 object
 # ---------------------------------------------------------------------------
 
+
 def compile_to_object(
     tc: Toolchain,
     env: ProjectEnv,
@@ -456,7 +480,8 @@ def compile_to_object(
             "-march=msp430",
             f"-O{opt_level}",
             str(input_ll),
-            "-o", str(output_s),
+            "-o",
+            str(output_s),
         ],
         step_name="llc-to-asm",
     )
@@ -467,8 +492,10 @@ def compile_to_object(
             f"-mmcu={env.device}",
             "-msmall",
             f"-I{env.msp430gcc_support_path / 'include'}",
-            "-c", str(output_s),
-            "-o", str(output_o),
+            "-c",
+            str(output_s),
+            "-o",
+            str(output_o),
         ],
         step_name="gcc-assemble",
     )
@@ -477,6 +504,7 @@ def compile_to_object(
 # ---------------------------------------------------------------------------
 # Link
 # ---------------------------------------------------------------------------
+
 
 def assemble_and_link(
     tc: Toolchain,
@@ -493,7 +521,8 @@ def assemble_and_link(
         f"-mmcu={env.device}",
         "-msmall",
         f"-L{env.msp430gcc_support_path / 'include'}",
-        "-T", str(linker_script),
+        "-T",
+        str(linker_script),
         "-Wl,--nmagic",
     ]
     cmd += [str(o) for o in objects]
@@ -507,6 +536,7 @@ def assemble_and_link(
 # ---------------------------------------------------------------------------
 # Runtime compilation helpers
 # ---------------------------------------------------------------------------
+
 
 def compile_runtime_c(
     tc: Toolchain,
@@ -558,6 +588,7 @@ def assemble_boot(
 # Temporary energy config generation
 # ---------------------------------------------------------------------------
 
+
 def write_assembly_energy_config(path: Path, energy_data_path: Path) -> Path:
     """Write a temporary energy config JSON pointing to assembly energy data."""
     config = {
@@ -573,6 +604,7 @@ def write_assembly_energy_config(path: Path, energy_data_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Timing helper
 # ---------------------------------------------------------------------------
+
 
 def now_ms() -> int:
     """Return the current time in milliseconds (monotonic clock)."""
@@ -592,6 +624,7 @@ def save_temps(tmp: Path, dest_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 # Shared link step
 # ---------------------------------------------------------------------------
+
 
 def link_algorithm(
     tc: Toolchain,
@@ -625,14 +658,24 @@ def link_algorithm(
         runtime_defines.append("DEVICE_DEBUG")
 
     runtime_o = stem.with_suffix(".runtime.o")
-    compile_runtime_c(tc, env, runtime_source, runtime_o, gcc_opt_level=gcc_opt_level, extra_defines=runtime_defines)
+    compile_runtime_c(
+        tc,
+        env,
+        runtime_source,
+        runtime_o,
+        gcc_opt_level=gcc_opt_level,
+        extra_defines=runtime_defines,
+    )
 
     link_objs = [main_object, boot_o, runtime_o]
 
     if device_debug:
         debug_common_o = stem.with_suffix(".debug_common.o")
         compile_runtime_c(
-            tc, env, env.debug_common_c, debug_common_o,
+            tc,
+            env,
+            env.debug_common_c,
+            debug_common_o,
             gcc_opt_level=gcc_opt_level,
             extra_defines=runtime_defines,
         )

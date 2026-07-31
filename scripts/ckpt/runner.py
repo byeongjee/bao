@@ -65,7 +65,9 @@ def run(
     elapsed_ms = int((time.monotonic() - start) * 1000)
 
     if result.stdout:
-        logger.debug("%s stdout:\n%s", step_name or "subprocess", result.stdout.rstrip())
+        logger.debug(
+            "%s stdout:\n%s", step_name or "subprocess", result.stdout.rstrip()
+        )
     if result.stderr:
         sys.stderr.write(result.stderr)
         if not result.stderr.endswith("\n"):

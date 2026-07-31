@@ -14,11 +14,10 @@ jobs:
       - uses: astral-sh/ruff-action@v3
         with:
           src: scripts/ckpt
-      # TODO: enable after running `ruff format scripts/ckpt`
-      # - uses: astral-sh/ruff-action@v3
-      #   with:
-      #     args: format --check
-      #     src: scripts/ckpt
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: format --check
+          src: scripts/ckpt
 
   cpp-format:
     name: C++ (clang-format)

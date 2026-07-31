@@ -45,7 +45,11 @@ class PassStatistics:
 _STAT_LABELS: dict[str, list[str]] = {
     "basic_blocks": ["Basic blocks (concrete)", "Basic blocks"],
     "edges": ["Edges (concrete)", "Edges"],
-    "abstract_cfg_blocks": ["Abstract CFG blocks", "Abstract CFG size", "Basic blocks (abstract)"],
+    "abstract_cfg_blocks": [
+        "Abstract CFG blocks",
+        "Abstract CFG size",
+        "Basic blocks (abstract)",
+    ],
     "abstract_cfg_edges": ["Abstract CFG edges"],
     "regions": ["Regions"],
     "candidate_globals": ["Candidate globals (V_elig)"],
@@ -56,7 +60,10 @@ _STAT_LABELS: dict[str, list[str]] = {
     "milp_presolved_constraints": ["MILP constraints (after presolve)"],
     "optimal_solution": ["Optimal solution"],
     "region_boundaries": ["Region boundaries"],
-    "distributed_checkpoints": ["Distributed checkpoints inserted", "Boundary commits enabled"],
+    "distributed_checkpoints": [
+        "Distributed checkpoints inserted",
+        "Boundary commits enabled",
+    ],
     "vm_placed_globals": ["VM-placed globals (of cand.)"],
     "solve_time_ms": ["Solve time (ms)"],
     "compilation_time_ms": ["Compilation time (ms)"],
@@ -233,7 +240,9 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
         edges=data.get("edges"),
         abstract_cfg_blocks=abstract_cfg_blocks,
         abstract_cfg_edges=abstract_cfg_edges,
-        abstract_cfg_size=abstract_cfg_blocks if abstract_cfg_blocks is not None else abstract_cfg_size,
+        abstract_cfg_size=abstract_cfg_blocks
+        if abstract_cfg_blocks is not None
+        else abstract_cfg_size,
         regions=data.get("regions"),
         candidate_globals=data.get("candidate_globals"),
         milp_allocation_mode=data.get("milp_allocation_mode"),
@@ -248,7 +257,9 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
         vm_placed_globals=data.get("vm_placed_globals"),
         vm_placed_variables=data.get("vm_placed_variables"),
         solve_time_ms=round(data["solve_time_ms"]) if "solve_time_ms" in data else None,
-        compilation_time_ms=round(data["compilation_time_ms"]) if "compilation_time_ms" in data else None,
+        compilation_time_ms=round(data["compilation_time_ms"])
+        if "compilation_time_ms" in data
+        else None,
         peak_rss_kb=data.get("peak_rss_kb"),
         boundary_checks=data.get("boundary_checks"),
         enabled_checkpoints=data.get("enabled_checkpoints"),

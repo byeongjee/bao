@@ -140,7 +140,9 @@ def _collect_trace(
             ),
         )
 
-    logger.info("  Trace collected for %s (profiling: %dms)", bench_name, profiling_time_ms)
+    logger.info(
+        "  Trace collected for %s (profiling: %dms)", bench_name, profiling_time_ms
+    )
     return trace_json, profiling_time_ms
 
 
@@ -217,7 +219,9 @@ def run_schematic_benchmarks(
     capacitors = discover_capacitors(env, algorithm_label, caps)
 
     if output_csv is None:
-        output_csv = env.project_dir / "benchmarks" / f"{algorithm_label}_benchmark_summary.csv"
+        output_csv = (
+            env.project_dir / "benchmarks" / f"{algorithm_label}_benchmark_summary.csv"
+        )
 
     if energy_config is None:
         energy_config = default_energy_config(env, algorithm_label)
@@ -239,19 +243,22 @@ def run_schematic_benchmarks(
 
     try:
         # Trace cache: collect once per benchmark, reuse for all capacitors.
-        trace_cache: dict[str, tuple[Path, int]] = {}  # bench_name -> (trace_path, profiling_ms)
+        trace_cache: dict[
+            str, tuple[Path, int]
+        ] = {}  # bench_name -> (trace_path, profiling_ms)
 
         with compilation_workdir(prefix="schematic_bench_") as workdir:
 
-            def compile_fn(
-                bench_path: Path, cap: CapacitorConfig
-            ) -> CompileResult:
+            def compile_fn(bench_path: Path, cap: CapacitorConfig) -> CompileResult:
                 bench_name = bench_path.stem
 
                 # Collect trace on first capacitor for this benchmark
                 if bench_name not in trace_cache:
                     trace_cache[bench_name] = _collect_trace(
-                        tc, env, bench_path, workdir,
+                        tc,
+                        env,
+                        bench_path,
+                        workdir,
                         energy_config=energy_config,
                         trace_config=trace_config,
                         estimator_mode=estimator_mode,

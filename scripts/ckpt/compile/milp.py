@@ -101,7 +101,10 @@ def compile_milp(
         extra_includes.append(str(env.project_dir / "passes" / "runtime"))
 
         compile_to_ir(
-            tc, env, opts.input_c, input_ll,
+            tc,
+            env,
+            opts.input_c,
+            input_ll,
             clang_opt_level=0,
             debug=opts.debug,
             device_debug=opts.device_debug,
@@ -132,11 +135,21 @@ def compile_milp(
         try:
             if opts.estimator_mode == "assembly":
                 pass_output, profiling_ms, strip_mining_stats_json = _assembly_mode(
-                    tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
+                    tc,
+                    env,
+                    opts,
+                    tmp,
+                    milp_input_ll,
+                    milp_extra_flags,
                 )
             else:
                 pass_output, profiling_ms, strip_mining_stats_json = _ir_mode(
-                    tc, env, opts, tmp, milp_input_ll, milp_extra_flags,
+                    tc,
+                    env,
+                    opts,
+                    tmp,
+                    milp_input_ll,
+                    milp_extra_flags,
                 )
         except CompilationError:
             if opts.save_temps:
@@ -169,6 +182,7 @@ def compile_milp(
             shutil.copy2(out_s, opts.output.with_suffix(".s"))
 
             import uuid
+
             run_id = uuid.uuid4().hex[:8]
             tmp_out = env.project_dir / "tmp" / f"milp_{opts.output.stem}_{run_id}"
             tmp_out.mkdir(parents=True, exist_ok=True)
@@ -199,6 +213,7 @@ def compile_milp(
 # Assembly-mode two-pass pipeline
 # ---------------------------------------------------------------------------
 
+
 def _assembly_mode(
     tc: Toolchain,
     env: ProjectEnv,
@@ -212,7 +227,15 @@ def _assembly_mode(
     Returns (pass_output, profiling_time_ms).
     """
     # Phase 2: Pre-strip-mining assembly energy
-    pre_bb_energy, pre_stderr = run_assembly_energy(tc, env, milp_input_ll, tmp / "pre", opts.energy_config, opts.pass_log_level, opt_level=opts.opt_level)
+    pre_bb_energy, pre_stderr = run_assembly_energy(
+        tc,
+        env,
+        milp_input_ll,
+        tmp / "pre",
+        opts.energy_config,
+        opts.pass_log_level,
+        opt_level=opts.opt_level,
+    )
 
     pre_energy_config = write_assembly_energy_config(
         tmp / "pre_energy_config.json",
@@ -236,7 +259,15 @@ def _assembly_mode(
     run(preprocess_cmd, step_name="milp-preprocess")
 
     # Phase 4: Post-strip-mining assembly energy
-    post_bb_energy, post_stderr = run_assembly_energy(tc, env, preprocessed_ll, tmp / "post", opts.energy_config, opts.pass_log_level, opt_level=opts.opt_level)
+    post_bb_energy, post_stderr = run_assembly_energy(
+        tc,
+        env,
+        preprocessed_ll,
+        tmp / "post",
+        opts.energy_config,
+        opts.pass_log_level,
+        opt_level=opts.opt_level,
+    )
 
     post_energy_config = write_assembly_energy_config(
         tmp / "post_energy_config.json",
@@ -248,7 +279,9 @@ def _assembly_mode(
     reclamped_ll = tmp / "reclamped.ll"
     reclamp_stats_json = tmp / "strip_mining_reclamp_stats.json"
     reclamp_output = _run_loop_reclamp_pass(
-        tc, env, opts,
+        tc,
+        env,
+        opts,
         energy_config=post_energy_config,
         input_ll=preprocessed_ll,
         output_ll=reclamped_ll,
@@ -265,8 +298,10 @@ def _assembly_mode(
             tc.opt,
             f"-load-pass-plugin={env.pass_lib}",
             "-passes=bb-freq-collect-only",
-            "-S", str(reclamped_ll),
-            "-o", str(freq_inst_ll),
+            "-S",
+            str(reclamped_ll),
+            "-o",
+            str(freq_inst_ll),
         ],
         step_name="bb-freq-collect-only",
     )
@@ -277,7 +312,9 @@ def _assembly_mode(
 
     # Phase 6: MILP solving (on preprocessed IR)
     pass_output = _run_milp_pass(
-        tc, env, opts,
+        tc,
+        env,
+        opts,
         pass_name="milp-solve-only",
         energy_config=post_energy_config,
         input_ll=reclamped_ll,
@@ -294,6 +331,7 @@ def _assembly_mode(
 # ---------------------------------------------------------------------------
 # IR-mode single-pass pipeline
 # ---------------------------------------------------------------------------
+
 
 def _ir_mode(
     tc: Toolchain,
@@ -318,8 +356,10 @@ def _ir_mode(
             "-passes=bb-freq-collect",
             f"-energy-config={opts.energy_config}",
             f"-milp-config={opts.milp_config}",
-            "-S", str(milp_input_ll),
-            "-o", str(freq_inst_ll),
+            "-S",
+            str(milp_input_ll),
+            "-o",
+            str(freq_inst_ll),
         ],
         step_name="bb-freq-collect",
     )
@@ -331,7 +371,9 @@ def _ir_mode(
     # MILP pass
     strip_mining_stats_json = tmp / "strip_mining_stats.json"
     pass_output = _run_milp_pass(
-        tc, env, opts,
+        tc,
+        env,
+        opts,
         pass_name="milp",
         energy_config=opts.energy_config,
         input_ll=milp_input_ll,
@@ -347,6 +389,7 @@ def _ir_mode(
 # ---------------------------------------------------------------------------
 # Shared MILP pass invocation
 # ---------------------------------------------------------------------------
+
 
 def _run_milp_pass(
     tc: Toolchain,
@@ -401,8 +444,10 @@ def _run_loop_reclamp_pass(
         f"-milp-config={opts.milp_config}",
         f"-ckpt-log-level={opts.pass_log_level}",
         f"-loop-strip-mining-stats-json={strip_mining_stats_json}",
-        "-S", str(input_ll),
-        "-o", str(output_ll),
+        "-S",
+        str(input_ll),
+        "-o",
+        str(output_ll),
     ]
 
     result = run(cmd, step_name="milp-reclamp-only")
@@ -484,7 +529,11 @@ def _merge_strip_mining_reclamp_stats(
             continue
 
         base_entry = base_by_function.get(function_name)
-        if base_entry is None and len(base_functions) == 1 and len(reclamp_functions) == 1:
+        if (
+            base_entry is None
+            and len(base_functions) == 1
+            and len(reclamp_functions) == 1
+        ):
             only_entry = base_functions[0]
             if isinstance(only_entry, dict):
                 base_entry = only_entry
@@ -548,8 +597,7 @@ def _merge_strip_mining_reclamp_stats(
             if isinstance(header, str) and header:
                 chosen_k_by_header[header] = item
         base_entry["chosen_k_values"] = [
-            chosen_k_by_header[header]
-            for header in sorted(chosen_k_by_header)
+            chosen_k_by_header[header] for header in sorted(chosen_k_by_header)
         ]
 
     with open(strip_mining_stats_json, "w") as f:
@@ -559,6 +607,7 @@ def _merge_strip_mining_reclamp_stats(
 # ---------------------------------------------------------------------------
 # MILP link step
 # ---------------------------------------------------------------------------
+
 
 def _link_milp(
     tc: Toolchain,
@@ -577,7 +626,8 @@ def _link_milp(
         boot_defines.append("DEVICE_DEBUG")
 
     return link_algorithm(
-        tc, env,
+        tc,
+        env,
         main_object=opts.output.with_suffix(".o"),
         output_elf=opts.output.with_suffix(".elf"),
         boot_source=env.milp_boot,

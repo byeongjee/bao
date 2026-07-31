@@ -46,7 +46,8 @@ def verify_rockclimb(
         cpu_freq: int,
     ) -> InstrumentedOutput:
         result = compile_rockclimb(
-            tc, env,
+            tc,
+            env,
             RockClimbCompileOptions(
                 input_c=bench_path,
                 energy_config=energy_config,
@@ -69,7 +70,8 @@ def verify_rockclimb(
         )
 
     return verify_algorithm(
-        env, tc,
+        env,
+        tc,
         algorithm="rockclimb",
         benchmarks=benchmarks,
         caps=caps,

@@ -67,7 +67,10 @@ def compile_uninstrumented(
     # Phase 1: C → LLVM IR at -O0
     input_ll = opts.output.with_suffix(".input.ll")
     compile_to_ir(
-        tc, env, opts.input_c, input_ll,
+        tc,
+        env,
+        opts.input_c,
+        input_ll,
         clang_opt_level=0,
         debug=False,
         device_debug=opts.device_debug,
@@ -108,7 +111,8 @@ def _link_uninstrumented(
     boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
 
     return link_algorithm(
-        tc, env,
+        tc,
+        env,
         main_object=opts.output.with_suffix(".o"),
         output_elf=opts.output.with_suffix(".elf"),
         boot_source=env.uninstrumented_boot,

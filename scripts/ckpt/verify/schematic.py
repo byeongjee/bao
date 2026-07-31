@@ -53,7 +53,8 @@ def verify_schematic(
         cpu_freq: int,
     ) -> InstrumentedOutput:
         result = compile_schematic(
-            tc, env,
+            tc,
+            env,
             SchematicCompileOptions(
                 input_c=bench_path,
                 energy_config=energy_config,
@@ -79,7 +80,8 @@ def verify_schematic(
         )
 
     return verify_algorithm(
-        env, tc,
+        env,
+        tc,
         algorithm=algorithm_label,
         benchmarks=benchmarks,
         caps=caps,

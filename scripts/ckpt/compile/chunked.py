@@ -80,7 +80,10 @@ def compile_chunked(
         extra_includes.append(str(env.project_dir / "passes" / "runtime"))
 
         compile_to_ir(
-            tc, env, opts.input_c, input_ll,
+            tc,
+            env,
+            opts.input_c,
+            input_ll,
             clang_opt_level=0,
             debug=False,
             device_debug=opts.device_debug,
@@ -101,8 +104,13 @@ def compile_chunked(
 
         # Phase 2: Pre-strip-mining assembly energy
         pre_bb_energy, _ = run_assembly_energy(
-            tc, env, chunk_input_ll, tmp / "pre", opts.energy_config,
-            opts.pass_log_level, opt_level=opts.opt_level,
+            tc,
+            env,
+            chunk_input_ll,
+            tmp / "pre",
+            opts.energy_config,
+            opts.pass_log_level,
+            opt_level=opts.opt_level,
         )
         pre_energy_config = write_assembly_energy_config(
             tmp / "pre_energy_config.json",
@@ -120,16 +128,23 @@ def compile_chunked(
                 f"-milp-config={opts.milp_config}",
                 f"-ckpt-log-level={opts.pass_log_level}",
                 f"-loop-strip-mining-stats-json={tmp / 'strip_mining_stats.json'}",
-                "-S", str(chunk_input_ll),
-                "-o", str(preprocessed_ll),
+                "-S",
+                str(chunk_input_ll),
+                "-o",
+                str(preprocessed_ll),
             ],
             step_name="milp-preprocess",
         )
 
         # Phase 4: Post-strip-mining assembly energy
         post_bb_energy, _ = run_assembly_energy(
-            tc, env, preprocessed_ll, tmp / "post", opts.energy_config,
-            opts.pass_log_level, opt_level=opts.opt_level,
+            tc,
+            env,
+            preprocessed_ll,
+            tmp / "post",
+            opts.energy_config,
+            opts.pass_log_level,
+            opt_level=opts.opt_level,
         )
         post_energy_config = write_assembly_energy_config(
             tmp / "post_energy_config.json",
@@ -148,8 +163,10 @@ def compile_chunked(
                 f"-milp-config={opts.milp_config}",
                 f"-ckpt-log-level={opts.pass_log_level}",
                 f"-loop-strip-mining-stats-json={tmp / 'strip_mining_reclamp_stats.json'}",
-                "-S", str(preprocessed_ll),
-                "-o", str(reclamped_ll),
+                "-S",
+                str(preprocessed_ll),
+                "-o",
+                str(reclamped_ll),
             ],
             step_name="milp-reclamp-only",
         )
@@ -166,7 +183,8 @@ def compile_chunked(
     elf_file: Path | None = None
     if link:
         elf_file = link_algorithm(
-            tc, env,
+            tc,
+            env,
             main_object=opts.output.with_suffix(".o"),
             output_elf=opts.output.with_suffix(".elf"),
             boot_source=env.uninstrumented_boot,

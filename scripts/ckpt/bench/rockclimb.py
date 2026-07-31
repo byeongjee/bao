@@ -29,7 +29,12 @@ from .config import (
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import CompileResult, check_device_available, nvm_counter, run_benchmark_matrix
+from .runner import (
+    CompileResult,
+    check_device_available,
+    nvm_counter,
+    run_benchmark_matrix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,9 +139,7 @@ def run_rockclimb_benchmarks(
     try:
         with compilation_workdir(prefix="rockclimb_bench_") as workdir:
 
-            def compile_fn(
-                bench_path: Path, cap: CapacitorConfig
-            ) -> CompileResult:
+            def compile_fn(bench_path: Path, cap: CapacitorConfig) -> CompileResult:
                 bench_name = bench_path.stem
                 out_dir = workdir / f"{bench_name}_{cap.label}"
                 out_dir.mkdir(parents=True, exist_ok=True)

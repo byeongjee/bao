@@ -158,11 +158,7 @@ def write_strip_mining_csv(runs: list[dict], output_path: Path) -> None:
                     }
                 )
         else:
-            status = (
-                "no_chunking_needed"
-                if k_covers > 0
-                else "no_eligible_loops"
-            )
+            status = "no_chunking_needed" if k_covers > 0 else "no_eligible_loops"
             rows.append(
                 {
                     "program": prog,

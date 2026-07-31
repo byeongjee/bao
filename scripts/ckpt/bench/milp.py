@@ -26,7 +26,12 @@ from .config import (
     discover_benchmarks,
     discover_capacitors,
 )
-from .runner import CompileResult, check_device_available, nvm_counter, run_benchmark_matrix
+from .runner import (
+    CompileResult,
+    check_device_available,
+    nvm_counter,
+    run_benchmark_matrix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +172,9 @@ def run_milp_benchmarks(
 
     if energy_config is None:
         if estimator_mode == "ir":
-            energy_config = env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+            energy_config = (
+                env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+            )
         else:
             energy_config = default_energy_config(env, "milp")
 
@@ -186,9 +193,7 @@ def run_milp_benchmarks(
         # Shared workdir for all compilations (cleaned up on exit)
         with compilation_workdir(prefix="milp_bench_") as workdir:
 
-            def compile_fn(
-                bench_path: Path, cap: CapacitorConfig
-            ) -> CompileResult:
+            def compile_fn(bench_path: Path, cap: CapacitorConfig) -> CompileResult:
                 bench_name = bench_path.stem
                 out_dir = workdir / f"{bench_name}_{cap.label}"
                 out_dir.mkdir(parents=True, exist_ok=True)

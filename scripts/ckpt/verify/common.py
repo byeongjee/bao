@@ -63,6 +63,7 @@ class BenchResult:
 @dataclass
 class InstrumentedOutput:
     """Result of an instrumented compilation for verification."""
+
     compile_output: str
     elf_file: Path | None
 
@@ -116,11 +117,7 @@ def verify_algorithm(
 
         results: list[BenchResult] = []
 
-        pairs = [
-            (bench_path, cap)
-            for bench_path in bench_files
-            for cap in capacitors
-        ]
+        pairs = [(bench_path, cap) for bench_path in bench_files for cap in capacitors]
         total = len(pairs)
 
         for idx, (bench_path, cap) in enumerate(pairs, 1):
@@ -128,7 +125,8 @@ def verify_algorithm(
             logger.info("[%d/%d] %s %s ...", idx, total, bench_name, cap.label)
 
             result = _verify_one(
-                tc, env,
+                tc,
+                env,
                 algorithm=algorithm,
                 bench_path=bench_path,
                 bench_name=bench_name,
@@ -145,9 +143,7 @@ def verify_algorithm(
 
         _print_summary(results, algorithm, halt_mode)
 
-        return not any(
-            r.status in (Status.FAIL, Status.ERROR) for r in results
-        )
+        return not any(r.status in (Status.FAIL, Status.ERROR) for r in results)
     finally:
         saleae_manager.close()
 
@@ -161,7 +157,8 @@ def _compile_baseline(
 ) -> Path:
     """Compile an uninstrumented baseline ELF with debug counters."""
     result = compile_uninstrumented(
-        tc, env,
+        tc,
+        env,
         UninstrumentedCompileOptions(
             input_c=bench_path,
             output=output,
@@ -178,7 +175,9 @@ def _compile_baseline(
         raise CompilationError(
             "baseline-link",
             StepResult(
-                returncode=1, stdout="", stderr="No ELF produced",
+                returncode=1,
+                stdout="",
+                stderr="No ELF produced",
                 duration_ms=0,
             ),
         )
@@ -206,7 +205,11 @@ def _verify_one(
         # -- A: Compile + flash baseline --
         try:
             baseline_elf = _compile_baseline(
-                tc, env, bench_path, tmp / "baseline", cpu_freq,
+                tc,
+                env,
+                bench_path,
+                tmp / "baseline",
+                cpu_freq,
             )
         except (CompilationError, OSError) as exc:
             msg = f"Baseline compilation failed: {exc}"
@@ -214,13 +217,20 @@ def _verify_one(
             return BenchResult(bench_name, cap_label, Status.ERROR, msg)
 
         try:
-            saleae_run(baseline_elf, saleae_manager, _FLASH_TIMEOUT,
-                       _AFTER_TRIGGER_SECONDS, capture_timeout_seconds)
+            saleae_run(
+                baseline_elf,
+                saleae_manager,
+                _FLASH_TIMEOUT,
+                _AFTER_TRIGGER_SECONDS,
+                capture_timeout_seconds,
+            )
             # The stop pulse fires before debug_exit() stores the result and halts.
             # Reconnecting with mspdebug too early resets the target and can restart
             # the benchmark before __nvm_done/__nvm_result are final.
             time.sleep(_POST_CAPTURE_SETTLE_SECONDS)
-            baseline_nvm = read_nvm(tc, baseline_elf, _FLASH_TIMEOUT, _BASELINE_NVM_SYMBOLS)
+            baseline_nvm = read_nvm(
+                tc, baseline_elf, _FLASH_TIMEOUT, _BASELINE_NVM_SYMBOLS
+            )
         except (DeviceError, OSError) as exc:
             msg = f"Baseline flash/read failed: {exc}"
             logger.error("  %s", msg)
@@ -228,7 +238,9 @@ def _verify_one(
 
         baseline_done = str(baseline_nvm.get("__nvm_done", ""))
         baseline_result = str(baseline_nvm.get("__nvm_result", ""))
-        logger.debug("  [baseline nvm] done=%s result=%s", baseline_done, baseline_result)
+        logger.debug(
+            "  [baseline nvm] done=%s result=%s", baseline_done, baseline_result
+        )
 
         if baseline_done != "1":
             msg = f"Baseline did not complete (__nvm_done={baseline_done})"
@@ -243,22 +255,36 @@ def _verify_one(
         # -- B: Compile instrumented --
         try:
             inst = compile_instrumented(
-                tc, env, bench_path, tmp, cap_config, halt_mode, cpu_freq,
+                tc,
+                env,
+                bench_path,
+                tmp,
+                cap_config,
+                halt_mode,
+                cpu_freq,
             )
             compile_output = inst.compile_output
         except CompilationError as exc:
-            compile_output = exc.pass_output or (exc.result.output if exc.result else str(exc))
+            compile_output = exc.pass_output or (
+                exc.result.output if exc.result else str(exc)
+            )
             infeasible = detect_infeasibility(compile_output)
             if infeasible:
                 logger.warning("  SKIP (%s)", infeasible)
                 return BenchResult(
-                    bench_name, cap_label, Status.SKIP, infeasible,
+                    bench_name,
+                    cap_label,
+                    Status.SKIP,
+                    infeasible,
                     baseline_result=baseline_result,
                 )
             msg = f"{algorithm} compilation failed"
             logger.debug("  %s: %s", msg, compile_output[:200])
             return BenchResult(
-                bench_name, cap_label, Status.ERROR, msg,
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
                 baseline_result=baseline_result,
             )
 
@@ -267,7 +293,10 @@ def _verify_one(
         if infeasible:
             logger.warning("  SKIP (%s)", infeasible)
             return BenchResult(
-                bench_name, cap_label, Status.SKIP, infeasible,
+                bench_name,
+                cap_label,
+                Status.SKIP,
+                infeasible,
                 baseline_result=baseline_result,
             )
 
@@ -276,21 +305,32 @@ def _verify_one(
             msg = f"{algorithm} compilation produced no ELF"
             logger.error("  %s", msg)
             return BenchResult(
-                bench_name, cap_label, Status.ERROR, msg,
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
                 baseline_result=baseline_result,
             )
 
         # -- D: Flash + read instrumented --
         try:
-            saleae_run(inst_elf, saleae_manager, _FLASH_TIMEOUT,
-                       _AFTER_TRIGGER_SECONDS, capture_timeout_seconds)
+            saleae_run(
+                inst_elf,
+                saleae_manager,
+                _FLASH_TIMEOUT,
+                _AFTER_TRIGGER_SECONDS,
+                capture_timeout_seconds,
+            )
             time.sleep(_POST_CAPTURE_SETTLE_SECONDS)
             inst_nvm = read_nvm(tc, inst_elf, _FLASH_TIMEOUT, nvm_symbols)
         except (DeviceError, OSError) as exc:
             msg = f"{algorithm} flash/read failed: {exc}"
             logger.error("  %s", msg)
             return BenchResult(
-                bench_name, cap_label, Status.ERROR, msg,
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
                 baseline_result=baseline_result,
             )
 
@@ -302,7 +342,10 @@ def _verify_one(
             msg = f"{algorithm} did not complete (__nvm_done={inst_done})"
             logger.error("  %s", msg)
             return BenchResult(
-                bench_name, cap_label, Status.ERROR, msg,
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
                 baseline_result=baseline_result,
             )
 
@@ -310,22 +353,40 @@ def _verify_one(
             msg = f"No RESULT from {algorithm}"
             logger.error("  %s", msg)
             return BenchResult(
-                bench_name, cap_label, Status.ERROR, msg,
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
                 baseline_result=baseline_result,
             )
 
         # -- E: Compare --
         if baseline_result == inst_result_val:
-            logger.info("  PASS (baseline=%s %s=%s)", baseline_result, algorithm, inst_result_val)
+            logger.info(
+                "  PASS (baseline=%s %s=%s)",
+                baseline_result,
+                algorithm,
+                inst_result_val,
+            )
             return BenchResult(
-                bench_name, cap_label, Status.PASS, "",
+                bench_name,
+                cap_label,
+                Status.PASS,
+                "",
                 baseline_result=baseline_result,
                 algorithm_result=inst_result_val,
             )
         else:
-            logger.error("  FAIL (baseline=%s %s=%s)", baseline_result, algorithm, inst_result_val)
+            logger.error(
+                "  FAIL (baseline=%s %s=%s)",
+                baseline_result,
+                algorithm,
+                inst_result_val,
+            )
             return BenchResult(
-                bench_name, cap_label, Status.FAIL,
+                bench_name,
+                cap_label,
+                Status.FAIL,
                 f"baseline={baseline_result} {algorithm}={inst_result_val}",
                 baseline_result=baseline_result,
                 algorithm_result=inst_result_val,
@@ -333,7 +394,9 @@ def _verify_one(
 
 
 def _print_summary(
-    results: list[BenchResult], algorithm: str, halt_mode: str,
+    results: list[BenchResult],
+    algorithm: str,
+    halt_mode: str,
 ) -> None:
     """Print the verification summary table."""
     pass_count = sum(1 for r in results if r.status == Status.PASS)
@@ -372,5 +435,9 @@ def _print_summary(
     logger.info("")
     logger.info(
         "%d/%d PASSED, %d FAILED, %d SKIPPED, %d ERRORS",
-        pass_count, total, fail_count, skip_count, error_count,
+        pass_count,
+        total,
+        fail_count,
+        skip_count,
+        error_count,
     )

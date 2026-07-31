@@ -95,7 +95,10 @@ def compile_rockclimb(
             clang_defines.append("DEVICE_DEBUG")
 
         compile_to_ir(
-            tc, env, opts.input_c, raw_ll,
+            tc,
+            env,
+            opts.input_c,
+            raw_ll,
             clang_opt_level=0,
             debug=False,
             device_debug=opts.device_debug,
@@ -116,20 +119,28 @@ def compile_rockclimb(
 
             optimized_ll = tmp / "optimized.ll"
             optimize_ir_with_options(
-                tc, stripped_ll, optimized_ll,
+                tc,
+                stripped_ll,
+                optimized_ll,
                 opt_level=opts.clang_opt_level,
                 disable_loop_unrolling=False,
             )
             rockclimb_input_ll = optimized_ll
 
         # Step 1d: Preprocess loops for RockClimb's energy-budgeted unroll policy.
-        preprocess_output = _run_rockclimb_preprocess(tc, env, opts, tmp, rockclimb_input_ll)
+        preprocess_output = _run_rockclimb_preprocess(
+            tc, env, opts, tmp, rockclimb_input_ll
+        )
         preprocessed_ll = tmp / "preprocessed.ll"
 
         if opts.precomputed_energy:
-            pass_output = preprocess_output + _precomputed_pipeline(tc, env, opts, tmp, preprocessed_ll)
+            pass_output = preprocess_output + _precomputed_pipeline(
+                tc, env, opts, tmp, preprocessed_ll
+            )
         else:
-            pass_output = preprocess_output + _mir_estimation_pipeline(tc, env, opts, tmp, preprocessed_ll)
+            pass_output = preprocess_output + _mir_estimation_pipeline(
+                tc, env, opts, tmp, preprocessed_ll
+            )
 
         # Copy stats JSON if available
         stats_json: Path | None = None
@@ -150,10 +161,12 @@ def compile_rockclimb(
             raw_s = tmp / "raw.s"
             run(
                 [
-                    tc.llc, "-march=msp430",
+                    tc.llc,
+                    "-march=msp430",
                     "-start-after=virtregrewriter",
                     str(instrumented_mir),
-                    "-o", str(raw_s),
+                    "-o",
+                    str(raw_s),
                 ],
                 step_name="llc-mir-to-asm",
             )
@@ -164,6 +177,7 @@ def compile_rockclimb(
             shutil.copy2(clean_s, output.with_suffix(".s"))
 
             import uuid
+
             run_id = uuid.uuid4().hex[:8]
             tmp_out = env.project_dir / "tmp" / f"rockclimb_{output.stem}_{run_id}"
             tmp_out.mkdir(parents=True, exist_ok=True)
@@ -190,6 +204,7 @@ def compile_rockclimb(
 # Pre-computed energy pipeline
 # ---------------------------------------------------------------------------
 
+
 def _precomputed_pipeline(
     tc: Toolchain,
     env: ProjectEnv,
@@ -213,8 +228,10 @@ def _precomputed_pipeline(
             f"-load-pass-plugin={env.bb_debuginfo_lib}",
             "-passes=assign-bb-debuginfo",
             f"-bb-mapping={bb_mapping}",
-            "-S", str(input_ll),
-            "-o", str(bbinfo_ll),
+            "-S",
+            str(input_ll),
+            "-o",
+            str(bbinfo_ll),
         ],
         step_name="assign-bb-debuginfo",
     )
@@ -223,10 +240,12 @@ def _precomputed_pipeline(
     mir_file = tmp / "pre.mir"
     run(
         [
-            tc.llc, "-march=msp430",
+            tc.llc,
+            "-march=msp430",
             "-stop-after=virtregrewriter",
             str(bbinfo_ll),
-            "-o", str(mir_file),
+            "-o",
+            str(mir_file),
         ],
         step_name="llc-to-mir",
     )
@@ -236,12 +255,14 @@ def _precomputed_pipeline(
     labeled_mir = tmp / "labeled.mir"
     run(
         [
-            tc.llc, "-march=msp430",
+            tc.llc,
+            "-march=msp430",
             f"-load={env.machine_pass_lib}",
             "-run-pass=assign-mir-bb-debuginfo",
             f"-mir-bb-mapping={mir_bb_mapping}",
             str(mir_file),
-            "-o", str(labeled_mir),
+            "-o",
+            str(labeled_mir),
         ],
         step_name="assign-mir-bb-debuginfo",
     )
@@ -250,11 +271,13 @@ def _precomputed_pipeline(
     energy_obj = tmp / "energy.o"
     run(
         [
-            tc.llc, "-march=msp430",
+            tc.llc,
+            "-march=msp430",
             "-start-after=virtregrewriter",
             "-filetype=obj",
             str(labeled_mir),
-            "-o", str(energy_obj),
+            "-o",
+            str(energy_obj),
         ],
         step_name="llc-energy-obj",
     )
@@ -264,8 +287,10 @@ def _precomputed_pipeline(
     result = run(
         [
             str(env.bb_analyzer),
-            "--energy-params", str(opts.energy_config),
-            "--bb-mapping", str(mir_bb_mapping),
+            "--energy-params",
+            str(opts.energy_config),
+            "--bb-mapping",
+            str(mir_bb_mapping),
             f"-ckpt-log-level={opts.pass_log_level}",
             str(energy_obj),
         ],
@@ -276,7 +301,11 @@ def _precomputed_pipeline(
 
     # Step 4: RockClimb machine pass with pre-computed MIR BB energy
     pass_output = _run_rockclimb_pass(
-        tc, env, opts, tmp, mir_file,
+        tc,
+        env,
+        opts,
+        tmp,
+        mir_file,
         energy_flag=("-rockclimb-energy-data", str(bb_energy)),
     )
     return analyzer_stderr + pass_output
@@ -285,6 +314,7 @@ def _precomputed_pipeline(
 # ---------------------------------------------------------------------------
 # MIR-level estimation pipeline (no bb-energy-analyzer)
 # ---------------------------------------------------------------------------
+
 
 def _mir_estimation_pipeline(
     tc: Toolchain,
@@ -301,17 +331,23 @@ def _mir_estimation_pipeline(
     mir_file = tmp / "pre.mir"
     run(
         [
-            tc.llc, "-march=msp430",
+            tc.llc,
+            "-march=msp430",
             "-stop-after=virtregrewriter",
             str(input_ll),
-            "-o", str(mir_file),
+            "-o",
+            str(mir_file),
         ],
         step_name="llc-to-mir",
     )
 
     # Step 3: RockClimb machine pass with MIR-level estimation
     pass_output = _run_rockclimb_pass(
-        tc, env, opts, tmp, mir_file,
+        tc,
+        env,
+        opts,
+        tmp,
+        mir_file,
         energy_flag=("-rockclimb-energy-config", str(opts.energy_config)),
     )
     return pass_output
@@ -326,7 +362,12 @@ def _run_rockclimb_preprocess(
 ) -> str:
     """Run RockClimb's IR preprocess pass after generating pre-pass energy."""
     pre_bb_energy, pre_stderr = run_assembly_energy(
-        tc, env, input_ll, tmp / "preprocess", opts.energy_config, opts.pass_log_level,
+        tc,
+        env,
+        input_ll,
+        tmp / "preprocess",
+        opts.energy_config,
+        opts.pass_log_level,
         opt_level=opts.opt_level,
     )
     preprocess_energy_config = write_assembly_energy_config(
@@ -344,11 +385,14 @@ def _run_rockclimb_preprocess(
             f"-rockclimb-config={opts.rockclimb_config}",
             *(
                 [f"-rockclimb-max-unroll-factor={opts.max_unroll}"]
-                if opts.max_unroll is not None else []
+                if opts.max_unroll is not None
+                else []
             ),
             f"-ckpt-log-level={opts.pass_log_level}",
-            "-S", str(input_ll),
-            "-o", str(preprocessed_ll),
+            "-S",
+            str(input_ll),
+            "-o",
+            str(preprocessed_ll),
         ],
         step_name="rockclimb-preprocess",
     )
@@ -358,6 +402,7 @@ def _run_rockclimb_preprocess(
 # ---------------------------------------------------------------------------
 # Shared RockClimb pass invocation
 # ---------------------------------------------------------------------------
+
 
 def _run_rockclimb_pass(
     tc: Toolchain,
@@ -372,7 +417,8 @@ def _run_rockclimb_pass(
     instrumented_mir = tmp / "instrumented.mir"
 
     cmd: list[str] = [
-        tc.llc, "-march=msp430",
+        tc.llc,
+        "-march=msp430",
         f"-load={env.machine_pass_lib}",
         "-run-pass=rockclimb",
         f"-rockclimb-config={opts.rockclimb_config}",
@@ -380,7 +426,8 @@ def _run_rockclimb_pass(
         f"-ckpt-log-level={opts.pass_log_level}",
         f"-ckpt-stats-json={instrumented_mir.parent / 'stats.json'}",
         str(mir_file),
-        "-o", str(instrumented_mir),
+        "-o",
+        str(instrumented_mir),
     ]
     # Per-save debug counters are intentionally disabled for RockClimb.
     # The inline counter sequence after each distributed register save
@@ -411,6 +458,7 @@ def _strip_cfi_directives(input_s: Path, output_s: Path) -> None:
 # RockClimb link step
 # ---------------------------------------------------------------------------
 
+
 def _link_rockclimb(
     tc: Toolchain,
     env: ProjectEnv,
@@ -426,8 +474,10 @@ def _link_rockclimb(
             tc.gcc,
             f"-mmcu={env.device}",
             "-msmall",
-            "-c", str(output.with_suffix(".s")),
-            "-o", str(asm_o),
+            "-c",
+            str(output.with_suffix(".s")),
+            "-o",
+            str(asm_o),
         ],
         step_name="gcc-assemble",
     )
@@ -443,7 +493,8 @@ def _link_rockclimb(
         boot_defines.append("DEVICE_DEBUG")
 
     return link_algorithm(
-        tc, env,
+        tc,
+        env,
         main_object=asm_o,
         output_elf=output.with_suffix(".elf"),
         boot_source=env.rockclimb_boot,

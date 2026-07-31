@@ -95,7 +95,10 @@ def compile_schematic(
         extra_includes.append(str(env.project_dir / "passes" / "runtime"))
 
         compile_to_ir(
-            tc, env, opts.input_c, input_ll,
+            tc,
+            env,
+            opts.input_c,
+            input_ll,
             clang_opt_level=0,
             debug=opts.debug,
             device_debug=opts.device_debug,
@@ -121,14 +124,20 @@ def compile_schematic(
         if opts.clang_opt_level != 0:
             optimized_ll = tmp / "input_optimized.ll"
             optimize_ir(
-                tc, isolated_ll, optimized_ll,
+                tc,
+                isolated_ll,
+                optimized_ll,
                 opt_level=opts.clang_opt_level,
             )
             schematic_input_ll = optimized_ll
 
         # Trace collection
         trace_json, profiling_ms = _collect_or_reuse_trace(
-            tc, env, opts, tmp, schematic_input_ll,
+            tc,
+            env,
+            opts,
+            tmp,
+            schematic_input_ll,
         )
 
         # --trace-only: copy trace and return early
@@ -150,7 +159,12 @@ def compile_schematic(
         analyzer_stderr = ""
         if opts.estimator_mode == "assembly":
             bb_energy, analyzer_stderr = run_assembly_energy(
-                tc, env, schematic_input_ll, tmp / "asm", opts.energy_config, opts.pass_log_level,
+                tc,
+                env,
+                schematic_input_ll,
+                tmp / "asm",
+                opts.energy_config,
+                opts.pass_log_level,
                 opt_level=opts.opt_level,
             )
             energy_config = write_assembly_energy_config(
@@ -160,7 +174,12 @@ def compile_schematic(
 
         # SCHEMATIC pass
         pass_output = analyzer_stderr + _run_schematic_pass(
-            tc, env, opts, tmp, schematic_input_ll, trace_json,
+            tc,
+            env,
+            opts,
+            tmp,
+            schematic_input_ll,
+            trace_json,
             energy_config=energy_config,
         )
 
@@ -183,7 +202,11 @@ def compile_schematic(
             out_s = tmp / "ckpt.s"
             out_o = tmp / "ckpt.o"
             compile_to_object(
-                tc, env, ckpt_ll, out_s, out_o,
+                tc,
+                env,
+                ckpt_ll,
+                out_s,
+                out_o,
                 opt_level=opts.opt_level,
             )
 
@@ -191,6 +214,7 @@ def compile_schematic(
             shutil.copy2(out_s, opts.output.with_suffix(".s"))
 
             import uuid
+
             run_id = uuid.uuid4().hex[:8]
             tmp_out = env.project_dir / "tmp" / f"schematic_{opts.output.stem}_{run_id}"
             tmp_out.mkdir(parents=True, exist_ok=True)
@@ -220,6 +244,7 @@ def compile_schematic(
 # Trace collection
 # ---------------------------------------------------------------------------
 
+
 def _collect_or_reuse_trace(
     tc: Toolchain,
     env: ProjectEnv,
@@ -245,8 +270,10 @@ def _collect_or_reuse_trace(
             "-passes=trace-collect",
             f"-energy-config={opts.energy_config}",
             f"-ckpt-log-level={opts.pass_log_level}",
-            "-S", str(schematic_input_ll),
-            "-o", str(trace_inst_ll),
+            "-S",
+            str(schematic_input_ll),
+            "-o",
+            str(trace_inst_ll),
         ],
         step_name="trace-collect",
     )
@@ -263,13 +290,15 @@ def _collect_or_reuse_trace(
     trace_bin = tmp / "trace_run"
     run(
         [
-            tc.clang, "-O0",
+            tc.clang,
+            "-O0",
             *env.sysroot_flags,
             str(native_ll),
             str(env.schematic_trace_runtime),
             str(stubs_c),
             *MATH_LINK_FLAGS,
-            "-o", str(trace_bin),
+            "-o",
+            str(trace_bin),
         ],
         step_name="trace-compile",
     )
@@ -297,7 +326,10 @@ def _collect_or_reuse_trace(
 # SCHEMATIC pass invocation
 # ---------------------------------------------------------------------------
 
-def _resolve_schematic_config(config_path: Path, clang_opt_level: int, tmp: Path) -> Path:
+
+def _resolve_schematic_config(
+    config_path: Path, clang_opt_level: int, tmp: Path
+) -> Path:
     """Resolve opt-level-dependent fields in the SCHEMATIC config.
 
     If the config contains ``loop_increment_cost_nvm_O0`` /
@@ -356,7 +388,9 @@ def _run_schematic_pass(
     cfg = energy_config or opts.energy_config
     assert opts.schematic_config is not None, "schematic_config required for pass"
     schematic_cfg = _resolve_schematic_config(
-        opts.schematic_config, opts.clang_opt_level, tmp,
+        opts.schematic_config,
+        opts.clang_opt_level,
+        tmp,
     )
     cmd: list[str] = [
         tc.opt,
@@ -384,6 +418,7 @@ def _run_schematic_pass(
 # SCHEMATIC link step
 # ---------------------------------------------------------------------------
 
+
 def _link_schematic(
     tc: Toolchain,
     env: ProjectEnv,
@@ -401,7 +436,8 @@ def _link_schematic(
         boot_defines.append("HALT_SWBOR")
 
     return link_algorithm(
-        tc, env,
+        tc,
+        env,
         main_object=opts.output.with_suffix(".o"),
         output_elf=opts.output.with_suffix(".elf"),
         boot_source=env.schematic_boot,

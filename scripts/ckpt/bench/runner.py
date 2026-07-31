@@ -40,24 +40,26 @@ from .config import CapacitorConfig
 
 logger = logging.getLogger(__name__)
 
-_FLASH_TIMEOUT = 30              # seconds
-_AFTER_TRIGGER_SECONDS = 1.0     # seconds to record after falling edge
+_FLASH_TIMEOUT = 30  # seconds
+_AFTER_TRIGGER_SECONDS = 1.0  # seconds to record after falling edge
 _POST_CAPTURE_SETTLE_SECONDS = 2.0
 
 # CSV columns that can only be filled by running the linked ELF on a device
 # (Saleae timing + NVM counter readback). Compile-only CSVs omit these, and
 # device-less bench runs leave them blank.
-RUNTIME_CSV_FIELDS: frozenset[str] = frozenset({
-    "execution_time_us",
-    "result",
-    "runtime_region_boundary_calls",
-    "runtime_debug_save_reg_calls",
-    "runtime_debug_save_vreg_calls",
-    "runtime_debug_restore_reg_calls",
-    "runtime_debug_restore_vreg_calls",
-    "runtime_debug_store_mem_calls",
-    "runtime_debug_restore_mem_calls",
-})
+RUNTIME_CSV_FIELDS: frozenset[str] = frozenset(
+    {
+        "execution_time_us",
+        "result",
+        "runtime_region_boundary_calls",
+        "runtime_debug_save_reg_calls",
+        "runtime_debug_save_vreg_calls",
+        "runtime_debug_restore_reg_calls",
+        "runtime_debug_restore_vreg_calls",
+        "runtime_debug_store_mem_calls",
+        "runtime_debug_restore_mem_calls",
+    }
+)
 
 
 def static_csv_header(header: list[str]) -> list[str]:
@@ -74,7 +76,9 @@ def build_common_fields(
     return {
         "basic_blocks": stats.basic_blocks or 0,
         "edges": stats.edges or 0,
-        "abstract_cfg_blocks": stats.abstract_cfg_blocks or stats.abstract_cfg_size or 0,
+        "abstract_cfg_blocks": stats.abstract_cfg_blocks
+        or stats.abstract_cfg_size
+        or 0,
         "abstract_cfg_edges": stats.abstract_cfg_edges or 0,
         "region_boundaries": stats.region_boundaries or 0,
         "compilation_time_ms": stats.compilation_time_ms or 0,
@@ -124,7 +128,7 @@ def check_device_available() -> bool:
             timeout=10,
         )
         return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except subprocess.TimeoutExpired, FileNotFoundError, OSError:
         return False
 
 
@@ -142,7 +146,6 @@ RowBuilder = Callable[
 # Signature:
 #   (bench_path, capacitor) -> CompileResult
 CompileFn = Callable[[Path, CapacitorConfig], CompileResult]
-
 
 
 _ENERGY_PARAMS_RE = re.compile(
@@ -254,7 +257,9 @@ def run_benchmark_matrix(
                     stats_json_path = compile_result.stats_json
                     compile_result_profiling_ms = compile_result.profiling_time_ms
                 except CompilationError as exc:
-                    compile_output = exc.pass_output or (exc.result.output if exc.result else "")
+                    compile_output = exc.pass_output or (
+                        exc.result.output if exc.result else ""
+                    )
                     output_dir = None
                     stats_json_path = getattr(exc, "stats_json", None)
                     had_compilation_error = True
@@ -288,15 +293,20 @@ def run_benchmark_matrix(
                             from ..device.flash import read_nvm
 
                             execution_time_us = saleae_run(
-                                elf, saleae_manager,
-                                _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
+                                elf,
+                                saleae_manager,
+                                _FLASH_TIMEOUT,
+                                _AFTER_TRIGGER_SECONDS,
                                 capture_timeout_seconds,
                             )
 
                             if device_debug and nvm_symbols:
                                 time.sleep(_POST_CAPTURE_SETTLE_SECONDS)
                                 nvm_dict = read_nvm(
-                                    tc, elf, _FLASH_TIMEOUT, nvm_symbols,
+                                    tc,
+                                    elf,
+                                    _FLASH_TIMEOUT,
+                                    nvm_symbols,
                                 )
                                 nvm_text = "\n".join(
                                     f"{k}={v}" for k, v in nvm_dict.items()
@@ -364,23 +374,26 @@ def run_benchmark_matrix(
 
                 # ----- Build row (algorithm-specific fields on top) -----
                 row_fields = common_fields
-                row_fields.update(row_builder(
-                    bench_name, cap.label, stats, nvm, full_output
-                ))
+                row_fields.update(
+                    row_builder(bench_name, cap.label, stats, nvm, full_output)
+                )
                 if execution_time_us is not None:
                     row_fields["execution_time_us"] = str(round(execution_time_us, 2))
 
                 row = BenchmarkRow(
                     benchmark=row_name,
                     capacitor=cap.label,
-                    status="link_failed" if had_compilation_error and row_status == "ok" else row_status,
+                    status="link_failed"
+                    if had_compilation_error and row_status == "ok"
+                    else row_status,
                     fields=row_fields,
                 )
                 write_csv_row(writer, row, csv_header)
 
                 # Print detailed summary
                 print_benchmark_summary(
-                    row.status, row_fields,
+                    row.status,
+                    row_fields,
                     device_debug=device_debug,
                 )
 
@@ -388,8 +401,16 @@ def run_benchmark_matrix(
     if all_required_keys:
         logger.info("")
         logger.info("--- Energy parameters ---")
-        logger.info("  Required (%d keys): %s", len(all_required_keys), ", ".join(sorted(all_required_keys)))
-        logger.info("  Missing  (%d keys): %s", len(all_missing_keys), ", ".join(sorted(all_missing_keys)))
+        logger.info(
+            "  Required (%d keys): %s",
+            len(all_required_keys),
+            ", ".join(sorted(all_required_keys)),
+        )
+        logger.info(
+            "  Missing  (%d keys): %s",
+            len(all_missing_keys),
+            ", ".join(sorted(all_missing_keys)),
+        )
         if accumulate_keys_file is not None:
             accumulate_keys_to_file(all_required_keys, accumulate_keys_file)
 
@@ -483,20 +504,28 @@ def print_benchmark_summary(
             logger.info("    %s%s", f"{title + ':':<16}", ", ".join(parts))
 
     # CFG
-    _print_group("CFG", [
-        ("blocks", _fmt("basic_blocks", fields)),
-        ("edges", _fmt("edges", fields)),
-        ("abstract blocks", _fmt("abstract_cfg_blocks", fields)),
-        ("abstract edges", _fmt("abstract_cfg_edges", fields)),
-        ("region boundaries", _fmt("region_boundaries", fields)),
-    ])
+    _print_group(
+        "CFG",
+        [
+            ("blocks", _fmt("basic_blocks", fields)),
+            ("edges", _fmt("edges", fields)),
+            ("abstract blocks", _fmt("abstract_cfg_blocks", fields)),
+            ("abstract edges", _fmt("abstract_cfg_edges", fields)),
+            ("region boundaries", _fmt("region_boundaries", fields)),
+        ],
+    )
 
     # MILP
     milp_items: list[tuple[str, str | None]] = [
         ("mode", _fmt("milp_allocation_mode", fields)),
         ("variables", _fmt("milp_variables", fields)),
         ("constraints", _fmt("milp_constraints", fields)),
-        ("solve", f"{fields['milp_solve_time_ms']}ms" if _fmt("milp_solve_time_ms", fields) else None),
+        (
+            "solve",
+            f"{fields['milp_solve_time_ms']}ms"
+            if _fmt("milp_solve_time_ms", fields)
+            else None,
+        ),
     ]
     presolved_vars = _fmt("milp_presolved_variables", fields)
     presolved_constraints = _fmt("milp_presolved_constraints", fields)
@@ -522,11 +551,14 @@ def print_benchmark_summary(
     _print_group("Checkpoints", ckpt_items)
 
     # Analysis
-    _print_group("Analysis", [
-        ("candidate globals", _fmt("candidate_globals", fields)),
-        ("loop decisions", _fmt("loop_decisions", fields)),
-        ("paths analyzed", _fmt("paths_analyzed", fields)),
-    ])
+    _print_group(
+        "Analysis",
+        [
+            ("candidate globals", _fmt("candidate_globals", fields)),
+            ("loop decisions", _fmt("loop_decisions", fields)),
+            ("paths analyzed", _fmt("paths_analyzed", fields)),
+        ],
+    )
 
     # Runtime (device debug — show even when 0)
     if device_debug:

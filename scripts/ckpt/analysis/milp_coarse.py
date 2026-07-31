@@ -67,9 +67,7 @@ def _geometric_mean(values: list[float]) -> float:
     if not values:
         raise ConfigError("Cannot compute a geometric mean over an empty result set.")
     if any(value <= 0 for value in values):
-        raise ConfigError(
-            "Geometric mean requires strictly positive values."
-        )
+        raise ConfigError("Geometric mean requires strictly positive values.")
     return math.exp(sum(math.log(value) for value in values) / len(values))
 
 
@@ -125,9 +123,7 @@ def _build_pairs(
         missing_from_baseline = sorted(coarse_benchmarks - baseline_benchmarks)
         details: list[str] = []
         if missing_from_coarse:
-            details.append(
-                f"missing from coarse CSV: {', '.join(missing_from_coarse)}"
-            )
+            details.append(f"missing from coarse CSV: {', '.join(missing_from_coarse)}")
         if missing_from_baseline:
             details.append(
                 f"missing from baseline CSV: {', '.join(missing_from_baseline)}"
@@ -227,9 +223,7 @@ def _summarize_pairs(
         _percent_reduction(before, after)
         for before, after in zip(solve_before, solve_after)
     ]
-    solve_ratios = [
-        after / before for before, after in zip(solve_before, solve_after)
-    ]
+    solve_ratios = [after / before for before, after in zip(solve_before, solve_after)]
 
     worst_case_before = max(pairs, key=lambda pair: float(pair["solve_time_before_ms"]))
     worst_case_after = max(pairs, key=lambda pair: float(pair["solve_time_after_ms"]))

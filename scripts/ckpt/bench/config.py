@@ -81,15 +81,12 @@ def discover_capacitors(
             results.append(CapacitorConfig(label=cap, config_path=cfg))
         elif filter_caps is not None:
             # Only warn when the user explicitly asked for this cap
-            warnings.warn(
-                f"Capacitor config not found: {cfg}", stacklevel=2
-            )
+            warnings.warn(f"Capacitor config not found: {cfg}", stacklevel=2)
 
     if not results:
         available = ", ".join(_DEFAULT_CAPS)
         raise ConfigError(
-            f"No matching capacitor sizes for {algorithm}. "
-            f"Available: {available}"
+            f"No matching capacitor sizes for {algorithm}. Available: {available}"
         )
 
     return results

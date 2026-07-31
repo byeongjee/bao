@@ -74,6 +74,7 @@ METRICS = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _read_csv(filepath: Path) -> list[dict[str, str]]:
     """Read a CSV file and return rows as list of dicts."""
     with filepath.open(newline="") as f:
@@ -195,6 +196,7 @@ def _normalize_data(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def plot_benchmarks(
     *,
     csv_dir: Path,
@@ -221,8 +223,7 @@ def plot_benchmarks(
 
     if metric not in METRICS:
         raise ConfigError(
-            f"Unknown metric: {metric!r}. "
-            f"Available: {', '.join(METRICS)}"
+            f"Unknown metric: {metric!r}. Available: {', '.join(METRICS)}"
         )
 
     alg_keys = algorithms if algorithms else list(ALGORITHMS.keys())

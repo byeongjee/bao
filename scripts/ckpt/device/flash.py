@@ -9,7 +9,6 @@ from ..toolchain import Toolchain
 from . import nvm
 
 
-
 def flash(
     elf_path: Path,
     timeout: int,
@@ -23,8 +22,10 @@ def flash(
     """
     mspdebug_result = run(
         [
-            "timeout", str(timeout),
-            "mspdebug", "tilib",
+            "timeout",
+            str(timeout),
+            "mspdebug",
+            "tilib",
             f"prog {elf_path}",
         ],
         step_name="mspdebug flash",
@@ -60,8 +61,10 @@ def read_nvm(
 
     mspdebug_result = run(
         [
-            "timeout", str(timeout),
-            "mspdebug", "tilib",
+            "timeout",
+            str(timeout),
+            "mspdebug",
+            "tilib",
             md_cmd,
         ],
         step_name="mspdebug read-nvm",
@@ -77,8 +80,6 @@ def read_nvm(
 
     data = nvm.parse_hex_dump(mspdebug_result.stdout)
     if len(data) < total_len:
-        raise DeviceError(
-            f"Expected {total_len} bytes from hex dump, got {len(data)}"
-        )
+        raise DeviceError(f"Expected {total_len} bytes from hex dump, got {len(data)}")
 
     return nvm.extract_symbol_values(data, sym_info, symbols, base_addr)

@@ -50,7 +50,8 @@ def verify_milp(
         cpu_freq: int,
     ) -> InstrumentedOutput:
         result = compile_milp(
-            tc, env,
+            tc,
+            env,
             MilpCompileOptions(
                 input_c=bench_path,
                 energy_config=energy_config,
@@ -76,7 +77,8 @@ def verify_milp(
         )
 
     return verify_algorithm(
-        env, tc,
+        env,
+        tc,
         algorithm="milp",
         benchmarks=benchmarks,
         caps=caps,

@@ -64,6 +64,7 @@ class CkptGroup(click.Group):
 # Root group
 # ---------------------------------------------------------------------------
 
+
 @click.group(cls=CkptGroup)
 @click.option(
     "--log-level",
@@ -94,6 +95,7 @@ def main(ctx: click.Context, log_level: str) -> None:
 # =========================================================================
 # compile group
 # =========================================================================
+
 
 @main.group()
 def compile() -> None:
@@ -135,9 +137,7 @@ def _resolve_algorithm_config(
         caps = discover_capacitors(env, algorithm, [cap])
         return caps[0].config_path
 
-    raise click.UsageError(
-        f"Provide {option_name} or --cap."
-    )
+    raise click.UsageError(f"Provide {option_name} or --cap.")
 
 
 def _write_compile_csv(
@@ -196,14 +196,29 @@ def _write_compile_csv(
 
 @compile.command("milp")
 @click.argument("input_c")
-@click.option("-e", "--energy-config", type=click.Path(exists=True),
-              help="Energy config (default: auto-detected by estimator mode).")
-@click.option("-m", "--milp-config", type=click.Path(exists=True),
-              help="MILP config (alternative to --cap).")
-@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Energy config (default: auto-detected by estimator mode).",
+)
+@click.option(
+    "-m",
+    "--milp-config",
+    type=click.Path(exists=True),
+    help="MILP config (alternative to --cap).",
+)
+@click.option(
+    "--cap",
+    help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.",
+)
 @click.option("-o", "--output", type=click.Path())
-@click.option("--csv", "csv_path", type=click.Path(),
-              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
+@click.option(
+    "--csv",
+    "csv_path",
+    type=click.Path(),
+    help="Also write a one-row stats CSV (compile-time fields only) to this path.",
+)
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option(
     "--estimator-mode",
@@ -228,17 +243,28 @@ def _write_compile_csv(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
-@click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
+@click.option(
+    "--save-temps", is_flag=True, help="Save intermediate files to output directory."
+)
 @click.option(
     "--milp-gap",
     type=float,
     default=0.0,
     help="MIP optimality gap (default: 0.0 = proven optimal).",
 )
-@click.option("--milp-log-file", type=click.Path(), default="", help="Gurobi log file path.")
-@click.option("--coarse-allocation", is_flag=True,
-              help="Use one MILP placement variable per eligible value instead of per-region placement.")
-@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
+@click.option(
+    "--milp-log-file", type=click.Path(), default="", help="Gurobi log file path."
+)
+@click.option(
+    "--coarse-allocation",
+    is_flag=True,
+    help="Use one MILP placement variable per eligible value instead of per-region placement.",
+)
+@click.option(
+    "--accumulate-keys",
+    type=click.Path(),
+    help="Accumulate required energy keys to this file.",
+)
 @click.pass_context
 def compile_milp_cmd(
     ctx: click.Context,
@@ -276,14 +302,20 @@ def compile_milp_cmd(
     output_path = Path(output) if output else Path("build") / input_path.stem
 
     milp_config_path = _resolve_algorithm_config(
-        env, "milp", milp_config, cap, "-m/--milp-config",
+        env,
+        "milp",
+        milp_config,
+        cap,
+        "-m/--milp-config",
     )
 
     energy_config_path: Path
     if energy_config is not None:
         energy_config_path = Path(energy_config)
     elif estimator_mode == "ir":
-        energy_config_path = env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+        energy_config_path = (
+            env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+        )
     else:
         energy_config_path = default_energy_config(env, "milp")
 
@@ -316,6 +348,7 @@ def compile_milp_cmd(
 
     if accumulate_keys:
         from .bench.runner import accumulate_keys_to_file, extract_energy_params
+
         ep = extract_energy_params(result.pass_output)
         if ep is not None:
             accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
@@ -328,18 +361,32 @@ def compile_milp_cmd(
 
     if csv_path:
         _write_compile_csv(
-            csv_path, algorithm="milp",
-            benchmark=input_path.stem, capacitor=cap or "", result=result,
+            csv_path,
+            algorithm="milp",
+            benchmark=input_path.stem,
+            capacitor=cap or "",
+            result=result,
         )
 
 
 @compile.command("rockclimb")
 @click.argument("input_c")
-@click.option("-e", "--energy-config", type=click.Path(exists=True),
-              help="Energy config (default: auto-detected).")
-@click.option("-c", "--rockclimb-config", type=click.Path(exists=True),
-              help="RockClimb config (alternative to --cap).")
-@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Energy config (default: auto-detected).",
+)
+@click.option(
+    "-c",
+    "--rockclimb-config",
+    type=click.Path(exists=True),
+    help="RockClimb config (alternative to --cap).",
+)
+@click.option(
+    "--cap",
+    help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.",
+)
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option("--device-debug", is_flag=True, help="Enable device debug.")
@@ -369,10 +416,20 @@ def compile_milp_cmd(
     show_default=True,
     help="Maximum RockClimb partial unroll factor for the preprocess pass.",
 )
-@click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
-@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
-@click.option("--csv", "csv_path", type=click.Path(),
-              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
+@click.option(
+    "--save-temps", is_flag=True, help="Save intermediate files to output directory."
+)
+@click.option(
+    "--accumulate-keys",
+    type=click.Path(),
+    help="Accumulate required energy keys to this file.",
+)
+@click.option(
+    "--csv",
+    "csv_path",
+    type=click.Path(),
+    help="Also write a one-row stats CSV (compile-time fields only) to this path.",
+)
 @click.pass_context
 def compile_rockclimb_cmd(
     ctx: click.Context,
@@ -406,7 +463,11 @@ def compile_rockclimb_cmd(
     output_path = Path(output) if output else Path("build") / input_path.stem
 
     rockclimb_config_path = _resolve_algorithm_config(
-        env, "rockclimb", rockclimb_config, cap, "-c/--rockclimb-config",
+        env,
+        "rockclimb",
+        rockclimb_config,
+        cap,
+        "-c/--rockclimb-config",
     )
 
     energy_config_path: Path
@@ -441,6 +502,7 @@ def compile_rockclimb_cmd(
     if accumulate_keys:
         import json as _json
         from .bench.runner import accumulate_keys_to_file, extract_energy_params
+
         ep = extract_energy_params(result.pass_output)
         if ep is not None:
             accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
@@ -457,8 +519,11 @@ def compile_rockclimb_cmd(
 
     if csv_path:
         _write_compile_csv(
-            csv_path, algorithm="rockclimb",
-            benchmark=input_path.stem, capacitor=cap or "", result=result,
+            csv_path,
+            algorithm="rockclimb",
+            benchmark=input_path.stem,
+            capacitor=cap or "",
+            result=result,
         )
 
 
@@ -499,7 +564,10 @@ def _compile_schematic_impl(
     schematic_config_path: Path | None
     if not trace_only:
         schematic_config_path = _resolve_algorithm_config(
-            env, algorithm_label, schematic_config, cap,
+            env,
+            algorithm_label,
+            schematic_config,
+            cap,
             "-s/--schematic-config or --cap",
         )
     else:
@@ -509,7 +577,9 @@ def _compile_schematic_impl(
     if energy_config is not None:
         energy_config_path = Path(energy_config)
     elif estimator_mode == "ir":
-        energy_config_path = env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+        energy_config_path = (
+            env.project_dir / "benchmarks" / "sample_energy_config_ir.json"
+        )
     else:
         energy_config_path = default_energy_config(env, algorithm_label)
 
@@ -541,6 +611,7 @@ def _compile_schematic_impl(
 
     if accumulate_keys:
         from .bench.runner import accumulate_keys_to_file, extract_energy_params
+
         ep = extract_energy_params(result.pass_output)
         if ep is not None:
             accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
@@ -558,18 +629,32 @@ def _compile_schematic_impl(
 
     if csv_path:
         _write_compile_csv(
-            csv_path, algorithm=algorithm_label,
-            benchmark=input_path.stem, capacitor=cap or "", result=result,
+            csv_path,
+            algorithm=algorithm_label,
+            benchmark=input_path.stem,
+            capacitor=cap or "",
+            result=result,
         )
 
 
 @compile.command("schematic")
 @click.argument("input_c")
-@click.option("-e", "--energy-config", type=click.Path(exists=True),
-              help="Energy config (default: auto-detected by estimator mode).")
-@click.option("-s", "--schematic-config", type=click.Path(exists=True),
-              help="SCHEMATIC config (alternative to --cap).")
-@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Energy config (default: auto-detected by estimator mode).",
+)
+@click.option(
+    "-s",
+    "--schematic-config",
+    type=click.Path(exists=True),
+    help="SCHEMATIC config (alternative to --cap).",
+)
+@click.option(
+    "--cap",
+    help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.",
+)
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
@@ -599,14 +684,30 @@ def _compile_schematic_impl(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
-@click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
-@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
-@click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
-              help="Force checkpoint at loop header when inner loop allocations conflict.")
-@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
-              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
-@click.option("--csv", "csv_path", type=click.Path(),
-              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
+@click.option(
+    "--save-temps", is_flag=True, help="Save intermediate files to output directory."
+)
+@click.option(
+    "--accumulate-keys",
+    type=click.Path(),
+    help="Accumulate required energy keys to this file.",
+)
+@click.option(
+    "--force-checkpoint-on-incompatible-loops",
+    is_flag=True,
+    help="Force checkpoint at loop header when inner loop allocations conflict.",
+)
+@click.option(
+    "--recompute-energy-after-new-checkpoint",
+    is_flag=True,
+    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
+)
+@click.option(
+    "--csv",
+    "csv_path",
+    type=click.Path(),
+    help="Also write a one-row stats CSV (compile-time fields only) to this path.",
+)
 @click.pass_context
 def compile_schematic_cmd(
     ctx: click.Context,
@@ -637,10 +738,25 @@ def compile_schematic_cmd(
     INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
     """
     _compile_schematic_impl(
-        ctx, input_c, energy_config, schematic_config, cap, output,
-        link, debug, device_debug, halt_mode, trace_file, trace_only,
-        opt_level, clang_opt_level, extra_includes, estimator_mode,
-        cpu_freq, save_temps, algorithm_label="schematic",
+        ctx,
+        input_c,
+        energy_config,
+        schematic_config,
+        cap,
+        output,
+        link,
+        debug,
+        device_debug,
+        halt_mode,
+        trace_file,
+        trace_only,
+        opt_level,
+        clang_opt_level,
+        extra_includes,
+        estimator_mode,
+        cpu_freq,
+        save_temps,
+        algorithm_label="schematic",
         accumulate_keys=accumulate_keys,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
         recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
@@ -650,11 +766,22 @@ def compile_schematic_cmd(
 
 @compile.command("schematicO3")
 @click.argument("input_c")
-@click.option("-e", "--energy-config", type=click.Path(exists=True),
-              help="Energy config (default: auto-detected by estimator mode).")
-@click.option("-s", "--schematic-config", type=click.Path(exists=True),
-              help="SCHEMATIC config (alternative to --cap).")
-@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Energy config (default: auto-detected by estimator mode).",
+)
+@click.option(
+    "-s",
+    "--schematic-config",
+    type=click.Path(exists=True),
+    help="SCHEMATIC config (alternative to --cap).",
+)
+@click.option(
+    "--cap",
+    help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.",
+)
 @click.option("-o", "--output", type=click.Path())
 @click.option("--link", is_flag=True, help="Link with boot.S and runtime.")
 @click.option("--debug", is_flag=True, help="Enable DEBUG output.")
@@ -684,14 +811,30 @@ def compile_schematic_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
-@click.option("--save-temps", is_flag=True, help="Save intermediate files to output directory.")
-@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
-@click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
-              help="Force checkpoint at loop header when inner loop allocations conflict.")
-@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
-              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
-@click.option("--csv", "csv_path", type=click.Path(),
-              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
+@click.option(
+    "--save-temps", is_flag=True, help="Save intermediate files to output directory."
+)
+@click.option(
+    "--accumulate-keys",
+    type=click.Path(),
+    help="Accumulate required energy keys to this file.",
+)
+@click.option(
+    "--force-checkpoint-on-incompatible-loops",
+    is_flag=True,
+    help="Force checkpoint at loop header when inner loop allocations conflict.",
+)
+@click.option(
+    "--recompute-energy-after-new-checkpoint",
+    is_flag=True,
+    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
+)
+@click.option(
+    "--csv",
+    "csv_path",
+    type=click.Path(),
+    help="Also write a one-row stats CSV (compile-time fields only) to this path.",
+)
 @click.pass_context
 def compile_schematic_o3_cmd(
     ctx: click.Context,
@@ -722,10 +865,25 @@ def compile_schematic_o3_cmd(
     INPUT_C can be a benchmark name (e.g. "crc") or a path to a C file.
     """
     _compile_schematic_impl(
-        ctx, input_c, energy_config, schematic_config, cap, output,
-        link, debug, device_debug, halt_mode, trace_file, trace_only,
-        opt_level, clang_opt_level, extra_includes, estimator_mode,
-        cpu_freq, save_temps, algorithm_label="schematicO3",
+        ctx,
+        input_c,
+        energy_config,
+        schematic_config,
+        cap,
+        output,
+        link,
+        debug,
+        device_debug,
+        halt_mode,
+        trace_file,
+        trace_only,
+        opt_level,
+        clang_opt_level,
+        extra_includes,
+        estimator_mode,
+        cpu_freq,
+        save_temps,
+        algorithm_label="schematicO3",
         accumulate_keys=accumulate_keys,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
         recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
@@ -736,8 +894,14 @@ def compile_schematic_o3_cmd(
 @compile.command("uninstrumented")
 @click.argument("input_c")
 @click.option("-o", "--output", type=click.Path())
-@click.option("--link/--no-link", default=True, help="Link with boot.S and runtime (default: on).")
-@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
+@click.option(
+    "--link/--no-link", default=True, help="Link with boot.S and runtime (default: on)."
+)
+@click.option(
+    "--device-debug/--no-device-debug",
+    default=True,
+    help="Enable device debug (default: on).",
+)
 @click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
@@ -747,8 +911,12 @@ def compile_schematic_o3_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
-@click.option("--csv", "csv_path", type=click.Path(),
-              help="Also write a one-row stats CSV (compile-time fields only) to this path.")
+@click.option(
+    "--csv",
+    "csv_path",
+    type=click.Path(),
+    help="Also write a one-row stats CSV (compile-time fields only) to this path.",
+)
 @click.pass_context
 def compile_uninstrumented_cmd(
     ctx: click.Context,
@@ -768,7 +936,10 @@ def compile_uninstrumented_cmd(
     """
     import time
 
-    from .compile.uninstrumented import UninstrumentedCompileOptions, compile_uninstrumented
+    from .compile.uninstrumented import (
+        UninstrumentedCompileOptions,
+        compile_uninstrumented,
+    )
 
     input_path = _resolve_input(ctx.obj["env"], input_c)
     output_path = Path(output) if output else Path("build") / input_path.stem
@@ -814,14 +985,31 @@ def compile_uninstrumented_cmd(
 
 @compile.command("chunked")
 @click.argument("input_c")
-@click.option("-e", "--energy-config", type=click.Path(exists=True),
-              help="Energy estimator config. Defaults to assembly params.")
-@click.option("-m", "--milp-config", type=click.Path(exists=True),
-              help="MILP config JSON (for chunk size K).")
-@click.option("--cap", help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.")
+@click.option(
+    "-e",
+    "--energy-config",
+    type=click.Path(exists=True),
+    help="Energy estimator config. Defaults to assembly params.",
+)
+@click.option(
+    "-m",
+    "--milp-config",
+    type=click.Path(exists=True),
+    help="MILP config JSON (for chunk size K).",
+)
+@click.option(
+    "--cap",
+    help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.",
+)
 @click.option("-o", "--output", type=click.Path())
-@click.option("--link/--no-link", default=True, help="Link with boot.S and runtime (default: on).")
-@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
+@click.option(
+    "--link/--no-link", default=True, help="Link with boot.S and runtime (default: on)."
+)
+@click.option(
+    "--device-debug/--no-device-debug",
+    default=True,
+    help="Enable device debug (default: on).",
+)
 @click.option("-O", "opt_level", type=int, default=3, help="LLC opt level.")
 @click.option("-Oc", "clang_opt_level", type=int, default=3, help="Clang opt level.")
 @click.option("-I", "extra_includes", multiple=True, help="Extra include dirs.")
@@ -863,11 +1051,16 @@ def compile_chunked_cmd(
     output_path = Path(output) if output else Path("build") / input_path.stem
 
     milp_config_path = _resolve_algorithm_config(
-        env, "milp", milp_config, cap, "-m/--milp-config",
+        env,
+        "milp",
+        milp_config,
+        cap,
+        "-m/--milp-config",
     )
 
     energy_config_path = (
-        Path(energy_config) if energy_config is not None
+        Path(energy_config)
+        if energy_config is not None
         else default_energy_config(env, "milp")
     )
 
@@ -899,6 +1092,7 @@ def compile_chunked_cmd(
 # bench group
 # =========================================================================
 
+
 @main.group()
 def bench() -> None:
     """Run benchmarks."""
@@ -907,7 +1101,11 @@ def bench() -> None:
 @bench.command("milp")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
+@click.option(
+    "--device-debug/--no-device-debug",
+    default=True,
+    help="Enable device debug (default: on).",
+)
 @click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
@@ -933,15 +1131,22 @@ def bench() -> None:
     default="16",
     help="CPU frequency in MHz (default: 16).",
 )
-@click.option("--coarse-allocation", is_flag=True,
-              help="Use one MILP placement variable per eligible value instead of per-region placement.")
+@click.option(
+    "--coarse-allocation",
+    is_flag=True,
+    help="Use one MILP placement variable per eligible value instead of per-region placement.",
+)
 @click.option(
     "--milp-gap",
     type=float,
     default=0.0,
     help="MIP optimality gap (default: 0.0 = proven optimal).",
 )
-@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
+@click.option(
+    "--accumulate-keys",
+    type=click.Path(),
+    help="Accumulate required energy keys to this file.",
+)
 @_saleae_timeout_option
 @click.pass_context
 def bench_milp_cmd(
@@ -984,7 +1189,11 @@ def bench_milp_cmd(
 @bench.command("rockclimb")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
+@click.option(
+    "--device-debug/--no-device-debug",
+    default=True,
+    help="Enable device debug (default: on).",
+)
 @click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
@@ -1011,7 +1220,11 @@ def bench_milp_cmd(
     show_default=True,
     help="Maximum RockClimb partial unroll factor for the preprocess pass.",
 )
-@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
+@click.option(
+    "--accumulate-keys",
+    type=click.Path(),
+    help="Accumulate required energy keys to this file.",
+)
 @_saleae_timeout_option
 @click.pass_context
 def bench_rockclimb_cmd(
@@ -1050,7 +1263,11 @@ def bench_rockclimb_cmd(
 @bench.command("schematic")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
+@click.option(
+    "--device-debug/--no-device-debug",
+    default=True,
+    help="Enable device debug (default: on).",
+)
 @click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
@@ -1081,11 +1298,21 @@ def bench_rockclimb_cmd(
     default="16",
     help="CPU frequency in MHz (default: 16).",
 )
-@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
-@click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
-              help="Force checkpoint at loop header when inner loop allocations conflict.")
-@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
-              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@click.option(
+    "--accumulate-keys",
+    type=click.Path(),
+    help="Accumulate required energy keys to this file.",
+)
+@click.option(
+    "--force-checkpoint-on-incompatible-loops",
+    is_flag=True,
+    help="Force checkpoint at loop header when inner loop allocations conflict.",
+)
+@click.option(
+    "--recompute-energy-after-new-checkpoint",
+    is_flag=True,
+    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
+)
 @_saleae_timeout_option
 @click.pass_context
 def bench_schematic_cmd(
@@ -1132,7 +1359,11 @@ def bench_schematic_cmd(
 @bench.command("schematicO3")
 @click.argument("benchmarks", nargs=-1)
 @click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("--device-debug/--no-device-debug", default=True, help="Enable device debug (default: on).")
+@click.option(
+    "--device-debug/--no-device-debug",
+    default=True,
+    help="Enable device debug (default: on).",
+)
 @click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
 @click.option(
     "--halt-mode",
@@ -1163,11 +1394,21 @@ def bench_schematic_cmd(
     default="16",
     help="CPU frequency in MHz (default: 16).",
 )
-@click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
-@click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
-              help="Force checkpoint at loop header when inner loop allocations conflict.")
-@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
-              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@click.option(
+    "--accumulate-keys",
+    type=click.Path(),
+    help="Accumulate required energy keys to this file.",
+)
+@click.option(
+    "--force-checkpoint-on-incompatible-loops",
+    is_flag=True,
+    help="Force checkpoint at loop header when inner loop allocations conflict.",
+)
+@click.option(
+    "--recompute-energy-after-new-checkpoint",
+    is_flag=True,
+    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
+)
 @_saleae_timeout_option
 @click.pass_context
 def bench_schematic_o3_cmd(
@@ -1345,6 +1586,7 @@ def bench_chunked_cmd(
 # verify group
 # =========================================================================
 
+
 @main.group()
 def verify() -> None:
     """Verification commands."""
@@ -1429,8 +1671,11 @@ def verify_rockclimb_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
-@click.option("--coarse-allocation", is_flag=True,
-              help="Use one MILP placement variable per eligible value instead of per-region placement.")
+@click.option(
+    "--coarse-allocation",
+    is_flag=True,
+    help="Use one MILP placement variable per eligible value instead of per-region placement.",
+)
 @_saleae_timeout_option
 @click.pass_context
 def verify_milp_cmd(
@@ -1492,10 +1737,16 @@ def verify_milp_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
-@click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
-              help="Force checkpoint at loop header when inner loop allocations conflict.")
-@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
-              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@click.option(
+    "--force-checkpoint-on-incompatible-loops",
+    is_flag=True,
+    help="Force checkpoint at loop header when inner loop allocations conflict.",
+)
+@click.option(
+    "--recompute-energy-after-new-checkpoint",
+    is_flag=True,
+    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
+)
 @_saleae_timeout_option
 @click.pass_context
 def verify_schematic_cmd(
@@ -1561,10 +1812,16 @@ def verify_schematic_cmd(
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
-@click.option("--force-checkpoint-on-incompatible-loops", is_flag=True,
-              help="Force checkpoint at loop header when inner loop allocations conflict.")
-@click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
-              help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@click.option(
+    "--force-checkpoint-on-incompatible-loops",
+    is_flag=True,
+    help="Force checkpoint at loop header when inner loop allocations conflict.",
+)
+@click.option(
+    "--recompute-energy-after-new-checkpoint",
+    is_flag=True,
+    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
+)
 @_saleae_timeout_option
 @click.pass_context
 def verify_schematic_o3_cmd(
@@ -1605,6 +1862,7 @@ def verify_schematic_o3_cmd(
 # =========================================================================
 # analyze group
 # =========================================================================
+
 
 @main.group()
 def analyze() -> None:
@@ -1720,11 +1978,10 @@ def analyze_plot_cmd(
 # device group
 # =========================================================================
 
+
 @main.group()
 def device() -> None:
     """Device interaction."""
-
-
 
 
 @device.command("read-serial")

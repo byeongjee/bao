@@ -14,7 +14,9 @@ from ..runner import DeviceError, run
 
 
 def resolve_symbols(
-    nm_path: str, elf_path: Path, symbol_names: list[str],
+    nm_path: str,
+    elf_path: Path,
+    symbol_names: list[str],
 ) -> dict[str, tuple[int, int]]:
     """Resolve symbol addresses from ELF via msp430-elf-nm.
 
@@ -163,8 +165,6 @@ def read_nvm_symbols(
 
     data = parse_hex_dump(md_output)
     if len(data) < total_len:
-        raise DeviceError(
-            f"Expected {total_len} bytes from hex dump, got {len(data)}"
-        )
+        raise DeviceError(f"Expected {total_len} bytes from hex dump, got {len(data)}")
 
     return extract_symbol_values(data, symbols, symbol_names, base_addr)

@@ -83,8 +83,10 @@ def run_chunked_benchmarks(
     try:
         output_csv.parent.mkdir(parents=True, exist_ok=True)
 
-        with compilation_workdir(prefix="chunked_bench_") as workdir, \
-             open(output_csv, "w", newline="") as csvfile:
+        with (
+            compilation_workdir(prefix="chunked_bench_") as workdir,
+            open(output_csv, "w", newline="") as csvfile,
+        ):
             writer = csv.writer(csvfile)
             writer.writerow(CSV_HEADER)
 
@@ -94,8 +96,9 @@ def run_chunked_benchmarks(
                 bench_name = bench_path.stem
                 for cap in capacitors:
                     i += 1
-                    logger.info("[%d/%d] Running %s (%s) ...",
-                                i, total, bench_name, cap.label)
+                    logger.info(
+                        "[%d/%d] Running %s (%s) ...", i, total, bench_name, cap.label
+                    )
 
                     out_dir = workdir / f"{bench_name}_{cap.label}"
                     out_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +107,8 @@ def run_chunked_benchmarks(
                     try:
                         t0 = time.monotonic()
                         result = compile_chunked(
-                            tc, env,
+                            tc,
+                            env,
                             ChunkedCompileOptions(
                                 input_c=bench_path,
                                 energy_config=energy_config,
@@ -126,16 +130,26 @@ def run_chunked_benchmarks(
 
                     if result.elf_file is None or not result.elf_file.exists():
                         logger.error("  FAILED (no ELF produced)")
-                        writer.writerow([bench_name, cap.label, "failed",
-                                         str(compilation_time_ms), ""])
+                        writer.writerow(
+                            [
+                                bench_name,
+                                cap.label,
+                                "failed",
+                                str(compilation_time_ms),
+                                "",
+                            ]
+                        )
                         continue
 
                     # Compile-only mode (no device): record compile time, skip timing.
                     if saleae_manager is None:
-                        logger.info("  OK (compile-only)  compilation_time=%dms",
-                                    compilation_time_ms)
-                        writer.writerow([bench_name, cap.label, "ok",
-                                         str(compilation_time_ms), ""])
+                        logger.info(
+                            "  OK (compile-only)  compilation_time=%dms",
+                            compilation_time_ms,
+                        )
+                        writer.writerow(
+                            [bench_name, cap.label, "ok", str(compilation_time_ms), ""]
+                        )
                         continue
 
                     # Flash + measure
@@ -143,22 +157,37 @@ def run_chunked_benchmarks(
                         from ..device.saleae import saleae_run
 
                         execution_time_us = saleae_run(
-                            result.elf_file, saleae_manager,
-                            _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
+                            result.elf_file,
+                            saleae_manager,
+                            _FLASH_TIMEOUT,
+                            _AFTER_TRIGGER_SECONDS,
                             capture_timeout_seconds,
                         )
                         logger.info(
                             "  OK  compilation_time=%dms execution_time=%.2fus",
-                            compilation_time_ms, execution_time_us)
-                        writer.writerow([
-                            bench_name, cap.label, "ok",
-                            str(compilation_time_ms),
-                            str(round(execution_time_us, 2)),
-                        ])
+                            compilation_time_ms,
+                            execution_time_us,
+                        )
+                        writer.writerow(
+                            [
+                                bench_name,
+                                cap.label,
+                                "ok",
+                                str(compilation_time_ms),
+                                str(round(execution_time_us, 2)),
+                            ]
+                        )
                     except DeviceError as exc:
                         logger.error("  DEVICE ERROR: %s", exc)
-                        writer.writerow([bench_name, cap.label, "device_error",
-                                         str(compilation_time_ms), ""])
+                        writer.writerow(
+                            [
+                                bench_name,
+                                cap.label,
+                                "device_error",
+                                str(compilation_time_ms),
+                                "",
+                            ]
+                        )
     finally:
         if saleae_manager is not None:
             saleae_manager.close()
