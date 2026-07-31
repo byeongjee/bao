@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 if "GRPC_ENABLE_FORK_SUPPORT" not in os.environ:
     os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
 
-from ..runner import DeviceError
+from ..errors import DeviceError
 from .flash import flash
 
 if TYPE_CHECKING:

@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import CompilationError, StepResult, ToolError, run
+from ..errors import CompilationError, ToolError
+from ..runner import StepResult, run
 from ..toolchain import Toolchain
 
 MATH_LINK_FLAGS = ["-lm"]

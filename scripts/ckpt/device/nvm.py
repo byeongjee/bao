@@ -10,7 +10,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ..runner import DeviceError, run
+from ..errors import DeviceError
+from ..runner import run
 
 
 def resolve_symbols(

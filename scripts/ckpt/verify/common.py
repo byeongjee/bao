@@ -30,9 +30,9 @@ from ..compile.uninstrumented import (
 from ..device.flash import read_nvm
 from ..device.saleae import discover_saleae, saleae_run
 from ..env import ProjectEnv
-from ..errors import DeviceError
+from ..errors import CompilationError, DeviceError
 from ..output_parser import detect_infeasibility
-from ..runner import CompilationError, StepResult
+from ..runner import StepResult
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 
