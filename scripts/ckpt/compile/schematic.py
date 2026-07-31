@@ -87,6 +87,13 @@ def compile_schematic(
       schematic pass -> compile to object ->
       (if link: assemble + link with schematic_boot.S + schematic_runtime.c)
     """
+    # bor/lpm4/swbor halt modes and debug-counters imply linking
+    link = opts.link
+    if opts.halt_mode in ("bor", "lpm4", "swbor"):
+        link = True
+    if opts.device_debug:
+        link = True
+
     opts.output.parent.mkdir(parents=True, exist_ok=True)
 
     with compilation_workdir(prefix="ckpt_schematic_") as tmp:
@@ -223,7 +230,7 @@ def compile_schematic(
                 if src.is_file():
                     shutil.copy2(src, tmp_out / src.name)
 
-            if opts.link or opts.device_debug:
+            if link:
                 elf_file = _link_schematic(tc, env, opts)
         except ToolError as exc:
             err = CompilationError(exc.step, exc.result)
