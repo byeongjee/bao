@@ -582,10 +582,16 @@ void applyMemoryAllocation(const RCGResult &result, const std::vector<SchematicB
 
         // End boundary extension.
         // Condition: trace[-1] has allocation AND (no checkpoints OR last ckpt dst != trace[-1]).
+        // Deliberate divergence from the reference (schematic.py:409): the reference
+        // tests `path[-2].bb_before == trace[-1]`, but a checkpoint's SOURCE block can
+        // never be the trace's last block, so that guard is vacuously true and the
+        // reference extends the end boundary even when a checkpoint separates it from
+        // the last interval. Testing the checkpoint's DESTINATION implements the
+        // intent both implementations document (mirroring the start-boundary check).
         auto endAllocIt = solution.blockAllocation.find(trace.back());
         if (endAllocIt != solution.blockAllocation.end()) {
             bool noSeparation = result.selectedCheckpoints.empty() ||
-                                result.selectedCheckpoints.back().src != trace.back();
+                                result.selectedCheckpoints.back().dst != trace.back();
             if (noSeparation) {
                 extendsAllocation(*endAllocIt->second, allocations.back());
                 allocations.back() = *endAllocIt->second;
