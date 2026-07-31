@@ -13,7 +13,6 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <limits>
-#include <queue>
 
 namespace checkpoint {
 
