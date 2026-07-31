@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from ckpt.compile.milp import _merge_strip_mining_reclamp_stats
+
+pytestmark = pytest.mark.unit
 
 
 def test_merge_strip_mining_reclamp_stats_updates_chosen_k(tmp_path: Path) -> None:
@@ -167,7 +170,9 @@ def test_merge_strip_mining_reclamp_stats_matches_by_function(tmp_path: Path) ->
     helper_entry = merged["functions"][0]
     main_entry = merged["functions"][1]
 
-    assert helper_entry["chosen_k_values"] == [{"loop_header": "helper.loop", "chosen_k": 5}]
+    assert helper_entry["chosen_k_values"] == [
+        {"loop_header": "helper.loop", "chosen_k": 5}
+    ]
     assert main_entry["chosen_k_values"] == [
         {"loop_header": "for.cond11.i.preheader", "chosen_k": 12},
     ]

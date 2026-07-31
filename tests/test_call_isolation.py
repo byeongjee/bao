@@ -18,9 +18,18 @@ pytestmark = pytest.mark.schematic
 
 def _isolate(tools, ir: str, *, expect_ok: bool = True) -> subprocess.CompletedProcess:
     r = subprocess.run(
-        [tools["opt"], f"-load-pass-plugin={tools['pass_lib']}",
-         "-passes=schematic-isolate", "-S", "-o", "-"],
-        input=ir, capture_output=True, text=True,
+        [
+            tools["opt"],
+            f"-load-pass-plugin={tools['pass_lib']}",
+            "-passes=schematic-isolate",
+            "-S",
+            "-o",
+            "-",
+        ],
+        input=ir,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if expect_ok:
         assert r.returncode == 0, f"schematic-isolate failed: {r.stderr}"
@@ -65,7 +74,9 @@ def test_call_isolated_and_marked(tools):
     main_body = re.search(r"define i32 @main\(\).*?\n\}", out, re.DOTALL)
     assert main_body, out
     labels = re.findall(r"^([\w.]+):", main_body.group(0), re.MULTILINE)
-    assert len(labels) >= 3, f"expected @main split into multiple blocks, got labels={labels}\n{out}"
+    assert len(labels) >= 3, (
+        f"expected @main split into multiple blocks, got labels={labels}\n{out}"
+    )
 
 
 SELF_RECURSION_IR = """\

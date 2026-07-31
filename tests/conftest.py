@@ -19,7 +19,9 @@ TESTS_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = TESTS_DIR.parent
 PASS_LIB = PROJECT_DIR / "passes" / "build" / "CheckpointPass.so"
 BB_FREQ_RUNTIME = PROJECT_DIR / "passes" / "runtime" / "bb_freq_runtime.c"
-SCHEMATIC_TRACE_RUNTIME = PROJECT_DIR / "passes" / "runtime" / "schematic_trace_runtime.c"
+SCHEMATIC_TRACE_RUNTIME = (
+    PROJECT_DIR / "passes" / "runtime" / "schematic_trace_runtime.c"
+)
 SCENARIOS_DIR = TESTS_DIR / "scenarios"
 CONFIGS_DIR = SCENARIOS_DIR / "configs"
 
@@ -81,11 +83,17 @@ def tools():
 # ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
-def _run(cmd: list[str], *, cwd: str | Path | None = None,
-         timeout: int = 120) -> subprocess.CompletedProcess[str]:
+def _run(
+    cmd: list[str], *, cwd: str | Path | None = None, timeout: int = 120
+) -> subprocess.CompletedProcess[str]:
     """Run a subprocess, capturing stdout+stderr."""
     return subprocess.run(
-        cmd, capture_output=True, text=True, cwd=cwd, timeout=timeout,
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        timeout=timeout,
+        check=False,
     )
 
 
@@ -102,11 +110,18 @@ def _prepare_schematic_ir(
     compile_to_ir(src, input_ll, mem2reg=False)
 
     ann_ll = str(tmp_path / "annotated.ll")
-    r = _run([
-        tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-        "-passes=tripcount-annotation",
-        "-S", input_ll, "-o", ann_ll,
-    ])
+    r = _run(
+        [
+            tools["opt"],
+            "-load-pass-plugin",
+            tools["pass_lib"],
+            "-passes=tripcount-annotation",
+            "-S",
+            input_ll,
+            "-o",
+            ann_ll,
+        ]
+    )
     if r.returncode != 0:
         raise RuntimeError(f"tripcount-annotation failed: {r.stderr}")
 
@@ -114,13 +129,18 @@ def _prepare_schematic_ir(
         return ann_ll
 
     opt_ll = str(tmp_path / f"optimized_O{frontend_opt_level}.ll")
-    r = _run([
-        tools["opt"],
-        f"-passes=default<O{frontend_opt_level}>",
-        "-vectorize-loops=false",
-        "-vectorize-slp=false",
-        "-S", ann_ll, "-o", opt_ll,
-    ])
+    r = _run(
+        [
+            tools["opt"],
+            f"-passes=default<O{frontend_opt_level}>",
+            "-vectorize-loops=false",
+            "-vectorize-slp=false",
+            "-S",
+            ann_ll,
+            "-o",
+            opt_ll,
+        ]
+    )
     if r.returncode != 0:
         raise RuntimeError(f"optimize-ir-O{frontend_opt_level} failed: {r.stderr}")
 
@@ -137,20 +157,34 @@ def _collect_schematic_trace(
     energy_config = str(energy_config)
 
     trace_ll = str(tmp_path / "trace_inst.ll")
-    r = _run([
-        tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-        "-passes=trace-collect",
-        f"-energy-config={energy_config}",
-        "-S", input_ll, "-o", trace_ll,
-    ])
+    r = _run(
+        [
+            tools["opt"],
+            "-load-pass-plugin",
+            tools["pass_lib"],
+            "-passes=trace-collect",
+            f"-energy-config={energy_config}",
+            "-S",
+            input_ll,
+            "-o",
+            trace_ll,
+        ]
+    )
     if r.returncode != 0:
         raise RuntimeError(f"trace-collect failed: {r.stderr}")
 
     trace_bin = str(tmp_path / "trace_run")
-    r = _run([
-        tools["clang"], *tools["sysroot_flags"], "-O0",
-        trace_ll, str(SCHEMATIC_TRACE_RUNTIME), "-o", trace_bin,
-    ])
+    r = _run(
+        [
+            tools["clang"],
+            *tools["sysroot_flags"],
+            "-O0",
+            trace_ll,
+            str(SCHEMATIC_TRACE_RUNTIME),
+            "-o",
+            trace_bin,
+        ]
+    )
     if r.returncode != 0:
         raise RuntimeError(f"trace compile failed: {r.stderr}")
 
@@ -173,9 +207,16 @@ def compile_to_ir(tools):
     def _compile(src: str | Path, out_ll: str | Path, *, mem2reg: bool = False):
         src, out_ll = str(src), str(out_ll)
         cmd = [
-            tools["clang"], *tools["sysroot_flags"],
-            "-S", "-emit-llvm", "-O0", "-Xclang", "-disable-O0-optnone",
-            src, "-o", out_ll,
+            tools["clang"],
+            *tools["sysroot_flags"],
+            "-S",
+            "-emit-llvm",
+            "-O0",
+            "-Xclang",
+            "-disable-O0-optnone",
+            src,
+            "-o",
+            out_ll,
         ]
         r = _run(cmd)
         if r.returncode != 0:
@@ -214,32 +255,53 @@ def run_milp(tools, compile_to_ir):
         if not skip_bb_freq:
             # Annotate trip counts
             ann_ll = str(tmp_path / "annotated.ll")
-            r = _run([
-                tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-                "-passes=tripcount-annotation",
-                "-S", input_ll, "-o", ann_ll,
-            ])
+            r = _run(
+                [
+                    tools["opt"],
+                    "-load-pass-plugin",
+                    tools["pass_lib"],
+                    "-passes=tripcount-annotation",
+                    "-S",
+                    input_ll,
+                    "-o",
+                    ann_ll,
+                ]
+            )
             if r.returncode != 0:
                 raise RuntimeError(f"tripcount-annotation failed: {r.stderr}")
 
             # Instrument for BB frequency collection
             freq_ll = str(tmp_path / "freq_inst.ll")
-            r = _run([
-                tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-                "-passes=bb-freq-collect",
-                f"-energy-config={energy_config}",
-                f"-milp-config={milp_config}",
-                "-S", ann_ll, "-o", freq_ll,
-            ])
+            r = _run(
+                [
+                    tools["opt"],
+                    "-load-pass-plugin",
+                    tools["pass_lib"],
+                    "-passes=bb-freq-collect",
+                    f"-energy-config={energy_config}",
+                    f"-milp-config={milp_config}",
+                    "-S",
+                    ann_ll,
+                    "-o",
+                    freq_ll,
+                ]
+            )
             if r.returncode != 0:
                 raise RuntimeError(f"bb-freq-collect failed: {r.stderr}")
 
             # Compile and run to get bb_freq.json
             freq_bin = str(tmp_path / "freq_run")
-            r = _run([
-                tools["clang"], *tools["sysroot_flags"], "-O0",
-                freq_ll, str(BB_FREQ_RUNTIME), "-o", freq_bin,
-            ])
+            r = _run(
+                [
+                    tools["clang"],
+                    *tools["sysroot_flags"],
+                    "-O0",
+                    freq_ll,
+                    str(BB_FREQ_RUNTIME),
+                    "-o",
+                    freq_bin,
+                ]
+            )
             if r.returncode != 0:
                 raise RuntimeError(f"freq compile failed: {r.stderr}")
 
@@ -247,7 +309,9 @@ def run_milp(tools, compile_to_ir):
 
             bb_freq_json = tmp_path / "bb_freq.json"
             if not bb_freq_json.exists():
-                raise RuntimeError("BB frequency collection did not produce bb_freq.json")
+                raise RuntimeError(
+                    "BB frequency collection did not produce bb_freq.json"
+                )
 
             bb_freq_flags = [f"-bb-freq-file={bb_freq_json}"]
             input_ll = ann_ll
@@ -255,7 +319,9 @@ def run_milp(tools, compile_to_ir):
         # Run MILP checkpoint pass
         output_ll = str(tmp_path / "output.ll")
         pass_cmd = [
-            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+            tools["opt"],
+            "-load-pass-plugin",
+            tools["pass_lib"],
             "-passes=checkpoint",
             f"-energy-config={energy_config}",
             f"-milp-config={milp_config}",
@@ -298,31 +364,52 @@ def run_schematic(tools, compile_to_ir):
 
         # Annotate trip counts
         ann_ll = str(tmp_path / "annotated.ll")
-        r = _run([
-            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-            "-passes=tripcount-annotation",
-            "-S", input_ll, "-o", ann_ll,
-        ])
+        r = _run(
+            [
+                tools["opt"],
+                "-load-pass-plugin",
+                tools["pass_lib"],
+                "-passes=tripcount-annotation",
+                "-S",
+                input_ll,
+                "-o",
+                ann_ll,
+            ]
+        )
         if r.returncode != 0:
             raise RuntimeError(f"tripcount-annotation failed: {r.stderr}")
 
         # Instrument for trace collection
         trace_ll = str(tmp_path / "trace_inst.ll")
-        r = _run([
-            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-            "-passes=trace-collect",
-            f"-energy-config={energy_config}",
-            "-S", ann_ll, "-o", trace_ll,
-        ])
+        r = _run(
+            [
+                tools["opt"],
+                "-load-pass-plugin",
+                tools["pass_lib"],
+                "-passes=trace-collect",
+                f"-energy-config={energy_config}",
+                "-S",
+                ann_ll,
+                "-o",
+                trace_ll,
+            ]
+        )
         if r.returncode != 0:
             raise RuntimeError(f"trace-collect failed: {r.stderr}")
 
         # Compile and run to get schematic_trace.json
         trace_bin = str(tmp_path / "trace_run")
-        r = _run([
-            tools["clang"], *tools["sysroot_flags"], "-O0",
-            trace_ll, str(SCHEMATIC_TRACE_RUNTIME), "-o", trace_bin,
-        ])
+        r = _run(
+            [
+                tools["clang"],
+                *tools["sysroot_flags"],
+                "-O0",
+                trace_ll,
+                str(SCHEMATIC_TRACE_RUNTIME),
+                "-o",
+                trace_bin,
+            ]
+        )
         if r.returncode != 0:
             raise RuntimeError(f"trace compile failed: {r.stderr}")
 
@@ -334,14 +421,21 @@ def run_schematic(tools, compile_to_ir):
 
         # Run SCHEMATIC pass
         output_ll = str(tmp_path / "output.ll")
-        r = _run([
-            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-            "-passes=schematic",
-            f"-energy-config={energy_config}",
-            f"-schematic-config={schematic_config}",
-            f"-schematic-trace={trace_json}",
-            "-S", ann_ll, "-o", output_ll,
-        ])
+        r = _run(
+            [
+                tools["opt"],
+                "-load-pass-plugin",
+                tools["pass_lib"],
+                "-passes=schematic",
+                f"-energy-config={energy_config}",
+                f"-schematic-config={schematic_config}",
+                f"-schematic-trace={trace_json}",
+                "-S",
+                ann_ll,
+                "-o",
+                output_ll,
+            ]
+        )
 
         output_ir = ""
         if os.path.exists(output_ll):
@@ -375,18 +469,29 @@ def run_schematic_o3(tools, compile_to_ir):
     ) -> PassResult:
         energy_config = str(energy_config)
         schematic_config = str(schematic_config)
-        schematic_input_ll = _prepare_schematic_ir(tools, compile_to_ir, src, tmp_path, 3)
-        trace_json = _collect_schematic_trace(tools, schematic_input_ll, energy_config, tmp_path)
+        schematic_input_ll = _prepare_schematic_ir(
+            tools, compile_to_ir, src, tmp_path, 3
+        )
+        trace_json = _collect_schematic_trace(
+            tools, schematic_input_ll, energy_config, tmp_path
+        )
 
         output_ll = str(tmp_path / "output.ll")
-        r = _run([
-            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-            "-passes=schematic",
-            f"-energy-config={energy_config}",
-            f"-schematic-config={schematic_config}",
-            f"-schematic-trace={trace_json}",
-            "-S", schematic_input_ll, "-o", output_ll,
-        ])
+        r = _run(
+            [
+                tools["opt"],
+                "-load-pass-plugin",
+                tools["pass_lib"],
+                "-passes=schematic",
+                f"-energy-config={energy_config}",
+                f"-schematic-config={schematic_config}",
+                f"-schematic-trace={trace_json}",
+                "-S",
+                schematic_input_ll,
+                "-o",
+                output_ll,
+            ]
+        )
 
         output_ir = ""
         if os.path.exists(output_ll):
@@ -415,7 +520,9 @@ def collect_schematic_trace(tools, compile_to_ir):
         schematic_input_ll = _prepare_schematic_ir(
             tools, compile_to_ir, src, tmp_path, frontend_opt_level
         )
-        trace_json = _collect_schematic_trace(tools, schematic_input_ll, energy_config, tmp_path)
+        trace_json = _collect_schematic_trace(
+            tools, schematic_input_ll, energy_config, tmp_path
+        )
         return json.loads(trace_json.read_text())
 
     return _collect
@@ -426,36 +533,39 @@ def collect_schematic_trace(tools, compile_to_ir):
 # ---------------------------------------------------------------------------
 def count_calls(ir: str, func_name: str) -> int:
     """Count 'call ... @func_name(' occurrences in IR."""
-    return len(re.findall(rf'call\s+[^@]*@{re.escape(func_name)}\s*\(', ir))
+    return len(re.findall(rf"call\s+[^@]*@{re.escape(func_name)}\s*\(", ir))
 
 
 def calls_in_block(ir: str, block_label: str, func_name: str) -> int:
     """Count calls to func_name within a specific basic block."""
     # Find the block: starts with 'label:' and ends at next label or function end
-    pattern = rf'^{re.escape(block_label)}:\s*(?:;[^\n]*)?\n(.*?)(?=^\S|\Z)'
+    pattern = rf"^{re.escape(block_label)}:\s*(?:;[^\n]*)?\n(.*?)(?=^\S|\Z)"
     m = re.search(pattern, ir, re.MULTILINE | re.DOTALL)
     if not m:
         return 0
     block_text = m.group(1)
-    return len(re.findall(rf'call\s+[^@]*@{re.escape(func_name)}\s*\(', block_text))
+    return len(re.findall(rf"call\s+[^@]*@{re.escape(func_name)}\s*\(", block_text))
 
 
 def has_global(ir: str, name: str) -> bool:
     """Check if @name = ... exists as a global."""
-    return bool(re.search(rf'^@{re.escape(name)}\s*=', ir, re.MULTILINE))
+    return bool(re.search(rf"^@{re.escape(name)}\s*=", ir, re.MULTILINE))
 
 
 def has_section(ir: str, global_name: str, section: str) -> bool:
     """Check if a global has a specific section annotation."""
-    return bool(re.search(
-        rf'^@{re.escape(global_name)}\s*=.*section\s+"{re.escape(section)}"',
-        ir, re.MULTILINE,
-    ))
+    return bool(
+        re.search(
+            rf'^@{re.escape(global_name)}\s*=.*section\s+"{re.escape(section)}"',
+            ir,
+            re.MULTILINE,
+        )
+    )
 
 
 def get_metric(stderr: str, label: str) -> str | None:
     """Extract 'Label: value' from stderr."""
-    m = re.search(rf'^\s*{re.escape(label)}:\s*(.+)$', stderr, re.MULTILINE)
+    m = re.search(rf"^\s*{re.escape(label)}:\s*(.+)$", stderr, re.MULTILINE)
     return m.group(1).strip() if m else None
 
 
@@ -547,13 +657,13 @@ def check_assertions(r: PassResult, expect: dict):
         )
 
     if "max_shadow_count" in expect:
-        count = len(re.findall(r'@__vm_shadow_\w+\s*=\s*internal\s+global', ir))
+        count = len(re.findall(r"@__vm_shadow_\w+\s*=\s*internal\s+global", ir))
         assert count <= expect["max_shadow_count"], (
             f"Expected <= {expect['max_shadow_count']} shadow globals, got {count}"
         )
 
     if "min_shadow_count" in expect:
-        count = len(re.findall(r'@__vm_shadow_\w+\s*=\s*internal\s+global', ir))
+        count = len(re.findall(r"@__vm_shadow_\w+\s*=\s*internal\s+global", ir))
         assert count >= expect["min_shadow_count"], (
             f"Expected >= {expect['min_shadow_count']} shadow globals, got {count}"
         )
@@ -567,9 +677,7 @@ def check_assertions(r: PassResult, expect: dict):
             )
             # No direct load/store to the original global should exist
             # (only memcpy for commit/restore references the original).
-            direct_uses = re.findall(
-                rf'(?:load|store)\b[^@]*@{re.escape(name)}\b', ir
-            )
+            direct_uses = re.findall(rf"(?:load|store)\b[^@]*@{re.escape(name)}\b", ir)
             assert len(direct_uses) == 0, (
                 f"Expected all accesses to @{name} via shadow, but found "
                 f"{len(direct_uses)} direct load/store(s):\n"

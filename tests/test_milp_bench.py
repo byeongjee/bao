@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
 from ckpt.bench.milp import CSV_HEADER, build_row
 from ckpt.output_parser import PassStatistics
+
+pytestmark = pytest.mark.unit
 
 
 def test_milp_csv_includes_problem_size_columns() -> None:

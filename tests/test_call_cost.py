@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from conftest import CONFIGS_DIR, SCENARIOS_DIR
 
 pytestmark = pytest.mark.schematic

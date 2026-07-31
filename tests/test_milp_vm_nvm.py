@@ -8,7 +8,6 @@ from __future__ import annotations
 import re
 
 import pytest
-
 from conftest import (
     CONFIGS_DIR,
     SCENARIOS_DIR,
@@ -38,12 +37,8 @@ def test_vm_nvm_enforcement(run_milp, tmp_path):
     ir = result.output_ir
 
     # Both globals get .fram section
-    assert has_section(ir, "g_hot", ".fram"), (
-        "@g_hot must have section \".fram\""
-    )
-    assert has_section(ir, "g_cold", ".fram"), (
-        "@g_cold must have section \".fram\""
-    )
+    assert has_section(ir, "g_hot", ".fram"), '@g_hot must have section ".fram"'
+    assert has_section(ir, "g_cold", ".fram"), '@g_cold must have section ".fram"'
 
     # Shadow global for the hot variable must exist
     assert has_global(ir, "__vm_shadow_g_hot"), (
@@ -59,7 +54,7 @@ def test_vm_nvm_enforcement(run_milp, tmp_path):
     # No direct store into @g_hot inside a function body
     # (global-level initializer lines start at column 0 with "@g_hot =",
     # whereas stores in function bodies are indented)
-    direct_store = re.search(r'^\s+store\s+.*ptr\s+@g_hot\b', ir, re.MULTILINE)
+    direct_store = re.search(r"^\s+store\s+.*ptr\s+@g_hot\b", ir, re.MULTILINE)
     assert direct_store is None, (
         "Found unexpected direct store to @g_hot in function body — "
         "accesses should be rewritten to the shadow"
@@ -84,12 +79,10 @@ def test_vm_overflow(run_milp, tmp_path):
 
     # All 5 globals must be placed in NVM
     for g in ("g_a", "g_b", "g_c", "g_d", "g_e"):
-        assert has_section(ir, g, ".fram"), (
-            f"@{g} must have section \".fram\""
-        )
+        assert has_section(ir, g, ".fram"), f'@{g} must have section ".fram"'
 
     # With vm_capacity=16 bytes and 5 globals x 4 bytes, at most 4 fit in VM
-    shadow_count = len(re.findall(r'@__vm_shadow_g_\w+\s*=\s*internal\s+global', ir))
+    shadow_count = len(re.findall(r"@__vm_shadow_g_\w+\s*=\s*internal\s+global", ir))
     assert shadow_count <= 4, (
         f"Shadow count {shadow_count} exceeds VM capacity (max 4 of 5 globals)"
     )
@@ -100,7 +93,7 @@ def test_vm_overflow(run_milp, tmp_path):
     )
 
     # At least one global must remain NVM-only (no shadow allocated)
-    shadowed = set(re.findall(r'@__vm_shadow_(g_[a-e])\b', ir))
+    shadowed = set(re.findall(r"@__vm_shadow_(g_[a-e])\b", ir))
     nvm_only = {g for g in ("g_a", "g_b", "g_c", "g_d", "g_e") if g not in shadowed}
     assert len(nvm_only) >= 1, (
         "All 5 globals have shadows — VM capacity constraint not enforced"
@@ -124,13 +117,11 @@ def test_vm_nvm_basic(run_milp, tmp_path):
 
     # At least one global must carry a .fram section annotation
     assert 'section ".fram"' in ir, (
-        "Expected at least one global with section \".fram\" in IR"
+        'Expected at least one global with section ".fram" in IR'
     )
 
     # At least one shadow global must be present
-    assert "__vm_shadow_" in ir, (
-        "Expected at least one @__vm_shadow_* global in IR"
-    )
+    assert "__vm_shadow_" in ir, "Expected at least one @__vm_shadow_* global in IR"
 
 
 def test_vm_nvm_basic_with_coarse_allocation(run_milp, tmp_path):

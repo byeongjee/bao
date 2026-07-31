@@ -12,6 +12,8 @@ import pytest
 from ckpt.device.saleae import _extract_timing, _wait_for_capture, saleae_run
 from ckpt.errors import DeviceError
 
+pytestmark = pytest.mark.unit
+
 
 def write_capture_csv(tmp_path: Path, rows: list[tuple[float, int]]) -> Path:
     """Write a minimal Saleae CSV with timestamp/value rows."""

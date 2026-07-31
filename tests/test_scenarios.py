@@ -7,8 +7,7 @@ and configs in tests/scenarios/configs/.
 from __future__ import annotations
 
 import pytest
-
-from conftest import SCENARIOS_DIR, CONFIGS_DIR, check_assertions
+from conftest import CONFIGS_DIR, SCENARIOS_DIR, check_assertions
 
 pytestmark = pytest.mark.milp
 

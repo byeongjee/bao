@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from ckpt.bench.runner import CompileResult, nvm_counter
 from ckpt.output_parser import NvmCounters
 from ckpt.runner import StepResult
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
 # StepResult.output
 # ---------------------------------------------------------------------------
+
 
 class TestStepResultOutput:
     def test_both_populated(self):
@@ -30,6 +34,7 @@ class TestStepResultOutput:
 # ---------------------------------------------------------------------------
 # nvm_counter
 # ---------------------------------------------------------------------------
+
 
 class TestNvmCounter:
     def test_none_nvm(self):
@@ -55,6 +60,7 @@ class TestNvmCounter:
 # ---------------------------------------------------------------------------
 # CompileResult
 # ---------------------------------------------------------------------------
+
 
 class TestCompileResult:
     def test_fields(self):

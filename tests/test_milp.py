@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from conftest import (
     CONFIGS_DIR,
     SCENARIOS_DIR,
@@ -29,15 +28,45 @@ pytestmark = pytest.mark.milp
 # Parametrized success tests
 # ---------------------------------------------------------------------------
 _SUCCESS_CASES = [
-    ("test_linear",            "test_linear.c",            MILP_PARAMS,       {"exit": 0, "min_prologue": 1}),
-    ("test_diamond",           "test_diamond.c",           MILP_PARAMS,       {"exit": 0, "min_prologue": 1}),
-    ("test_simple_loop",       "test_simple_loop.c",       MILP_PARAMS,       {"exit": 0, "min_prologue": 1}),
-    ("test_nested_loops",      "test_nested_loops.c",      MILP_PARAMS,       {"exit": 0, "min_prologue": 1}),
-    ("test_early_return",      "test_early_return.c",      MILP_PARAMS,       {"exit": 0, "min_prologue": 1}),
-    ("test_exit_constraint",   "test_exit_constraint.c",   MILP_PARAMS,       {"exit": 0, "min_prologue": 1}),
-    ("test_switch",            "test_switch.c",            MILP_PARAMS,       {"exit": 0, "min_prologue": 1}),
-    ("test_distributed_stores","test_distributed_stores.c",MILP_PARAMS_SMALL, {"exit": 0, "min_prologue": 1}),
-    ("test_vm_nvm_placement",  "test_vm_nvm_placement.c",  MILP_PARAMS_SMALL, {"exit": 0, "min_prologue": 1}),
+    ("test_linear", "test_linear.c", MILP_PARAMS, {"exit": 0, "min_prologue": 1}),
+    ("test_diamond", "test_diamond.c", MILP_PARAMS, {"exit": 0, "min_prologue": 1}),
+    (
+        "test_simple_loop",
+        "test_simple_loop.c",
+        MILP_PARAMS,
+        {"exit": 0, "min_prologue": 1},
+    ),
+    (
+        "test_nested_loops",
+        "test_nested_loops.c",
+        MILP_PARAMS,
+        {"exit": 0, "min_prologue": 1},
+    ),
+    (
+        "test_early_return",
+        "test_early_return.c",
+        MILP_PARAMS,
+        {"exit": 0, "min_prologue": 1},
+    ),
+    (
+        "test_exit_constraint",
+        "test_exit_constraint.c",
+        MILP_PARAMS,
+        {"exit": 0, "min_prologue": 1},
+    ),
+    ("test_switch", "test_switch.c", MILP_PARAMS, {"exit": 0, "min_prologue": 1}),
+    (
+        "test_distributed_stores",
+        "test_distributed_stores.c",
+        MILP_PARAMS_SMALL,
+        {"exit": 0, "min_prologue": 1},
+    ),
+    (
+        "test_vm_nvm_placement",
+        "test_vm_nvm_placement.c",
+        MILP_PARAMS_SMALL,
+        {"exit": 0, "min_prologue": 1},
+    ),
 ]
 
 
@@ -67,10 +96,13 @@ def test_milp_infeasible(run_milp, tmp_path):
         MILP_PARAMS_SMALL,
         tmp_path,
     )
-    check_assertions(result, {
-        "exit": 0,
-        "stderr_contains": "exceed energy capacity",
-    })
+    check_assertions(
+        result,
+        {
+            "exit": 0,
+            "stderr_contains": "exceed energy capacity",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +116,13 @@ def test_milp_missing_bb_freq(run_milp, tmp_path):
         tmp_path,
         skip_bb_freq=True,
     )
-    check_assertions(result, {
-        "exit": "nonzero",
-        "stderr_contains": "bb-freq-file",
-    })
+    check_assertions(
+        result,
+        {
+            "exit": "nonzero",
+            "stderr_contains": "bb-freq-file",
+        },
+    )
 
 
 def test_coarse_allocation_reduces_problem_size(run_milp, tmp_path_factory):
@@ -112,9 +147,13 @@ def test_coarse_allocation_reduces_problem_size(run_milp, tmp_path_factory):
     assert get_metric(coarse.stderr, "MILP allocation mode") == "coarse"
 
     fine_vars = int(get_metric(fine.stderr, "MILP variables (before presolve)"))
-    fine_constraints = int(get_metric(fine.stderr, "MILP constraints (before presolve)"))
+    fine_constraints = int(
+        get_metric(fine.stderr, "MILP constraints (before presolve)")
+    )
     coarse_vars = int(get_metric(coarse.stderr, "MILP variables (before presolve)"))
-    coarse_constraints = int(get_metric(coarse.stderr, "MILP constraints (before presolve)"))
+    coarse_constraints = int(
+        get_metric(coarse.stderr, "MILP constraints (before presolve)")
+    )
 
     assert coarse_vars < fine_vars
     assert coarse_constraints < fine_constraints
