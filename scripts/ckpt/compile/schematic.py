@@ -425,15 +425,11 @@ def _link_schematic(
     opts: SchematicCompileOptions,
 ) -> Path:
     """Assemble and link the SCHEMATIC output with boot.S + runtime.c."""
-    boot_defines: list[str] = [f"F_CPU={opts.cpu_freq}"]
-    if opts.device_debug:
-        boot_defines.append("DEVICE_DEBUG")
-    if opts.halt_mode == "bor":
-        boot_defines.append("HALT_BOR")
-    elif opts.halt_mode == "lpm4":
-        boot_defines.append("HALT_LPM4")
-    elif opts.halt_mode == "swbor":
-        boot_defines.append("HALT_SWBOR")
+    boot_defines = common.build_boot_defines(
+        cpu_freq=opts.cpu_freq,
+        halt_mode=opts.halt_mode,
+        device_debug=opts.device_debug,
+    )
 
     return link_algorithm(
         tc,

@@ -554,6 +554,25 @@ def assemble_and_link(
     return run(cmd, step_name="link")
 
 
+def build_boot_defines(
+    *,
+    cpu_freq: int,
+    halt_mode: str | None,
+    device_debug: bool,
+) -> list[str]:
+    """Build the -D defines for assembling a checkpoint pipeline's boot.S."""
+    defines = [f"F_CPU={cpu_freq}"]
+    if halt_mode == "bor":
+        defines.append("HALT_BOR")
+    elif halt_mode == "lpm4":
+        defines.append("HALT_LPM4")
+    elif halt_mode == "swbor":
+        defines.append("HALT_SWBOR")
+    if device_debug:
+        defines.append("DEVICE_DEBUG")
+    return defines
+
+
 # ---------------------------------------------------------------------------
 # Runtime compilation helpers
 # ---------------------------------------------------------------------------
