@@ -16,7 +16,7 @@ from ..compile.uninstrumented import (
     compile_uninstrumented,
 )
 from ..env import ProjectEnv
-from ..errors import ConfigError, DeviceError
+from ..errors import CkptError, ConfigError, DeviceError
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import discover_benchmarks
@@ -110,7 +110,7 @@ def run_uninstrumented_benchmarks(
                         ),
                     )
                     compilation_time_ms = int((time.monotonic() - t0) * 1000)
-                except Exception as exc:
+                except CkptError as exc:
                     logger.error("  FAILED (compilation): %s", exc)
                     writer.writerow([bench_name, "failed", "", ""])
                     continue

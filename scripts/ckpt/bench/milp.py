@@ -17,7 +17,6 @@ from ..output_parser import (
     NvmCounters,
     PassStatistics,
 )
-
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import (

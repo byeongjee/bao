@@ -8,9 +8,8 @@ from pathlib import Path
 
 from .env import ProjectEnv
 
-
 # Canonical definition lives in errors.py; re-exported for compatibility.
-from .errors import ToolNotFoundError  # noqa: F401
+from .errors import ToolNotFoundError
 
 
 @dataclass(frozen=True)

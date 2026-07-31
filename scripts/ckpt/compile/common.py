@@ -359,11 +359,11 @@ def strip_ir_for_native(input_ll: Path, output_ll: Path) -> None:
     ir_text = input_ll.read_text()
     lines: list[str] = []
     for line in ir_text.splitlines(keepends=True):
-        if line.startswith("target triple = "):
-            lines.append("\n")
-        elif line.startswith("target datalayout = "):
-            lines.append("\n")
-        elif "@llvm.compiler.used" in line or "@llvm.used" in line:
+        if (
+            line.startswith(("target triple = ", "target datalayout = "))
+            or "@llvm.compiler.used" in line
+            or "@llvm.used" in line
+        ):
             lines.append("\n")
         else:
             line = re.sub(r',?\s*section\s+"[^"]+"', "", line)

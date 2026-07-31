@@ -501,6 +501,7 @@ def compile_rockclimb_cmd(
 
     if accumulate_keys:
         import json as _json
+
         from .bench.runner import accumulate_keys_to_file, extract_energy_params
 
         ep = extract_energy_params(result.pass_output)
@@ -970,8 +971,8 @@ def compile_uninstrumented_cmd(
     if csv_path:
         import csv as _csv
 
-        from .bench.uninstrumented import CSV_HEADER as _UNINST_HEADER
         from .bench.runner import static_csv_header
+        from .bench.uninstrumented import CSV_HEADER as _UNINST_HEADER
 
         header = static_csv_header(_UNINST_HEADER)
         out = Path(csv_path)

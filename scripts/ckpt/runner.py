@@ -8,7 +8,6 @@ import sys
 import time
 from dataclasses import dataclass
 
-
 # Exception classes — canonical definitions live in errors.py.
 # Re-exported here for backward compatibility.
 from .errors import (  # noqa: F401
@@ -61,6 +60,7 @@ def run(
         cwd=cwd,
         timeout=timeout,
         input=input,
+        check=False,
     )
     elapsed_ms = int((time.monotonic() - start) * 1000)
 

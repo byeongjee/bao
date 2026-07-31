@@ -342,48 +342,40 @@ def format_milp_coarse_summary(
     for row in summary_rows:
         capacitor = str(row["capacitor"])
         lines.append(
-            (
-                f"{capacitor}: solve mean "
-                f"{float(row['solve_time_mean_before_ms']):.2f} -> "
-                f"{float(row['solve_time_mean_after_ms']):.2f} ms "
-                f"({float(row['solve_time_mean_reduction_pct']):.1f}% reduction), "
-                f"geomean reduction "
-                f"{float(row['solve_time_geomean_reduction_pct']):.1f}%, "
-                f"mean per-benchmark reduction "
-                f"{float(row['solve_time_mean_of_reductions_pct']):.1f}%."
-            )
+            f"{capacitor}: solve mean "
+            f"{float(row['solve_time_mean_before_ms']):.2f} -> "
+            f"{float(row['solve_time_mean_after_ms']):.2f} ms "
+            f"({float(row['solve_time_mean_reduction_pct']):.1f}% reduction), "
+            f"geomean reduction "
+            f"{float(row['solve_time_geomean_reduction_pct']):.1f}%, "
+            f"mean per-benchmark reduction "
+            f"{float(row['solve_time_mean_of_reductions_pct']):.1f}%."
         )
         lines.append(
-            (
-                f"{capacitor}: worst case "
-                f"{str(row['worst_case_before_benchmark'])} "
-                f"{float(row['worst_case_before_ms']):.0f} ms -> "
-                f"{str(row['worst_case_after_benchmark'])} "
-                f"{float(row['worst_case_after_ms']):.0f} ms."
-            )
+            f"{capacitor}: worst case "
+            f"{row['worst_case_before_benchmark']!s} "
+            f"{float(row['worst_case_before_ms']):.0f} ms -> "
+            f"{row['worst_case_after_benchmark']!s} "
+            f"{float(row['worst_case_after_ms']):.0f} ms."
         )
         lines.append(
-            (
-                f"{capacitor}: mean MILP vars "
-                f"{float(row['milp_variables_mean_before']):.1f} -> "
-                f"{float(row['milp_variables_mean_after']):.1f} "
-                f"({float(row['milp_variables_mean_reduction_pct']):.1f}%), "
-                f"constraints {float(row['milp_constraints_mean_before']):.1f} -> "
-                f"{float(row['milp_constraints_mean_after']):.1f} "
-                f"({float(row['milp_constraints_mean_reduction_pct']):.1f}%)."
-            )
+            f"{capacitor}: mean MILP vars "
+            f"{float(row['milp_variables_mean_before']):.1f} -> "
+            f"{float(row['milp_variables_mean_after']):.1f} "
+            f"({float(row['milp_variables_mean_reduction_pct']):.1f}%), "
+            f"constraints {float(row['milp_constraints_mean_before']):.1f} -> "
+            f"{float(row['milp_constraints_mean_after']):.1f} "
+            f"({float(row['milp_constraints_mean_reduction_pct']):.1f}%)."
         )
         lines.append(
-            (
-                f"{capacitor}: mean presolved vars "
-                f"{float(row['milp_presolved_variables_mean_before']):.1f} -> "
-                f"{float(row['milp_presolved_variables_mean_after']):.1f} "
-                f"({float(row['milp_presolved_variables_mean_reduction_pct']):.1f}%), "
-                f"presolved constraints "
-                f"{float(row['milp_presolved_constraints_mean_before']):.1f} -> "
-                f"{float(row['milp_presolved_constraints_mean_after']):.1f} "
-                f"({float(row['milp_presolved_constraints_mean_reduction_pct']):.1f}%)."
-            )
+            f"{capacitor}: mean presolved vars "
+            f"{float(row['milp_presolved_variables_mean_before']):.1f} -> "
+            f"{float(row['milp_presolved_variables_mean_after']):.1f} "
+            f"({float(row['milp_presolved_variables_mean_reduction_pct']):.1f}%), "
+            f"presolved constraints "
+            f"{float(row['milp_presolved_constraints_mean_before']):.1f} -> "
+            f"{float(row['milp_presolved_constraints_mean_after']):.1f} "
+            f"({float(row['milp_presolved_constraints_mean_reduction_pct']):.1f}%)."
         )
 
     return "\n".join(lines)

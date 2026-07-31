@@ -21,11 +21,11 @@ from ..compile.schematic import (
     compile_schematic,
 )
 from ..env import ProjectEnv
+from ..errors import ConfigError
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
 )
-from ..errors import ConfigError
 from ..runner import CompilationError, StepResult
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain

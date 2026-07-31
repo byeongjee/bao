@@ -126,7 +126,9 @@ def saleae_run(
                 device_configuration=device_config,
                 capture_configuration=capture_config,
             )
-        except Exception as exc:
+        # Deliberately broad: any start failure is retried, then wrapped in
+        # DeviceError below.
+        except Exception as exc:  # noqa: BLE001
             last_start_error = exc
             if attempt == _MAX_CAPTURE_ATTEMPTS:
                 break
@@ -208,8 +210,10 @@ def _stop_capture_quietly(capture: object) -> None:
     """Best-effort stop for captures that failed before normal completion."""
     try:
         capture.stop()
-    except Exception:
-        pass
+    # Deliberately broad: the capture already failed and this cleanup must
+    # not mask the original error.
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Ignoring error while stopping failed capture: %s", exc)
 
 
 def _is_ambiguous_capture(exc: DeviceError) -> bool:

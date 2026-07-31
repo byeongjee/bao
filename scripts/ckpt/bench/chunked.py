@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..compile.chunked import ChunkedCompileOptions, compile_chunked
 from ..env import ProjectEnv
-from ..errors import ConfigError, DeviceError
+from ..errors import CkptError, ConfigError, DeviceError
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from .config import default_energy_config, discover_benchmarks, discover_capacitors
@@ -123,7 +123,7 @@ def run_chunked_benchmarks(
                             ),
                         )
                         compilation_time_ms = int((time.monotonic() - t0) * 1000)
-                    except Exception as exc:
+                    except CkptError as exc:
                         logger.error("  FAILED (compilation): %s", exc)
                         writer.writerow([bench_name, cap.label, "failed", "", ""])
                         continue

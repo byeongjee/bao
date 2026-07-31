@@ -14,14 +14,16 @@ import logging
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from saleae.automation import Manager
 
 from ..env import ProjectEnv
+from ..errors import DeviceError
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
@@ -33,7 +35,6 @@ from ..output_parser import (
     parse_nvm_output,
     parse_pass_output,
 )
-from ..errors import DeviceError
 from ..runner import CompilationError
 from ..toolchain import Toolchain
 from .config import CapacitorConfig
@@ -126,6 +127,7 @@ def check_device_available() -> bool:
             ["mspdebug", "tilib", "exit"],
             capture_output=True,
             timeout=10,
+            check=False,
         )
         return result.returncode == 0
     except subprocess.TimeoutExpired, FileNotFoundError, OSError:
@@ -289,8 +291,8 @@ def run_benchmark_matrix(
                     elf = output_dir / f"{bench_name}.elf"
                     if elf.is_file():
                         try:
-                            from ..device.saleae import saleae_run
                             from ..device.flash import read_nvm
+                            from ..device.saleae import saleae_run
 
                             execution_time_us = saleae_run(
                                 elf,
