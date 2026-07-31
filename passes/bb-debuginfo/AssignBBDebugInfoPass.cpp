@@ -62,13 +62,13 @@ PreservedAnalyses AssignBBDebugInfoPass::run(Module &M, ModuleAnalysisManager &A
     // Create a dummy file for our debug info
     DIFile *File = DIB.createFile("bb-labels.ll", "");
 
-    // Create a compile unit
+    // Create a compile unit (registered in the DIBuilder; emitted on finalize)
     // Using DW_LANG_C since it's a simple, well-supported language
-    DICompileUnit *CU = DIB.createCompileUnit(dwarf::DW_LANG_C, File,
-                                              "bb-debuginfo-pass", // Producer
-                                              false,               // isOptimized
-                                              "",                  // Flags
-                                              0                    // Runtime version
+    DIB.createCompileUnit(dwarf::DW_LANG_C, File,
+                          "bb-debuginfo-pass", // Producer
+                          false,               // isOptimized
+                          "",                  // Flags
+                          0                    // Runtime version
     );
 
     // Create a simple void function type for all functions

@@ -87,7 +87,7 @@ void SchematicStateAnalysis::identifyCandidates() {
                 continue;
 
             const llvm::Value *Obj = llvm::getUnderlyingObject(Ptr->stripPointerCasts());
-            llvm::Value *ObjMut = const_cast<llvm::Value *>(Obj);
+            auto *ObjMut = const_cast<llvm::Value *>(Obj);
 
             if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(ObjMut)) {
                 // Structural filters (same as MILP StateAnalysis::identifyVMObjs)

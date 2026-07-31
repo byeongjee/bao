@@ -76,19 +76,19 @@ std::vector<LineEntry> parseLineTableWithObjdump(const std::string &objectPath) 
     int rc = sys::ExecuteAndWait(objdumpPath, args, std::nullopt, redirects);
     if (rc != 0) {
         PLOGE << "error: objdump --dwarf=decodedline failed";
-        sys::fs::remove(tempPath);
+        (void)sys::fs::remove(tempPath);
         return entries;
     }
 
     // Read output
     ErrorOr<std::unique_ptr<MemoryBuffer>> bufOrErr = MemoryBuffer::getFile(tempPath);
     if (!bufOrErr) {
-        sys::fs::remove(tempPath);
+        (void)sys::fs::remove(tempPath);
         return entries;
     }
 
     std::string output = (*bufOrErr)->getBuffer().str();
-    sys::fs::remove(tempPath);
+    (void)sys::fs::remove(tempPath);
 
     // Parse output
     // Format: filename   line_number   starting_address   view   stmt
@@ -140,18 +140,18 @@ std::vector<FuncRange> parseFunctionRanges(const std::string &objectPath) {
 
     int rc = sys::ExecuteAndWait(objdumpPath, args, std::nullopt, redirects);
     if (rc != 0) {
-        sys::fs::remove(tempPath);
+        (void)sys::fs::remove(tempPath);
         return functions;
     }
 
     ErrorOr<std::unique_ptr<MemoryBuffer>> bufOrErr = MemoryBuffer::getFile(tempPath);
     if (!bufOrErr) {
-        sys::fs::remove(tempPath);
+        (void)sys::fs::remove(tempPath);
         return functions;
     }
 
     std::string output = (*bufOrErr)->getBuffer().str();
-    sys::fs::remove(tempPath);
+    (void)sys::fs::remove(tempPath);
 
     // Parse disassembly to find function labels
     // Format: 00000000 <function_name>:

@@ -622,11 +622,14 @@ static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAl
                 continue;
 
             auto metaIt = solution.blockMeta.find(block);
-            if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-                llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
-                if (!seenLoops.count(loopHeader)) {
-                    seenLoops.insert(loopHeader);
-                    cost += (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+            if (metaIt != solution.blockMeta.end()) {
+                const auto &loopOpt = metaIt->second.loop;
+                if (loopOpt.has_value()) {
+                    llvm::BasicBlock *loopHeader = loopOpt->loop->getHeader();
+                    if (!seenLoops.count(loopHeader)) {
+                        seenLoops.insert(loopHeader);
+                        cost += (loopOpt->nbIter - 1) * loopOpt->costOneIt;
+                    }
                 }
             }
 
@@ -716,12 +719,14 @@ static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAl
             SchematicBlock *block = edge.src;
             if (isBlockInLoop(block)) {
                 auto metaIt = solution.blockMeta.find(block);
-                if (metaIt != solution.blockMeta.end() && metaIt->second.loop.has_value()) {
-                    llvm::BasicBlock *loopHeader = metaIt->second.loop->loop->getHeader();
-                    if (!seenLoops.count(loopHeader)) {
-                        seenLoops.insert(loopHeader);
-                        energy +=
-                            (metaIt->second.loop->nbIter - 1) * metaIt->second.loop->costOneIt;
+                if (metaIt != solution.blockMeta.end()) {
+                    const auto &loopOpt = metaIt->second.loop;
+                    if (loopOpt.has_value()) {
+                        llvm::BasicBlock *loopHeader = loopOpt->loop->getHeader();
+                        if (!seenLoops.count(loopHeader)) {
+                            seenLoops.insert(loopHeader);
+                            energy += (loopOpt->nbIter - 1) * loopOpt->costOneIt;
+                        }
                     }
                 }
 

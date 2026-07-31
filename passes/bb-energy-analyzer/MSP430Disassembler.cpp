@@ -73,7 +73,7 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
     int rc = sys::ExecuteAndWait(objdumpPath, args, std::nullopt, redirects);
     if (rc != 0) {
         PLOGE << "error: objdump failed with exit code " << rc;
-        sys::fs::remove(tempPath);
+        (void)sys::fs::remove(tempPath);
         return result;
     }
 
@@ -81,12 +81,12 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
     ErrorOr<std::unique_ptr<MemoryBuffer>> bufOrErr = MemoryBuffer::getFile(tempPath);
     if (!bufOrErr) {
         PLOGE << "error: failed to read objdump output: " << bufOrErr.getError().message();
-        sys::fs::remove(tempPath);
+        (void)sys::fs::remove(tempPath);
         return result;
     }
 
     std::string output = (*bufOrErr)->getBuffer().str();
-    sys::fs::remove(tempPath);
+    (void)sys::fs::remove(tempPath);
 
     // Parse objdump output
     // Format:
