@@ -5,6 +5,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
@@ -24,7 +25,9 @@ void CheckpointInstrumenter::declareRuntimeFunctions() {
     llvm::LLVMContext &Ctx = M_.getContext();
     llvm::Type *VoidTy = llvm::Type::getVoidTy(Ctx);
 
-    boundaryFn_ = M_.getOrInsertFunction("__region_boundary", VoidTy);
+    // Declared for linkage visibility; boundary calls are emitted as inline
+    // asm (with full GPR clobbers) rather than through this callee.
+    M_.getOrInsertFunction("__region_boundary", VoidTy);
 
     // NOTE: Per-operation debug counters (cnt_save_vreg, cnt_restore_vreg,
     // cnt_store_mem, cnt_restore_mem) are disabled to reduce code size.
@@ -112,6 +115,7 @@ void CheckpointInstrumenter::createNVMBackupGlobals(llvm::Function &F, const MIL
                                                     const ICFGView &cfg) {
 
     nvmBackupMap_.clear();
+    allocaAddrMap_.clear();
 
     unsigned ssaCounter = 0;
     for (llvm::Value *V : state.getIneligibleObjs()) {
@@ -140,6 +144,22 @@ void CheckpointInstrumenter::createNVMBackupGlobals(llvm::Function &F, const MIL
             llvm::Constant::getNullValue(backupType), backupName);
         backup->setSection(".nvm");
         nvmBackupMap_[V] = backup;
+
+        // For allocas, also create an NVM slot holding the alloca's address.
+        // Restore code after a boundary must not reference the alloca
+        // directly: llc would keep the SP-relative address in a register or
+        // stack spill slot across the boundary, both of which a BOR reboot
+        // destroys. Instead the address is stored to FRAM before the
+        // boundary and reloaded after it (the stack layout is deterministic
+        // across recovery, so the stored address stays valid).
+        if (llvm::isa<llvm::AllocaInst>(V)) {
+            llvm::Type *ptrTy = llvm::PointerType::getUnqual(M_.getContext());
+            auto *addrSlot = new llvm::GlobalVariable(
+                M_, ptrTy, /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
+                llvm::Constant::getNullValue(ptrTy), backupName + "_addr");
+            addrSlot->setSection(".nvm");
+            allocaAddrMap_[V] = addrSlot;
+        }
     }
 }
 
@@ -291,6 +311,12 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     auto *AI = llvm::cast<llvm::AllocaInst>(V);
                     builder.CreateMemCpy(backupIt->second, backupIt->second->getAlign(), AI,
                                          AI->getAlign(), size);
+                    // Persist the alloca's address so the restore code after
+                    // the boundary can reload it from FRAM instead of keeping
+                    // it live (in a register or spill slot) across the reboot.
+                    auto addrIt = allocaAddrMap_.find(V);
+                    assert(addrIt != allocaAddrMap_.end() && "alloca commit requires an addr slot");
+                    builder.CreateStore(AI, addrIt->second);
                     // if (addDebugMarkers_)
                     //     emitCounterIncrement(builder, cntStoreMemGV_);
                 } else {
@@ -321,8 +347,22 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 inserted++;
             }
 
-            // Emit boundary call.
-            auto *boundaryCall = builder.CreateCall(boundaryFn_);
+            // Emit boundary call as inline asm that clobbers all GPRs and
+            // memory. A BOR reboot at the boundary destroys every register
+            // except SP (restored by recovery), so the call must not follow
+            // the C ABI's callee-saved contract: values kept in R4-R10
+            // across the call would silently read back as garbage after
+            // recovery. The ~{memory} clobber also stops llc from
+            // forwarding pre-boundary values (e.g. the FRAM addr-slot
+            // stores) across the reboot.
+            llvm::FunctionType *asmTy =
+                llvm::FunctionType::get(llvm::Type::getVoidTy(M_.getContext()), false);
+            llvm::InlineAsm *boundaryAsm = llvm::InlineAsm::get(
+                asmTy, "call #__region_boundary",
+                "~{r4},~{r5},~{r6},~{r7},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},"
+                "~{memory}",
+                /*hasSideEffects=*/true);
+            auto *boundaryCall = builder.CreateCall(asmTy, boundaryAsm);
             inserted++;
 
             // --- Split block after boundary call ---
@@ -379,7 +419,20 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 llvm::Value *size =
                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
                 auto *AI = llvm::cast<llvm::AllocaInst>(V);
-                builder.CreateMemCpy(AI, AI->getAlign(), backupIt->second,
+                // After a boundary, the alloca's address must come from the
+                // FRAM addr slot (committed just before the boundary): any
+                // register or spill slot holding it is destroyed by the BOR
+                // reboot. At the entry node there is no reboot in between,
+                // so the alloca can be referenced directly.
+                llvm::Value *dst = AI;
+                if (!isEntryNode) {
+                    auto addrIt = allocaAddrMap_.find(V);
+                    assert(addrIt != allocaAddrMap_.end() &&
+                           "alloca restore requires an addr slot");
+                    dst = builder.CreateLoad(llvm::PointerType::getUnqual(M_.getContext()),
+                                             addrIt->second);
+                }
+                builder.CreateMemCpy(dst, AI->getAlign(), backupIt->second,
                                      backupIt->second->getAlign(), size);
                 // if (addDebugMarkers_)
                 //     emitCounterIncrement(builder, cntRestoreMemGV_);

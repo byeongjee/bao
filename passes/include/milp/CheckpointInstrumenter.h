@@ -26,8 +26,6 @@ class CheckpointInstrumenter {
     llvm::Module &M_;
     bool addDebugMarkers_;
 
-    llvm::FunctionCallee boundaryFn_;
-
     /// Debug counter globals (resolved when addDebugMarkers_ is true).
     /// cnt_save_vreg/cnt_restore_vreg count IR-level value saves which may
     /// not map 1:1 to physical register saves due to register spilling.
@@ -42,6 +40,10 @@ class CheckpointInstrumenter {
 
     /// Maps ineligible objects (globals, allocas, SSA values) to NVM backup globals.
     std::map<llvm::Value *, llvm::GlobalVariable *> nvmBackupMap_;
+    /// Per-alloca FRAM slot holding the alloca's runtime address, so restore
+    /// code after a boundary reboot can reload it instead of keeping it live
+    /// across the boundary in a register or stack spill slot.
+    std::map<llvm::Value *, llvm::GlobalVariable *> allocaAddrMap_;
 
     void declareRuntimeFunctions();
 
