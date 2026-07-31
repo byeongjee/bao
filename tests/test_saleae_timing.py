@@ -319,7 +319,7 @@ class TestSaleaeRun:
         )
 
         with pytest.raises(
-            DeviceError, match="Cannot start Saleae capture after 3 attempts"
+            DeviceError, match="Saleae capture did not complete after 3 attempts"
         ):
             saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0, 60.0)
 
