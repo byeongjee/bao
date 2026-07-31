@@ -90,13 +90,13 @@ computeWorstCaseWorstCasePathResult(Loop *L,
         }
         unsigned scevTC = SE.getSmallConstantTripCount(SubL);
         auto markerTC = getMarkerTripCount(SubL);
-        unsigned tc;
+        uint64_t tc;
         if (scevTC > 0 && markerTC)
-            tc = std::min(scevTC, static_cast<unsigned>(*markerTC));
+            tc = std::min<uint64_t>(scevTC, *markerTC);
         else if (scevTC > 0)
             tc = scevTC;
         else if (markerTC)
-            tc = static_cast<unsigned>(*markerTC);
+            tc = *markerTC;
         else {
             result.error = "sub-loop-unknown-trip-count";
             return result;
@@ -487,13 +487,13 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
         // Compute loop trip count for total energy check.
         unsigned scevTC = SE.getSmallConstantTripCount(L);
         auto markerTC = getMarkerTripCount(L);
-        unsigned loopTC;
+        uint64_t loopTC;
         if (scevTC > 0 && markerTC)
-            loopTC = std::min(scevTC, static_cast<unsigned>(*markerTC));
+            loopTC = std::min<uint64_t>(scevTC, *markerTC);
         else if (scevTC > 0)
             loopTC = scevTC;
         else if (markerTC)
-            loopTC = static_cast<unsigned>(*markerTC);
+            loopTC = *markerTC;
         else {
             skipLoop("unknown-loop-trip-count",
                      "scev-trip-count=" + std::to_string(scevTC) + ", marker-trip-count=none");
@@ -702,14 +702,10 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
             blockEnergyByAbstract[node] = agg.pathEnergy;
             fEntryByAbstract[node] = agg.fEntry;
 
-            // Loop entry frequency for boundary costing.
-            double fBound = agg.fEntry;
-            if (llvm::Loop *L = LI.getLoopFor(agg.headerBB)) {
-                if (llvm::BasicBlock *PH = L->getLoopPreheader()) {
-                    fBound = energy.getFEntry(PH);
-                }
-            }
-            fBoundaryByAbstract[node] = fBound;
+            // Boundary costing uses the loop entry frequency, which is
+            // exactly what agg.fEntry already holds (preheader frequency
+            // when a preheader exists, header frequency otherwise).
+            fBoundaryByAbstract[node] = agg.fEntry;
             eligLiveInByAbstract[node] = agg.eligLiveIn;
             ineligLiveInByAbstract[node] = agg.ineligLiveIn;
 

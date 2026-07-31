@@ -136,15 +136,9 @@ struct LoopStripMiningStats {
     std::vector<LoopStripMiningDetail> loopDetails;
 };
 
-struct LoopStripMiningFunctionSnapshot {
-    unsigned loopsSeen = 0;
-    unsigned loopsEligible = 0;
-    unsigned loopsRewritten = 0;
-    unsigned loopsChunked = 0;
-    std::map<std::string, unsigned> skippedReasons;
-    std::vector<std::pair<std::string, uint64_t>> chosenKByHeader;
-    std::vector<LoopStripMiningDetail> loopDetails;
-};
+/// Per-function copy of the stats, retained across functions for the
+/// module-level JSON dump.
+using LoopStripMiningFunctionSnapshot = LoopStripMiningStats;
 
 struct HeaderPhiInfo {
     PHINode *headerPhi;
@@ -241,18 +235,6 @@ static json::Object loopDetailToJSON(const LoopStripMiningDetail &detail) {
     return obj;
 }
 
-static LoopStripMiningFunctionSnapshot snapshotFromStats(const LoopStripMiningStats &stats) {
-    LoopStripMiningFunctionSnapshot snapshot;
-    snapshot.loopsSeen = stats.loopsSeen;
-    snapshot.loopsEligible = stats.loopsEligible;
-    snapshot.loopsRewritten = stats.loopsRewritten;
-    snapshot.loopsChunked = stats.loopsChunked;
-    snapshot.skippedReasons = stats.skippedReasons;
-    snapshot.chosenKByHeader = stats.chosenKByHeader;
-    snapshot.loopDetails = stats.loopDetails;
-    return snapshot;
-}
-
 static json::Object functionSnapshotToJSON(const std::string &functionName,
                                            const LoopStripMiningFunctionSnapshot &snapshot) {
     json::Object summary;
@@ -303,7 +285,7 @@ static void writeLoopStripMiningStatsJSON(const Function &F, const LoopStripMini
         return;
 
     auto &store = getLoopStripMiningStatsStore();
-    store[F.getName().str()] = snapshotFromStats(stats);
+    store[F.getName().str()] = stats;
 
     json::Array functions;
     functions.reserve(store.size());
@@ -517,13 +499,13 @@ computeWorstCaseSummaryPathResult(Loop *L, const DenseMap<const BasicBlock *, do
 
         unsigned scevTC = SE.getSmallConstantTripCount(SubL);
         auto markerTC = getMarkerTripCount(SubL);
-        unsigned tc;
+        uint64_t tc;
         if (scevTC > 0 && markerTC)
-            tc = std::min(scevTC, static_cast<unsigned>(*markerTC));
+            tc = std::min<uint64_t>(scevTC, *markerTC);
         else if (scevTC > 0)
             tc = scevTC;
         else if (markerTC)
-            tc = static_cast<unsigned>(*markerTC);
+            tc = *markerTC;
         else {
             result.error = "sub-loop-unknown-trip-count";
             return result;
@@ -790,6 +772,108 @@ static double computeNvmAccessMarginOnPath(const SmallPtrSetImpl<const BasicBloc
     return nvmAccessMargin;
 }
 
+/// Exact constant trip count for loops with a single exiting block; records
+/// it in the plan detail when known.
+static std::optional<uint64_t> computeExactTripCount(Loop *L, ScalarEvolution &SE,
+                                                     PlanResult &result) {
+    SmallVector<BasicBlock *, 8> exitingBlocks;
+    L->getExitingBlocks(exitingBlocks);
+    std::optional<uint64_t> tc;
+    if (exitingBlocks.size() == 1)
+        tc = getConstantTripCount(L, SE, exitingBlocks.front());
+    if (tc) {
+        result.detail.tripCountKnown = true;
+        result.detail.tripCount = *tc;
+    }
+    return tc;
+}
+
+/// Tier 1: strip mining via exit rewrite. Requires a canonical IV, a single
+/// exiting block, an exact trip count >= 2, and the supported exit form.
+/// Returns true when \p result was finalized (plan or terminal skip); false
+/// to fall through to the chunking tier.
+static bool tryStripMiningPlan(Loop *L, uint64_t K, double iterEnergy,
+                               std::optional<uint64_t> exactTripCount, PlanResult &result) {
+    PHINode *IV = L->getCanonicalInductionVariable();
+    SmallVector<BasicBlock *, 8> exitingBlocks;
+    L->getExitingBlocks(exitingBlocks);
+    if (!IV || exitingBlocks.size() != 1 || !exactTripCount ||
+        !supportsExitRewriteForm(L, *exactTripCount) || *exactTripCount < 2)
+        return false;
+
+    if (K >= *exactTripCount) {
+        result.skipReason = "k-covers-entire-loop";
+        result.detail.skipReason = result.skipReason;
+        return true;
+    }
+    LoopRewritePlan plan;
+    plan.L = L;
+    plan.N = *exactTripCount;
+    plan.K = K;
+    plan.iterEnergy = iterEnergy;
+    plan.isChunking = false;
+    result.plan = plan;
+    result.skipReason.clear();
+    result.detail.isChunking = false;
+    result.detail.chosenKValid = true;
+    result.detail.chosenK = K;
+    return true;
+}
+
+/// Tier 2: chunking fallback. Only needs the latch to branch back to the
+/// header. Finalizes \p result with either a chunking plan or a skip.
+static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double iterEnergy,
+                              std::optional<uint64_t> exactTripCount, PlanResult &result) {
+    BasicBlock *Header = L->getHeader();
+    auto *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
+    if (!LatchBr) {
+        result.skipReason = "latch-not-branch-inst";
+        result.detail.skipReason = result.skipReason;
+        return;
+    }
+
+    bool hasBackedge = false;
+    for (unsigned i = 0; i < LatchBr->getNumSuccessors(); i++) {
+        if (LatchBr->getSuccessor(i) == Header) {
+            hasBackedge = true;
+            break;
+        }
+    }
+    if (!hasBackedge) {
+        result.skipReason = "latch-no-backedge-to-header";
+        result.detail.skipReason = result.skipReason;
+        return;
+    }
+
+    // If we can determine trip count and K covers it, skip
+    std::optional<uint64_t> knownTC = exactTripCount;
+    if (!knownTC)
+        knownTC = getMarkerTripCount(L);
+    if (knownTC) {
+        result.detail.tripCountKnown = true;
+        result.detail.tripCount = *knownTC;
+    }
+    if (knownTC && K >= *knownTC) {
+        result.skipReason = "k-covers-entire-loop";
+        result.detail.skipReason = result.skipReason;
+        return;
+    }
+
+    LoopRewritePlan plan;
+    plan.L = L;
+    // Carry known upper-bound trip count into chunking so the generated
+    // outer loop can be annotated with a conservative upper bound.
+    plan.N = knownTC ? *knownTC : 0;
+    plan.K = K;
+    plan.iterEnergy = iterEnergy;
+    plan.isChunking = true;
+    result.plan = plan;
+    result.skipReason.clear();
+    result.detail.isChunking = true;
+    result.detail.chosenKValid = true;
+    result.detail.chosenK = K;
+}
+
 static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
                                    const DenseMap<const BasicBlock *, double> &blockEnergy,
                                    const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
@@ -929,94 +1013,11 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         return result;
     }
 
-    // ── Tier 1: Try strip mining ──
-    // Requires: canonical IV, single exiting block, constant trip count, K < N
-    PHINode *IV = L->getCanonicalInductionVariable();
-    SmallVector<BasicBlock *, 8> exitingBlocks;
-    L->getExitingBlocks(exitingBlocks);
-    std::optional<uint64_t> exactTripCount;
-    if (exitingBlocks.size() == 1)
-        exactTripCount = getConstantTripCount(L, SE, exitingBlocks.front());
-    if (exactTripCount) {
-        result.detail.tripCountKnown = true;
-        result.detail.tripCount = *exactTripCount;
-    }
-
-    if (IV && exitingBlocks.size() == 1 && exactTripCount &&
-        supportsExitRewriteForm(L, *exactTripCount)) {
-        if (exactTripCount && *exactTripCount >= 2) {
-            if (K >= *exactTripCount) {
-                result.skipReason = "k-covers-entire-loop";
-                result.detail.skipReason = result.skipReason;
-                return result;
-            }
-            LoopRewritePlan plan;
-            plan.L = L;
-            plan.N = *exactTripCount;
-            plan.K = K;
-            plan.iterEnergy = iterEnergy.energy;
-            plan.isChunking = false;
-            result.plan = plan;
-            result.skipReason.clear();
-            result.detail.isChunking = false;
-            result.detail.chosenKValid = true;
-            result.detail.chosenK = K;
-            return result;
-        }
-    }
-
-    // ── Tier 2: Chunking fallback ──
-    // Only needs: latch has a BranchInst with backedge to header
-    BasicBlock *Header = L->getHeader();
-    auto *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
-    if (!LatchBr) {
-        result.skipReason = "latch-not-branch-inst";
-        result.detail.skipReason = result.skipReason;
+    // ── Tier 1: strip mining; Tier 2: chunking fallback ──
+    std::optional<uint64_t> exactTripCount = computeExactTripCount(L, SE, result);
+    if (tryStripMiningPlan(L, K, iterEnergy.energy, exactTripCount, result))
         return result;
-    }
-
-    bool hasBackedge = false;
-    for (unsigned i = 0; i < LatchBr->getNumSuccessors(); i++) {
-        if (LatchBr->getSuccessor(i) == Header) {
-            hasBackedge = true;
-            break;
-        }
-    }
-    if (!hasBackedge) {
-        result.skipReason = "latch-no-backedge-to-header";
-        result.detail.skipReason = result.skipReason;
-        return result;
-    }
-
-    // If we can determine trip count and K covers it, skip
-    std::optional<uint64_t> knownTC;
-    if (exactTripCount)
-        knownTC = exactTripCount;
-    if (!knownTC)
-        knownTC = getMarkerTripCount(L);
-    if (knownTC) {
-        result.detail.tripCountKnown = true;
-        result.detail.tripCount = *knownTC;
-    }
-    if (knownTC && K >= *knownTC) {
-        result.skipReason = "k-covers-entire-loop";
-        result.detail.skipReason = result.skipReason;
-        return result;
-    }
-
-    LoopRewritePlan plan;
-    plan.L = L;
-    // Carry known upper-bound trip count into chunking so the generated
-    // outer loop can be annotated with a conservative upper bound.
-    plan.N = knownTC ? *knownTC : 0;
-    plan.K = K;
-    plan.iterEnergy = iterEnergy.energy;
-    plan.isChunking = true;
-    result.plan = plan;
-    result.skipReason.clear();
-    result.detail.isChunking = true;
-    result.detail.chosenKValid = true;
-    result.detail.chosenK = K;
+    buildChunkingPlan(L, Latch, K, iterEnergy.energy, exactTripCount, result);
     return result;
 }
 
@@ -2001,7 +2002,9 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     }
 
     if (verifyFunction(F, &errs())) {
-        PLOGE << "LoopStripMiningPass: verifier reported errors in " << F.getName();
+        report_fatal_error(Twine("LoopStripMiningPass: verifier reported errors in ") +
+                               F.getName() + "; aborting instead of passing broken IR downstream",
+                           /*gen_crash_diag=*/false);
     }
 
     printSummary(F, stats);
