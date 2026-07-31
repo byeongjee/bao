@@ -4,20 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..bench.schematic import NVM_SYMBOLS
 from ..compile.schematic import SchematicCompileOptions, compile_schematic
 from ..env import ProjectEnv
 from ..toolchain import Toolchain
 from .common import InstrumentedOutput, verify_algorithm
-
-_NVM_SYMBOLS = [
-    "__nvm_done",
-    "__nvm_result",
-    "cnt_boundary",
-    "cnt_save_reg",
-    "cnt_restore_reg",
-    "cnt_store_mem",
-    "cnt_restore_mem",
-]
 
 
 def verify_schematic(
@@ -88,6 +79,6 @@ def verify_schematic(
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
-        nvm_symbols=_NVM_SYMBOLS,
+        nvm_symbols=NVM_SYMBOLS,
         compile_instrumented=compile_instrumented,
     )

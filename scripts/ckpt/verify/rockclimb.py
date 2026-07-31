@@ -4,18 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..bench.rockclimb import NVM_SYMBOLS
 from ..compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 from ..env import ProjectEnv
 from ..toolchain import Toolchain
 from .common import InstrumentedOutput, verify_algorithm
-
-_NVM_SYMBOLS = [
-    "__nvm_done",
-    "__nvm_result",
-    "cnt_boundary",
-    "cnt_save_reg",
-    "cnt_restore_reg",
-]
 
 
 def verify_rockclimb(
@@ -78,6 +71,6 @@ def verify_rockclimb(
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
-        nvm_symbols=_NVM_SYMBOLS,
+        nvm_symbols=NVM_SYMBOLS,
         compile_instrumented=compile_instrumented,
     )

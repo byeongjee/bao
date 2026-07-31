@@ -67,7 +67,7 @@ CSV_HEADER: list[str] = [
     "result",
 ]
 
-_NVM_SYMBOLS: list[str] = [
+NVM_SYMBOLS: list[str] = [
     "__nvm_done",
     "__nvm_result",
     "cnt_boundary",
@@ -223,7 +223,7 @@ def run_milp_benchmarks(
             capacitors,
             compile_fn,
             output_csv,
-            nvm_symbols=_NVM_SYMBOLS,
+            nvm_symbols=NVM_SYMBOLS,
             device_debug=device_debug,
             csv_header=CSV_HEADER,
             row_builder=build_row,

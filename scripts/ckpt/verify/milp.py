@@ -4,20 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..bench.milp import NVM_SYMBOLS
 from ..compile.milp import MilpCompileOptions, compile_milp
 from ..env import ProjectEnv
 from ..toolchain import Toolchain
 from .common import InstrumentedOutput, verify_algorithm
-
-_NVM_SYMBOLS = [
-    "__nvm_done",
-    "__nvm_result",
-    "cnt_boundary",
-    "cnt_save_vreg",
-    "cnt_restore_vreg",
-    "cnt_store_mem",
-    "cnt_restore_mem",
-]
 
 
 def verify_milp(
@@ -85,6 +76,6 @@ def verify_milp(
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
-        nvm_symbols=_NVM_SYMBOLS,
+        nvm_symbols=NVM_SYMBOLS,
         compile_instrumented=compile_instrumented,
     )
