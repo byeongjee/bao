@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-commit hook: auto-format staged C/C++ files with clang-format
+# and lint staged Python files with ruff.
+# clang-tidy is excluded (too slow for pre-commit; run manually or in CI).
+
+CLANG_FORMAT="${CLANG_FORMAT:-clang-format}"
+
+# --- C/C++ formatting ---
+
+staged_cpp=$(git diff --cached --name-only --diff-filter=ACMR -- '*.cpp' '*.h' '*.c' || true)
+
+if [ -n "$staged_cpp" ]; then
+    if command -v "$CLANG_FORMAT" &>/dev/null; then
+        echo "Running clang-format..."
+        for file in $staged_cpp; do
+            if [ -f "$file" ]; then
+                "$CLANG_FORMAT" -i "$file"
+                git add "$file"
+            fi
+        done
+    else
+        echo "Warning: clang-format not found, skipping format check."
+    fi
+fi
+
+# --- Python linting ---
+
+staged_py=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py' || true)
+
+if [ -n "$staged_py" ]; then
+    if command -v uvx &>/dev/null; then
+        echo "Running ruff format..."
+        for file in $staged_py; do
+            if [ -f "$file" ]; then
+                uvx ruff format "$file"
+                git add "$file"
+            fi
+        done
+        echo "Running ruff check..."
+        # shellcheck disable=SC2086
+        uvx ruff check $staged_py
+    else
+        echo "Warning: uvx not found, skipping ruff."
+    fi
+fi
+
+echo "Pre-commit checks passed."
