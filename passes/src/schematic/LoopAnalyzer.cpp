@@ -6,7 +6,6 @@
 #include "schematic/RCGSolver.h"
 #include "schematic/TraceAnalyzer.h"
 
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/ErrorHandling.h"
 

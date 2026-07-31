@@ -174,34 +174,6 @@ void SchematicInstrumenter::rewriteAccessesInRegion(const std::vector<llvm::Basi
     }
 }
 
-void SchematicInstrumenter::rewriteAllShadowAccesses(llvm::Function &F) {
-    for (llvm::BasicBlock &BB : F) {
-        for (llvm::Instruction &I : BB) {
-            for (unsigned i = 0; i < I.getNumOperands(); ++i) {
-                llvm::Value *Op = I.getOperand(i);
-
-                auto it = shadowMap_.find(Op);
-                if (it != shadowMap_.end()) {
-                    I.setOperand(i, it->second);
-                    continue;
-                }
-
-                // Handle constant expressions that reference shadow-mapped globals.
-                if (auto *C = llvm::dyn_cast<llvm::Constant>(Op)) {
-                    for (const auto &[V, shadow] : shadowMap_) {
-                        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-                            if (auto *replaced = replaceGVInConstant(C, GV, shadow)) {
-                                I.setOperand(i, replaced);
-                                C = replaced; // chain replacements
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// Emit an inline increment of an NVM counter global: load, add 1, store.
 static void emitCounterIncrement(llvm::IRBuilder<> &builder, llvm::GlobalVariable *counterGV) {
     llvm::Type *counterTy = counterGV->getValueType();

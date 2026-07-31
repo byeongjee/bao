@@ -15,6 +15,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <limits>
+#include <set>
 
 namespace checkpoint {
 
@@ -27,11 +28,9 @@ static bool isWhitelistedHelperName(llvm::StringRef N) {
 
 } // namespace
 
-SchematicStateAnalysis::SchematicStateAnalysis(llvm::Function &F, llvm::AAResults &AA,
-                                               const CFGAnalysis &cfg)
+SchematicStateAnalysis::SchematicStateAnalysis(llvm::Function &F, llvm::AAResults &AA)
     : F_(F), AA_(AA) {
     identifyCandidates();
-    identifyIneligibleSSAValues();
     computeAccessMaps();
 }
 
@@ -107,7 +106,6 @@ void SchematicStateAnalysis::identifyCandidates() {
                     continue;
 
                 candidates_.push_back(GV);
-                candidateSet_.insert(GV);
                 candidateGlobals_.push_back(GV);
                 varSizeBytes_[GV] = DL.getTypeAllocSize(GV->getValueType());
 
@@ -128,46 +126,8 @@ void SchematicStateAnalysis::identifyCandidates() {
                     continue;
 
                 candidates_.push_back(AI);
-                candidateSet_.insert(AI);
                 varSizeBytes_[AI] = static_cast<unsigned>(totalBytes);
             }
-        }
-    }
-}
-
-void SchematicStateAnalysis::identifyIneligibleSSAValues() {
-    llvm::Module *M = F_.getParent();
-    if (!M)
-        return;
-
-    const llvm::DataLayout &DL = M->getDataLayout();
-
-    for (llvm::BasicBlock &BB : F_) {
-        for (llvm::Instruction &I : BB) {
-            if (I.getType()->isVoidTy())
-                continue;
-            if (llvm::isa<llvm::AllocaInst>(&I))
-                continue;
-            if (llvm::isa<llvm::PHINode>(&I))
-                continue;
-            if (!I.getType()->isSized())
-                continue;
-
-            bool hasCrossBlockUse = false;
-            for (const llvm::User *U : I.users()) {
-                if (auto *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
-                    if (UI->getParent() != &BB) {
-                        hasCrossBlockUse = true;
-                        break;
-                    }
-                }
-            }
-            if (!hasCrossBlockUse)
-                continue;
-
-            ineligibleObjs_.push_back(&I);
-            ineligibleObjSet_.insert(&I);
-            varSizeBytes_[&I] = DL.getTypeAllocSize(I.getType());
         }
     }
 }
