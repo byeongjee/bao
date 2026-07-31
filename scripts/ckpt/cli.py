@@ -1248,26 +1248,10 @@ def verify() -> None:
 
 @verify.command("rockclimb")
 @click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
-)
-# Verification uses BOR, which destroys modeled volatile state before recovery.
-@click.option(
-    "--halt-mode",
-    type=click.Choice(HALT_MODES),
-    default="bor",
-    help="Halt mode for linked binary (default: bor).",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
-)
+@_cap_multi_option
+@_energy_override_option
+@_verify_halt_mode_option
+@_cpu_freq_option("1")
 @_saleae_timeout_option
 @click.pass_context
 def verify_rockclimb_cmd(
@@ -1285,12 +1269,12 @@ def verify_rockclimb_cmd(
     success = verify_rockclimb(
         ctx.obj["env"],
         ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
         halt_mode=halt_mode,
         capture_timeout_seconds=timeout,
-        energy_config=Path(energy_config) if energy_config else None,
-        cpu_freq=int(cpu_freq) * 1_000_000,
+        energy_config=_path_or_none(energy_config),
+        cpu_freq=_mhz_to_hz(cpu_freq),
         pass_log_level=ctx.obj["pass_log_level"],
     )
     if not success:
@@ -1299,37 +1283,12 @@ def verify_rockclimb_cmd(
 
 @verify.command("milp")
 @click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
-)
-# Verification uses BOR, which destroys modeled volatile state before recovery.
-@click.option(
-    "--halt-mode",
-    type=click.Choice(HALT_MODES),
-    default="bor",
-    help="Halt mode for linked binary (default: bor).",
-)
-@click.option(
-    "--estimator-mode",
-    type=click.Choice(["assembly", "ir"]),
-    default="assembly",
-    help="Energy estimator mode.",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
-)
-@click.option(
-    "--coarse-allocation",
-    is_flag=True,
-    help="Use one MILP placement variable per eligible value instead of per-region placement.",
-)
+@_cap_multi_option
+@_energy_override_option
+@_verify_halt_mode_option
+@_estimator_mode_option
+@_cpu_freq_option("1")
+@_coarse_allocation_flag
 @_saleae_timeout_option
 @click.pass_context
 def verify_milp_cmd(
@@ -1349,13 +1308,13 @@ def verify_milp_cmd(
     success = verify_milp(
         ctx.obj["env"],
         ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
         halt_mode=halt_mode,
         capture_timeout_seconds=timeout,
-        energy_config=Path(energy_config) if energy_config else None,
+        energy_config=_path_or_none(energy_config),
         estimator_mode=estimator_mode,
-        cpu_freq=int(cpu_freq) * 1_000_000,
+        cpu_freq=_mhz_to_hz(cpu_freq),
         coarse_allocation=coarse_allocation,
         pass_log_level=ctx.obj["pass_log_level"],
     )
@@ -1363,48 +1322,22 @@ def verify_milp_cmd(
         raise SystemExit(1)
 
 
-@verify.command("schematic")
-@click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
+_verify_schematic_options = _add_options(
+    _cap_multi_option,
+    _energy_override_option,
+    _verify_halt_mode_option,
+    _estimator_mode_option,
+    _cpu_freq_option("1"),
+    _schematic_tuning_options,
+    _saleae_timeout_option,
 )
-# Verification uses BOR, which destroys modeled volatile state before recovery.
-@click.option(
-    "--halt-mode",
-    type=click.Choice(HALT_MODES),
-    default="bor",
-    help="Halt mode for linked binary (default: bor).",
-)
-@click.option(
-    "--estimator-mode",
-    type=click.Choice(["assembly", "ir"]),
-    default="assembly",
-    help="Energy estimator mode.",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
-)
-@click.option(
-    "--force-checkpoint-on-incompatible-loops",
-    is_flag=True,
-    help="Force checkpoint at loop header when inner loop allocations conflict.",
-)
-@click.option(
-    "--recompute-energy-after-new-checkpoint",
-    is_flag=True,
-    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
-)
-@_saleae_timeout_option
-@click.pass_context
-def verify_schematic_cmd(
+
+
+def _verify_schematic_impl(
     ctx: click.Context,
+    *,
+    algorithm_label: str,
+    clang_opt_level: int,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
     energy_config: str | None,
@@ -1415,102 +1348,48 @@ def verify_schematic_cmd(
     recompute_energy_after_new_checkpoint: bool,
     timeout: float,
 ) -> None:
-    """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
     from .verify.schematic import verify_schematic
 
     success = verify_schematic(
         ctx.obj["env"],
         ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
         halt_mode=halt_mode,
         capture_timeout_seconds=timeout,
-        energy_config=Path(energy_config) if energy_config else None,
+        energy_config=_path_or_none(energy_config),
         estimator_mode=estimator_mode,
-        cpu_freq=int(cpu_freq) * 1_000_000,
-        clang_opt_level=0,
+        cpu_freq=_mhz_to_hz(cpu_freq),
+        clang_opt_level=clang_opt_level,
         pass_log_level=ctx.obj["pass_log_level"],
-        algorithm_label="schematic",
+        algorithm_label=algorithm_label,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
         recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
     if not success:
         raise SystemExit(1)
+
+
+@verify.command("schematic")
+@click.argument("benchmarks", nargs=-1)
+@_verify_schematic_options
+@click.pass_context
+def verify_schematic_cmd(ctx: click.Context, **kwargs) -> None:
+    """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
+    _verify_schematic_impl(
+        ctx, algorithm_label="schematic", clang_opt_level=0, **kwargs
+    )
 
 
 @verify.command("schematicO3")
 @click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
-)
-# Verification uses BOR, which destroys modeled volatile state before recovery.
-@click.option(
-    "--halt-mode",
-    type=click.Choice(HALT_MODES),
-    default="bor",
-    help="Halt mode for linked binary (default: bor).",
-)
-@click.option(
-    "--estimator-mode",
-    type=click.Choice(["assembly", "ir"]),
-    default="assembly",
-    help="Energy estimator mode.",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="1",
-    help="CPU frequency in MHz (default: 1).",
-)
-@click.option(
-    "--force-checkpoint-on-incompatible-loops",
-    is_flag=True,
-    help="Force checkpoint at loop header when inner loop allocations conflict.",
-)
-@click.option(
-    "--recompute-energy-after-new-checkpoint",
-    is_flag=True,
-    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
-)
-@_saleae_timeout_option
+@_verify_schematic_options
 @click.pass_context
-def verify_schematic_o3_cmd(
-    ctx: click.Context,
-    benchmarks: tuple[str, ...],
-    cap: tuple[str, ...],
-    energy_config: str | None,
-    halt_mode: str,
-    estimator_mode: str,
-    cpu_freq: str,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
-    timeout: float,
-) -> None:
+def verify_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
     """Verify semantic correctness of SCHEMATIC-O3 checkpoint insertion."""
-    from .verify.schematic import verify_schematic
-
-    success = verify_schematic(
-        ctx.obj["env"],
-        ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
-        halt_mode=halt_mode,
-        capture_timeout_seconds=timeout,
-        energy_config=Path(energy_config) if energy_config else None,
-        estimator_mode=estimator_mode,
-        cpu_freq=int(cpu_freq) * 1_000_000,
-        clang_opt_level=3,
-        pass_log_level=ctx.obj["pass_log_level"],
-        algorithm_label="schematicO3",
-        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
+    _verify_schematic_impl(
+        ctx, algorithm_label="schematicO3", clang_opt_level=3, **kwargs
     )
-    if not success:
-        raise SystemExit(1)
 
 
 # =========================================================================
