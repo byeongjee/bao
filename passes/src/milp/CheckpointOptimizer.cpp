@@ -202,6 +202,7 @@ bool CheckpointOptimizer::solve() {
     solved_ = true;
 
     int status = model_.get(GRB_IntAttr_Status);
+    modelKnownInfeasible_ = (status == GRB_INFEASIBLE || status == GRB_INF_OR_UNBD);
     if (status == GRB_OPTIMAL) {
         extractSolution();
         solution_.solverStatus = SolverStatus::Optimal;
@@ -273,17 +274,23 @@ void CheckpointOptimizer::ensureModelBuilt() {
 
 void CheckpointOptimizer::computeProblemSizeStats() {
     ensureModelBuilt();
-    if (problemSizeStatsComputed_)
-        return;
+    if (!baseSizeStatsComputed_) {
+        model_.update();
+        problemSizeStats_.variablesBeforePresolve = model_.get(GRB_IntAttr_NumVars);
+        problemSizeStats_.constraintsBeforePresolve = model_.get(GRB_IntAttr_NumConstrs);
+        baseSizeStatsComputed_ = true;
+    }
 
-    model_.update();
-    problemSizeStats_.variablesBeforePresolve = model_.get(GRB_IntAttr_NumVars);
-    problemSizeStats_.constraintsBeforePresolve = model_.get(GRB_IntAttr_NumConstrs);
-
-    GRBModel presolved = model_.presolve();
-    problemSizeStats_.variablesAfterPresolve = presolved.get(GRB_IntAttr_NumVars);
-    problemSizeStats_.constraintsAfterPresolve = presolved.get(GRB_IntAttr_NumConstrs);
-    problemSizeStatsComputed_ = true;
+    // GRBModel::presolve() throws GRBException on an infeasible model, and
+    // this plugin builds with -fno-exceptions, so a throw aborts opt.
+    // Only presolve once optimize() has run and ruled out infeasibility;
+    // until then the after-presolve fields stay 0.
+    if (!presolveStatsComputed_ && solved_ && !modelKnownInfeasible_) {
+        GRBModel presolved = model_.presolve();
+        problemSizeStats_.variablesAfterPresolve = presolved.get(GRB_IntAttr_NumVars);
+        problemSizeStats_.constraintsAfterPresolve = presolved.get(GRB_IntAttr_NumConstrs);
+        presolveStatsComputed_ = true;
+    }
 }
 
 void CheckpointOptimizer::buildModel() {

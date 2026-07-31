@@ -131,7 +131,9 @@ class CheckpointOptimizer {
     MILPProblemSizeStats problemSizeStats_;
     bool solved_ = false;
     bool modelBuilt_ = false;
-    bool problemSizeStatsComputed_ = false;
+    bool baseSizeStatsComputed_ = false;
+    bool presolveStatsComputed_ = false;
+    bool modelKnownInfeasible_ = false;
     bool coarseAllocation_ = false;
     bool acceptFeasible_ = false;
     double timeLimit_ = 600.0;
