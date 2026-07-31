@@ -6,6 +6,7 @@
 #include "gurobi_c++.h"
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -125,12 +126,19 @@ class CheckpointOptimizer {
     const IEnergyView &energy_;
     const MILPEnergyParams &params_;
 
-    GRBEnv env_;
-    GRBModel model_;
+    /// Gurobi objects are created lazily in ensureModelBuilt() behind a
+    /// try/catch: GRBEnv construction throws on e.g. license errors, and
+    /// every caller of this class builds with -fno-exceptions. This
+    /// translation unit alone compiles with -fexceptions (see
+    /// passes/CMakeLists.txt) so Gurobi failures become error returns
+    /// instead of std::terminate.
+    std::unique_ptr<GRBEnv> env_;
+    std::unique_ptr<GRBModel> model_;
     MILPSolution solution_;
     MILPProblemSizeStats problemSizeStats_;
     bool solved_ = false;
     bool modelBuilt_ = false;
+    bool gurobiFailed_ = false;
     bool baseSizeStatsComputed_ = false;
     bool presolveStatsComputed_ = false;
     bool modelKnownInfeasible_ = false;
@@ -161,7 +169,8 @@ class CheckpointOptimizer {
     /// Computed as forward-reachable closure from {b : D_{b,v} = 1}.
     std::map<llvm::Value *, std::set<NodeId>> reachableDefs_;
 
-    void ensureModelBuilt();
+    /// Returns false if Gurobi initialization or model construction failed.
+    bool ensureModelBuilt();
     void computeProblemSizeStats();
     void buildModel();
     void addVariables();

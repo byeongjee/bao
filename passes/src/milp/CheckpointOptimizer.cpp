@@ -139,17 +139,7 @@ computeReachableDefs(const ICFGView &cfg, const IStateView &state,
 
 CheckpointOptimizer::CheckpointOptimizer(const MILPInput &input)
     : cfg_(input.cfg), state_(input.state), energy_(input.energy),
-      params_(input.energy.getParams()), env_(), model_(env_) {
-    model_.set(GRB_IntParam_OutputFlag, 0);
-    model_.set(GRB_IntParam_Threads, 1);
-    model_.set(GRB_IntParam_Seed, 0);
-    model_.set(GRB_IntParam_ConcurrentMIP, 1);
-    model_.set(GRB_IntParam_MIPFocus, 1);
-    model_.set(GRB_IntParam_Presolve, 2);
-    model_.set(GRB_IntParam_Cuts, 2);
-    model_.set(GRB_IntParam_Symmetry, 2);
-    model_.set(GRB_DoubleParam_Heuristics, 0.1);
-}
+      params_(input.energy.getParams()) {}
 
 const MILPProblemSizeStats &CheckpointOptimizer::getProblemSizeStats() {
     computeProblemSizeStats();
@@ -189,107 +179,154 @@ bool CheckpointOptimizer::solve() {
         return false;
     }
 
+    if (!ensureModelBuilt())
+        return false;
     computeProblemSizeStats();
-    if (timeLimit_ > 0.0)
-        model_.set(GRB_DoubleParam_TimeLimit, timeLimit_);
-    if (mipGap_ > 0.0)
-        model_.set(GRB_DoubleParam_MIPGap, mipGap_);
-    if (!logFile_.empty()) {
-        model_.set(GRB_IntParam_OutputFlag, 1);
-        model_.set(GRB_StringParam_LogFile, logFile_);
-    }
-    model_.optimize();
-    solved_ = true;
 
-    int status = model_.get(GRB_IntAttr_Status);
-    modelKnownInfeasible_ = (status == GRB_INFEASIBLE || status == GRB_INF_OR_UNBD);
-    if (status == GRB_OPTIMAL) {
-        extractSolution();
-        solution_.solverStatus = SolverStatus::Optimal;
-        return true;
-    }
+    try {
+        if (timeLimit_ > 0.0)
+            model_->set(GRB_DoubleParam_TimeLimit, timeLimit_);
+        if (mipGap_ > 0.0)
+            model_->set(GRB_DoubleParam_MIPGap, mipGap_);
+        if (!logFile_.empty()) {
+            model_->set(GRB_IntParam_OutputFlag, 1);
+            model_->set(GRB_StringParam_LogFile, logFile_);
+        }
+        model_->optimize();
+        solved_ = true;
 
-    int solCount = model_.get(GRB_IntAttr_SolCount);
-    PLOGE << "Optimization did not prove optimality"
-          << " (Gurobi status=" << status << ", solutions found=" << solCount << ")";
+        int status = model_->get(GRB_IntAttr_Status);
+        modelKnownInfeasible_ = (status == GRB_INFEASIBLE || status == GRB_INF_OR_UNBD);
+        if (status == GRB_OPTIMAL) {
+            extractSolution();
+            solution_.solverStatus = SolverStatus::Optimal;
+            return true;
+        }
 
-    if (status == GRB_INFEASIBLE) {
-        PLOGE << "Optimization infeasible; computing IIS diagnostics...";
-        model_.computeIIS();
-        model_.write("milp_infeasible.lp");
-        model_.write("milp_infeasible.ilp");
-        PLOGD << "  Wrote model: milp_infeasible.lp";
-        PLOGD << "  Wrote IIS:   milp_infeasible.ilp";
+        int solCount = model_->get(GRB_IntAttr_SolCount);
+        PLOGE << "Optimization did not prove optimality"
+              << " (Gurobi status=" << status << ", solutions found=" << solCount << ")";
 
-        auto constrs = model_.getConstrs();
-        int numConstrs = model_.get(GRB_IntAttr_NumConstrs);
-        int printedConstrs = 0;
-        for (int i = 0; i < numConstrs; i++) {
-            if (!constrs[i].get(GRB_IntAttr_IISConstr))
-                continue;
-            PLOGD << "  IIS constr: " << constrs[i].get(GRB_StringAttr_ConstrName);
-            printedConstrs++;
-            if (printedConstrs >= 200) {
-                PLOGD << "  IIS constr: ... truncated at 200 entries";
-                break;
+        if (status == GRB_INFEASIBLE) {
+            PLOGE << "Optimization infeasible; computing IIS diagnostics...";
+            model_->computeIIS();
+            model_->write("milp_infeasible.lp");
+            model_->write("milp_infeasible.ilp");
+            PLOGD << "  Wrote model: milp_infeasible.lp";
+            PLOGD << "  Wrote IIS:   milp_infeasible.ilp";
+
+            // getConstrs()/getVars() return caller-owned arrays.
+            std::unique_ptr<GRBConstr[]> constrs(model_->getConstrs());
+            int numConstrs = model_->get(GRB_IntAttr_NumConstrs);
+            int printedConstrs = 0;
+            for (int i = 0; i < numConstrs; i++) {
+                if (!constrs[i].get(GRB_IntAttr_IISConstr))
+                    continue;
+                PLOGD << "  IIS constr: " << constrs[i].get(GRB_StringAttr_ConstrName);
+                printedConstrs++;
+                if (printedConstrs >= 200) {
+                    PLOGD << "  IIS constr: ... truncated at 200 entries";
+                    break;
+                }
+            }
+
+            std::unique_ptr<GRBVar[]> vars(model_->getVars());
+            int numVars = model_->get(GRB_IntAttr_NumVars);
+            int printedVarBounds = 0;
+            for (int i = 0; i < numVars; i++) {
+                if (!vars[i].get(GRB_IntAttr_IISLB) && !vars[i].get(GRB_IntAttr_IISUB))
+                    continue;
+                PLOGD << "  IIS var bound: " << vars[i].get(GRB_StringAttr_VarName)
+                      << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
+                      << " UB=" << vars[i].get(GRB_IntAttr_IISUB);
+                printedVarBounds++;
+                if (printedVarBounds >= 200) {
+                    PLOGD << "  IIS var bound: ... truncated at 200 entries";
+                    break;
+                }
             }
         }
 
-        auto vars = model_.getVars();
-        int numVars = model_.get(GRB_IntAttr_NumVars);
-        int printedVarBounds = 0;
-        for (int i = 0; i < numVars; i++) {
-            if (!vars[i].get(GRB_IntAttr_IISLB) && !vars[i].get(GRB_IntAttr_IISUB))
-                continue;
-            PLOGD << "  IIS var bound: " << vars[i].get(GRB_StringAttr_VarName)
-                  << " LB=" << vars[i].get(GRB_IntAttr_IISLB)
-                  << " UB=" << vars[i].get(GRB_IntAttr_IISUB);
-            printedVarBounds++;
-            if (printedVarBounds >= 200) {
-                PLOGD << "  IIS var bound: ... truncated at 200 entries";
-                break;
-            }
+        if (acceptFeasible_ && solCount > 0) {
+            double gap = model_->get(GRB_DoubleAttr_MIPGap);
+            PLOGW << "Accepting feasible solution (MIP gap=" << gap << ")";
+            extractSolution();
+            solution_.solverStatus = SolverStatus::Feasible;
+            solution_.mipGap = gap;
+            return true;
         }
-    }
 
-    if (acceptFeasible_ && solCount > 0) {
-        double gap = model_.get(GRB_DoubleAttr_MIPGap);
-        PLOGW << "Accepting feasible solution (MIP gap=" << gap << ")";
-        extractSolution();
-        solution_.solverStatus = SolverStatus::Feasible;
-        solution_.mipGap = gap;
-        return true;
+        return false;
+    } catch (const GRBException &e) {
+        PLOGE << "Gurobi error during MILP solve: " << e.getMessage() << " (code "
+              << e.getErrorCode() << ")";
+    } catch (const std::exception &e) {
+        PLOGE << "Error during MILP solve: " << e.what();
     }
-
     return false;
 }
 
-void CheckpointOptimizer::ensureModelBuilt() {
+bool CheckpointOptimizer::ensureModelBuilt() {
     if (modelBuilt_)
-        return;
+        return true;
+    if (gurobiFailed_)
+        return false;
 
-    buildModel();
-    modelBuilt_ = true;
+    // This translation unit compiles with -fexceptions (unlike the rest of
+    // the plugin) so Gurobi errors — license failures in the GRBEnv
+    // constructor, out-of-memory during model construction — surface as
+    // error returns instead of std::terminate.
+    try {
+        env_ = std::make_unique<GRBEnv>();
+        model_ = std::make_unique<GRBModel>(*env_);
+        model_->set(GRB_IntParam_OutputFlag, 0);
+        model_->set(GRB_IntParam_Threads, 1);
+        model_->set(GRB_IntParam_Seed, 0);
+        model_->set(GRB_IntParam_ConcurrentMIP, 1);
+        model_->set(GRB_IntParam_MIPFocus, 1);
+        model_->set(GRB_IntParam_Presolve, 2);
+        model_->set(GRB_IntParam_Cuts, 2);
+        model_->set(GRB_IntParam_Symmetry, 2);
+        model_->set(GRB_DoubleParam_Heuristics, 0.1);
+        buildModel();
+        modelBuilt_ = true;
+        return true;
+    } catch (const GRBException &e) {
+        PLOGE << "Gurobi error while building MILP model: " << e.getMessage() << " (code "
+              << e.getErrorCode() << ")";
+    } catch (const std::exception &e) {
+        PLOGE << "Error while building MILP model: " << e.what();
+    }
+    gurobiFailed_ = true;
+    env_.reset();
+    model_.reset();
+    return false;
 }
 
 void CheckpointOptimizer::computeProblemSizeStats() {
-    ensureModelBuilt();
-    if (!baseSizeStatsComputed_) {
-        model_.update();
-        problemSizeStats_.variablesBeforePresolve = model_.get(GRB_IntAttr_NumVars);
-        problemSizeStats_.constraintsBeforePresolve = model_.get(GRB_IntAttr_NumConstrs);
-        baseSizeStatsComputed_ = true;
-    }
+    if (!ensureModelBuilt())
+        return;
 
-    // GRBModel::presolve() throws GRBException on an infeasible model, and
-    // this plugin builds with -fno-exceptions, so a throw aborts opt.
-    // Only presolve once optimize() has run and ruled out infeasibility;
-    // until then the after-presolve fields stay 0.
-    if (!presolveStatsComputed_ && solved_ && !modelKnownInfeasible_) {
-        GRBModel presolved = model_.presolve();
-        problemSizeStats_.variablesAfterPresolve = presolved.get(GRB_IntAttr_NumVars);
-        problemSizeStats_.constraintsAfterPresolve = presolved.get(GRB_IntAttr_NumConstrs);
-        presolveStatsComputed_ = true;
+    try {
+        if (!baseSizeStatsComputed_) {
+            model_->update();
+            problemSizeStats_.variablesBeforePresolve = model_->get(GRB_IntAttr_NumVars);
+            problemSizeStats_.constraintsBeforePresolve = model_->get(GRB_IntAttr_NumConstrs);
+            baseSizeStatsComputed_ = true;
+        }
+
+        // GRBModel::presolve() throws GRBException on an infeasible model.
+        // Only presolve once optimize() has run and ruled out infeasibility;
+        // until then the after-presolve fields stay 0.
+        if (!presolveStatsComputed_ && solved_ && !modelKnownInfeasible_) {
+            GRBModel presolved = model_->presolve();
+            problemSizeStats_.variablesAfterPresolve = presolved.get(GRB_IntAttr_NumVars);
+            problemSizeStats_.constraintsAfterPresolve = presolved.get(GRB_IntAttr_NumConstrs);
+            presolveStatsComputed_ = true;
+        }
+    } catch (const GRBException &e) {
+        PLOGE << "Gurobi error while computing problem-size stats: " << e.getMessage() << " (code "
+              << e.getErrorCode() << ")";
     }
 }
 
@@ -314,7 +351,7 @@ void CheckpointOptimizer::buildModel() {
     addVariables();
     addObjective();
     addConstraints();
-    model_.update();
+    model_->update();
 }
 
 void CheckpointOptimizer::addVariables() {
@@ -323,12 +360,12 @@ void CheckpointOptimizer::addVariables() {
 
     // r_b for all blocks.
     for (NodeId block : cfg_.getBlocks()) {
-        r_[block] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, "r_" + nodeToken(cfg_, block));
+        r_[block] = model_->addVar(0.0, 1.0, 0.0, GRB_BINARY, "r_" + nodeToken(cfg_, block));
     }
 
     if (coarseAllocation_) {
         for (llvm::GlobalVariable *GV : orderedVmObjs_) {
-            mGlobal_[GV] = model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeGlobalVarName("m", GV));
+            mGlobal_[GV] = model_->addVar(0.0, 1.0, 0.0, GRB_BINARY, makeGlobalVarName("m", GV));
         }
     }
 
@@ -340,11 +377,11 @@ void CheckpointOptimizer::addVariables() {
             BlockVarKey key = std::make_pair(block, V);
             if (!coarseAllocation_ && !state_.isIneligible(V)) {
                 m_[key] =
-                    model_.addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "m", block, V));
+                    model_->addVar(0.0, 1.0, 0.0, GRB_BINARY, makeVarName(cfg_, "m", block, V));
             }
             if (reachableDefs_[V].count(block)) {
                 d_[key] =
-                    model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "d", block, V));
+                    model_->addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "d", block, V));
             }
         }
     }
@@ -354,11 +391,9 @@ void CheckpointOptimizer::addVariables() {
     // Not live-in: rHat = 0, no variable needed.
     for (NodeId block : cfg_.getBlocks()) {
         for (llvm::GlobalVariable *GV : collectSortedValues(state_.getEligLiveIn(block))) {
-            if (state_.getEligLiveIn(block).count(GV) == 0)
-                continue;
             BlockVarKey key = std::make_pair(block, static_cast<llvm::Value *>(GV));
             rHat_[key] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "rHat", block, GV));
+                model_->addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "rHat", block, GV));
             rHatKeys_.push_back(key);
         }
     }
@@ -381,7 +416,7 @@ void CheckpointOptimizer::addVariables() {
                 continue;
             BlockVarKey key = std::make_pair(block, V);
             s_[key] =
-                model_.addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "s", block, V));
+                model_->addVar(0.0, 1.0, 0.0, GRB_CONTINUOUS, makeVarName(cfg_, "s", block, V));
             sKeys_.push_back(key);
         }
     }
@@ -389,10 +424,10 @@ void CheckpointOptimizer::addVariables() {
     // eAccum_[b] for all blocks.
     for (NodeId block : cfg_.getBlocks()) {
         eAccum_[block] =
-            model_.addVar(0.0, Ebuf, 0.0, GRB_CONTINUOUS, "eAccum_" + nodeToken(cfg_, block));
+            model_->addVar(0.0, Ebuf, 0.0, GRB_CONTINUOUS, "eAccum_" + nodeToken(cfg_, block));
     }
 
-    model_.update();
+    model_->update();
 }
 
 void CheckpointOptimizer::addObjective() {
@@ -430,7 +465,7 @@ void CheckpointOptimizer::addObjective() {
         objective += energy_.getFBoundary(block) * buildEEnd(block);
     }
 
-    model_.setObjective(objective, GRB_MINIMIZE);
+    model_->setObjective(objective, GRB_MINIMIZE);
 }
 
 void CheckpointOptimizer::addConstraints() {
@@ -450,7 +485,7 @@ void CheckpointOptimizer::addConstraints() {
 void CheckpointOptimizer::constrainEntryAsRegionStart() {
     NodeId entry = cfg_.getEntryBlock();
     if (entry != kInvalidNodeId && r_.count(entry)) {
-        model_.addConstr(r_[entry] == 1, "C1_entry_region_start");
+        model_->addConstr(r_[entry] == 1, "C1_entry_region_start");
     }
 }
 
@@ -485,7 +520,7 @@ void CheckpointOptimizer::constrainVMCapacity() {
                 continue;
             vmUsage += static_cast<double>(sizeBytes) * mGlobal_.at(GV);
         }
-        model_.addConstr(vmUsage <= reducedCapacity, "vm_capacity_global");
+        model_->addConstr(vmUsage <= reducedCapacity, "vm_capacity_global");
         return;
     }
 
@@ -498,7 +533,7 @@ void CheckpointOptimizer::constrainVMCapacity() {
             vmUsage += static_cast<double>(sizeBytes) *
                        m_.at(std::make_pair(block, static_cast<llvm::Value *>(GV)));
         }
-        model_.addConstr(vmUsage <= reducedCapacity, "vm_capacity_" + nodeToken(cfg_, block));
+        model_->addConstr(vmUsage <= reducedCapacity, "vm_capacity_" + nodeToken(cfg_, block));
     }
 }
 
@@ -512,13 +547,14 @@ void CheckpointOptimizer::constrainNeedRestoreLinearization() {
         GRBVar rHatVar = rHat_.at(key);
         auto *GV = llvm::cast<llvm::GlobalVariable>(V);
         std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
-        model_.addConstr(rHatVar <= r_[block], "C3_rHat_le_r_" + suffix);
+        model_->addConstr(rHatVar <= r_[block], "C3_rHat_le_r_" + suffix);
         if (coarseAllocation_) {
-            model_.addConstr(rHatVar <= mGlobal_.at(GV), "C3_rHat_le_m_" + suffix);
-            model_.addConstr(rHatVar >= r_[block] + mGlobal_.at(GV) - 1, "C3_rHat_ge_rm_" + suffix);
+            model_->addConstr(rHatVar <= mGlobal_.at(GV), "C3_rHat_le_m_" + suffix);
+            model_->addConstr(rHatVar >= r_[block] + mGlobal_.at(GV) - 1,
+                              "C3_rHat_ge_rm_" + suffix);
         } else {
-            model_.addConstr(rHatVar <= m_.at(key), "C3_rHat_le_m_" + suffix);
-            model_.addConstr(rHatVar >= r_[block] + m_.at(key) - 1, "C3_rHat_ge_rm_" + suffix);
+            model_->addConstr(rHatVar <= m_.at(key), "C3_rHat_le_m_" + suffix);
+            model_->addConstr(rHatVar >= r_[block] + m_.at(key) - 1, "C3_rHat_ge_rm_" + suffix);
         }
     }
 }
@@ -534,10 +570,10 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
         for (llvm::GlobalVariable *GV : orderedVmObjs_) {
             BlockVarKey predKey = std::make_pair(pred, static_cast<llvm::Value *>(GV));
             BlockVarKey succKey = std::make_pair(succ, static_cast<llvm::Value *>(GV));
-            model_.addConstr(m_[succKey] <= m_[predKey] + r_[succ],
-                             "C12_placement_fwd_" + std::to_string(idx));
-            model_.addConstr(m_[succKey] >= m_[predKey] - r_[succ],
-                             "C13_placement_bwd_" + std::to_string(idx));
+            model_->addConstr(m_[succKey] <= m_[predKey] + r_[succ],
+                              "C12_placement_fwd_" + std::to_string(idx));
+            model_->addConstr(m_[succKey] >= m_[predKey] - r_[succ],
+                              "C13_placement_bwd_" + std::to_string(idx));
             idx++;
         }
     }
@@ -558,8 +594,8 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
             BlockVarKey firstKey = std::make_pair(firstPred, V);
             for (size_t i = 1; i < preds.size(); ++i) {
                 BlockVarKey otherKey = std::make_pair(preds[i], V);
-                model_.addConstr(m_[firstKey] == m_[otherKey],
-                                 "merge_placement_eq_" + std::to_string(mergeIdx));
+                model_->addConstr(m_[firstKey] == m_[otherKey],
+                                  "merge_placement_eq_" + std::to_string(mergeIdx));
                 mergeIdx++;
             }
         }
@@ -591,7 +627,7 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
             std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
 
             // C4: d[b,v] >= D_{b,v}
-            model_.addConstr(dVar >= def, "C4_dirty_local_" + suffix);
+            model_->addConstr(dVar >= def, "C4_dirty_local_" + suffix);
 
             // C5': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]  [LP tightening]
             // Predecessors outside Reach(v) contribute 0.
@@ -601,10 +637,10 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
                 if (predIt != d_.end())
                     predSum += predIt->second;
             }
-            model_.addConstr(dVar <= def + predSum, "C5p_dirty_upper_" + suffix);
+            model_->addConstr(dVar <= def + predSum, "C5p_dirty_upper_" + suffix);
 
             // C6: d[b,v] <= D_{b,v} - r[b] + 1
-            model_.addConstr(dVar <= def + (1 - r_[block]), "C6_dirty_reset_" + suffix);
+            model_->addConstr(dVar <= def + (1 - r_[block]), "C6_dirty_reset_" + suffix);
         }
     }
 
@@ -616,8 +652,8 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
             auto succIt = d_.find(std::make_pair(succ, V));
             if (predIt == d_.end() || succIt == d_.end())
                 continue; // One or both outside Reach(v), constraint is trivial.
-            model_.addConstr(succIt->second >= predIt->second - r_[succ],
-                             "C5_dirty_edge_" + std::to_string(idx));
+            model_->addConstr(succIt->second >= predIt->second - r_[succ],
+                              "C5_dirty_edge_" + std::to_string(idx));
             idx++;
         }
     }
@@ -637,7 +673,7 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
         std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
 
         // C8': s[b,v] <= r[b]
-        model_.addConstr(sVar <= r_[block], "C8p_save_le_r_" + suffix);
+        model_->addConstr(sVar <= r_[block], "C8p_save_le_r_" + suffix);
 
         // C8': s[b,v] <= Σ_pred d[pred,v]  (replaces dHat upper bound)
         // Predecessors outside Reach(v) contribute 0.
@@ -647,20 +683,20 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
             if (predIt != d_.end())
                 predDirtySum += predIt->second;
         }
-        model_.addConstr(sVar <= predDirtySum, "C8p_save_le_dirty_" + suffix);
+        model_->addConstr(sVar <= predDirtySum, "C8p_save_le_dirty_" + suffix);
 
         // C8': s[b,v] <= Σ_pred m[pred,v]  (replaces dHat upper bound)
         // For ineligibles, m=1 so s <= |preds|, trivially satisfied — skip.
         if (!state_.isIneligible(V)) {
             auto *GV = llvm::cast<llvm::GlobalVariable>(V);
             if (coarseAllocation_) {
-                model_.addConstr(sVar <= mGlobal_.at(GV), "C8p_save_le_place_" + suffix);
+                model_->addConstr(sVar <= mGlobal_.at(GV), "C8p_save_le_place_" + suffix);
             } else {
                 GRBLinExpr predPlaceSum = 0;
                 for (NodeId pred : predecessors_[block]) {
                     predPlaceSum += m_.at(std::make_pair(pred, V));
                 }
-                model_.addConstr(sVar <= predPlaceSum, "C8p_save_le_place_" + suffix);
+                model_->addConstr(sVar <= predPlaceSum, "C8p_save_le_place_" + suffix);
             }
         }
     }
@@ -684,16 +720,16 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
                 continue; // d[pred,v] = 0, so RHS <= 0, trivially satisfied.
             if (state_.isIneligible(V)) {
                 // m=1: s >= d + 1 + r - 2 = d + r - 1
-                model_.addConstr(sVar >= dIt->second + r_[succ] - 1,
-                                 "C8_save_edge_" + std::to_string(idx));
+                model_->addConstr(sVar >= dIt->second + r_[succ] - 1,
+                                  "C8_save_edge_" + std::to_string(idx));
             } else {
                 auto *GV = llvm::cast<llvm::GlobalVariable>(V);
                 if (coarseAllocation_) {
-                    model_.addConstr(sVar >= dIt->second + mGlobal_.at(GV) + r_[succ] - 2,
-                                     "C8_save_edge_" + std::to_string(idx));
+                    model_->addConstr(sVar >= dIt->second + mGlobal_.at(GV) + r_[succ] - 2,
+                                      "C8_save_edge_" + std::to_string(idx));
                 } else {
-                    model_.addConstr(sVar >= dIt->second + m_.at(predKey) + r_[succ] - 2,
-                                     "C8_save_edge_" + std::to_string(idx));
+                    model_->addConstr(sVar >= dIt->second + m_.at(predKey) + r_[succ] - 2,
+                                      "C8_save_edge_" + std::to_string(idx));
                 }
             }
             idx++;
@@ -711,10 +747,10 @@ void CheckpointOptimizer::constrainEnergyInitAtRegionStart() {
     for (NodeId block : cfg_.getBlocks()) {
         GRBLinExpr eStart = buildEStart(block);
         std::string suffix = nodeToken(cfg_, block);
-        model_.addConstr(eAccum_[block] >= eStart - M * (1 - r_[block]),
-                         "C9_energy_init_lb_" + suffix);
-        model_.addConstr(eAccum_[block] <= eStart + M * (1 - r_[block]),
-                         "C9_energy_init_ub_" + suffix);
+        model_->addConstr(eAccum_[block] >= eStart - M * (1 - r_[block]),
+                          "C9_energy_init_lb_" + suffix);
+        model_->addConstr(eAccum_[block] <= eStart + M * (1 - r_[block]),
+                          "C9_energy_init_ub_" + suffix);
     }
 }
 
@@ -727,8 +763,8 @@ void CheckpointOptimizer::constrainEnergyPropagation() {
     unsigned edgeIdx = 0;
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
-        model_.addConstr(eAccum_[dst] >= eAccum_[src] + eBlkSrc - M * r_[dst],
-                         "C10_energy_prop_" + std::to_string(edgeIdx++));
+        model_->addConstr(eAccum_[dst] >= eAccum_[src] + eBlkSrc - M * r_[dst],
+                          "C10_energy_prop_" + std::to_string(edgeIdx++));
     }
 }
 
@@ -743,14 +779,14 @@ void CheckpointOptimizer::constrainEnergyWithinCapacity() {
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
         GRBLinExpr eEndDst = buildEEnd(dst);
-        model_.addConstr(eAccum_[src] + eBlkSrc + eEndDst <= Ebuf,
-                         "C11_energy_edge_" + std::to_string(edgeIdx++));
+        model_->addConstr(eAccum_[src] + eBlkSrc + eEndDst <= Ebuf,
+                          "C11_energy_edge_" + std::to_string(edgeIdx++));
     }
 
     for (NodeId exitBlock : cfg_.getExitBlocks()) {
         GRBLinExpr eBlkExit = buildEBlk(exitBlock);
-        model_.addConstr(eAccum_[exitBlock] + eBlkExit <= Ebuf,
-                         "C11_energy_exit_" + nodeToken(cfg_, exitBlock));
+        model_->addConstr(eAccum_[exitBlock] + eBlkExit <= Ebuf,
+                          "C11_energy_exit_" + nodeToken(cfg_, exitBlock));
     }
 }
 
@@ -788,7 +824,9 @@ GRBLinExpr CheckpointOptimizer::buildEStart(NodeId block) {
     }
 
     // Ineligible + live-in: rHat = r[b], so E_rst_v * r[b].
-    for (llvm::Value *V : state_.getIneligLiveIn(block)) {
+    // Sorted iteration keeps floating-point coefficient accumulation
+    // deterministic across runs (pointer-ordered set iteration is not).
+    for (llvm::Value *V : collectSortedValues(state_.getIneligLiveIn(block))) {
         double eRestore = energy_.getERestore(V);
         if (eRestore > 0.0) {
             expr += eRestore * r_[block];
@@ -868,7 +906,7 @@ void CheckpointOptimizer::extractSolution() {
         solution_.eAccum[block] = var.get(GRB_DoubleAttr_X);
     }
 
-    solution_.objectiveValue = model_.get(GRB_DoubleAttr_ObjVal);
+    solution_.objectiveValue = model_->get(GRB_DoubleAttr_ObjVal);
 }
 
 } // namespace checkpoint
