@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from ckpt.output_parser import (
     NvmCounters,
     PassStatistics,
@@ -17,10 +16,10 @@ from ckpt.output_parser import (
     parse_pass_output,
 )
 
-
 # ---------------------------------------------------------------------------
 # extract_stat
 # ---------------------------------------------------------------------------
+
 
 class TestExtractStat:
     def test_first_label_match(self):
@@ -58,6 +57,7 @@ class TestExtractStat:
 # _parse_int
 # ---------------------------------------------------------------------------
 
+
 class TestParseInt:
     @pytest.mark.parametrize(
         "val, expected",
@@ -77,6 +77,7 @@ class TestParseInt:
 # ---------------------------------------------------------------------------
 # parse_pass_output
 # ---------------------------------------------------------------------------
+
 
 class TestParsePassOutput:
     REALISTIC_OUTPUT = """\
@@ -106,7 +107,6 @@ Peak RSS (KB): 10240
         assert stats.edges == 30
         assert stats.abstract_cfg_blocks == 11
         assert stats.abstract_cfg_edges == 14
-        assert stats.abstract_cfg_size == 11
         assert stats.regions == 3
         assert stats.candidate_globals == 5
         assert stats.milp_allocation_mode == "coarse"
@@ -128,7 +128,6 @@ Peak RSS (KB): 10240
         assert stats.edges == 5
         assert stats.abstract_cfg_blocks is None
         assert stats.abstract_cfg_edges is None
-        assert stats.abstract_cfg_size is None
         assert stats.regions is None
         assert stats.milp_variables is None
         assert stats.milp_presolved_variables is None
@@ -140,7 +139,6 @@ Peak RSS (KB): 10240
     def test_legacy_abstract_cfg_label(self):
         stats = parse_pass_output("Basic blocks (abstract): 9\n")
         assert stats.abstract_cfg_blocks == 9
-        assert stats.abstract_cfg_size == 9
 
     def test_abstract_cfg_edge_label(self):
         stats = parse_pass_output("Abstract CFG edges: 12\n")
@@ -155,6 +153,7 @@ Peak RSS (KB): 10240
 # ---------------------------------------------------------------------------
 # parse_nvm_output
 # ---------------------------------------------------------------------------
+
 
 class TestParseNvmOutput:
     def test_all_keys_present(self):
@@ -210,6 +209,7 @@ cnt_restore_reg=2
 # nvm_counters_to_labels
 # ---------------------------------------------------------------------------
 
+
 class TestNvmCountersToLabels:
     def test_full_counters(self):
         c = NvmCounters(
@@ -254,6 +254,7 @@ class TestNvmCountersToLabels:
 # detect_infeasibility
 # ---------------------------------------------------------------------------
 
+
 class TestDetectInfeasibility:
     @pytest.mark.parametrize(
         "pattern, expected_reason",
@@ -287,6 +288,7 @@ class TestDetectInfeasibility:
 # has_pass_statistics
 # ---------------------------------------------------------------------------
 
+
 class TestHasPassStatistics:
     def test_present(self):
         assert has_pass_statistics("--- Checkpoint Insertion Statistics ---") is True
@@ -298,6 +300,7 @@ class TestHasPassStatistics:
 # ---------------------------------------------------------------------------
 # load_stats_json
 # ---------------------------------------------------------------------------
+
 
 class TestLoadStatsJson:
     def test_loads_top_level_abstract_cfg_fields(self):
@@ -319,7 +322,6 @@ class TestLoadStatsJson:
         assert infeasibility_reason is None
         assert stats.abstract_cfg_blocks == 11
         assert stats.abstract_cfg_edges == 14
-        assert stats.abstract_cfg_size == 11
         assert stats.milp_allocation_mode == "coarse"
         assert stats.milp_variables == 100
         assert stats.milp_constraints == 200
@@ -342,7 +344,6 @@ class TestLoadStatsJson:
         assert infeasibility_reason == "solver found no feasible solution"
         assert stats.abstract_cfg_blocks == 7
         assert stats.abstract_cfg_edges == 9
-        assert stats.abstract_cfg_size == 7
 
     def test_falls_back_to_legacy_top_level_abstract_cfg_size(self):
         stats, feasible, infeasibility_reason = load_stats_json(
@@ -354,4 +355,3 @@ class TestLoadStatsJson:
         assert infeasibility_reason is None
         assert stats.abstract_cfg_blocks == 5
         assert stats.abstract_cfg_edges is None
-        assert stats.abstract_cfg_size == 5

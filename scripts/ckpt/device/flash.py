@@ -23,8 +23,6 @@ def flash(
     """
     mspdebug_result = run(
         [
-            "timeout",
-            str(timeout),
             "mspdebug",
             "tilib",
             f"prog {elf_path}",
@@ -62,8 +60,6 @@ def read_nvm(
 
     mspdebug_result = run(
         [
-            "timeout",
-            str(timeout),
             "mspdebug",
             "tilib",
             md_cmd,

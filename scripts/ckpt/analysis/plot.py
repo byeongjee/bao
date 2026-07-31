@@ -10,6 +10,7 @@ import csv
 import logging
 from pathlib import Path
 
+from ..bench.config import cap_sort_key
 from ..errors import ConfigError
 
 logger = logging.getLogger(__name__)
@@ -101,20 +102,11 @@ def _get_value(row: dict[str, str], metric_key: str) -> float | None:
         return None
 
 
-def _cap_sort_key(cap: str) -> tuple[float, str]:
-    if cap.endswith("uF"):
-        try:
-            return float(cap.removesuffix("uF")), cap
-        except ValueError:
-            pass
-    return float("inf"), cap
-
-
 def _sort_key(label: str) -> tuple[str, float, str]:
     parts = label.split("\n")
     program = parts[0]
     cap = parts[1].strip("()") if len(parts) > 1 else ""
-    cap_value, cap_label = _cap_sort_key(cap)
+    cap_value, cap_label = cap_sort_key(cap)
     return (program, cap_value, cap_label)
 
 

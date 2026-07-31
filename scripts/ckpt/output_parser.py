@@ -17,7 +17,6 @@ class PassStatistics:
     edges: int | None = None
     abstract_cfg_blocks: int | None = None
     abstract_cfg_edges: int | None = None
-    abstract_cfg_size: int | None = None
     regions: int | None = None
     candidate_globals: int | None = None
     milp_allocation_mode: str | None = None
@@ -114,7 +113,6 @@ def parse_pass_output(text: str) -> PassStatistics:
             setattr(stats, field_name, raw)
         else:
             setattr(stats, field_name, _parse_int(raw))
-    stats.abstract_cfg_size = stats.abstract_cfg_blocks
     return stats
 
 
@@ -224,12 +222,10 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
 
     abstract_cfg_blocks = data.get("abstract_cfg_blocks")
     abstract_cfg_edges = data.get("abstract_cfg_edges")
-    abstract_cfg_size = data.get("abstract_cfg_size")
     abstract_cfg = data.get("abstract_cfg")
-    if abstract_cfg_blocks is None and abstract_cfg_size is not None:
-        abstract_cfg_blocks = abstract_cfg_size
-    if abstract_cfg_size is None and isinstance(abstract_cfg, dict):
-        abstract_cfg_size = abstract_cfg.get("abstract_nodes")
+    if abstract_cfg_blocks is None:
+        # Legacy top-level key
+        abstract_cfg_blocks = data.get("abstract_cfg_size")
     if abstract_cfg_blocks is None and isinstance(abstract_cfg, dict):
         abstract_cfg_blocks = abstract_cfg.get("abstract_nodes")
     if abstract_cfg_edges is None and isinstance(abstract_cfg, dict):
@@ -240,9 +236,6 @@ def load_stats_json(data: dict) -> tuple[PassStatistics, bool, str | None]:
         edges=data.get("edges"),
         abstract_cfg_blocks=abstract_cfg_blocks,
         abstract_cfg_edges=abstract_cfg_edges,
-        abstract_cfg_size=abstract_cfg_blocks
-        if abstract_cfg_blocks is not None
-        else abstract_cfg_size,
         regions=data.get("regions"),
         candidate_globals=data.get("candidate_globals"),
         milp_allocation_mode=data.get("milp_allocation_mode"),

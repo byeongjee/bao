@@ -8,9 +8,6 @@ from pathlib import Path
 
 from .env import ProjectEnv
 
-# Canonical definition lives in errors.py; re-exported for compatibility.
-from .errors import ToolNotFoundError
-
 
 @dataclass(frozen=True)
 class Toolchain:
@@ -56,9 +53,3 @@ class Toolchain:
             nm=nm_path,
             size=size_path,
         )
-
-    def validate(self) -> None:
-        """Check that critical LLVM tools exist."""
-        for name, path in [("clang", self.clang), ("opt", self.opt), ("llc", self.llc)]:
-            if not Path(path).exists() and not shutil.which(path):
-                raise ToolNotFoundError(name, path)

@@ -8,6 +8,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from ..bench.config import cap_sort_key
 from ..errors import ConfigError
 
 _SUMMARY_FIELDS = [
@@ -38,15 +39,6 @@ _SUMMARY_FIELDS = [
     "milp_presolved_constraints_mean_after",
     "milp_presolved_constraints_mean_reduction_pct",
 ]
-
-
-def _cap_sort_key(capacitor: str) -> tuple[float, str]:
-    if capacitor.endswith("uF"):
-        try:
-            return float(capacitor.removesuffix("uF")), capacitor
-        except ValueError:
-            pass
-    return float("inf"), capacitor
 
 
 def _mean(values: list[float]) -> float:
@@ -311,7 +303,7 @@ def summarize_milp_coarse_allocation(
 
     capacitors = sorted(
         {str(pair["capacitor"]) for pair in pairs},
-        key=_cap_sort_key,
+        key=cap_sort_key,
     )
 
     summaries = [
