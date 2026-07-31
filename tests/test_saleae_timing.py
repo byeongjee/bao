@@ -138,6 +138,34 @@ class FakeFlakyManager:
         return FakeCapture(capture_csv_lines(self.capture_rows))
 
 
+class FakeHeldSession:
+    """Stub for flash.HeldFlashSession: records release/abort calls."""
+
+    def __init__(self, calls: list[tuple[str, int | None]]) -> None:
+        self._calls = calls
+
+    def release(self, timeout: int) -> None:
+        self._calls.append(("release", timeout))
+
+    def abort(self) -> None:
+        self._calls.append(("abort", None))
+
+
+def install_fake_flash_and_hold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[tuple[Path, int]], list[tuple[str, int | None]]]:
+    """Stub flash_and_hold; returns (flash_calls, session_calls) recorders."""
+    flash_calls: list[tuple[Path, int]] = []
+    session_calls: list[tuple[str, int | None]] = []
+
+    def fake_flash_and_hold(elf_path: Path, timeout: int) -> FakeHeldSession:
+        flash_calls.append((elf_path, timeout))
+        return FakeHeldSession(session_calls)
+
+    monkeypatch.setattr("ckpt.device.saleae.flash_and_hold", fake_flash_and_hold)
+    return flash_calls, session_calls
+
+
 def install_fake_saleae_automation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Install a stub ``saleae.automation`` module for pure unit tests."""
     fake_automation = types.ModuleType("saleae.automation")
@@ -194,12 +222,7 @@ class TestSaleaeRun:
         monkeypatch: pytest.MonkeyPatch,
     ):
         install_fake_saleae_automation(monkeypatch)
-        flash_calls: list[tuple[Path, int]] = []
-
-        def fake_flash(elf_path: Path, timeout: int) -> None:
-            flash_calls.append((elf_path, timeout))
-
-        monkeypatch.setattr("ckpt.device.saleae.flash", fake_flash)
+        flash_calls, session_calls = install_fake_flash_and_hold(monkeypatch)
 
         manager = FakeManager(
             [
@@ -229,6 +252,7 @@ class TestSaleaeRun:
             (Path("/tmp/app.elf"), 30),
             (Path("/tmp/app.elf"), 30),
         ]
+        assert session_calls == [("release", 30), ("release", 30)]
         assert manager.calls == 2
 
     def test_retries_start_capture_failure_before_flashing(
@@ -236,16 +260,12 @@ class TestSaleaeRun:
         monkeypatch: pytest.MonkeyPatch,
     ):
         install_fake_saleae_automation(monkeypatch)
-        flash_calls: list[tuple[Path, int]] = []
+        flash_calls, session_calls = install_fake_flash_and_hold(monkeypatch)
         sleep_calls: list[float] = []
-
-        def fake_flash(elf_path: Path, timeout: int) -> None:
-            flash_calls.append((elf_path, timeout))
 
         def fake_sleep(seconds: float) -> None:
             sleep_calls.append(seconds)
 
-        monkeypatch.setattr("ckpt.device.saleae.flash", fake_flash)
         monkeypatch.setattr("ckpt.device.saleae.time.sleep", fake_sleep)
 
         manager = FakeFlakyManager(
@@ -263,7 +283,13 @@ class TestSaleaeRun:
         result = saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0, 60.0)
 
         assert result == pytest.approx(378115.72)
-        assert flash_calls == [(Path("/tmp/app.elf"), 30)]
+        # One flash per attempt: the first attempt's session is aborted when
+        # start_capture fails, the second is released into the capture.
+        assert flash_calls == [
+            (Path("/tmp/app.elf"), 30),
+            (Path("/tmp/app.elf"), 30),
+        ]
+        assert session_calls == [("abort", None), ("release", 30)]
         assert sleep_calls == [0.5]
         assert manager.calls == 2
 
@@ -272,6 +298,7 @@ class TestSaleaeRun:
         monkeypatch: pytest.MonkeyPatch,
     ):
         install_fake_saleae_automation(monkeypatch)
+        flash_calls, session_calls = install_fake_flash_and_hold(monkeypatch)
         sleep_calls: list[float] = []
 
         def fake_sleep(seconds: float) -> None:
@@ -298,13 +325,15 @@ class TestSaleaeRun:
 
         assert sleep_calls == [0.5, 0.5]
         assert manager.calls == 3
+        assert len(flash_calls) == 3
+        assert session_calls == [("abort", None)] * 3
 
     def test_timeout_stops_and_closes_capture(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ):
         install_fake_saleae_automation(monkeypatch)
-        monkeypatch.setattr("ckpt.device.saleae.flash", lambda elf_path, timeout: None)
+        install_fake_flash_and_hold(monkeypatch)
 
         deadline_exceeded = object()
 
