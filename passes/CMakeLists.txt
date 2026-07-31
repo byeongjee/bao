@@ -72,7 +72,6 @@ src/common/LoopTripCount.cpp
     src/common/PassStatistics.cpp
     src/common/RockClimbConfig.cpp
     src/common/TripCountAnnotationPass.cpp
-    src/common/EdgeSplitPass.cpp
     # Energy estimators
     src/estimator/AssemblyBasedEstimator.cpp
     src/estimator/IRBasedEstimator.cpp

@@ -1,5 +1,4 @@
 #include "common/BBFreqCollectorPass.h"
-#include "common/EdgeSplitPass.h"
 #include "common/TripCountAnnotationPass.h"
 #include "milp/LoopStripMiningPass.h"
 #include "milp/MILPCheckpointPass.h"
@@ -98,7 +97,6 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
                         FPM.addPass(checkpoint::LoopStripMiningPass());
-                        // FPM.addPass(checkpoint::EdgeSplitPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
                     }
@@ -112,7 +110,6 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
                         FPM.addPass(checkpoint::LoopStripMiningPass());
-                        // FPM.addPass(checkpoint::EdgeSplitPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
                     }
@@ -128,7 +125,6 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
                         FPM.addPass(checkpoint::LoopStripMiningPass());
-                        // FPM.addPass(checkpoint::EdgeSplitPass());
                         FPM.addPass(checkpoint::BBFreqCollectorPass());
                         return true;
                     }
@@ -138,7 +134,6 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
                         FPM.addPass(checkpoint::LoopStripMiningPass());
-                        // FPM.addPass(checkpoint::EdgeSplitPass());
                         return true;
                     }
                     if (Name == "rockclimb-preprocess") {
