@@ -194,6 +194,28 @@ def _write_compile_csv(
     logger.info("Stats CSV: %s", csv_path)
 
 
+def _handle_accumulate_keys(result, accumulate_keys: str | None) -> None:
+    """Append the compile's required energy keys to the accumulate file.
+
+    Reads the keys from the pass output, falling back to the stats JSON
+    sidecar when the pass output carries no energy-parameter block.
+    """
+    if not accumulate_keys:
+        return
+    import json
+
+    from .bench.runner import accumulate_keys_to_file, extract_energy_params
+
+    ep = extract_energy_params(result.pass_output)
+    if ep is not None:
+        accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
+    elif result.stats_json is not None and result.stats_json.is_file():
+        data = json.loads(result.stats_json.read_text())
+        req = data.get("required_energy_keys", [])
+        if req:
+            accumulate_keys_to_file(set(req), Path(accumulate_keys))
+
+
 @compile.command("milp")
 @click.argument("input_c")
 @click.option(
@@ -346,12 +368,7 @@ def compile_milp_cmd(
         ),
     )
 
-    if accumulate_keys:
-        from .bench.runner import accumulate_keys_to_file, extract_energy_params
-
-        ep = extract_energy_params(result.pass_output)
-        if ep is not None:
-            accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
+    _handle_accumulate_keys(result, accumulate_keys)
 
     logger.info("Object: %s", result.object_file)
     logger.info("Assembly: %s", result.assembly_file)
@@ -499,19 +516,7 @@ def compile_rockclimb_cmd(
         ),
     )
 
-    if accumulate_keys:
-        import json as _json
-
-        from .bench.runner import accumulate_keys_to_file, extract_energy_params
-
-        ep = extract_energy_params(result.pass_output)
-        if ep is not None:
-            accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
-        elif result.stats_json is not None and result.stats_json.is_file():
-            data = _json.loads(result.stats_json.read_text())
-            req = data.get("required_energy_keys", [])
-            if req:
-                accumulate_keys_to_file(set(req), Path(accumulate_keys))
+    _handle_accumulate_keys(result, accumulate_keys)
 
     logger.info("Assembly: %s", result.assembly_file)
     if result.elf_file:
@@ -610,12 +615,7 @@ def _compile_schematic_impl(
         ),
     )
 
-    if accumulate_keys:
-        from .bench.runner import accumulate_keys_to_file, extract_energy_params
-
-        ep = extract_energy_params(result.pass_output)
-        if ep is not None:
-            accumulate_keys_to_file(set(ep[0]), Path(accumulate_keys))
+    _handle_accumulate_keys(result, accumulate_keys)
 
     if result.object_file:
         logger.info("Object: %s", result.object_file)
