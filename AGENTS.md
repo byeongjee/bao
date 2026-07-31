@@ -257,17 +257,16 @@ The optimizer uses binary and continuous decision variables:
 
 | Variable | Type | Meaning |
 |----------|------|---------|
-| `isRegionStart[b]` | binary | 1 if block b starts a new checkpoint region |
-| `placeInVm[b,v]` | binary | 1 if global v is placed in VM (SRAM) at block b |
-| `needRestore[b,v]` | binary | 1 if global v needs restore from FRAM at block b |
-| `commit[b,v]` | binary | 1 if global v is committed to FRAM at block b |
-| `pending[b,v]` | binary | tracking uncommitted modifications |
-| `vmPending[b,v]` | binary | VM-placed pending state |
-| `energyAccumulated[b]` | continuous | accumulated energy at block b |
+| `r[b]` | binary | 1 if block b starts a new checkpoint region |
+| `m[b,v]` | binary | 1 if eligible global v is placed in VM (SRAM) at block b; fixed to 1 for ineligible objects (coarse-allocation mode uses per-global `m[v]` instead) |
+| `rHat[b,v]` | continuous | need-restore indicator (`r[b] AND m[b,v]`), for eligible live-in pairs |
+| `d[b,v]` | continuous | dirty indicator: v modified since the last save |
+| `s[b,v]` | continuous | 1 if v is saved at region boundary b |
+| `eAccum[b]` | continuous | accumulated energy at block b |
 
-**Objective:** Minimize weighted sum of region starts, NVM access penalties, save/restore costs, weighted by block frequency.
+**Objective:** Minimize the frequency-weighted sum of NVM access penalties for eligible globals not placed in VM, region-start overhead (prologue + restore costs), and region-end overhead (epilogue + save costs).
 
-**Constraint groups:** C1 (entry region start), C3 (VM capacity), C4 (need-restore linearization), C5 (placement propagation), C6 (pending propagation), C7 (commit model), C8 (energy init), C9 (energy propagation), C10 (buffer safety).
+**Constraint groups:** C1 (entry region start), C2 (ineligible VM placement), C3 (need-restore linearization), VM capacity, C4–C6 (dirty propagation), C8 (save at region boundary), C9 (energy init at region start), C10 (energy propagation), C11 (energy within capacity), C12–C13 (placement propagation).
 
 ### RockClimb (PFI Baseline — Machine-Level)
 

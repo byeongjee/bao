@@ -94,18 +94,18 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
 }
 
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
-computeIneligGlobalAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
-                                  const std::vector<llvm::Value *> &ineligibleObjs) {
+computeIneligAllocaLiveness(llvm::Function &F, const CFGAnalysis &cfg,
+                            const std::vector<llvm::Value *> &ineligibleObjs) {
 
     llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>> result;
 
-    std::vector<llvm::Value *> globalAllocaIneligs;
+    std::vector<llvm::Value *> allocaIneligs;
     for (llvm::Value *V : ineligibleObjs) {
-        if (llvm::isa<llvm::GlobalVariable>(V) || llvm::isa<llvm::AllocaInst>(V))
-            globalAllocaIneligs.push_back(V);
+        if (llvm::isa<llvm::AllocaInst>(V))
+            allocaIneligs.push_back(V);
     }
 
-    if (globalAllocaIneligs.empty())
+    if (allocaIneligs.empty())
         return result;
 
     struct BlockVarInfo {
@@ -117,50 +117,33 @@ computeIneligGlobalAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const 
 
     // Phase 1: Per-instruction scan (iterate F for non-const access).
     for (llvm::BasicBlock &BB : F) {
-        for (llvm::Value *V : globalAllocaIneligs) {
+        for (llvm::Value *V : allocaIneligs) {
             auto key = std::make_pair(static_cast<const llvm::BasicBlock *>(&BB), V);
             BlockVarInfo info;
             bool seenMustStore = false;
 
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-                for (llvm::Instruction &I : BB) {
-                    auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
-                    llvm::ModRefInfo MRI = AA.getModRefInfo(&I, Loc);
-
-                    if (llvm::isRefSet(MRI) && !seenMustStore)
+            auto *AI = llvm::cast<llvm::AllocaInst>(V);
+            for (llvm::Instruction &I : BB) {
+                if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
+                    if (LI->getPointerOperand()->stripPointerCasts() == AI && !seenMustStore)
                         info.loadBeforeMustStore = true;
-
-                    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-                        llvm::Value *Ptr = SI->getPointerOperand()->stripPointerCasts();
-                        if (Ptr == GV) {
-                            info.hasMustStore = true;
-                            seenMustStore = true;
-                        }
+                }
+                if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+                    if (SI->getPointerOperand()->stripPointerCasts() == AI) {
+                        info.hasMustStore = true;
+                        seenMustStore = true;
                     }
                 }
-            } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
-                for (llvm::Instruction &I : BB) {
-                    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
-                        if (LI->getPointerOperand()->stripPointerCasts() == AI && !seenMustStore)
+                if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
+                    llvm::Value *dst = MI->getRawDest()->stripPointerCasts();
+                    if (dst == AI) {
+                        info.hasMustStore = true;
+                        seenMustStore = true;
+                    }
+                    if (auto *MT = llvm::dyn_cast<llvm::MemTransferInst>(MI)) {
+                        llvm::Value *src = MT->getRawSource()->stripPointerCasts();
+                        if (src == AI && !seenMustStore)
                             info.loadBeforeMustStore = true;
-                    }
-                    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-                        if (SI->getPointerOperand()->stripPointerCasts() == AI) {
-                            info.hasMustStore = true;
-                            seenMustStore = true;
-                        }
-                    }
-                    if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
-                        llvm::Value *dst = MI->getRawDest()->stripPointerCasts();
-                        if (dst == AI) {
-                            info.hasMustStore = true;
-                            seenMustStore = true;
-                        }
-                        if (auto *MT = llvm::dyn_cast<llvm::MemTransferInst>(MI)) {
-                            llvm::Value *src = MT->getRawSource()->stripPointerCasts();
-                            if (src == AI && !seenMustStore)
-                                info.loadBeforeMustStore = true;
-                        }
                     }
                 }
             }
@@ -170,7 +153,7 @@ computeIneligGlobalAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const 
     }
 
     // Phase 2: Dataflow iteration.
-    for (llvm::Value *V : globalAllocaIneligs) {
+    for (llvm::Value *V : allocaIneligs) {
         llvm::DenseMap<const llvm::BasicBlock *, bool> liveIn, liveOut;
         for (const llvm::BasicBlock *BB : cfg.getBlocks()) {
             liveIn[BB] = false;

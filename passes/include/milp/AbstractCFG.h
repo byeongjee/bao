@@ -95,7 +95,7 @@ class AbstractCFG final : public ICFGView, public IStateView, public IEnergyView
     std::map<NodeId, std::set<llvm::GlobalVariable *>> eligLiveIn_;
     std::map<BlockGVKey, bool> eligDefIndicator_;
 
-    // Ineligible (non-candidate globals, allocas, SSA values)
+    // Ineligible (allocas, SSA values)
     std::vector<llvm::Value *> ineligibleObjs_;
     std::set<llvm::Value *> ineligibleObjSet_;
     std::map<NodeId, std::set<llvm::Value *>> ineligLiveIn_;

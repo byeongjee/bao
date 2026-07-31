@@ -31,9 +31,10 @@ class ICFGView {
 
 /// Abstract state-analysis view consumed by the MILP optimizer.
 ///
-/// Eligible globals (V_elig) have placeInVm/needRestore decision variables.
-/// Ineligible objects (V_inelig) — non-candidate globals, allocas, cross-block
-/// SSA values — always reside in VM and only get pending/commit variables.
+/// Eligible globals (V_elig) get VM-placement (m) and need-restore (rHat)
+/// decision variables. Ineligible objects (V_inelig) — allocas and cross-block
+/// SSA values — always reside in VM (m fixed to 1) and participate only in
+/// the dirty/save (d/s) model.
 class IStateView {
   public:
     virtual ~IStateView() = default;
@@ -43,7 +44,7 @@ class IStateView {
     virtual const std::set<llvm::GlobalVariable *> &getEligLiveIn(NodeId block) const = 0;
     virtual bool getEligDefIndicator(NodeId block, llvm::GlobalVariable *gv) const = 0;
 
-    // -- Ineligible (non-candidate globals, allocas, SSA registers) --
+    // -- Ineligible (allocas, SSA registers) --
     virtual const std::vector<llvm::Value *> &getIneligibleObjs() const = 0;
     virtual bool isIneligible(llvm::Value *v) const = 0;
     virtual const std::set<llvm::Value *> &getIneligLiveIn(NodeId block) const = 0;
