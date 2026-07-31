@@ -77,6 +77,14 @@ make
 
 This produces `CheckpointPass.so`.
 
+### 3. Enable git hooks (one-time, for contributors)
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This activates the pre-commit hook in `.githooks/`, which auto-formats staged C/C++ files with clang-format and runs `ruff format` + `ruff check` on staged Python files.
+
 ## Usage
 
 ### 1. Compile C to LLVM IR

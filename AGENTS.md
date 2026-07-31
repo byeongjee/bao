@@ -21,6 +21,10 @@ make
 
 Output: `passes/build/CheckpointPass.so` (main plugin), `passes/build/bb-debuginfo/BBDebugInfoPass.so`, `passes/build/bb-energy-analyzer/bb-energy-analyzer`
 
+### Git Hooks
+
+One-time setup per clone: `git config core.hooksPath .githooks`. The pre-commit hook auto-formats staged C/C++ files with clang-format and runs `ruff format` + `ruff check` on staged Python files.
+
 ## Running Passes
 
 ```bash
