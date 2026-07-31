@@ -75,9 +75,8 @@ uv sync
 uv run ckpt compile milp test --cap 1uF
 
 # Compile + flash + measure on an attached MSP430 board. Running the bench
-# itself requires a Saleae Logic analyzer driven through the Logic 2
-# automation server (`uv sync --extra saleae`). Degrades to compile-only
-# if no device is detected:
+# itself requires a Saleae Logic analyzer — see docs/saleae.md for setup.
+# Degrades to compile-only if no device is detected:
 uv run ckpt bench milp test --cap 1uF --csv results.csv
 ```
 

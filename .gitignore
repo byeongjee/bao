@@ -39,6 +39,5 @@ tests/dwarf-validation/output/
 .Rlib/
 AGENTS.md
 benchmarks/milp_benchmark_summary.csv
-docs/
 scripts/.omx/
 typescript
