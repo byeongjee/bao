@@ -23,7 +23,6 @@ struct SchematicParams {
                                     // Differs by opt level (O0: memory-resident; O3: register).
     double callCost;                // Per-call overhead charged once at each function's entry
                                     // (reference self.call_cost, schematic.py:62,184-186).
-    unsigned maxPaths;              // Maximum paths to enumerate
     bool addDebugMarkers = false;   // Emit debug marker calls
     bool forceCheckpointOnIncompatibleLoops = false; // Force checkpoint at loop header
                                                      // when inner loop allocation conflicts

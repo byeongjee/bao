@@ -10,6 +10,5 @@
   "mem_restore_energy_per_byte": 0.5,
   "vm_capacity_bytes": 128,
   "loop_increment_cost_nvm": 4.0,
-  "call_cost": 4.0,
-  "max_paths": 10
+  "call_cost": 4.0
 }
