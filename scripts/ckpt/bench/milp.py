@@ -26,9 +26,10 @@ from .config import (
     discover_capacitors,
 )
 from .runner import (
+    MATRIX_COMPILE_ONLY_WARNING,
     CompileResult,
-    check_device_available,
     nvm_counter,
+    optional_saleae,
     run_benchmark_matrix,
 )
 
@@ -177,68 +178,56 @@ def run_milp_benchmarks(
         else:
             energy_config = default_energy_config(env, "milp")
 
-    saleae_manager = None
-    if check_device_available():
-        from ..device.saleae import discover_saleae
+    # Shared workdir for all compilations (cleaned up on exit)
+    with (
+        optional_saleae(MATRIX_COMPILE_ONLY_WARNING) as saleae_manager,
+        compilation_workdir(prefix="milp_bench_") as workdir,
+    ):
 
-        saleae_manager = discover_saleae()
-    else:
-        logger.warning(
-            "No MSP430 device detected; running compile-only (no flash, timing, "
-            "or NVM readback). Runtime CSV columns will be left blank."
-        )
+        def compile_fn(bench_path: Path, cap: CapacitorConfig) -> CompileResult:
+            bench_name = bench_path.stem
+            out_dir = workdir / f"{bench_name}_{cap.label}"
+            out_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        # Shared workdir for all compilations (cleaned up on exit)
-        with compilation_workdir(prefix="milp_bench_") as workdir:
-
-            def compile_fn(bench_path: Path, cap: CapacitorConfig) -> CompileResult:
-                bench_name = bench_path.stem
-                out_dir = workdir / f"{bench_name}_{cap.label}"
-                out_dir.mkdir(parents=True, exist_ok=True)
-
-                opts = MilpCompileOptions(
-                    input_c=bench_path,
-                    energy_config=energy_config,
-                    milp_config=cap.config_path,
-                    output=out_dir / bench_name,
-                    estimator_mode=estimator_mode,
-                    pass_log_level=pass_log_level,
-                    debug=False,
-                    link=True,
-                    halt_mode=halt_mode,
-                    device_debug=device_debug,
-                    cpu_freq=cpu_freq,
-                    opt_level=3,
-                    clang_opt_level=3,
-                    milp_gap=milp_gap,
-                    milp_log_file="",
-                    coarse_allocation=coarse_allocation,
-                )
-
-                result: MilpCompileResult = compile_milp(tc, env, opts)
-                return CompileResult(
-                    out_dir=out_dir,
-                    pass_output=result.pass_output,
-                    stats_json=result.stats_json,
-                    profiling_time_ms=result.profiling_time_ms,
-                )
-
-            run_benchmark_matrix(
-                env,
-                tc,
-                bench_paths,
-                capacitors,
-                compile_fn,
-                output_csv,
-                nvm_symbols=_NVM_SYMBOLS,
+            opts = MilpCompileOptions(
+                input_c=bench_path,
+                energy_config=energy_config,
+                milp_config=cap.config_path,
+                output=out_dir / bench_name,
+                estimator_mode=estimator_mode,
+                pass_log_level=pass_log_level,
+                debug=False,
+                link=True,
+                halt_mode=halt_mode,
                 device_debug=device_debug,
-                csv_header=CSV_HEADER,
-                row_builder=build_row,
-                saleae_manager=saleae_manager,
-                capture_timeout_seconds=capture_timeout_seconds,
-                accumulate_keys_file=accumulate_keys_file,
+                cpu_freq=cpu_freq,
+                opt_level=3,
+                clang_opt_level=3,
+                milp_gap=milp_gap,
+                milp_log_file="",
+                coarse_allocation=coarse_allocation,
             )
-    finally:
-        if saleae_manager is not None:
-            saleae_manager.close()
+
+            result: MilpCompileResult = compile_milp(tc, env, opts)
+            return CompileResult(
+                out_dir=out_dir,
+                pass_output=result.pass_output,
+                stats_json=result.stats_json,
+                profiling_time_ms=result.profiling_time_ms,
+            )
+
+        run_benchmark_matrix(
+            env,
+            tc,
+            bench_paths,
+            capacitors,
+            compile_fn,
+            output_csv,
+            nvm_symbols=_NVM_SYMBOLS,
+            device_debug=device_debug,
+            csv_header=CSV_HEADER,
+            row_builder=build_row,
+            saleae_manager=saleae_manager,
+            capture_timeout_seconds=capture_timeout_seconds,
+            accumulate_keys_file=accumulate_keys_file,
+        )
