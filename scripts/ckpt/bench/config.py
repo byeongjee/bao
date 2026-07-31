@@ -104,3 +104,13 @@ def default_energy_config(env: ProjectEnv, algorithm: str) -> Path:
             f"Expected one of: {', '.join(_ENERGY_CONFIG_MAP)}"
         )
     return env.project_dir / "benchmarks" / filename
+
+
+def cap_sort_key(cap: str) -> tuple[float, str]:
+    """Sort key ordering capacitor labels numerically (e.g. 5uF < 10uF)."""
+    if cap.endswith("uF"):
+        try:
+            return float(cap.removesuffix("uF")), cap
+        except ValueError:
+            pass
+    return float("inf"), cap

@@ -137,35 +137,3 @@ def extract_symbol_values(
         else:
             values[name] = int.from_bytes(data[offset : offset + size], "little")
     return values
-
-
-def read_nvm_symbols(
-    nm_path: str,
-    elf_path: Path,
-    symbol_names: list[str],
-    *,
-    md_output: str | None = None,
-    timeout: int = 10,
-) -> dict[str, int]:
-    """High-level: resolve symbols and extract values from hex dump output.
-
-    If *md_output* is provided, it is parsed directly as mspdebug ``md``
-    output.  Otherwise a ``DeviceError`` is raised — callers should run
-    mspdebug externally and pass the captured output here.
-
-    Returns {symbol_name: value}.
-    """
-    symbols = resolve_symbols(nm_path, elf_path, symbol_names)
-    base_addr, total_len = compute_md_region(symbols)
-
-    if md_output is None:
-        raise DeviceError(
-            "No md_output provided; run mspdebug externally and pass the "
-            "hex dump output via the md_output parameter"
-        )
-
-    data = parse_hex_dump(md_output)
-    if len(data) < total_len:
-        raise DeviceError(f"Expected {total_len} bytes from hex dump, got {len(data)}")
-
-    return extract_symbol_values(data, symbols, symbol_names, base_addr)
