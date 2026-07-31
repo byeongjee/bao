@@ -53,7 +53,7 @@ def compile_to_ir(
     input_c: Path,
     output_ll: Path,
     *,
-    clang_opt_level: int = 2,
+    clang_opt_level: int,
     debug: bool,
     device_debug: bool,
     extra_includes: list[str] | None = None,

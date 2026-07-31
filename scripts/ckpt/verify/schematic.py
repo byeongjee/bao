@@ -63,6 +63,9 @@ def verify_schematic(
                 clang_opt_level=clang_opt_level,
                 force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
                 recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
+                save_temps=False,
+                trace_file=None,
+                linker_script=None,
             ),
         )
         return InstrumentedOutput(

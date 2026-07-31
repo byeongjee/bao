@@ -121,6 +121,9 @@ def _collect_trace(
         clang_opt_level=clang_opt_level,
         force_checkpoint_on_incompatible_loops=False,
         recompute_energy_after_new_checkpoint=False,
+        save_temps=False,
+        trace_file=None,
+        linker_script=None,
         extra_includes=[str(env.project_dir / "passes" / "runtime")],
     )
     trace_result: SchematicCompileResult = compile_schematic(tc, env, trace_opts)
@@ -173,14 +176,14 @@ def run_schematic_benchmarks(
     env: ProjectEnv,
     tc: Toolchain,
     *,
-    benchmarks: list[str] | None = None,
-    caps: list[str] | None = None,
-    output_csv: Path | None = None,
+    benchmarks: list[str] | None,
+    caps: list[str] | None,
+    output_csv: Path | None,
     device_debug: bool,
     capture_timeout_seconds: float,
     halt_mode: str,
-    energy_config: Path | None = None,
-    trace_config: Path | None = None,
+    energy_config: Path | None,
+    trace_config: Path | None,
     estimator_mode: str,
     cpu_freq: int,
     clang_opt_level: int,
@@ -284,8 +287,10 @@ def run_schematic_benchmarks(
                 recompute_energy_after_new_checkpoint=(
                     recompute_energy_after_new_checkpoint
                 ),
-                extra_includes=[str(env.project_dir / "passes" / "runtime")],
+                save_temps=False,
                 trace_file=trace_json,
+                linker_script=None,
+                extra_includes=[str(env.project_dir / "passes" / "runtime")],
             )
             result: SchematicCompileResult = compile_schematic(tc, env, compile_opts)
             return CompileResult(

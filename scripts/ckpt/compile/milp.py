@@ -48,7 +48,7 @@ class MilpCompileOptions:
     milp_gap: float
     milp_log_file: str
     coarse_allocation: bool
-    save_temps: bool = False
+    save_temps: bool
     extra_includes: list[str] = field(default_factory=list)
 
 

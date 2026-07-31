@@ -9,14 +9,13 @@ from ckpt.analysis.strip_mining import parse_strip_mining_log
 from ckpt.bench.config import discover_capacitors
 from ckpt.env import ProjectEnv
 
-
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 
 def test_discover_capacitors_includes_50uf_by_default() -> None:
     env = ProjectEnv.from_environ(PROJECT_DIR)
 
-    caps = discover_capacitors(env, "milp")
+    caps = discover_capacitors(env, "milp", None)
 
     assert [cap.label for cap in caps] == ["1uF", "5uF", "10uF", "50uF", "100uF"]
 

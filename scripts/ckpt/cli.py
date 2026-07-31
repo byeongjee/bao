@@ -592,6 +592,7 @@ def compile_rockclimb_cmd(
             cpu_freq=cpu_freq_hz,
             max_unroll=max_unroll,
             save_temps=save_temps,
+            linker_script=None,
         ),
     )
 
@@ -690,6 +691,7 @@ def _compile_schematic_impl(
             extra_includes=list(extra_includes),
             trace_file=_path_or_none(trace_file),
             save_temps=save_temps,
+            linker_script=None,
             force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
             recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
         ),
@@ -1232,6 +1234,8 @@ def bench_chunked_cmd(
         energy_config=_path_or_none(energy_config),
         capture_timeout_seconds=timeout,
         cpu_freq=_mhz_to_hz(cpu_freq),
+        clang_opt_level=3,
+        opt_level=3,
         pass_log_level=ctx.obj["pass_log_level"],
     )
 
@@ -1528,5 +1532,11 @@ def device_read_serial_cmd(timeout: float, end_marker: str) -> None:
     """Read serial output from a connected MSP430 device."""
     from .device.serial import read_serial_output
 
-    output = read_serial_output(timeout=timeout, end_marker=end_marker)
+    output = read_serial_output(
+        device=None,
+        baud=9600,
+        timeout=timeout,
+        end_marker=end_marker,
+        reset_cmd=None,
+    )
     click.echo(output)

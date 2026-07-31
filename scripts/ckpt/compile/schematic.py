@@ -52,10 +52,10 @@ class SchematicCompileOptions:
     clang_opt_level: int
     force_checkpoint_on_incompatible_loops: bool
     recompute_energy_after_new_checkpoint: bool
-    save_temps: bool = False
+    save_temps: bool
+    trace_file: Path | None
+    linker_script: Path | None
     extra_includes: list[str] = field(default_factory=list)
-    trace_file: Path | None = None
-    linker_script: Path | None = None
 
 
 @dataclass
@@ -348,10 +348,10 @@ def _run_schematic_pass(
     input_ll: Path,
     trace_json: Path,
     *,
-    energy_config: Path | None = None,
+    energy_config: Path,
 ) -> str:
     """Run the SCHEMATIC opt pass and return its captured output."""
-    cfg = energy_config or opts.energy_config
+    cfg = energy_config
     assert opts.schematic_config is not None, "schematic_config required for pass"
     schematic_cfg = _resolve_schematic_config(
         opts.schematic_config,

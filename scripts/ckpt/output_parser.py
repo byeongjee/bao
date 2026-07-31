@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+# PassStatistics and NvmCounters are parse-result containers: every field is
+# genuinely optional depending on what the tool printed, so they are a
+# documented exception to the no-default-field convention.
 @dataclass
 class PassStatistics:
     """Parsed pass statistics from compiler output.

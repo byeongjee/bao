@@ -192,12 +192,12 @@ def _normalize_data(
 def plot_benchmarks(
     *,
     csv_dir: Path,
-    metric: str = "prologue",
-    algorithms: list[str] | None = None,
-    benchmarks: list[str] | None = None,
-    capacitors: list[str] | None = None,
-    normalize: str | None = None,
-    output_file: Path | None = None,
+    metric: str,
+    algorithms: list[str] | None,
+    benchmarks: list[str] | None,
+    capacitors: list[str] | None,
+    normalize: str | None,
+    output_file: Path | None,
 ) -> None:
     """Plot benchmark comparison chart.
 
