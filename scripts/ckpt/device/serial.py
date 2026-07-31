@@ -14,7 +14,7 @@ import time
 
 import serial as pyserial
 
-from ..runner import DeviceError
+from ..errors import DeviceError
 
 
 def find_device() -> str | None:

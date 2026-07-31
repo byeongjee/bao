@@ -3,27 +3,42 @@
 from __future__ import annotations
 
 import pytest
-
 from ckpt.device.nvm import (
     compute_md_region,
     extract_symbol_values,
     format_md_command,
     parse_hex_dump,
 )
-from ckpt.runner import DeviceError
-
+from ckpt.errors import DeviceError
 
 # ---------------------------------------------------------------------------
 # parse_hex_dump
 # ---------------------------------------------------------------------------
+
 
 class TestParseHexDump:
     def test_single_line(self):
         line = "    04000: 0a 00 05 00 01 00 00 00  00 00 00 00 00 00 00 00  |................|"
         data = parse_hex_dump(line)
         assert data == bytearray(
-            [0x0A, 0x00, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00,
-             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+            [
+                0x0A,
+                0x00,
+                0x05,
+                0x00,
+                0x01,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+            ]
         )
 
     def test_multi_line(self):
@@ -37,11 +52,7 @@ class TestParseHexDump:
         assert data[16] == 0xFF
 
     def test_lines_without_pipe_ignored(self):
-        output = (
-            "Reading memory...\n"
-            "    04000: 0a 00  |..|\n"
-            "Done.\n"
-        )
+        output = "Reading memory...\n    04000: 0a 00  |..|\nDone.\n"
         data = parse_hex_dump(output)
         assert data == bytearray([0x0A, 0x00])
 
@@ -52,6 +63,7 @@ class TestParseHexDump:
 # ---------------------------------------------------------------------------
 # extract_symbol_values
 # ---------------------------------------------------------------------------
+
 
 class TestExtractSymbolValues:
     def test_one_byte(self):
@@ -102,6 +114,7 @@ class TestExtractSymbolValues:
 # compute_md_region
 # ---------------------------------------------------------------------------
 
+
 class TestComputeMdRegion:
     def test_single_symbol(self):
         symbols = {"x": (0x4000, 2)}
@@ -119,6 +132,7 @@ class TestComputeMdRegion:
 # ---------------------------------------------------------------------------
 # format_md_command
 # ---------------------------------------------------------------------------
+
 
 class TestFormatMdCommand:
     def test_basic(self):

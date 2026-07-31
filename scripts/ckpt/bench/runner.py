@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from saleae.automation import Manager
 
 from ..env import ProjectEnv
-from ..errors import CkptError, DeviceError
+from ..errors import CkptError, CompilationError, DeviceError
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
@@ -36,7 +36,6 @@ from ..output_parser import (
     parse_nvm_output,
     parse_pass_output,
 )
-from ..runner import CompilationError
 from ..toolchain import Toolchain
 from .config import CapacitorConfig
 

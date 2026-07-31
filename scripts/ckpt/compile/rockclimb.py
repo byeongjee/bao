@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import CompilationError, ToolError, run
+from ..errors import CompilationError, ToolError
+from ..runner import run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from . import common

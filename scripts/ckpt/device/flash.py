@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..runner import DeviceError, run
+from ..errors import DeviceError
+from ..runner import run
 from ..toolchain import Toolchain
 from . import nvm
 

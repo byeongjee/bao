@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import CompilationError, StepResult, run
+from ..errors import CompilationError
+from ..runner import StepResult, run
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
 from . import common

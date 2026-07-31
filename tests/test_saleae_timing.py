@@ -5,12 +5,12 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
+from typing import Self
 from unittest.mock import MagicMock
 
 import pytest
-
 from ckpt.device.saleae import _extract_timing, _wait_for_capture, saleae_run
-from ckpt.runner import DeviceError
+from ckpt.errors import DeviceError
 
 
 def write_capture_csv(tmp_path: Path, rows: list[tuple[float, int]]) -> Path:
@@ -82,7 +82,7 @@ class FakeCapture:
     def __init__(self, csv_lines: list[str]):
         self.csv_lines = csv_lines
 
-    def __enter__(self) -> FakeCapture:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
@@ -105,7 +105,9 @@ class FakeManager:
         self.capture_rows = capture_rows
         self.calls = 0
 
-    def start_capture(self, device_configuration: object, capture_configuration: object) -> FakeCapture:
+    def start_capture(
+        self, device_configuration: object, capture_configuration: object
+    ) -> FakeCapture:
         del device_configuration, capture_configuration
         csv_lines = capture_csv_lines(self.capture_rows[self.calls])
         self.calls += 1
@@ -124,7 +126,9 @@ class FakeFlakyManager:
         self.error_message = error_message
         self.calls = 0
 
-    def start_capture(self, device_configuration: object, capture_configuration: object) -> FakeCapture:
+    def start_capture(
+        self, device_configuration: object, capture_configuration: object
+    ) -> FakeCapture:
         del device_configuration, capture_configuration
         self.calls += 1
         if self.calls <= self.failures_before_success:
@@ -159,7 +163,9 @@ def install_fake_saleae_automation(monkeypatch: pytest.MonkeyPatch) -> None:
         PULSE_HIGH = "pulse_high"
 
     class LogicDeviceConfiguration:
-        def __init__(self, enabled_digital_channels: list[int], digital_sample_rate: int):
+        def __init__(
+            self, enabled_digital_channels: list[int], digital_sample_rate: int
+        ):
             self.enabled_digital_channels = enabled_digital_channels
             self.digital_sample_rate = digital_sample_rate
 
@@ -283,7 +289,9 @@ class TestSaleaeRun:
             error_message="No physical devices found",
         )
 
-        with pytest.raises(DeviceError, match="Cannot start Saleae capture after 3 attempts"):
+        with pytest.raises(
+            DeviceError, match="Cannot start Saleae capture after 3 attempts"
+        ):
             saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0, 60.0)
 
         assert sleep_calls == [0.5, 0.5]
@@ -294,8 +302,7 @@ class TestSaleaeRun:
         monkeypatch: pytest.MonkeyPatch,
     ):
         install_fake_saleae_automation(monkeypatch)
-        monkeypatch.setattr("ckpt.device.saleae.flash",
-                            lambda elf_path, timeout: None)
+        monkeypatch.setattr("ckpt.device.saleae.flash", lambda elf_path, timeout: None)
 
         deadline_exceeded = object()
 
@@ -305,15 +312,16 @@ class TestSaleaeRun:
 
         fake_grpc = types.ModuleType("grpc")
         fake_grpc.RpcError = RpcError
-        fake_grpc.StatusCode = types.SimpleNamespace(DEADLINE_EXCEEDED=deadline_exceeded)
+        fake_grpc.StatusCode = types.SimpleNamespace(
+            DEADLINE_EXCEEDED=deadline_exceeded
+        )
         request = object()
         fake_saleae_grpc = types.ModuleType("saleae.grpc")
         fake_saleae_grpc.saleae_pb2 = MagicMock()
         fake_saleae_grpc.saleae_pb2.WaitCaptureRequest.return_value = request
         monkeypatch.setitem(sys.modules, "grpc", fake_grpc)
         monkeypatch.setitem(sys.modules, "saleae.grpc", fake_saleae_grpc)
-        monkeypatch.setattr("ckpt.device.saleae._wait_for_capture",
-                            _wait_for_capture)
+        monkeypatch.setattr("ckpt.device.saleae._wait_for_capture", _wait_for_capture)
 
         capture = MagicMock()
         capture.__enter__.return_value = capture

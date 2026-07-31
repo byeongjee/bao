@@ -8,15 +8,7 @@ import sys
 import time
 from dataclasses import dataclass
 
-# Exception classes — canonical definitions live in errors.py.
-# Re-exported here for backward compatibility.
-from .errors import (  # noqa: F401
-    CompilationError,
-    ConfigError,
-    DeviceError,
-    InfeasibleError,
-    ToolError,
-)
+from .errors import ToolError
 
 logger = logging.getLogger(__name__)
 
