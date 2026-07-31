@@ -34,9 +34,13 @@ class SchematicPass : public llvm::PassInfoMixin<SchematicPass> {
     /// holds already-solved callee summaries for folding at call sites. On
     /// success the function is instrumented, `out` is filled, and true is
     /// returned; a benign skip or hard failure returns false (no summary).
+    /// `mutatedIR` is set when the function's IR was modified even if solving
+    /// failed afterwards (e.g. alloca hoisting before an infeasible solve), so
+    /// the driver can report accurate PreservedAnalyses.
     bool solveFunction(llvm::Function &F, llvm::FunctionAnalysisManager &FAM,
                        const SchematicParams &params, VMAddressTracker &sharedVMTracker,
-                       const std::map<llvm::Function *, CallSummary> &summaries, CallSummary &out);
+                       const std::map<llvm::Function *, CallSummary> &summaries, CallSummary &out,
+                       bool &mutatedIR);
 };
 
 } // namespace checkpoint

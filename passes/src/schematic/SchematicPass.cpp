@@ -274,7 +274,7 @@ static void captureCallSummary(CallSummary &out, const SchematicSolution &soluti
 bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
                                   const SchematicParams &params, VMAddressTracker &sharedVMTracker,
                                   const std::map<Function *, CallSummary> &summaries,
-                                  CallSummary &out) {
+                                  CallSummary &out, bool &mutatedIR) {
     const auto totalStart = std::chrono::steady_clock::now();
 
     // Step 1: Obtain LLVM analyses.
@@ -282,7 +282,24 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
     auto &AA = AM.getResult<AAManager>(F);
 
-    // Step 2: Create base checkpoint context (estimator + CFG).
+    // Step 2: Hoist non-entry static allocas to the entry block. Must happen
+    // BEFORE the checkpoint context is created: the context computes per-block
+    // energy costs, and hoisting afterwards would leave the costs attributed to
+    // the blocks the allocas were moved out of.
+    BasicBlock &entryBB = F.getEntryBlock();
+    for (BasicBlock &BB : F) {
+        if (&BB == &entryBB)
+            continue;
+        for (auto it = BB.begin(); it != BB.end();) {
+            auto *AI = dyn_cast<AllocaInst>(&*it++);
+            if (AI && isa<ConstantInt>(AI->getArraySize())) {
+                AI->moveBefore(entryBB, entryBB.getFirstInsertionPt());
+                mutatedIR = true;
+            }
+        }
+    }
+
+    // Step 3: Create base checkpoint context (estimator + CFG).
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(), "schematic pass");
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip())
@@ -291,19 +308,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     }
     auto &ctx = *ctxResult.context;
 
-    // Step 3: SCHEMATIC params + CLI overrides are resolved once by the driver.
-
-    // Step 4: Hoist non-entry static allocas to the entry block.
-    BasicBlock &entryBB = F.getEntryBlock();
-    for (BasicBlock &BB : F) {
-        if (&BB == &entryBB)
-            continue;
-        for (auto it = BB.begin(); it != BB.end();) {
-            auto *AI = dyn_cast<AllocaInst>(&*it++);
-            if (AI && isa<ConstantInt>(AI->getArraySize()))
-                AI->moveBefore(entryBB, entryBB.getFirstInsertionPt());
-        }
-    }
+    // Step 4: SCHEMATIC params + CLI overrides are resolved once by the driver.
 
     // Step 5: Run SchematicStateAnalysis.
     SchematicStateAnalysis state(F, AA, *ctx.cfg);
@@ -560,10 +565,15 @@ PreservedAnalyses SchematicPass::run(Module &M, ModuleAnalysisManager &MAM) {
                 continue;
             }
             CallSummary summary;
-            if (solveFunction(*F, FAM, params, vmTracker, summaries, summary)) {
+            // Track IR mutation separately from solve success: a failed solve may
+            // still have hoisted allocas, and reporting PreservedAnalyses::all()
+            // after mutating IR would leave stale analyses behind.
+            bool mutatedIR = false;
+            if (solveFunction(*F, FAM, params, vmTracker, summaries, summary, mutatedIR)) {
                 summaries[F] = std::move(summary);
                 changed = true;
             }
+            changed |= mutatedIR;
         }
     }
 
