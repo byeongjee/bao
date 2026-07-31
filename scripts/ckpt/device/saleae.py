@@ -147,34 +147,55 @@ def saleae_run(
             time.sleep(_CAPTURE_START_RETRY_DELAY_SECONDS)
             continue
 
-        with capture_context as capture:
-            try:
-                session.release(flash_timeout)
-                _wait_for_capture(capture, capture_timeout_seconds)
-            except Exception:
-                _stop_capture_quietly(capture)
-                raise
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                csv_path = Path(tmpdir) / "digital.csv"
-                capture.export_raw_data_csv(
-                    directory=tmpdir,
-                    digital_channels=[_SALEAE_CHANNEL],
-                )
+        try:
+            with capture_context as capture:
                 try:
-                    return _extract_timing(csv_path)
-                except DeviceError as exc:
-                    if not _is_ambiguous_capture(exc):
-                        raise
-                    last_ambiguous_error = exc
-                    if attempt == _MAX_CAPTURE_ATTEMPTS:
-                        break
-                    logger.warning(
-                        "Ambiguous Saleae capture for %s on attempt %d/%d; retrying.",
-                        elf_path,
-                        attempt,
-                        _MAX_CAPTURE_ATTEMPTS,
+                    session.release(flash_timeout)
+                    _wait_for_capture(capture, capture_timeout_seconds)
+                except Exception:
+                    _stop_capture_quietly(capture)
+                    raise
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    csv_path = Path(tmpdir) / "digital.csv"
+                    capture.export_raw_data_csv(
+                        directory=tmpdir,
+                        digital_channels=[_SALEAE_CHANNEL],
                     )
+                    try:
+                        return _extract_timing(csv_path)
+                    except DeviceError as exc:
+                        if not _is_ambiguous_capture(exc):
+                            raise
+                        last_ambiguous_error = exc
+                        if attempt == _MAX_CAPTURE_ATTEMPTS:
+                            break
+                        logger.warning(
+                            "Ambiguous Saleae capture for %s on attempt %d/%d; retrying.",
+                            elf_path,
+                            attempt,
+                            _MAX_CAPTURE_ATTEMPTS,
+                        )
+        except DeviceError:
+            # Our own errors (no pulses, capture wait timeout, mspdebug
+            # failures) keep their existing semantics.
+            raise
+        # Deliberately broad: Logic 2 runtime hiccups (e.g. "Error
+        # interacting with device during capture: ReadTimeout" raised from
+        # the capture context's close()) are transient — retry the attempt.
+        except Exception as exc:  # noqa: BLE001
+            last_start_error = exc
+            if attempt == _MAX_CAPTURE_ATTEMPTS:
+                break
+            logger.warning(
+                "Saleae capture attempt %d/%d failed for %s; retrying in %.1fs. Error: %s",
+                attempt,
+                _MAX_CAPTURE_ATTEMPTS,
+                elf_path,
+                _CAPTURE_START_RETRY_DELAY_SECONDS,
+                exc,
+            )
+            time.sleep(_CAPTURE_START_RETRY_DELAY_SECONDS)
 
     if last_ambiguous_error is not None:
         raise DeviceError(
@@ -183,7 +204,7 @@ def saleae_run(
 
     assert last_start_error is not None
     raise DeviceError(
-        "Cannot start Saleae capture after "
+        "Saleae capture did not complete after "
         f"{_MAX_CAPTURE_ATTEMPTS} attempts. "
         "Is a physical Logic device connected and visible to Logic 2? "
         f"Error: {last_start_error}"
