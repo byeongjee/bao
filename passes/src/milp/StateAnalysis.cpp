@@ -421,22 +421,19 @@ void StateAnalysis::computeAccessMaps() {
         }
     }
 
-    // Alloca def tracking: scan users of each ineligible AllocaInst.
+    // Alloca def tracking: use alias analysis so writes through GEPs
+    // (array elements, struct fields) are visible, matching the
+    // eligible-global approach above.
     for (llvm::Value *V : ineligibleObjs_) {
         auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V);
         if (!AI)
             continue;
-        for (const llvm::User *U : AI->users()) {
-            if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(U)) {
-                if (SI->getPointerOperand()->stripPointerCasts() == AI) {
-                    const llvm::BasicBlock *BBKey = SI->getParent();
-                    ineligDefVars_[BBKey].insert(AI);
-                }
-            }
-            if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(U)) {
-                if (MI->getRawDest()->stripPointerCasts() == AI) {
-                    const llvm::BasicBlock *BBKey = MI->getParent();
-                    ineligDefVars_[BBKey].insert(AI);
+        auto Loc = llvm::MemoryLocation::getBeforeOrAfter(AI);
+        for (llvm::BasicBlock &BB : F_) {
+            for (llvm::Instruction &I : BB) {
+                if (llvm::isModSet(AA_.getModRefInfo(&I, Loc))) {
+                    ineligDefVars_[&BB].insert(AI);
+                    break;
                 }
             }
         }
@@ -457,7 +454,7 @@ void StateAnalysis::computeEligLiveness() {
 }
 
 void StateAnalysis::computeIneligAllocaLiveness() {
-    auto allocaLive = checkpoint::computeIneligAllocaLiveness(F_, cfg_, ineligibleObjs_);
+    auto allocaLive = checkpoint::computeIneligAllocaLiveness(F_, AA_, cfg_, ineligibleObjs_);
     for (auto &[BB, vals] : allocaLive)
         ineligLiveIn_[BB].insert(vals.begin(), vals.end());
 }

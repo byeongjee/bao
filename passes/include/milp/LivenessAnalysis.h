@@ -24,7 +24,7 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
 /// load-before-must-store analysis.
 /// Returns BB -> set of live-in Values.
 llvm::DenseMap<const llvm::BasicBlock *, std::set<llvm::Value *>>
-computeIneligAllocaLiveness(llvm::Function &F, const CFGAnalysis &cfg,
+computeIneligAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg,
                             const std::vector<llvm::Value *> &ineligibleObjs);
 
 /// Compute edge-aware SSA liveness for ineligible cross-block SSA values.
