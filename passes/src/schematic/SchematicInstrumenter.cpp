@@ -3,6 +3,7 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 #include <cassert>
@@ -407,12 +408,25 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
     // Step 4: Build per-block allocation map from blockAllocation.
     // Allocations were already extended during analysis (SchematicPass Step 9c)
     // to contain all accessed candidate variables.
+    // No two SchematicBlock* entries may map to the same BasicBlock*: the last
+    // one would silently win in blockToAlloc and the rewriting/checkpoint logic
+    // below would use inconsistent allocations, so fail hard before using the map.
+    llvm::DenseMap<llvm::BasicBlock *, const SchematicBlock *> blockToSBlock;
     llvm::DenseMap<llvm::BasicBlock *, const RegionAllocation *> blockToAlloc;
     for (const auto &[sblock, allocPtr] : solution.blockAllocation) {
         if (sblock->isSynthetic() || !allocPtr)
             continue;
-        if (auto *BB = sblock->getLLVMBlock())
-            blockToAlloc[BB] = allocPtr.get();
+        auto *BB = sblock->getLLVMBlock();
+        if (!BB)
+            continue;
+        auto it = blockToSBlock.find(BB);
+        if (it != blockToSBlock.end()) {
+            llvm::report_fatal_error(llvm::Twine("SCHEMATIC: duplicate blockAllocation for BB '") +
+                                     BB->getName() + "': SchematicBlock '" + it->second->getName() +
+                                     "' and '" + sblock->getName() + "'");
+        }
+        blockToSBlock[BB] = sblock;
+        blockToAlloc[BB] = allocPtr.get();
     }
 
     // Step 5: Rewrite accesses per-block based on each block's allocation.
@@ -423,28 +437,6 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
         if (it == blockToAlloc.end())
             continue;
         rewriteAccessesInRegion({&BB}, *it->second);
-    }
-
-    // Assertion: no two SchematicBlock* entries in blockAllocation should map to
-    // the same BasicBlock*. If they do, the last one wins in blockToAlloc and the
-    // rewriting/checkpoint logic may use inconsistent allocations.
-    {
-        llvm::DenseMap<llvm::BasicBlock *, const SchematicBlock *> seen;
-        for (const auto &[sblock, allocPtr] : solution.blockAllocation) {
-            if (sblock->isSynthetic() || !allocPtr)
-                continue;
-            auto *BB = sblock->getLLVMBlock();
-            if (!BB)
-                continue;
-            auto it = seen.find(BB);
-            if (it != seen.end()) {
-                llvm::errs() << "SCHEMATIC: duplicate blockAllocation for BB '" << BB->getName()
-                             << "': SchematicBlock '" << it->second->getName() << "' and '"
-                             << sblock->getName() << "'\n";
-                assert(false && "Duplicate BasicBlock in blockAllocation");
-            }
-            seen[BB] = sblock;
-        }
     }
 
     // Step 7: Entry block — no boundary call (consistent with RockClimb,
