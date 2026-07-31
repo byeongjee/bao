@@ -7,16 +7,37 @@ scripts.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import time
 from pathlib import Path
 
 from ..env import ProjectEnv
-from ..runner import CompilationError, StepResult, run
+from ..runner import CompilationError, StepResult, ToolError, run
 from ..toolchain import Toolchain
 
 MATH_LINK_FLAGS = ["-lm"]
+
+
+def raises_compilation_error(fn):
+    """Convert ToolError from subprocess steps into CompilationError.
+
+    ``runner.run`` raises the generic ToolError; compile pipelines report
+    failures as CompilationError (exit code 4, caught by bench/verify
+    loops). Applied to each ``compile_*`` entry point.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except CompilationError:
+            raise
+        except ToolError as exc:
+            raise CompilationError(exc.step, exc.result) from exc
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------

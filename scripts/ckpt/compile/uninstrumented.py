@@ -16,6 +16,7 @@ from .common import (
     compile_to_object,
     link_algorithm,
     optimize_ir,
+    raises_compilation_error,
 )
 
 
@@ -42,6 +43,7 @@ class UninstrumentedCompileResult:
     elf_file: Path | None
 
 
+@raises_compilation_error
 def compile_uninstrumented(
     tc: Toolchain,
     env: ProjectEnv,
