@@ -21,7 +21,7 @@ if "GRPC_ENABLE_FORK_SUPPORT" not in os.environ:
     os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
 
 from ..errors import DeviceError
-from .flash import flash
+from .flash import flash_and_hold
 
 if TYPE_CHECKING:
     from saleae.automation import Manager
@@ -80,9 +80,12 @@ def saleae_run(
     so only the stop pulse fires the trigger.
 
     Flow:
-        1. Start Saleae capture (trigger: PULSE_HIGH, min 1 ms)
-        2. Flash the ELF via mspdebug
-        3. Programming session exits and the target free-runs
+        1. Flash the ELF via mspdebug, keeping the session open — the
+           target stays halted, so no stray pulses can occur while the
+           capture is armed
+        2. Start Saleae capture (trigger: PULSE_HIGH, min 1 ms)
+        3. Release the mspdebug session — the target resets and free-runs
+           exactly once inside the armed capture window
         4. Start pulse (~10 us) is captured but does not trigger
         5. Program runs (GPIO LOW — BOR resets are invisible)
         6. Stop pulse (~5 ms) fires the trigger
@@ -117,6 +120,10 @@ def saleae_run(
     last_ambiguous_error: DeviceError | None = None
     last_start_error: Exception | None = None
     for attempt in range(1, _MAX_CAPTURE_ATTEMPTS + 1):
+        # Flash first, holding the target halted, so the capture window
+        # armed below cannot see pulses from programming-induced resets.
+        session = flash_and_hold(elf_path, flash_timeout)
+
         try:
             capture_context = manager.start_capture(
                 device_configuration=device_config,
@@ -125,6 +132,7 @@ def saleae_run(
         # Deliberately broad: any start failure is retried, then wrapped in
         # DeviceError below.
         except Exception as exc:  # noqa: BLE001
+            session.abort()
             last_start_error = exc
             if attempt == _MAX_CAPTURE_ATTEMPTS:
                 break
@@ -141,7 +149,7 @@ def saleae_run(
 
         with capture_context as capture:
             try:
-                flash(elf_path, flash_timeout)
+                session.release(flash_timeout)
                 _wait_for_capture(capture, capture_timeout_seconds)
             except Exception:
                 _stop_capture_quietly(capture)
