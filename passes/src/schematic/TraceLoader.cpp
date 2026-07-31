@@ -17,6 +17,52 @@ namespace checkpoint {
 
 namespace {
 
+/// Parse one trace entry ({"path"/"trace": [names], "count"/"nb_execution": N}),
+/// accepting both our format and the reference format. Returns std::nullopt
+/// (with a warning) for entries that are malformed or name unknown basic
+/// blocks. Every value's type is validated before get<T>(): the codebase
+/// builds with -fno-exceptions, so an unchecked get<T>() on a mistyped value
+/// would abort the whole opt process instead of skipping the trace.
+static std::optional<EnumeratedPath>
+parseTraceEntry(const json &traceObj,
+                const llvm::DenseMap<llvm::StringRef, SchematicBlock *> &nameToBlock,
+                const std::string &context) {
+    if (!traceObj.is_object()) {
+        PLOGW << "TraceLoader: trace entry in " << context << " is not an object, skipping trace";
+        return std::nullopt;
+    }
+    const char *pathKey = traceObj.contains("path") ? "path" : "trace";
+    const char *countKey = traceObj.contains("count") ? "count" : "nb_execution";
+    if (!traceObj.contains(pathKey) || !traceObj.contains(countKey)) {
+        PLOGW << "TraceLoader: trace entry in " << context
+              << " is missing path/count, skipping trace";
+        return std::nullopt;
+    }
+    if (!traceObj[pathKey].is_array() || !traceObj[countKey].is_number_unsigned()) {
+        PLOGW << "TraceLoader: trace entry in " << context
+              << " has a non-array path or non-integer count, skipping trace";
+        return std::nullopt;
+    }
+
+    EnumeratedPath ep;
+    for (const auto &bbName : traceObj[pathKey]) {
+        if (!bbName.is_string()) {
+            PLOGW << "TraceLoader: non-string BB name in " << context << ", skipping trace";
+            return std::nullopt;
+        }
+        std::string name = bbName.get<std::string>();
+        auto it = nameToBlock.find(StringRef(name));
+        if (it == nameToBlock.end()) {
+            PLOGW << "TraceLoader: BB '" << name << "' not found in " << context
+                  << ", skipping trace";
+            return std::nullopt;
+        }
+        ep.blocks.push_back(it->second);
+    }
+    ep.count = traceObj[countKey].get<unsigned>();
+    return ep;
+}
+
 static LoadedLoopTrace makeCanonicalLoopTrace(Loop *L, SchematicGraph &graph) {
     LoadedLoopTrace llt;
     llt.loop = L;
@@ -353,31 +399,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
     // -----------------------------------------------------------------------
     if (funcObj.contains("traces") && funcObj["traces"].is_array()) {
         for (const auto &traceObj : funcObj["traces"]) {
-            // Accept both our format ("path"/"count") and reference format
-            // ("trace"/"nb_execution").
-            const char *pathKey = traceObj.contains("path") ? "path" : "trace";
-            const char *countKey = traceObj.contains("count") ? "count" : "nb_execution";
-            if (!traceObj.contains(pathKey) || !traceObj.contains(countKey))
-                continue;
-
-            EnumeratedPath ep;
-            bool valid = true;
-            for (const auto &bbName : traceObj[pathKey]) {
-                std::string name = bbName.get<std::string>();
-                auto it = nameToBlock_.find(StringRef(name));
-                if (it == nameToBlock_.end()) {
-                    PLOGW << "TraceLoader: BB '" << name << "' not found in " << funcName
-                          << ", skipping trace";
-                    valid = false;
-                    break;
-                }
-                ep.blocks.push_back(it->second);
-            }
-            if (!valid)
-                continue;
-
-            ep.count = traceObj[countKey].get<unsigned>();
-            result.functionPaths.push_back(std::move(ep));
+            if (auto ep = parseTraceEntry(traceObj, nameToBlock_, funcName))
+                result.functionPaths.push_back(std::move(*ep));
         }
 
         // Sort by decreasing count
@@ -424,6 +447,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                 // Latch
                 if (loopMeta.contains("latch") && loopMeta["latch"].is_array()) {
                     for (const auto &ln : loopMeta["latch"]) {
+                        if (!ln.is_string())
+                            continue;
                         std::string name = ln.get<std::string>();
                         auto it = nameToBlock_.find(StringRef(name));
                         if (it != nameToBlock_.end()) {
@@ -436,6 +461,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                 // Members
                 if (loopMeta.contains("basic_blocks") && loopMeta["basic_blocks"].is_array()) {
                     for (const auto &mn : loopMeta["basic_blocks"]) {
+                        if (!mn.is_string())
+                            continue;
                         std::string name = mn.get<std::string>();
                         auto it = nameToBlock_.find(StringRef(name));
                         if (it != nameToBlock_.end())
@@ -443,8 +470,8 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
                     }
                 }
 
-                // Depth
-                if (loopMeta.contains("depth"))
+                // Depth (mistyped values fall back to LoopInfo's depth below)
+                if (loopMeta.contains("depth") && loopMeta["depth"].is_number_unsigned())
                     llt.depth = loopMeta["depth"].get<unsigned>();
             }
 
@@ -459,29 +486,9 @@ std::optional<LoadedTraces> TraceLoader::load(const std::string &traceFilePath) 
             // Parse iteration traces
             if (loopObj.contains("traces") && loopObj["traces"].is_array()) {
                 for (const auto &traceObj : loopObj["traces"]) {
-                    const char *lpPathKey = traceObj.contains("path") ? "path" : "trace";
-                    const char *lpCountKey = traceObj.contains("count") ? "count" : "nb_execution";
-                    if (!traceObj.contains(lpPathKey) || !traceObj.contains(lpCountKey))
-                        continue;
-
-                    EnumeratedPath ep;
-                    bool valid = true;
-                    for (const auto &bbName : traceObj[lpPathKey]) {
-                        std::string name = bbName.get<std::string>();
-                        auto it = nameToBlock_.find(StringRef(name));
-                        if (it == nameToBlock_.end()) {
-                            PLOGW << "TraceLoader: BB '" << name
-                                  << "' in loop trace not found, skipping";
-                            valid = false;
-                            break;
-                        }
-                        ep.blocks.push_back(it->second);
-                    }
-                    if (!valid)
-                        continue;
-
-                    ep.count = traceObj[lpCountKey].get<unsigned>();
-                    llt.iterationPaths.push_back(std::move(ep));
+                    if (auto ep = parseTraceEntry(traceObj, nameToBlock_,
+                                                  funcName + " loop '" + headerName + "'"))
+                        llt.iterationPaths.push_back(std::move(*ep));
                 }
 
                 // Sort by decreasing count

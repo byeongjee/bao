@@ -32,10 +32,18 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
                                                      "loop_increment_cost_nvm",
                                                      "call_cost"};
 
+    // Validate types before any get<T>(): the codebase builds with
+    // -fno-exceptions, so an unchecked get<T>() on a mistyped field would
+    // abort the whole opt process instead of failing this parse cleanly.
     for (const auto &field : requiredDouble) {
         if (!config.contains(field)) {
             PLOGE << "Error: Missing required field '" << field
                   << "' in SCHEMATIC config: " << configPath;
+            return std::nullopt;
+        }
+        if (!config[field].is_number()) {
+            PLOGE << "Error: Field '" << field << "' must be a number"
+                  << " in SCHEMATIC config: " << configPath;
             return std::nullopt;
         }
     }
@@ -45,6 +53,11 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
         if (!config.contains(field)) {
             PLOGE << "Error: Missing required field '" << field
                   << "' in SCHEMATIC config: " << configPath;
+            return std::nullopt;
+        }
+        if (!config[field].is_number_unsigned()) {
+            PLOGE << "Error: Field '" << field << "' must be a non-negative integer"
+                  << " in SCHEMATIC config: " << configPath;
             return std::nullopt;
         }
     }
@@ -69,15 +82,22 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     params.callCost = config["call_cost"].get<double>();
 
     // max_paths: check schematic section first, then root.
+    const nlohmann::json *maxPathsSrc = nullptr;
     if (schSection.contains("max_paths")) {
-        params.maxPaths = schSection["max_paths"].get<unsigned>();
+        maxPathsSrc = &schSection["max_paths"];
     } else if (config.contains("max_paths")) {
-        params.maxPaths = config["max_paths"].get<unsigned>();
+        maxPathsSrc = &config["max_paths"];
     } else {
         PLOGE << "Error: Missing required field 'max_paths'"
               << " in SCHEMATIC config: " << configPath;
         return std::nullopt;
     }
+    if (!maxPathsSrc->is_number_unsigned()) {
+        PLOGE << "Error: Field 'max_paths' must be a non-negative integer"
+              << " in SCHEMATIC config: " << configPath;
+        return std::nullopt;
+    }
+    params.maxPaths = maxPathsSrc->get<unsigned>();
 
     // Helper to read bool from schematic section or root.
     auto readBool = [&](const std::string &key, bool defaultVal) -> std::optional<bool> {
