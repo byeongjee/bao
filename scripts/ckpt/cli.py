@@ -954,53 +954,16 @@ def bench() -> None:
 
 @bench.command("milp")
 @click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option(
-    "--device-debug/--no-device-debug",
-    default=True,
-    help="Enable device debug (default: on).",
-)
-@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
-@click.option(
-    "--halt-mode",
-    type=click.Choice(HALT_MODES),
-    default="swbor",
-    help="Halt mode for linked binary.",
-)
-@click.option(
-    "--estimator-mode",
-    type=click.Choice(["assembly", "ir"]),
-    default="assembly",
-    help="Energy estimator mode.",
-)
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="16",
-    help="CPU frequency in MHz (default: 16).",
-)
-@click.option(
-    "--coarse-allocation",
-    is_flag=True,
-    help="Use one MILP placement variable per eligible value instead of per-region placement.",
-)
-@click.option(
-    "--milp-gap",
-    type=float,
-    default=0.0,
-    help="MIP optimality gap (default: 0.0 = proven optimal).",
-)
-@click.option(
-    "--accumulate-keys",
-    type=click.Path(),
-    help="Accumulate required energy keys to this file.",
-)
+@_cap_multi_option
+@_device_debug_toggle
+@_output_csv_option
+@_bench_halt_mode_option
+@_estimator_mode_option
+@_energy_override_option
+@_cpu_freq_option("16")
+@_coarse_allocation_flag
+@_milp_gap_option
+@_accumulate_keys_option
 @_saleae_timeout_option
 @click.pass_context
 def bench_milp_cmd(
@@ -1024,61 +987,32 @@ def bench_milp_cmd(
     run_milp_benchmarks(
         ctx.obj["env"],
         ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
         device_debug=device_debug,
         capture_timeout_seconds=timeout,
         halt_mode=halt_mode,
-        output_csv=Path(output) if output else None,
+        output_csv=_path_or_none(output),
         estimator_mode=estimator_mode,
-        energy_config=Path(energy_config) if energy_config else None,
-        cpu_freq=int(cpu_freq) * 1_000_000,
+        energy_config=_path_or_none(energy_config),
+        cpu_freq=_mhz_to_hz(cpu_freq),
         coarse_allocation=coarse_allocation,
         milp_gap=milp_gap,
         pass_log_level=ctx.obj["pass_log_level"],
-        accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
+        accumulate_keys_file=_path_or_none(accumulate_keys),
     )
 
 
 @bench.command("rockclimb")
 @click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option(
-    "--device-debug/--no-device-debug",
-    default=True,
-    help="Enable device debug (default: on).",
-)
-@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
-@click.option(
-    "--halt-mode",
-    type=click.Choice(HALT_MODES),
-    default="swbor",
-    help="Halt mode for linked binary.",
-)
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="16",
-    help="CPU frequency in MHz (default: 16).",
-)
-@click.option(
-    "--max-unroll",
-    type=click.IntRange(min=1),
-    default=4,
-    show_default=True,
-    help="Maximum RockClimb partial unroll factor for the preprocess pass.",
-)
-@click.option(
-    "--accumulate-keys",
-    type=click.Path(),
-    help="Accumulate required energy keys to this file.",
-)
+@_cap_multi_option
+@_device_debug_toggle
+@_output_csv_option
+@_bench_halt_mode_option
+@_energy_override_option
+@_cpu_freq_option("16")
+@_max_unroll_option
+@_accumulate_keys_option
 @_saleae_timeout_option
 @click.pass_context
 def bench_rockclimb_cmd(
@@ -1100,221 +1034,102 @@ def bench_rockclimb_cmd(
     run_rockclimb_benchmarks(
         ctx.obj["env"],
         ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
         device_debug=device_debug,
         capture_timeout_seconds=timeout,
         halt_mode=halt_mode,
-        output_csv=Path(output) if output else None,
-        energy_config=Path(energy_config) if energy_config else None,
-        cpu_freq=int(cpu_freq) * 1_000_000,
+        output_csv=_path_or_none(output),
+        energy_config=_path_or_none(energy_config),
+        cpu_freq=_mhz_to_hz(cpu_freq),
         max_unroll=max_unroll,
         pass_log_level=ctx.obj["pass_log_level"],
-        accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
+        accumulate_keys_file=_path_or_none(accumulate_keys),
+    )
+
+
+_bench_schematic_options = _add_options(
+    _cap_multi_option,
+    _device_debug_toggle,
+    _output_csv_option,
+    _bench_halt_mode_option,
+    _energy_override_option,
+    _trace_config_option,
+    _estimator_mode_option,
+    _cpu_freq_option("16"),
+    _accumulate_keys_option,
+    _schematic_tuning_options,
+    _saleae_timeout_option,
+)
+
+
+def _bench_schematic_impl(
+    ctx: click.Context,
+    *,
+    algorithm_label: str,
+    clang_opt_level: int,
+    benchmarks: tuple[str, ...],
+    cap: tuple[str, ...],
+    device_debug: bool,
+    output: str | None,
+    halt_mode: str,
+    energy_config: str | None,
+    trace_config: str | None,
+    estimator_mode: str,
+    cpu_freq: str,
+    accumulate_keys: str | None,
+    force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
+    timeout: float,
+) -> None:
+    from .bench.schematic import run_schematic_benchmarks
+
+    run_schematic_benchmarks(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
+        device_debug=device_debug,
+        capture_timeout_seconds=timeout,
+        halt_mode=halt_mode,
+        output_csv=_path_or_none(output),
+        energy_config=_path_or_none(energy_config),
+        trace_config=_path_or_none(trace_config),
+        estimator_mode=estimator_mode,
+        cpu_freq=_mhz_to_hz(cpu_freq),
+        clang_opt_level=clang_opt_level,
+        pass_log_level=ctx.obj["pass_log_level"],
+        algorithm_label=algorithm_label,
+        accumulate_keys_file=_path_or_none(accumulate_keys),
+        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
 
 
 @bench.command("schematic")
 @click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option(
-    "--device-debug/--no-device-debug",
-    default=True,
-    help="Enable device debug (default: on).",
-)
-@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
-@click.option(
-    "--halt-mode",
-    type=click.Choice(HALT_MODES),
-    default="swbor",
-    help="Halt mode for linked binary.",
-)
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
-)
-@click.option(
-    "--trace-config",
-    type=click.Path(exists=True),
-    help="Override trace-collection config (default: config_10uF.json).",
-)
-@click.option(
-    "--estimator-mode",
-    type=click.Choice(["assembly", "ir"]),
-    default="assembly",
-    help="Energy estimator mode.",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="16",
-    help="CPU frequency in MHz (default: 16).",
-)
-@click.option(
-    "--accumulate-keys",
-    type=click.Path(),
-    help="Accumulate required energy keys to this file.",
-)
-@click.option(
-    "--force-checkpoint-on-incompatible-loops",
-    is_flag=True,
-    help="Force checkpoint at loop header when inner loop allocations conflict.",
-)
-@click.option(
-    "--recompute-energy-after-new-checkpoint",
-    is_flag=True,
-    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
-)
-@_saleae_timeout_option
+@_bench_schematic_options
 @click.pass_context
-def bench_schematic_cmd(
-    ctx: click.Context,
-    benchmarks: tuple[str, ...],
-    cap: tuple[str, ...],
-    device_debug: bool,
-    output: str | None,
-    halt_mode: str,
-    energy_config: str | None,
-    trace_config: str | None,
-    estimator_mode: str,
-    cpu_freq: str,
-    accumulate_keys: str | None,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
-    timeout: float,
-) -> None:
+def bench_schematic_cmd(ctx: click.Context, **kwargs) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
-    from .bench.schematic import run_schematic_benchmarks
-
-    run_schematic_benchmarks(
-        ctx.obj["env"],
-        ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
-        device_debug=device_debug,
-        capture_timeout_seconds=timeout,
-        halt_mode=halt_mode,
-        output_csv=Path(output) if output else None,
-        energy_config=Path(energy_config) if energy_config else None,
-        trace_config=Path(trace_config) if trace_config else None,
-        estimator_mode=estimator_mode,
-        cpu_freq=int(cpu_freq) * 1_000_000,
-        clang_opt_level=0,
-        pass_log_level=ctx.obj["pass_log_level"],
-        algorithm_label="schematic",
-        accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
-        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
-    )
+    _bench_schematic_impl(ctx, algorithm_label="schematic", clang_opt_level=0, **kwargs)
 
 
 @bench.command("schematicO3")
 @click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option(
-    "--device-debug/--no-device-debug",
-    default=True,
-    help="Enable device debug (default: on).",
-)
-@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
-@click.option(
-    "--halt-mode",
-    type=click.Choice(HALT_MODES),
-    default="swbor",
-    help="Halt mode for linked binary.",
-)
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
-)
-@click.option(
-    "--trace-config",
-    type=click.Path(exists=True),
-    help="Override trace-collection config (default: config_10uF.json).",
-)
-@click.option(
-    "--estimator-mode",
-    type=click.Choice(["assembly", "ir"]),
-    default="assembly",
-    help="Energy estimator mode.",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="16",
-    help="CPU frequency in MHz (default: 16).",
-)
-@click.option(
-    "--accumulate-keys",
-    type=click.Path(),
-    help="Accumulate required energy keys to this file.",
-)
-@click.option(
-    "--force-checkpoint-on-incompatible-loops",
-    is_flag=True,
-    help="Force checkpoint at loop header when inner loop allocations conflict.",
-)
-@click.option(
-    "--recompute-energy-after-new-checkpoint",
-    is_flag=True,
-    help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
-)
-@_saleae_timeout_option
+@_bench_schematic_options
 @click.pass_context
-def bench_schematic_o3_cmd(
-    ctx: click.Context,
-    benchmarks: tuple[str, ...],
-    cap: tuple[str, ...],
-    device_debug: bool,
-    output: str | None,
-    halt_mode: str,
-    energy_config: str | None,
-    trace_config: str | None,
-    estimator_mode: str,
-    cpu_freq: str,
-    accumulate_keys: str | None,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
-    timeout: float,
-) -> None:
+def bench_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
     """Run SCHEMATIC-O3 benchmarks across programs and capacitor sizes."""
-    from .bench.schematic import run_schematic_benchmarks
-
-    run_schematic_benchmarks(
-        ctx.obj["env"],
-        ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
-        device_debug=device_debug,
-        capture_timeout_seconds=timeout,
-        halt_mode=halt_mode,
-        output_csv=Path(output) if output else None,
-        energy_config=Path(energy_config) if energy_config else None,
-        trace_config=Path(trace_config) if trace_config else None,
-        estimator_mode=estimator_mode,
-        cpu_freq=int(cpu_freq) * 1_000_000,
-        clang_opt_level=3,
-        pass_log_level=ctx.obj["pass_log_level"],
-        algorithm_label="schematicO3",
-        accumulate_keys_file=Path(accumulate_keys) if accumulate_keys else None,
-        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
+    _bench_schematic_impl(
+        ctx, algorithm_label="schematicO3", clang_opt_level=3, **kwargs
     )
 
 
 @bench.command("uninstrumented")
 @click.argument("benchmarks", nargs=-1)
-@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="16",
-    help="CPU frequency in MHz (default: 16).",
-)
+@_output_csv_option
+@_cpu_freq_option("16")
 @_saleae_timeout_option
 @click.pass_context
 def bench_uninstrumented_cmd(
@@ -1352,10 +1167,10 @@ def _bench_uninstrumented_impl(
     run_uninstrumented_benchmarks(
         ctx.obj["env"],
         ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        output_csv=Path(output) if output else None,
+        benchmarks=_list_or_none(benchmarks),
+        output_csv=_path_or_none(output),
         capture_timeout_seconds=timeout,
-        cpu_freq=int(cpu_freq) * 1_000_000,
+        cpu_freq=_mhz_to_hz(cpu_freq),
         algorithm_label=algorithm_label,
         clang_opt_level=clang_opt_level,
         opt_level=opt_level,
@@ -1364,13 +1179,8 @@ def _bench_uninstrumented_impl(
 
 @bench.command("uninstrumentedO0")
 @click.argument("benchmarks", nargs=-1)
-@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="16",
-    help="CPU frequency in MHz (default: 16).",
-)
+@_output_csv_option
+@_cpu_freq_option("16")
 @_saleae_timeout_option
 @click.pass_context
 def bench_uninstrumented_o0_cmd(
@@ -1395,20 +1205,10 @@ def bench_uninstrumented_o0_cmd(
 
 @bench.command("chunked")
 @click.argument("benchmarks", nargs=-1)
-@click.option("--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF).")
-@click.option("-o", "--output", "--csv", type=click.Path(), help="Output CSV path.")
-@click.option(
-    "-e",
-    "--energy-config",
-    type=click.Path(exists=True),
-    help="Override default energy config.",
-)
-@click.option(
-    "--cpu-freq",
-    type=click.Choice(["1", "8", "16"]),
-    default="16",
-    help="CPU frequency in MHz (default: 16).",
-)
+@_cap_multi_option
+@_output_csv_option
+@_energy_override_option
+@_cpu_freq_option("16")
 @_saleae_timeout_option
 @click.pass_context
 def bench_chunked_cmd(
@@ -1426,12 +1226,12 @@ def bench_chunked_cmd(
     run_chunked_benchmarks(
         ctx.obj["env"],
         ctx.obj["tc"],
-        benchmarks=list(benchmarks) if benchmarks else None,
-        caps=list(cap) if cap else None,
-        output_csv=Path(output) if output else None,
-        energy_config=Path(energy_config) if energy_config else None,
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
+        output_csv=_path_or_none(output),
+        energy_config=_path_or_none(energy_config),
         capture_timeout_seconds=timeout,
-        cpu_freq=int(cpu_freq) * 1_000_000,
+        cpu_freq=_mhz_to_hz(cpu_freq),
         pass_log_level=ctx.obj["pass_log_level"],
     )
 
