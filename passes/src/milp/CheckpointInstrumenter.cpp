@@ -4,9 +4,12 @@
 #include "common/ValueOrder.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
@@ -162,67 +165,72 @@ void CheckpointInstrumenter::createNVMBackupGlobals(llvm::Function &F, const MIL
     }
 }
 
-/// Recursively replace occurrences of \p GV with \p Replacement inside a
-/// Constant (e.g. a ConstantExpr GEP that embeds a global pointer).
-/// Returns the rebuilt Constant on success, or nullptr if \p C does not
-/// reference \p GV.
-static llvm::Constant *replaceGVInConstant(llvm::Constant *C, llvm::GlobalVariable *GV,
-                                           llvm::GlobalVariable *Replacement) {
-    if (C == GV)
-        return Replacement;
-
-    auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(C);
-    if (!CE)
-        return nullptr;
-
-    bool changed = false;
-    llvm::SmallVector<llvm::Constant *, 4> newOps;
-    for (unsigned i = 0; i < CE->getNumOperands(); ++i) {
-        llvm::Constant *op = CE->getOperand(i);
-        llvm::Constant *replaced = replaceGVInConstant(op, GV, Replacement);
-        if (replaced) {
-            newOps.push_back(replaced);
-            changed = true;
-        } else {
-            newOps.push_back(op);
-        }
-    }
-
-    if (!changed)
-        return nullptr;
-
-    return CE->getWithOperands(newOps);
-}
-
 void CheckpointInstrumenter::rewriteAccessesInVMRegions(llvm::Function &F,
                                                         const MILPSolution &solution,
                                                         const ICFGView &cfg) {
 
+    // Redirect memory ACCESSES (not raw operands) in m=1 blocks to the VM
+    // shadow. Rewriting operands block-locally is unsound: a pointer derived
+    // from the global in an m=1 block (e.g. a LICM-hoisted GEP) can flow
+    // into m=0 blocks, whose accesses would then silently hit the shadow
+    // while the MILP model assumes they hit FRAM — writes end up in SRAM
+    // with no commit modeled, and a BOR reboot discards them. Instead, each
+    // access in an m=1 block recomputes its address as
+    //   shadow + (ptr - global)
+    // so an access follows its own block's placement no matter where its
+    // pointer operand was computed.
     const NodeMap &nodeMap = cfg.getNodeMap();
+    const llvm::DataLayout &DL = M_.getDataLayout();
+    llvm::Type *intPtrTy = DL.getIntPtrType(M_.getContext());
+    llvm::Type *i8Ty = llvm::Type::getInt8Ty(M_.getContext());
+
+    auto shadowForUnderlying =
+        [&](llvm::Value *Ptr) -> std::pair<llvm::GlobalVariable *, llvm::GlobalVariable *> {
+        auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(
+            const_cast<llvm::Value *>(llvm::getUnderlyingObject(Ptr)));
+        if (!GV)
+            return {nullptr, nullptr};
+        auto it = shadowMap_.find(GV);
+        if (it == shadowMap_.end())
+            return {nullptr, nullptr};
+        return {GV, it->second};
+    };
+
     for (llvm::BasicBlock &BB : F) {
         NodeId nodeId = nodeMap.getNodeId(&BB);
         if (nodeId == kInvalidNodeId)
             continue;
 
-        for (auto &[GV, shadow] : shadowMap_) {
-            auto key = std::make_pair(nodeId, static_cast<llvm::Value *>(GV));
-            auto pvIt = solution.m.find(key);
-            if (pvIt == solution.m.end() || !pvIt->second)
-                continue;
+        auto placedInVm = [&](llvm::GlobalVariable *GV) {
+            auto pvIt = solution.m.find(std::make_pair(nodeId, static_cast<llvm::Value *>(GV)));
+            return pvIt != solution.m.end() && pvIt->second;
+        };
 
-            // Replace uses of GV in this block with shadow.
-            // Handles both direct operands and GV references nested
-            // inside ConstantExpr operands (e.g. constant-index GEPs
-            // created by loop unrolling at -O2).
-            for (llvm::Instruction &I : BB) {
-                for (unsigned i = 0; i < I.getNumOperands(); ++i) {
-                    if (I.getOperand(i) == GV) {
-                        I.setOperand(i, shadow);
-                    } else if (auto *C = llvm::dyn_cast<llvm::Constant>(I.getOperand(i))) {
-                        if (auto *replaced = replaceGVInConstant(C, GV, shadow))
-                            I.setOperand(i, replaced);
-                    }
-                }
+        auto redirect = [&](llvm::Instruction &I, unsigned opIdx) {
+            llvm::Value *Ptr = I.getOperand(opIdx);
+            auto [GV, shadow] = shadowForUnderlying(Ptr);
+            if (!GV || !placedInVm(GV))
+                return;
+            llvm::IRBuilder<> builder(&I);
+            llvm::Value *newPtr = shadow;
+            if (Ptr != GV) {
+                llvm::Value *off =
+                    builder.CreateSub(builder.CreatePtrToInt(Ptr, intPtrTy),
+                                      builder.CreatePtrToInt(GV, intPtrTy), "vm.off");
+                newPtr = builder.CreateGEP(i8Ty, shadow, off, "vm.addr");
+            }
+            I.setOperand(opIdx, newPtr);
+        };
+
+        for (llvm::Instruction &I : llvm::make_early_inc_range(BB)) {
+            if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
+                redirect(I, LI->getPointerOperandIndex());
+            } else if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+                redirect(I, SI->getPointerOperandIndex());
+            } else if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
+                redirect(I, 0); // dest
+                if (llvm::isa<llvm::MemTransferInst>(MI))
+                    redirect(I, 1); // source
             }
         }
     }
