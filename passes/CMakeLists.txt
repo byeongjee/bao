@@ -119,6 +119,13 @@ target_compile_options(CheckpointPass PRIVATE
     -fno-rtti
 )
 
+# CheckpointOptimizer.cpp alone builds with exceptions enabled so it can
+# catch GRBException from the Gurobi C++ API (license errors, infeasible
+# presolve, out-of-memory) and turn them into error returns. Exceptions
+# never propagate out of that translation unit.
+set_source_files_properties(src/milp/CheckpointOptimizer.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions")
+
 # On macOS, use flat namespace so undefined symbols are resolved at runtime from opt
 if(APPLE)
     set_target_properties(CheckpointPass PROPERTIES
