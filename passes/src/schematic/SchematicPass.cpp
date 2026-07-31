@@ -97,22 +97,50 @@ static json::Array buildLoopDecisionDetails(const SchematicSolution &solution) {
     return details;
 }
 
+static CommonStats makeCommonStats(const Function &F, const CFGAnalysis &cfg,
+                                   const SchematicStateAnalysis &state, double totalMs) {
+    CommonStats c;
+    c.passName = "SCHEMATIC";
+    c.functionName = F.getName().str();
+    c.basicBlocks = cfg.getBlocks().size();
+    c.edges = cfg.getEdges().size();
+    c.candidateGlobals = state.getCandidates().size();
+    c.compilationTimeMs = totalMs;
+    c.peakRSSKb = getPeakRSSKb();
+    return c;
+}
+
+static void appendSolutionCounts(json::Object &root, const SchematicSolution &solution) {
+    root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
+    root["enabled_checkpoints"] = static_cast<int64_t>(solution.enabledCheckpoints.size());
+    root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
+}
+
+static void writeInfeasibleStatsJson(const Function &F, const CFGAnalysis &cfg,
+                                     const SchematicStateAnalysis &state,
+                                     const SchematicSolution &solution,
+                                     std::chrono::steady_clock::time_point totalStart) {
+    if (StatsJsonOpt.empty())
+        return;
+    double totalMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - totalStart)
+            .count();
+    json::Object root = commonStatsToJSON(makeCommonStats(F, cfg, state, totalMs));
+    root["feasible"] = false;
+    root["infeasibility_reason"] = "energy capacity too small";
+    appendSolutionCounts(root, solution);
+    writeStatsJSON(StatsJsonOpt, std::move(root));
+}
+
 static void printSchematicStats(const Function &F, const CFGAnalysis &cfg,
                                 const SchematicStateAnalysis &state,
                                 const SchematicSolution &solution,
                                 const SchematicInstrumenter &instrumenter, unsigned inserted,
                                 double totalExecutionTimeMs) {
-    CommonStats common;
-    common.passName = "SCHEMATIC";
-    common.functionName = F.getName().str();
-    common.basicBlocks = cfg.getBlocks().size();
-    common.edges = cfg.getEdges().size();
-    common.candidateGlobals = state.getCandidates().size();
+    CommonStats common = makeCommonStats(F, cfg, state, totalExecutionTimeMs);
     common.regions = solution.regions.size();
     common.regionBoundaries = instrumenter.boundaryCalls();
     common.runtimeCallsInserted = inserted;
-    common.compilationTimeMs = totalExecutionTimeMs;
-    common.peakRSSKb = getPeakRSSKb();
     printCommonStats(common);
 
     PLOGI << "  --- SCHEMATIC-specific ---";
@@ -399,27 +427,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
                           /*loopScope=*/nullptr, traceError)) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '" << F.getName()
                   << "', path #" << solution.pathsAnalyzed << ": " << traceError;
-            if (!StatsJsonOpt.empty()) {
-                const auto totalEnd = std::chrono::steady_clock::now();
-                double totalMs =
-                    std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
-                CommonStats c;
-                c.passName = "SCHEMATIC";
-                c.functionName = F.getName().str();
-                c.basicBlocks = ctx.cfg->getBlocks().size();
-                c.edges = ctx.cfg->getEdges().size();
-                c.candidateGlobals = state.getCandidates().size();
-                c.compilationTimeMs = totalMs;
-                c.peakRSSKb = getPeakRSSKb();
-                json::Object root = commonStatsToJSON(c);
-                root["feasible"] = false;
-                root["infeasibility_reason"] = "energy capacity too small";
-                root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
-                root["enabled_checkpoints"] =
-                    static_cast<int64_t>(solution.enabledCheckpoints.size());
-                root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
-                writeStatsJSON(StatsJsonOpt, std::move(root));
-            }
+            writeInfeasibleStatsJson(F, *ctx.cfg, state, solution, totalStart);
             return false;
         }
     }
@@ -431,27 +439,7 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
                                          /*loopScope=*/nullptr, graph, uncoveredError)) {
             PLOGE << "SCHEMATIC infeasible: energy capacity too small for function '" << F.getName()
                   << "', uncovered blocks: " << uncoveredError;
-            if (!StatsJsonOpt.empty()) {
-                const auto totalEnd = std::chrono::steady_clock::now();
-                double totalMs =
-                    std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
-                CommonStats c;
-                c.passName = "SCHEMATIC";
-                c.functionName = F.getName().str();
-                c.basicBlocks = ctx.cfg->getBlocks().size();
-                c.edges = ctx.cfg->getEdges().size();
-                c.candidateGlobals = state.getCandidates().size();
-                c.compilationTimeMs = totalMs;
-                c.peakRSSKb = getPeakRSSKb();
-                json::Object root = commonStatsToJSON(c);
-                root["feasible"] = false;
-                root["infeasibility_reason"] = "energy capacity too small";
-                root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
-                root["enabled_checkpoints"] =
-                    static_cast<int64_t>(solution.enabledCheckpoints.size());
-                root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
-                writeStatsJSON(StatsJsonOpt, std::move(root));
-            }
+            writeInfeasibleStatsJson(F, *ctx.cfg, state, solution, totalStart);
             return false;
         }
     }
@@ -481,22 +469,13 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     printSchematicStats(F, *ctx.cfg, state, solution, instrumenter, inserted, totalExecutionTimeMs);
 
     if (!StatsJsonOpt.empty()) {
-        CommonStats c;
-        c.passName = "SCHEMATIC";
-        c.functionName = F.getName().str();
-        c.basicBlocks = ctx.cfg->getBlocks().size();
-        c.edges = ctx.cfg->getEdges().size();
-        c.candidateGlobals = state.getCandidates().size();
+        CommonStats c = makeCommonStats(F, *ctx.cfg, state, totalExecutionTimeMs);
         c.regions = solution.regions.size();
         c.regionBoundaries = instrumenter.boundaryCalls();
         c.runtimeCallsInserted = inserted;
-        c.compilationTimeMs = totalExecutionTimeMs;
-        c.peakRSSKb = getPeakRSSKb();
         json::Object root = commonStatsToJSON(c);
         root["feasible"] = true;
-        root["paths_analyzed"] = static_cast<int64_t>(solution.pathsAnalyzed);
-        root["enabled_checkpoints"] = static_cast<int64_t>(solution.enabledCheckpoints.size());
-        root["loop_decisions"] = static_cast<int64_t>(solution.loopDecisions.size());
+        appendSolutionCounts(root, solution);
         root["loop_decision_details"] = buildLoopDecisionDetails(solution);
         writeStatsJSON(StatsJsonOpt, std::move(root));
     }
