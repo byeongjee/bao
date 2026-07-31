@@ -61,9 +61,12 @@ static RegionAllocation *getResolvedAllocation(SchematicSolution &solution, Sche
     return it->second.get();
 }
 
-static std::optional<FixedCheckpointEdge> getFixedPotentialCheckpointEdge(
+/// Shared lookup: resolve a CFG edge whose checkpoint is in `requiredState` and
+/// whose endpoints are both fixed (analyzed, with resolved allocations).
+static std::optional<FixedCheckpointEdge> getFixedCheckpointEdgeWithState(
     const std::pair<const llvm::BasicBlock *, const llvm::BasicBlock *> &cfgEdge,
-    SchematicSolution &solution, llvm::LoopInfo &LI, SchematicGraph &graph, llvm::Loop *loopScope) {
+    SchematicSolution &solution, llvm::LoopInfo &LI, SchematicGraph &graph, llvm::Loop *loopScope,
+    CheckpointState requiredState) {
     auto *srcBB = const_cast<llvm::BasicBlock *>(cfgEdge.first);
     auto *dstBB = const_cast<llvm::BasicBlock *>(cfgEdge.second);
     if (isEdgeOutsideLoopScope(loopScope, srcBB, dstBB))
@@ -72,7 +75,7 @@ static std::optional<FixedCheckpointEdge> getFixedPotentialCheckpointEdge(
     SchematicBlock *srcBlock = graph.getOrCreate(srcBB);
     SchematicBlock *dstBlock = graph.getOrCreate(dstBB);
     CFGEdge edge{srcBlock, dstBlock};
-    if (!isPotentialCheckpoint(solution, edge))
+    if (getCheckpointState(solution, edge) != requiredState)
         return std::nullopt;
     if (isLoopBackEdge(LI, srcBB, dstBB))
         return std::nullopt;
@@ -91,34 +94,18 @@ static std::optional<FixedCheckpointEdge> getFixedPotentialCheckpointEdge(
                                srcMeta, dstMeta, srcAlloc, dstAlloc};
 }
 
+static std::optional<FixedCheckpointEdge> getFixedPotentialCheckpointEdge(
+    const std::pair<const llvm::BasicBlock *, const llvm::BasicBlock *> &cfgEdge,
+    SchematicSolution &solution, llvm::LoopInfo &LI, SchematicGraph &graph, llvm::Loop *loopScope) {
+    return getFixedCheckpointEdgeWithState(cfgEdge, solution, LI, graph, loopScope,
+                                           CheckpointState::Potential);
+}
+
 static std::optional<FixedCheckpointEdge> getFixedDisabledCheckpointEdge(
     const std::pair<const llvm::BasicBlock *, const llvm::BasicBlock *> &cfgEdge,
     SchematicSolution &solution, llvm::LoopInfo &LI, SchematicGraph &graph, llvm::Loop *loopScope) {
-    auto *srcBB = const_cast<llvm::BasicBlock *>(cfgEdge.first);
-    auto *dstBB = const_cast<llvm::BasicBlock *>(cfgEdge.second);
-    if (isEdgeOutsideLoopScope(loopScope, srcBB, dstBB))
-        return std::nullopt;
-
-    SchematicBlock *srcBlock = graph.getOrCreate(srcBB);
-    SchematicBlock *dstBlock = graph.getOrCreate(dstBB);
-    CFGEdge edge{srcBlock, dstBlock};
-    if (!isDisabledCheckpoint(solution, edge))
-        return std::nullopt;
-    if (isLoopBackEdge(LI, srcBB, dstBB))
-        return std::nullopt;
-
-    BlockMetadata *srcMeta = getAnalyzedBlockMeta(solution, srcBlock);
-    BlockMetadata *dstMeta = getAnalyzedBlockMeta(solution, dstBlock);
-    if (!srcMeta || !dstMeta)
-        return std::nullopt;
-
-    RegionAllocation *srcAlloc = getResolvedAllocation(solution, srcBlock);
-    RegionAllocation *dstAlloc = getResolvedAllocation(solution, dstBlock);
-    if (!srcAlloc || !dstAlloc)
-        return std::nullopt;
-
-    return FixedCheckpointEdge{srcBB,   dstBB,   srcBlock, dstBlock, edge,
-                               srcMeta, dstMeta, srcAlloc, dstAlloc};
+    return getFixedCheckpointEdgeWithState(cfgEdge, solution, LI, graph, loopScope,
+                                           CheckpointState::Disabled);
 }
 
 static bool canMergeWithoutCheckpoint(const FixedCheckpointEdge &edge) {
