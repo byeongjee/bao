@@ -1,7 +1,6 @@
 // passes/src/schematic/EnergyPropagation.cpp
 #include "schematic/EnergyPropagation.h"
 
-#include <algorithm>
 #include <deque>
 #include <map>
 #include <set>
@@ -129,22 +128,26 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSolution &solution,
                          const CFGAnalysis &cfg, const SchematicStateAnalysis &state,
                          const SchematicParams &params, llvm::LoopInfo &LI, llvm::Loop *loopScope) {
-    // Priority queue: edge -> accumulated cost (reference: chkpt_cost)
-    std::map<CFGEdge, double> ckptCost;
-    ckptCost[seedEdge] = 0.0;
+    // Deliberate divergence from the reference (cfg_modification.py:256-316): the
+    // reference walks forward greedily, popping the max-cost pending edge and
+    // dropping any proposal to an already-visited edge. At a join whose costlier
+    // incoming path has more hops, the join's outgoing edge can be popped via the
+    // cheap path before the expensive frontier arrives, so blocks downstream of
+    // the join get a best-case (too high) E_left. Mirror propagateEnergyToLeave
+    // instead: build the DAG of reachable disabled edges first, then propagate
+    // the worst-case (max) accumulated cost in topological order.
+
+    // Phase 2: BFS forward from seedEdge through disabled edges to build DAG
+    std::deque<CFGEdge> toVisit = {seedEdge};
     std::set<CFGEdge> visited;
+    std::map<CFGEdge, std::vector<CFGEdge>> dagAdj;
+    dagAdj[seedEdge]; // ensure seed node exists
 
-    // Phase 2: Priority queue loop -- max cost first (reference lines 279-316)
-    while (!ckptCost.empty()) {
-        // Select checkpoint with highest accumulated cost (reference line 281)
-        auto maxIt =
-            std::max_element(ckptCost.begin(), ckptCost.end(),
-                             [](const auto &a, const auto &b) { return a.second < b.second; });
-        CFGEdge ckpt = maxIt->first;
-        double cost = maxIt->second;
-
-        visited.insert(ckpt);
-        ckptCost.erase(maxIt);
+    while (!toVisit.empty()) {
+        CFGEdge ckpt = toVisit.front();
+        toVisit.pop_front();
+        if (!visited.insert(ckpt).second)
+            continue;
 
         SchematicBlock *bb = ckpt.dst;
         if (!bb)
@@ -152,19 +155,12 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
         if (loopScope && bb->getLLVMBlock() && !loopScope->contains(bb->getLLVMBlock()))
             continue;
 
-        // Add block cost and compute energy_left (reference lines 298-302)
-        double blockCost = getBlockExecEnergy(bb, solution, cfg, state, params);
-        cost += blockCost;
-        double energyLeft = seedELeft - cost;
-        if (energyLeft < solution.blockMeta[bb].E_left)
-            solution.blockMeta[bb].E_left = energyLeft;
-
-        // Forward to successor disabled edges (reference lines 310-316)
         for (SchematicBlock *succ : bb->successors()) {
             CFGEdge childEdge{bb, succ};
 
             if (visited.count(childEdge))
                 continue;
+            // Reference: cfg_modification.py traverses only DISABLED checkpoints.
             if (!isDisabledCheckpoint(solution, childEdge))
                 continue;
             // Skip back-edges
@@ -177,8 +173,57 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
             }
             if (loopScope && succ->getLLVMBlock() && !loopScope->contains(succ->getLLVMBlock()))
                 continue;
-            if (ckptCost.find(childEdge) == ckptCost.end() || cost < ckptCost[childEdge])
-                ckptCost[childEdge] = cost;
+            dagAdj[childEdge]; // ensure node exists
+            dagAdj[ckpt].push_back(childEdge);
+            toVisit.push_back(childEdge);
+        }
+    }
+
+    // Phase 3: Kahn's algorithm for topological sort, then longest-path propagation
+    std::map<CFGEdge, unsigned> inDeg;
+    for (auto &[node, children] : dagAdj) {
+        if (inDeg.find(node) == inDeg.end())
+            inDeg[node] = 0;
+        for (auto &child : children)
+            inDeg[child]++;
+    }
+    std::deque<CFGEdge> topoQueue;
+    for (auto &[node, deg] : inDeg)
+        if (deg == 0)
+            topoQueue.push_back(node);
+
+    std::map<CFGEdge, double> maxCost;
+    maxCost[seedEdge] = 0.0;
+
+    while (!topoQueue.empty()) {
+        CFGEdge ckpt = topoQueue.front();
+        topoQueue.pop_front();
+
+        double cost = maxCost.count(ckpt) ? maxCost[ckpt] : 0.0;
+        maxCost.erase(ckpt);
+
+        SchematicBlock *bb = ckpt.dst;
+        if (bb) {
+            // Add block execution cost and compute energy_left
+            cost += getBlockExecEnergy(bb, solution, cfg, state, params);
+            double energyLeft = seedELeft - cost;
+
+            // Update E_left if smaller
+            if (energyLeft < solution.blockMeta[bb].E_left)
+                solution.blockMeta[bb].E_left = energyLeft;
+
+            // Propagate worst-case (max) accumulated cost to children
+            for (auto &childEdge : dagAdj[ckpt]) {
+                if (maxCost.find(childEdge) == maxCost.end() || cost > maxCost[childEdge])
+                    maxCost[childEdge] = cost;
+            }
+        }
+
+        // Advance topological sort
+        for (auto &child : dagAdj[ckpt]) {
+            inDeg[child]--;
+            if (inDeg[child] == 0)
+                topoQueue.push_back(child);
         }
     }
 }
