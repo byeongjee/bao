@@ -6,9 +6,7 @@ device, and measures execution time via Saleae GPIO capture.
 
 from __future__ import annotations
 
-import csv
 import logging
-import time
 from pathlib import Path
 
 from ..compile.uninstrumented import (
@@ -16,11 +14,15 @@ from ..compile.uninstrumented import (
     compile_uninstrumented,
 )
 from ..env import ProjectEnv
-from ..errors import CkptError, ConfigError, DeviceError
+from ..errors import ConfigError
 from ..tempdir import compilation_workdir
 from ..toolchain import Toolchain
-from .config import discover_benchmarks
-from .runner import check_device_available
+from .config import CapacitorConfig, discover_benchmarks
+from .runner import (
+    TIMING_COMPILE_ONLY_WARNING,
+    optional_saleae,
+    run_timing_matrix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +32,6 @@ CSV_HEADER: list[str] = [
     "compilation_time_ms",
     "execution_time_us",
 ]
-
-_FLASH_TIMEOUT = 30
-_AFTER_TRIGGER_SECONDS = 1.0
 
 
 def run_uninstrumented_benchmarks(
@@ -64,107 +63,37 @@ def run_uninstrumented_benchmarks(
             env.project_dir / "benchmarks" / f"{algorithm_label}_benchmark_summary.csv"
         )
 
-    saleae_manager = None
-    if check_device_available():
-        from ..device.saleae import discover_saleae
+    with (
+        optional_saleae(TIMING_COMPILE_ONLY_WARNING) as saleae_manager,
+        compilation_workdir(prefix=f"{algorithm_label}_bench_") as workdir,
+    ):
 
-        saleae_manager = discover_saleae()
-    else:
-        logger.warning(
-            "No MSP430 device detected; running compile-only (no flash or "
-            "timing). The execution_time_us column will be left blank."
+        def compile_fn(bench_path: Path, _cap: CapacitorConfig | None) -> Path | None:
+            bench_name = bench_path.stem
+            out_dir = workdir / bench_name
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            result = compile_uninstrumented(
+                tc,
+                env,
+                UninstrumentedCompileOptions(
+                    input_c=bench_path,
+                    output=out_dir / bench_name,
+                    device_debug=False,
+                    cpu_freq=cpu_freq,
+                    opt_level=opt_level,
+                    clang_opt_level=clang_opt_level,
+                    link=True,
+                ),
+            )
+            return result.elf_file
+
+        run_timing_matrix(
+            bench_paths=bench_paths,
+            capacitors=None,
+            compile_fn=compile_fn,
+            output_csv=output_csv,
+            csv_header=CSV_HEADER,
+            saleae_manager=saleae_manager,
+            capture_timeout_seconds=capture_timeout_seconds,
         )
-
-    try:
-        output_csv.parent.mkdir(parents=True, exist_ok=True)
-
-        with (
-            compilation_workdir(prefix=f"{algorithm_label}_bench_") as workdir,
-            open(output_csv, "w", newline="") as csvfile,
-        ):
-            writer = csv.writer(csvfile)
-            writer.writerow(CSV_HEADER)
-
-            total = len(bench_paths)
-            for i, bench_path in enumerate(bench_paths, 1):
-                bench_name = bench_path.stem
-                logger.info("[%d/%d] Running %s ...", i, total, bench_name)
-
-                out_dir = workdir / bench_name
-                out_dir.mkdir(parents=True, exist_ok=True)
-
-                # Compile
-                try:
-                    t0 = time.monotonic()
-                    result = compile_uninstrumented(
-                        tc,
-                        env,
-                        UninstrumentedCompileOptions(
-                            input_c=bench_path,
-                            output=out_dir / bench_name,
-                            device_debug=False,
-                            cpu_freq=cpu_freq,
-                            opt_level=opt_level,
-                            clang_opt_level=clang_opt_level,
-                            link=True,
-                        ),
-                    )
-                    compilation_time_ms = int((time.monotonic() - t0) * 1000)
-                except CkptError as exc:
-                    logger.error("  FAILED (compilation): %s", exc)
-                    writer.writerow([bench_name, "failed", "", ""])
-                    continue
-
-                if result.elf_file is None or not result.elf_file.exists():
-                    logger.error("  FAILED (no ELF produced)")
-                    writer.writerow(
-                        [bench_name, "failed", str(compilation_time_ms), ""]
-                    )
-                    continue
-
-                # Compile-only mode (no device): record compile time, skip timing.
-                if saleae_manager is None:
-                    logger.info(
-                        "  OK (compile-only)  compilation_time=%dms",
-                        compilation_time_ms,
-                    )
-                    writer.writerow([bench_name, "ok", str(compilation_time_ms), ""])
-                    continue
-
-                # Flash + measure
-                try:
-                    from ..device.saleae import saleae_run
-
-                    execution_time_us = saleae_run(
-                        result.elf_file,
-                        saleae_manager,
-                        _FLASH_TIMEOUT,
-                        _AFTER_TRIGGER_SECONDS,
-                        capture_timeout_seconds,
-                    )
-                    logger.info(
-                        "  OK  compilation_time=%dms execution_time=%.2fus",
-                        compilation_time_ms,
-                        execution_time_us,
-                    )
-                    writer.writerow(
-                        [
-                            bench_name,
-                            "ok",
-                            str(compilation_time_ms),
-                            str(round(execution_time_us, 2)),
-                        ]
-                    )
-                except DeviceError as exc:
-                    logger.error("  DEVICE ERROR: %s", exc)
-                    writer.writerow(
-                        [bench_name, "device_error", str(compilation_time_ms), ""]
-                    )
-    finally:
-        if saleae_manager is not None:
-            saleae_manager.close()
-
-    logger.info("")
-    logger.info("==========================================")
-    logger.info("Results written to: %s", output_csv)
-    logger.info("==========================================")
