@@ -27,6 +27,7 @@ def verify_rockclimb(
     halt_mode: str,
     energy_config: Path | None,
     cpu_freq: int,
+    capture_timeout_seconds: float,
     pass_log_level: str,
 ) -> bool:
     """Verify semantic correctness of RockClimb checkpoint insertion."""
@@ -74,6 +75,7 @@ def verify_rockclimb(
         caps=caps,
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
+        capture_timeout_seconds=capture_timeout_seconds,
         nvm_symbols=_NVM_SYMBOLS,
         compile_instrumented=compile_instrumented,
     )

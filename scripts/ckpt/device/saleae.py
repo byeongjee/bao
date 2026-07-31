@@ -71,6 +71,7 @@ def saleae_run(
     manager: Manager,
     flash_timeout: int,
     after_trigger_seconds: float,
+    capture_timeout_seconds: float,
 ) -> float:
     """Flash ELF, capture GPIO waveform, return execution_time_us.
 
@@ -94,8 +95,7 @@ def saleae_run(
         9. Retry if the waveform is ambiguous, else return delta in us
 
     Raises DeviceError if no edges are detected (GPIO never pulsed)
-    or no stop pulse (program hung — capture.wait blocks until
-    trigger fires).
+    or the stop pulse does not arrive within *capture_timeout_seconds*.
     """
     from saleae.automation import (
         CaptureConfiguration,
@@ -144,7 +144,7 @@ def saleae_run(
         with capture_context as capture:
             try:
                 flash(elf_path, flash_timeout)
-                capture.wait()
+                _wait_for_capture(capture, capture_timeout_seconds)
             except Exception:
                 _stop_capture_quietly(capture)
                 raise
@@ -185,6 +185,23 @@ def saleae_run(
 
 
 _SHORT_PULSE_THRESHOLD = 0.001  # 1 ms — start pulse is ~10 us, stop pulse is ~5 ms
+
+
+def _wait_for_capture(capture: object, timeout_seconds: float) -> None:
+    """Wait for capture completion with a client-side gRPC deadline."""
+    import grpc
+    from saleae.grpc import saleae_pb2
+
+    request = saleae_pb2.WaitCaptureRequest(capture_id=capture.capture_id)
+    try:
+        capture.manager.stub.WaitCapture(request, timeout=timeout_seconds)
+    except grpc.RpcError as exc:
+        if exc.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+            raise DeviceError(
+                "Saleae capture timed out after "
+                f"{timeout_seconds:g} seconds waiting for the end signal"
+            ) from exc
+        raise
 
 
 def _stop_capture_quietly(capture: object) -> None:

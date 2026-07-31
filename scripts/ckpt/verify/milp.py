@@ -30,6 +30,7 @@ def verify_milp(
     energy_config: Path | None,
     estimator_mode: str,
     cpu_freq: int,
+    capture_timeout_seconds: float,
     coarse_allocation: bool,
     pass_log_level: str,
 ) -> bool:
@@ -81,6 +82,7 @@ def verify_milp(
         caps=caps,
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
+        capture_timeout_seconds=capture_timeout_seconds,
         nvm_symbols=_NVM_SYMBOLS,
         compile_instrumented=compile_instrumented,
     )

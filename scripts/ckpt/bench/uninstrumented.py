@@ -41,6 +41,7 @@ def run_uninstrumented_benchmarks(
     *,
     benchmarks: list[str] | None,
     output_csv: Path | None,
+    capture_timeout_seconds: float,
     cpu_freq: int,
     algorithm_label: str,
     clang_opt_level: int,
@@ -128,6 +129,7 @@ def run_uninstrumented_benchmarks(
                     execution_time_us = saleae_run(
                         result.elf_file, saleae_manager,
                         _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
+                        capture_timeout_seconds,
                     )
                     logger.info("  OK  compilation_time=%dms execution_time=%.2fus",
                                 compilation_time_ms, execution_time_us)

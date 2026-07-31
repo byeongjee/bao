@@ -112,16 +112,16 @@ ckpt compile uninstrumented INPUT [--link] [--save-temps] [--cpu-freq 1|8|16] [-
 # --csv (alias -o/--output), unified with `compile`. When no MSP430 device is detected,
 # bench logs a warning and degrades to compile-only: it still writes the CSV, but the
 # device-only runtime columns (execution_time_us, runtime_*) are left blank.
-ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--accumulate-keys FILE] [--csv CSV]
-ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--accumulate-keys FILE] [--csv CSV]
-ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--trace-config] [--accumulate-keys FILE] [--csv CSV]
-ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [--csv CSV]
+ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--timeout SECONDS] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--timeout SECONDS] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--trace-config] [--timeout SECONDS] [--accumulate-keys FILE] [--csv CSV]
+ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [--timeout SECONDS] [--csv CSV]
 
 # Semantic verification defaults to --halt-mode bor, which destroys modeled volatile state
 # before checkpoint recovery. Compile and bench default to swbor for continuous-power measurement.
-ckpt verify milp       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq]
-ckpt verify rockclimb  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--cpu-freq]
-ckpt verify schematic  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq]
+ckpt verify milp       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS]
+ckpt verify rockclimb  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--cpu-freq] [--timeout SECONDS]
+ckpt verify schematic  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS]
 
 # Analysis
 ckpt analyze strip-mining LOG_FILE [-o CSV]
@@ -299,6 +299,7 @@ Sample configs are in `benchmarks/` and `tests/`.
 
 - **Always use `uv run` to execute Python commands** (e.g., `uv run pytest`, `uv run python`). Never use bare `python` or `pytest`.
 - **Never manually install packages** with `uv pip install`. `uv run` auto-syncs dependencies. For optional extras use `uv run --extra test pytest ...`.
+- **Always use the built-in `--timeout` option for Saleae-capable `uv run ckpt bench ...` and `uv run ckpt verify ...` executions.** Never wrap these commands with `timeout`, `gtimeout`, or another external process killer; terminating the Python process externally can bypass Saleae capture cleanup and leave Logic 2 unable to start a new session.
 
 ## Problem-Solving Principles
 

@@ -84,6 +84,7 @@ def verify_algorithm(
     caps: list[str] | None,
     halt_mode: str,
     cpu_freq: int,
+    capture_timeout_seconds: float,
     nvm_symbols: list[str],
     compile_instrumented: CompileInstrumentedFn,
 ) -> bool:
@@ -136,6 +137,7 @@ def verify_algorithm(
                 saleae_manager=saleae_manager,
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
+                capture_timeout_seconds=capture_timeout_seconds,
                 nvm_symbols=nvm_symbols,
                 compile_instrumented=compile_instrumented,
             )
@@ -195,6 +197,7 @@ def _verify_one(
     saleae_manager: Manager,
     halt_mode: str,
     cpu_freq: int,
+    capture_timeout_seconds: float,
     nvm_symbols: list[str],
     compile_instrumented: CompileInstrumentedFn,
 ) -> BenchResult:
@@ -211,7 +214,8 @@ def _verify_one(
             return BenchResult(bench_name, cap_label, Status.ERROR, msg)
 
         try:
-            saleae_run(baseline_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
+            saleae_run(baseline_elf, saleae_manager, _FLASH_TIMEOUT,
+                       _AFTER_TRIGGER_SECONDS, capture_timeout_seconds)
             # The stop pulse fires before debug_exit() stores the result and halts.
             # Reconnecting with mspdebug too early resets the target and can restart
             # the benchmark before __nvm_done/__nvm_result are final.
@@ -278,7 +282,8 @@ def _verify_one(
 
         # -- D: Flash + read instrumented --
         try:
-            saleae_run(inst_elf, saleae_manager, _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS)
+            saleae_run(inst_elf, saleae_manager, _FLASH_TIMEOUT,
+                       _AFTER_TRIGGER_SECONDS, capture_timeout_seconds)
             time.sleep(_POST_CAPTURE_SETTLE_SECONDS)
             inst_nvm = read_nvm(tc, inst_elf, _FLASH_TIMEOUT, nvm_symbols)
         except (DeviceError, OSError) as exc:

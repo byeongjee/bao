@@ -31,27 +31,27 @@ def main() -> None:
         run(
             ["uv", "run", "ckpt", "bench", algo]
             + benchmarks
-            + ["-o", str(RESULT_DIR / f"{algo}-swbor.csv")]
+            + ["--timeout", "60", "-o", str(RESULT_DIR / f"{algo}-swbor.csv")]
         )
         print(f"\n=== {algo} (no device-debug) ===")
         run(
             ["uv", "run", "ckpt", "bench", algo]
             + benchmarks
-            + ["--no-device-debug", "-o", str(RESULT_DIR / f"{algo}-swbor-no-debug.csv")]
+            + ["--no-device-debug", "--timeout", "60", "-o", str(RESULT_DIR / f"{algo}-swbor-no-debug.csv")]
         )
 
     print("\n=== uninstrumented ===")
     run(
         ["uv", "run", "ckpt", "bench", "uninstrumented"]
         + benchmarks
-        + ["-o", str(RESULT_DIR / "uninstrumented.csv")]
+        + ["--timeout", "60", "-o", str(RESULT_DIR / "uninstrumented.csv")]
     )
 
     print("\n=== uninstrumentedO0 ===")
     run(
         ["uv", "run", "ckpt", "bench", "uninstrumentedO0"]
         + benchmarks
-        + ["-o", str(RESULT_DIR / "uninstrumentedO0.csv")]
+        + ["--timeout", "60", "-o", str(RESULT_DIR / "uninstrumentedO0.csv")]
     )
 
     print(f"\nDone. Results in {RESULT_DIR}/")

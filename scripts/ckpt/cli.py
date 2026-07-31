@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 HALT_MODES = ("bor", "lpm4", "swbor")
 
+_saleae_timeout_option = click.option(
+    "--timeout",
+    type=click.FloatRange(min=0, min_open=True),
+    default=60.0,
+    show_default=True,
+    help="Maximum wait in seconds for each Saleae capture.",
+)
+
 # Exit code mapping for CkptError subclasses.
 _EXIT_CODES: list[tuple[type[CkptError], int]] = [
     (ConfigError, 2),
@@ -934,6 +942,7 @@ def bench() -> None:
     help="MIP optimality gap (default: 0.0 = proven optimal).",
 )
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
+@_saleae_timeout_option
 @click.pass_context
 def bench_milp_cmd(
     ctx: click.Context,
@@ -948,6 +957,7 @@ def bench_milp_cmd(
     coarse_allocation: bool,
     milp_gap: float,
     accumulate_keys: str | None,
+    timeout: float,
 ) -> None:
     """Run MILP benchmarks across programs and capacitor sizes."""
     from .bench.milp import run_milp_benchmarks
@@ -958,6 +968,7 @@ def bench_milp_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         device_debug=device_debug,
+        capture_timeout_seconds=timeout,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         estimator_mode=estimator_mode,
@@ -1001,6 +1012,7 @@ def bench_milp_cmd(
     help="Maximum RockClimb partial unroll factor for the preprocess pass.",
 )
 @click.option("--accumulate-keys", type=click.Path(), help="Accumulate required energy keys to this file.")
+@_saleae_timeout_option
 @click.pass_context
 def bench_rockclimb_cmd(
     ctx: click.Context,
@@ -1013,6 +1025,7 @@ def bench_rockclimb_cmd(
     cpu_freq: str,
     max_unroll: int,
     accumulate_keys: str | None,
+    timeout: float,
 ) -> None:
     """Run RockClimb benchmarks across programs and capacitor sizes."""
     from .bench.rockclimb import run_rockclimb_benchmarks
@@ -1023,6 +1036,7 @@ def bench_rockclimb_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         device_debug=device_debug,
+        capture_timeout_seconds=timeout,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         energy_config=Path(energy_config) if energy_config else None,
@@ -1072,6 +1086,7 @@ def bench_rockclimb_cmd(
               help="Force checkpoint at loop header when inner loop allocations conflict.")
 @click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
               help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@_saleae_timeout_option
 @click.pass_context
 def bench_schematic_cmd(
     ctx: click.Context,
@@ -1087,6 +1102,7 @@ def bench_schematic_cmd(
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
     recompute_energy_after_new_checkpoint: bool,
+    timeout: float,
 ) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -1097,6 +1113,7 @@ def bench_schematic_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         device_debug=device_debug,
+        capture_timeout_seconds=timeout,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         energy_config=Path(energy_config) if energy_config else None,
@@ -1151,6 +1168,7 @@ def bench_schematic_cmd(
               help="Force checkpoint at loop header when inner loop allocations conflict.")
 @click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
               help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@_saleae_timeout_option
 @click.pass_context
 def bench_schematic_o3_cmd(
     ctx: click.Context,
@@ -1166,6 +1184,7 @@ def bench_schematic_o3_cmd(
     accumulate_keys: str | None,
     force_checkpoint_on_incompatible_loops: bool,
     recompute_energy_after_new_checkpoint: bool,
+    timeout: float,
 ) -> None:
     """Run SCHEMATIC-O3 benchmarks across programs and capacitor sizes."""
     from .bench.schematic import run_schematic_benchmarks
@@ -1176,6 +1195,7 @@ def bench_schematic_o3_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         device_debug=device_debug,
+        capture_timeout_seconds=timeout,
         halt_mode=halt_mode,
         output_csv=Path(output) if output else None,
         energy_config=Path(energy_config) if energy_config else None,
@@ -1200,12 +1220,14 @@ def bench_schematic_o3_cmd(
     default="16",
     help="CPU frequency in MHz (default: 16).",
 )
+@_saleae_timeout_option
 @click.pass_context
 def bench_uninstrumented_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     output: str | None,
     cpu_freq: str,
+    timeout: float,
 ) -> None:
     """Run uninstrumented baselines and measure execution time."""
     _bench_uninstrumented_impl(
@@ -1213,6 +1235,7 @@ def bench_uninstrumented_cmd(
         benchmarks,
         output,
         cpu_freq,
+        timeout,
         algorithm_label="uninstrumented",
         clang_opt_level=3,
         opt_level=3,
@@ -1224,6 +1247,7 @@ def _bench_uninstrumented_impl(
     benchmarks: tuple[str, ...],
     output: str | None,
     cpu_freq: str,
+    timeout: float,
     algorithm_label: str,
     clang_opt_level: int,
     opt_level: int,
@@ -1235,6 +1259,7 @@ def _bench_uninstrumented_impl(
         ctx.obj["tc"],
         benchmarks=list(benchmarks) if benchmarks else None,
         output_csv=Path(output) if output else None,
+        capture_timeout_seconds=timeout,
         cpu_freq=int(cpu_freq) * 1_000_000,
         algorithm_label=algorithm_label,
         clang_opt_level=clang_opt_level,
@@ -1251,12 +1276,14 @@ def _bench_uninstrumented_impl(
     default="16",
     help="CPU frequency in MHz (default: 16).",
 )
+@_saleae_timeout_option
 @click.pass_context
 def bench_uninstrumented_o0_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     output: str | None,
     cpu_freq: str,
+    timeout: float,
 ) -> None:
     """Run uninstrumented baselines with O0 frontend IR and O3 backend."""
     _bench_uninstrumented_impl(
@@ -1264,6 +1291,7 @@ def bench_uninstrumented_o0_cmd(
         benchmarks,
         output,
         cpu_freq,
+        timeout,
         algorithm_label="uninstrumentedO0",
         clang_opt_level=0,
         opt_level=3,
@@ -1286,6 +1314,7 @@ def bench_uninstrumented_o0_cmd(
     default="16",
     help="CPU frequency in MHz (default: 16).",
 )
+@_saleae_timeout_option
 @click.pass_context
 def bench_chunked_cmd(
     ctx: click.Context,
@@ -1294,6 +1323,7 @@ def bench_chunked_cmd(
     output: str | None,
     energy_config: str | None,
     cpu_freq: str,
+    timeout: float,
 ) -> None:
     """Run chunking-only baselines across programs and capacitor sizes."""
     from .bench.chunked import run_chunked_benchmarks
@@ -1305,6 +1335,7 @@ def bench_chunked_cmd(
         caps=list(cap) if cap else None,
         output_csv=Path(output) if output else None,
         energy_config=Path(energy_config) if energy_config else None,
+        capture_timeout_seconds=timeout,
         cpu_freq=int(cpu_freq) * 1_000_000,
         pass_log_level=ctx.obj["pass_log_level"],
     )
@@ -1341,6 +1372,7 @@ def verify() -> None:
     default="1",
     help="CPU frequency in MHz (default: 1).",
 )
+@_saleae_timeout_option
 @click.pass_context
 def verify_rockclimb_cmd(
     ctx: click.Context,
@@ -1349,6 +1381,7 @@ def verify_rockclimb_cmd(
     energy_config: str | None,
     halt_mode: str,
     cpu_freq: str,
+    timeout: float,
 ) -> None:
     """Verify semantic correctness of RockClimb checkpoint insertion."""
     from .verify.rockclimb import verify_rockclimb
@@ -1359,6 +1392,7 @@ def verify_rockclimb_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         halt_mode=halt_mode,
+        capture_timeout_seconds=timeout,
         energy_config=Path(energy_config) if energy_config else None,
         cpu_freq=int(cpu_freq) * 1_000_000,
         pass_log_level=ctx.obj["pass_log_level"],
@@ -1397,6 +1431,7 @@ def verify_rockclimb_cmd(
 )
 @click.option("--coarse-allocation", is_flag=True,
               help="Use one MILP placement variable per eligible value instead of per-region placement.")
+@_saleae_timeout_option
 @click.pass_context
 def verify_milp_cmd(
     ctx: click.Context,
@@ -1407,6 +1442,7 @@ def verify_milp_cmd(
     estimator_mode: str,
     cpu_freq: str,
     coarse_allocation: bool,
+    timeout: float,
 ) -> None:
     """Verify semantic correctness of MILP checkpoint insertion."""
     from .verify.milp import verify_milp
@@ -1417,6 +1453,7 @@ def verify_milp_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         halt_mode=halt_mode,
+        capture_timeout_seconds=timeout,
         energy_config=Path(energy_config) if energy_config else None,
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
@@ -1459,6 +1496,7 @@ def verify_milp_cmd(
               help="Force checkpoint at loop header when inner loop allocations conflict.")
 @click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
               help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@_saleae_timeout_option
 @click.pass_context
 def verify_schematic_cmd(
     ctx: click.Context,
@@ -1470,6 +1508,7 @@ def verify_schematic_cmd(
     cpu_freq: str,
     force_checkpoint_on_incompatible_loops: bool,
     recompute_energy_after_new_checkpoint: bool,
+    timeout: float,
 ) -> None:
     """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
     from .verify.schematic import verify_schematic
@@ -1480,6 +1519,7 @@ def verify_schematic_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         halt_mode=halt_mode,
+        capture_timeout_seconds=timeout,
         energy_config=Path(energy_config) if energy_config else None,
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,
@@ -1525,6 +1565,7 @@ def verify_schematic_cmd(
               help="Force checkpoint at loop header when inner loop allocations conflict.")
 @click.option("--recompute-energy-after-new-checkpoint", is_flag=True,
               help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).")
+@_saleae_timeout_option
 @click.pass_context
 def verify_schematic_o3_cmd(
     ctx: click.Context,
@@ -1536,6 +1577,7 @@ def verify_schematic_o3_cmd(
     cpu_freq: str,
     force_checkpoint_on_incompatible_loops: bool,
     recompute_energy_after_new_checkpoint: bool,
+    timeout: float,
 ) -> None:
     """Verify semantic correctness of SCHEMATIC-O3 checkpoint insertion."""
     from .verify.schematic import verify_schematic
@@ -1546,6 +1588,7 @@ def verify_schematic_o3_cmd(
         benchmarks=list(benchmarks) if benchmarks else None,
         caps=list(cap) if cap else None,
         halt_mode=halt_mode,
+        capture_timeout_seconds=timeout,
         energy_config=Path(energy_config) if energy_config else None,
         estimator_mode=estimator_mode,
         cpu_freq=int(cpu_freq) * 1_000_000,

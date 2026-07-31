@@ -43,6 +43,7 @@ def run_chunked_benchmarks(
     caps: list[str] | None,
     output_csv: Path | None,
     energy_config: Path | None,
+    capture_timeout_seconds: float,
     cpu_freq: int,
     pass_log_level: str,
     clang_opt_level: int = 3,
@@ -144,6 +145,7 @@ def run_chunked_benchmarks(
                         execution_time_us = saleae_run(
                             result.elf_file, saleae_manager,
                             _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
+                            capture_timeout_seconds,
                         )
                         logger.info(
                             "  OK  compilation_time=%dms execution_time=%.2fus",

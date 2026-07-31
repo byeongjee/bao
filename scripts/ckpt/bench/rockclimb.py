@@ -82,6 +82,7 @@ def run_rockclimb_benchmarks(
     caps: list[str] | None = None,
     output_csv: Path | None = None,
     device_debug: bool,
+    capture_timeout_seconds: float,
     halt_mode: str,
     energy_config: Path | None = None,
     cpu_freq: int,
@@ -176,6 +177,7 @@ def run_rockclimb_benchmarks(
                 csv_header=CSV_HEADER,
                 row_builder=build_row,
                 saleae_manager=saleae_manager,
+                capture_timeout_seconds=capture_timeout_seconds,
                 accumulate_keys_file=accumulate_keys_file,
             )
     finally:

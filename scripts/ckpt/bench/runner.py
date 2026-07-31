@@ -207,6 +207,7 @@ def run_benchmark_matrix(
     csv_header: list[str],
     row_builder: RowBuilder,
     saleae_manager: Manager | None,
+    capture_timeout_seconds: float,
     accumulate_keys_file: Path | None,
 ) -> None:
     """Run compile + Saleae timing + optional NVM-read across benchmark x capacitor matrix.
@@ -289,6 +290,7 @@ def run_benchmark_matrix(
                             execution_time_us = saleae_run(
                                 elf, saleae_manager,
                                 _FLASH_TIMEOUT, _AFTER_TRIGGER_SECONDS,
+                                capture_timeout_seconds,
                             )
 
                             if device_debug and nvm_symbols:
