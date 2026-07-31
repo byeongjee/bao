@@ -70,7 +70,7 @@ unsigned CheckpointInstrumenter::instrumentFunction(llvm::Function &F, const MIL
 
     applyMemoryPlacement(state);
     createShadowGlobals(F, solution, state);
-    createNVMBackupGlobals(F, solution, state, cfg);
+    createNVMBackupGlobals(F, solution, state);
     rewriteAccessesInVMRegions(F, solution, cfg);
     unsigned inserted = insertRegionBoundaries(F, solution, cfg, stateView, state);
     return inserted;
@@ -111,8 +111,7 @@ void CheckpointInstrumenter::createShadowGlobals(llvm::Function &F, const MILPSo
 }
 
 void CheckpointInstrumenter::createNVMBackupGlobals(llvm::Function &F, const MILPSolution &solution,
-                                                    const StateAnalysis &state,
-                                                    const ICFGView &cfg) {
+                                                    const StateAnalysis &state) {
 
     nvmBackupMap_.clear();
     allocaAddrMap_.clear();
