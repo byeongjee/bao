@@ -21,7 +21,6 @@
     "reg_store_energy": 0.0
   },
   "schematic": {
-    "max_paths": 10,
     "enable_block_splitting": true
   }
 }

@@ -81,24 +81,6 @@ std::optional<SchematicParams> parseSchematicParams(const std::string &configPat
     params.loopIncrementCostNvm = config["loop_increment_cost_nvm"].get<double>();
     params.callCost = config["call_cost"].get<double>();
 
-    // max_paths: check schematic section first, then root.
-    const nlohmann::json *maxPathsSrc = nullptr;
-    if (schSection.contains("max_paths")) {
-        maxPathsSrc = &schSection["max_paths"];
-    } else if (config.contains("max_paths")) {
-        maxPathsSrc = &config["max_paths"];
-    } else {
-        PLOGE << "Error: Missing required field 'max_paths'"
-              << " in SCHEMATIC config: " << configPath;
-        return std::nullopt;
-    }
-    if (!maxPathsSrc->is_number_unsigned()) {
-        PLOGE << "Error: Field 'max_paths' must be a non-negative integer"
-              << " in SCHEMATIC config: " << configPath;
-        return std::nullopt;
-    }
-    params.maxPaths = maxPathsSrc->get<unsigned>();
-
     // Helper to read bool from schematic section or root.
     auto readBool = [&](const std::string &key, bool defaultVal) -> std::optional<bool> {
         for (const auto *src : {&schSection, &config}) {
