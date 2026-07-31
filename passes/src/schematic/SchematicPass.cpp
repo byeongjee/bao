@@ -334,33 +334,32 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     if (!foldCalleeSummaries(F, graph, *ctx.cfg, params, summaries, solution))
         return false;
 
-    // Load traces (optional).
-    std::optional<LoadedTraces> loadedTraces;
-    if (!SchematicTraceOpt.getValue().empty()) {
-        TraceLoader loader(F, LI, graph);
-        loadedTraces = loader.load(SchematicTraceOpt.getValue());
-        if (!loadedTraces) {
-            PLOGE << "SCHEMATIC: failed to load traces for " << F.getName();
-            return false;
-        }
-        PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
+    // Load traces (required).
+    if (SchematicTraceOpt.getValue().empty()) {
+        PLOGE << "SCHEMATIC: no trace file given for " << F.getName() << " — traces are required";
+        return false;
     }
+    TraceLoader loader(F, LI, graph);
+    std::optional<LoadedTraces> loadedTraces = loader.load(SchematicTraceOpt.getValue());
+    if (!loadedTraces) {
+        PLOGE << "SCHEMATIC: failed to load traces for " << F.getName();
+        return false;
+    }
+    if (loadedTraces->functionPaths.empty()) {
+        PLOGE << "SCHEMATIC: no function traces for " << F.getName() << " — traces are required";
+        return false;
+    }
+    PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
 
     // Loop analysis.
     LoopAnalyzer loopAnalyzer(LI, SE, *ctx.cfg, state, params, &vmTracker, graph);
-    if (loadedTraces)
-        loopAnalyzer.setLoadedLoopTraces(loadedTraces->loopTraces);
+    loopAnalyzer.setLoadedLoopTraces(loadedTraces->loopTraces);
 
     if (!loopAnalyzer.analyzeLoops(solution)) {
         PLOGE << "SCHEMATIC: loop analysis failed for " << F.getName() << " — aborting";
         return false;
     }
 
-    // Get paths from traces (required).
-    if (!loadedTraces || loadedTraces->functionPaths.empty()) {
-        PLOGE << "SCHEMATIC: no traces loaded for " << F.getName() << " — traces are required";
-        return false;
-    }
     std::vector<EnumeratedPath> paths = loadedTraces->functionPaths;
 
     // Create synthetic START_Func/END_Func boundary blocks for function traces.
