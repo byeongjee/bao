@@ -18,7 +18,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from conftest import (
     CONFIGS_DIR,
     SCENARIOS_DIR,
@@ -57,7 +56,9 @@ def _func_stats(stderr: str, fn: str) -> dict[str, str]:
     return {}
 
 
-def _run_schematic_interproc(tools, compile_to_ir, src, energy_config, schematic_config, tmp_path):
+def _run_schematic_interproc(
+    tools, compile_to_ir, src, energy_config, schematic_config, tmp_path
+):
     """Full inter-procedural pipeline: isolate, trace on isolated IR, then solve."""
     energy_config = str(energy_config)
     schematic_config = str(schematic_config)
@@ -66,17 +67,33 @@ def _run_schematic_interproc(tools, compile_to_ir, src, energy_config, schematic
     compile_to_ir(src, input_ll, mem2reg=False)
 
     ann_ll = str(tmp_path / "annotated.ll")
-    r = _run([
-        tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-        "-passes=tripcount-annotation", "-S", input_ll, "-o", ann_ll,
-    ])
+    r = _run(
+        [
+            tools["opt"],
+            "-load-pass-plugin",
+            tools["pass_lib"],
+            "-passes=tripcount-annotation",
+            "-S",
+            input_ll,
+            "-o",
+            ann_ll,
+        ]
+    )
     assert r.returncode == 0, f"tripcount-annotation failed: {r.stderr}"
 
     iso_ll = str(tmp_path / "isolated.ll")
-    r = _run([
-        tools["opt"], "-load-pass-plugin", tools["pass_lib"],
-        "-passes=schematic-isolate", "-S", ann_ll, "-o", iso_ll,
-    ])
+    r = _run(
+        [
+            tools["opt"],
+            "-load-pass-plugin",
+            tools["pass_lib"],
+            "-passes=schematic-isolate",
+            "-S",
+            ann_ll,
+            "-o",
+            iso_ll,
+        ]
+    )
     assert r.returncode == 0, f"schematic-isolate failed: {r.stderr}"
 
     trace_json = _collect_schematic_trace(tools, iso_ll, energy_config, tmp_path)
@@ -84,14 +101,22 @@ def _run_schematic_interproc(tools, compile_to_ir, src, energy_config, schematic
     output_ll = str(tmp_path / "output.ll")
     r = subprocess.run(
         [
-            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+            tools["opt"],
+            "-load-pass-plugin",
+            tools["pass_lib"],
             "-passes=schematic",
             f"-energy-config={energy_config}",
             f"-schematic-config={schematic_config}",
             f"-schematic-trace={trace_json}",
-            "-S", iso_ll, "-o", output_ll,
+            "-S",
+            iso_ll,
+            "-o",
+            output_ll,
         ],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     output_ir = Path(output_ll).read_text() if Path(output_ll).exists() else ""
     return PassResult(r.returncode, r.stdout, r.stderr, output_ir)
@@ -127,7 +152,9 @@ def test_disabled_fold_no_active_checkpoint_at_call(tools, compile_to_ir, tmp_pa
     assert r.output_ir.count("call void @__region_boundary()") == 0, r.output_ir
 
 
-def test_virtual_callee_has_checkpoint_caller_stays_feasible(tools, compile_to_ir, tmp_path):
+def test_virtual_callee_has_checkpoint_caller_stays_feasible(
+    tools, compile_to_ir, tmp_path
+):
     """A callee that needs an internal checkpoint folds VIRTUAL.
 
     heavy() far exceeds the budget and is split internally (its own boundary).
@@ -211,7 +238,12 @@ def test_call_in_loop_folds_before_loop_analysis(tools, compile_to_ir, tmp_path)
     callee energy baked into the call site. main must be analyzed and feasible.
     """
     r = _run_schematic_interproc(
-        tools, compile_to_ir, FUNC_CALL_IN_LOOP, ENERGY_CONFIG, SCHEMATIC_CONFIG, tmp_path
+        tools,
+        compile_to_ir,
+        FUNC_CALL_IN_LOOP,
+        ENERGY_CONFIG,
+        SCHEMATIC_CONFIG,
+        tmp_path,
     )
     assert r.exit_code == 0, r.stderr
     assert "energy capacity too small" not in r.stderr, r.stderr
@@ -234,6 +266,8 @@ def test_call_chain_propagates_virtual(tools, compile_to_ir, tmp_path):
     assert r.exit_code == 0, r.stderr
     assert "energy capacity too small" not in r.stderr, r.stderr
     b = _func_stats(r.stderr, "b_fn")
-    assert b and int(b["Region boundaries"]) >= 1, f"b_fn should be split (VIRTUAL): {b}"
+    assert b and int(b["Region boundaries"]) >= 1, (
+        f"b_fn should be split (VIRTUAL): {b}"
+    )
     for fn in ("a_fn", "main"):
         assert _func_stats(r.stderr, fn), f"{fn} was not analyzed\n{r.stderr}"

@@ -11,6 +11,9 @@ from ckpt.device.nvm import (
 )
 from ckpt.errors import DeviceError
 
+pytestmark = pytest.mark.unit
+
+
 # ---------------------------------------------------------------------------
 # parse_hex_dump
 # ---------------------------------------------------------------------------

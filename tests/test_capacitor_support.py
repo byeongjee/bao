@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from ckpt.analysis.plot import _sort_key
 from ckpt.analysis.strip_mining import parse_strip_mining_log
 from ckpt.bench.config import discover_capacitors
 from ckpt.env import ProjectEnv
+
+pytestmark = pytest.mark.unit
+
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 

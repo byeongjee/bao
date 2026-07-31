@@ -6,9 +6,12 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from ckpt.compile import common, schematic
 from ckpt.compile.schematic import SchematicCompileOptions
 from ckpt.runner import StepResult
+
+pytestmark = pytest.mark.unit
 
 
 def test_collect_bb_freq_links_math_library(tmp_path, monkeypatch):

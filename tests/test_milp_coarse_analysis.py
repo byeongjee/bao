@@ -6,9 +6,10 @@ import csv
 from pathlib import Path
 
 import pytest
-
 from ckpt.analysis.milp_coarse import summarize_milp_coarse_allocation
 from ckpt.errors import ConfigError
+
+pytestmark = pytest.mark.unit
 
 
 _FIELDS = [
@@ -109,17 +110,13 @@ def test_summarize_milp_coarse_allocation_reports_per_cap_and_overall(
     assert five_uf["solve_time_mean_before_ms"] == pytest.approx(62.5)
     assert five_uf["solve_time_mean_after_ms"] == pytest.approx(35.0)
     assert five_uf["solve_time_mean_reduction_pct"] == pytest.approx(44.0)
-    assert five_uf["solve_time_geomean_reduction_pct"] == pytest.approx(
-        36.7544468
-    )
+    assert five_uf["solve_time_geomean_reduction_pct"] == pytest.approx(36.7544468)
     assert five_uf["solve_time_mean_of_reductions_pct"] == pytest.approx(35.0)
     assert five_uf["worst_case_before_benchmark"] == "alpha-5uF"
     assert five_uf["worst_case_before_ms"] == pytest.approx(100.0)
     assert five_uf["worst_case_after_benchmark"] == "alpha-5uF"
     assert five_uf["worst_case_after_ms"] == pytest.approx(50.0)
-    assert five_uf["milp_variables_mean_reduction_pct"] == pytest.approx(
-        13.3333333
-    )
+    assert five_uf["milp_variables_mean_reduction_pct"] == pytest.approx(13.3333333)
     assert five_uf["milp_presolved_constraints_mean_reduction_pct"] == pytest.approx(
         20.0
     )
@@ -129,9 +126,7 @@ def test_summarize_milp_coarse_allocation_reports_per_cap_and_overall(
     assert overall["solve_time_mean_before_ms"] == pytest.approx(58.3333333)
     assert overall["solve_time_mean_after_ms"] == pytest.approx(31.6666667)
     assert overall["solve_time_mean_reduction_pct"] == pytest.approx(45.7142857)
-    assert overall["solve_time_geomean_reduction_pct"] == pytest.approx(
-        41.5196452
-    )
+    assert overall["solve_time_geomean_reduction_pct"] == pytest.approx(41.5196452)
 
 
 def test_summarize_milp_coarse_allocation_rejects_mismatched_benchmarks(

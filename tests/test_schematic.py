@@ -10,14 +10,13 @@ import re
 import subprocess
 
 import pytest
-
 from conftest import (
     CONFIGS_DIR,
     PROJECT_DIR,
     SCENARIOS_DIR,
+    PassResult,
     _collect_schematic_trace,
     _prepare_schematic_ir,
-    PassResult,
     check_assertions,
 )
 
@@ -38,8 +37,11 @@ SCENARIOS = [
         ENERGY_CONFIG,
         SCHEMATIC_CONFIG,
         # Trivial function fits in one region: no boundaries needed.
-        {"exit": 0, "max_boundary": 0,
-         "stderr_contains": "Enabled checkpoints:             0"},
+        {
+            "exit": 0,
+            "max_boundary": 0,
+            "stderr_contains": "Enabled checkpoints:             0",
+        },
     ),
     (
         "loop",
@@ -50,8 +52,11 @@ SCENARIOS = [
         # 10 iterations = ~230 total — well within budget). Loop analysis runs and
         # determines loopFitsEntirely; no back-edge checkpoint is inserted.
         # The loop body is analyzed as a single region (min_boundary=0 is correct).
-        {"exit": 0, "max_boundary": 0,
-         "stderr_contains": "Loop decisions:                  1"},
+        {
+            "exit": 0,
+            "max_boundary": 0,
+            "stderr_contains": "Loop decisions:                  1",
+        },
     ),
     (
         "switch",
@@ -62,8 +67,7 @@ SCENARIOS = [
         # IR-level costs (~67 energy for the expensive path), the entire function
         # fits without checkpoints. Validates multi-successor CFG handling: no
         # false infeasibility, correct uncovered-path analysis for untouched cases.
-        {"exit": 0, "max_boundary": 0,
-         "stderr_contains": "Paths analyzed:"},
+        {"exit": 0, "max_boundary": 0, "stderr_contains": "Paths analyzed:"},
     ),
     (
         "nested_loop_energy",
@@ -75,8 +79,12 @@ SCENARIOS = [
         # reference-equivalent behavior does NOT blanket-reactivate every
         # fixed edge inside the analyzed loops; the static boundary count
         # stays compact.
-        {"exit": 0, "min_boundary": 3, "max_boundary": 3,
-         "stderr_contains": "Loop decisions:"},
+        {
+            "exit": 0,
+            "min_boundary": 3,
+            "max_boundary": 3,
+            "stderr_contains": "Loop decisions:",
+        },
     ),
 ]
 
@@ -102,16 +110,22 @@ def _run_schematic_with_trace(
     output_ll = tmp_path / "output.ll"
     result = subprocess.run(
         [
-            tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+            tools["opt"],
+            "-load-pass-plugin",
+            tools["pass_lib"],
             "-passes=schematic",
             f"-energy-config={energy_config}",
             f"-schematic-config={schematic_config}",
             f"-schematic-trace={trace_json}",
-            "-S", schematic_input_ll, "-o", str(output_ll),
+            "-S",
+            schematic_input_ll,
+            "-o",
+            str(output_ll),
         ],
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
 
     output_ir = output_ll.read_text() if output_ll.exists() else ""
@@ -147,6 +161,7 @@ def _run_ckpt_compile_schematic_o3(
         text=True,
         cwd=str(PROJECT_DIR),
         timeout=240,
+        check=False,
     )
     return result, result.stdout + result.stderr
 
@@ -355,27 +370,37 @@ def test_schematic_synthesizes_missing_nested_loop_trace(
     assert "Loop decisions:                  2" in result.stderr
 
 
-def test_schematic_debug_loop_logs_respect_log_level(tools, compile_to_ir, tmp_path_factory):
+def test_schematic_debug_loop_logs_respect_log_level(
+    tools, compile_to_ir, tmp_path_factory
+):
     tmp_path = tmp_path_factory.mktemp("schematic_log_levels")
     src = SCENARIOS_DIR / "scenario_nested_loop_energy_o3.c"
 
     schematic_input_ll = _prepare_schematic_ir(tools, compile_to_ir, src, tmp_path, 3)
-    trace_json = _collect_schematic_trace(tools, schematic_input_ll, ENERGY_CONFIG, tmp_path)
+    trace_json = _collect_schematic_trace(
+        tools, schematic_input_ll, ENERGY_CONFIG, tmp_path
+    )
 
     def run_with_log_level(log_level: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
-                tools["opt"], "-load-pass-plugin", tools["pass_lib"],
+                tools["opt"],
+                "-load-pass-plugin",
+                tools["pass_lib"],
                 "-passes=schematic",
                 f"-energy-config={ENERGY_CONFIG}",
                 f"-schematic-config={SCHEMATIC_CONFIG}",
                 f"-schematic-trace={trace_json}",
                 f"-ckpt-log-level={log_level}",
-                "-S", schematic_input_ll, "-o", str(tmp_path / f"output_{log_level}.ll"),
+                "-S",
+                schematic_input_ll,
+                "-o",
+                str(tmp_path / f"output_{log_level}.ll"),
             ],
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
 
     info_result = run_with_log_level("info")
@@ -405,7 +430,16 @@ def test_schematic_skips_debug_helper_functions(
     assert result.exit_code == 0, (
         f"Expected exit=0 but got {result.exit_code}.\nstderr: {result.stderr[:1000]}"
     )
-    assert "SCHEMATIC: skipping benchmark infrastructure function timing_gpio_start" in result.stderr
-    assert "SCHEMATIC: skipping benchmark infrastructure function timing_gpio_stop" in result.stderr
-    assert "SCHEMATIC: skipping benchmark infrastructure function _timing_delay_cycles" in result.stderr
+    assert (
+        "SCHEMATIC: skipping benchmark infrastructure function timing_gpio_start"
+        in result.stderr
+    )
+    assert (
+        "SCHEMATIC: skipping benchmark infrastructure function timing_gpio_stop"
+        in result.stderr
+    )
+    assert (
+        "SCHEMATIC: skipping benchmark infrastructure function _timing_delay_cycles"
+        in result.stderr
+    )
     assert "due to unresolved memory/call effects" not in result.stderr

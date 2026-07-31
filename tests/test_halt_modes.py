@@ -1,6 +1,5 @@
 import click
 import pytest
-
 from ckpt.cli import (
     HALT_MODES,
     bench_milp_cmd,
@@ -16,7 +15,6 @@ from ckpt.cli import (
     verify_schematic_cmd,
     verify_schematic_o3_cmd,
 )
-
 
 pytestmark = pytest.mark.unit
 

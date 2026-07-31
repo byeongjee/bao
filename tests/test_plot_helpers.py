@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import pytest
-
 from ckpt.analysis.plot import _get_value, _parse_benchmark_name
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
 # _parse_benchmark_name
 # ---------------------------------------------------------------------------
+
 
 class TestParseBenchmarkName:
     @pytest.mark.parametrize(
@@ -29,6 +31,7 @@ class TestParseBenchmarkName:
 # ---------------------------------------------------------------------------
 # _get_value
 # ---------------------------------------------------------------------------
+
 
 class TestGetValue:
     def test_valid_float(self):

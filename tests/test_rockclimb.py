@@ -17,7 +17,9 @@ import pytest
 # ---------------------------------------------------------------------------
 TESTS_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = TESTS_DIR.parent
-MACHINE_PASS_LIB = PROJECT_DIR / "passes" / "build" / "rockclimb-backend" / "RockClimbMachinePass.so"
+MACHINE_PASS_LIB = (
+    PROJECT_DIR / "passes" / "build" / "rockclimb-backend" / "RockClimbMachinePass.so"
+)
 ROCKCLIMB_PARAMS = TESTS_DIR / "rockclimb_params.json"
 ASSEMBLY_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "assembly_params.json"
 
@@ -110,27 +112,52 @@ def run_rockclimb_machine(machine_tools):
 
         # Step 1: C → LLVM IR
         subprocess.run(
-            [clang, "-S", "-emit-llvm", f"-O{clang_opt}", "--target=msp430",
-             str(src), "-o", str(ir_file)],
-            check=True, capture_output=True, text=True,
+            [
+                clang,
+                "-S",
+                "-emit-llvm",
+                f"-O{clang_opt}",
+                "--target=msp430",
+                str(src),
+                "-o",
+                str(ir_file),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
         )
 
         # Step 2: IR → MIR (stop after register allocation)
         subprocess.run(
-            [llc, "-march=msp430", "-stop-after=virtregrewriter",
-             str(ir_file), "-o", str(mir_file)],
-            check=True, capture_output=True, text=True,
+            [
+                llc,
+                "-march=msp430",
+                "-stop-after=virtregrewriter",
+                str(ir_file),
+                "-o",
+                str(mir_file),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
         )
 
         # Step 3: Run RockClimb machine pass
         result = subprocess.run(
-            [llc, "-march=msp430",
-             f"-load={pass_lib}",
-             "-run-pass=rockclimb",
-             f"-rockclimb-config={rockclimb_config}",
-             f"-rockclimb-energy-config={energy_config}",
-             str(mir_file), "-o", str(out_mir)],
-            capture_output=True, text=True,
+            [
+                llc,
+                "-march=msp430",
+                f"-load={pass_lib}",
+                "-run-pass=rockclimb",
+                f"-rockclimb-config={rockclimb_config}",
+                f"-rockclimb-energy-config={energy_config}",
+                str(mir_file),
+                "-o",
+                str(out_mir),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
         output_mir = out_mir.read_text() if out_mir.exists() else ""
@@ -139,9 +166,17 @@ def run_rockclimb_machine(machine_tools):
         # Step 4: Resume compilation MIR → assembly (only if pass succeeded)
         if result.returncode == 0 and out_mir.exists():
             asm_result = subprocess.run(
-                [llc, "-march=msp430", "-start-after=virtregrewriter",
-                 str(out_mir), "-o", str(out_asm)],
-                capture_output=True, text=True,
+                [
+                    llc,
+                    "-march=msp430",
+                    "-start-after=virtregrewriter",
+                    str(out_mir),
+                    "-o",
+                    str(out_asm),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
             )
             if asm_result.returncode == 0 and out_asm.exists():
                 output_asm = out_asm.read_text()
@@ -299,7 +334,10 @@ class TestMachinePassBasic:
     def test_pass_runs_successfully(self, run_rockclimb_machine, tmp_path):
         src = _write_src(tmp_path, SIMPLE_LINEAR)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0, f"Pass failed:\n{result.stderr}"
         assert "Checkpoint Insertion Statistics" in result.stderr
@@ -307,19 +345,23 @@ class TestMachinePassBasic:
     def test_produces_boundary_checks(self, run_rockclimb_machine, tmp_path):
         src = _write_src(tmp_path, SIMPLE_LINEAR)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0
         # Should have at least one boundary check in MIR
         checks_mir = count_mir_calls(result.output_mir, "__region_boundary")
-        assert checks_mir >= 1, (
-            f"Expected >=1 boundary checks in MIR, got {checks_mir}"
-        )
+        assert checks_mir >= 1, f"Expected >=1 boundary checks in MIR, got {checks_mir}"
 
     def test_produces_assembly_calls(self, run_rockclimb_machine, tmp_path):
         src = _write_src(tmp_path, SIMPLE_LINEAR)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0
         assert result.output_asm, "No assembly output produced"
@@ -336,7 +378,10 @@ class TestMachinePassLoop:
     def test_loop_creates_regions(self, run_rockclimb_machine, tmp_path):
         src = _write_src(tmp_path, SIMPLE_LOOP)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0
         # Loop header is a mandatory boundary → should create multiple regions
@@ -352,7 +397,10 @@ class TestMachinePassDistributedCkpt:
     def test_register_saves_in_mir(self, run_rockclimb_machine, tmp_path):
         src = _write_src(tmp_path, MULTI_LIVEOUT)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0
         saves = count_mir_reg_saves(result.output_mir)
@@ -363,7 +411,10 @@ class TestMachinePassDistributedCkpt:
         """Registers modified in a loop body and used via back-edge must be saved."""
         src = _write_src(tmp_path, LOOP_BACKEDGE_LIVEOUT)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0
         saves = count_mir_reg_saves(result.output_mir)
@@ -382,19 +433,26 @@ class TestMachinePassDistributedCkpt:
         has no save point — recovery restores the initial pointer.
         """
         low_cap_config = tmp_path / "low_cap_rockclimb.json"
-        low_cap_config.write_text(json.dumps({
-            "capacity": 20.0,
-            "E_pro": 0.0,
-            "E_epi": 0.0,
-            "N_reg": 16,
-            "reg_store_energy": 0.0,
-            "reg_restore_energy": 0.0,
-            "rockclimb": {"distributed_checkpointing": True},
-        }))
+        low_cap_config.write_text(
+            json.dumps(
+                {
+                    "capacity": 20.0,
+                    "E_pro": 0.0,
+                    "E_epi": 0.0,
+                    "N_reg": 16,
+                    "reg_store_energy": 0.0,
+                    "reg_restore_energy": 0.0,
+                    "rockclimb": {"distributed_checkpointing": True},
+                }
+            )
+        )
 
         src = _write_src(tmp_path, BOUNDARY_BLOCK_DEF)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, low_cap_config, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            low_cap_config,
+            tmp_path,
         )
         assert result.exit_code == 0, f"Pass failed:\n{result.stderr}"
 
@@ -418,7 +476,10 @@ class TestMachinePassDistributedCkpt:
     def test_register_saves_in_assembly(self, run_rockclimb_machine, tmp_path):
         src = _write_src(tmp_path, MULTI_LIVEOUT)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0
         saves_mir = count_mir_reg_saves(result.output_mir)
@@ -439,35 +500,49 @@ class TestMachinePassDistributedCkpt:
 
         # Run without reg_store_energy
         base_config = tmp_path / "base_config.json"
-        base_config.write_text(json.dumps({
-            "capacity": 507.87,
-            "E_pro": 5.0,
-            "E_epi": 3.0,
-            "N_reg": 16,
-            "reg_store_energy": 0.0,
-            "reg_restore_energy": 2.0,
-            "rockclimb": {"distributed_checkpointing": True},
-        }))
+        base_config.write_text(
+            json.dumps(
+                {
+                    "capacity": 507.87,
+                    "E_pro": 5.0,
+                    "E_epi": 3.0,
+                    "N_reg": 16,
+                    "reg_store_energy": 0.0,
+                    "reg_restore_energy": 2.0,
+                    "rockclimb": {"distributed_checkpointing": True},
+                }
+            )
+        )
         base_result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, base_config, tmp_path / "base",
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            base_config,
+            tmp_path / "base",
         )
         assert base_result.exit_code == 0
 
         # Run with reg_store_energy in rockclimb section
         store_config = tmp_path / "store_config.json"
-        store_config.write_text(json.dumps({
-            "capacity": 507.87,
-            "E_pro": 5.0,
-            "E_epi": 3.0,
-            "N_reg": 16,
-            "reg_store_energy": 5.0,
-            "reg_restore_energy": 2.0,
-            "rockclimb": {
-                "distributed_checkpointing": True,
-            },
-        }))
+        store_config.write_text(
+            json.dumps(
+                {
+                    "capacity": 507.87,
+                    "E_pro": 5.0,
+                    "E_epi": 3.0,
+                    "N_reg": 16,
+                    "reg_store_energy": 5.0,
+                    "reg_restore_energy": 2.0,
+                    "rockclimb": {
+                        "distributed_checkpointing": True,
+                    },
+                }
+            )
+        )
         store_result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, store_config, tmp_path / "store",
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            store_config,
+            tmp_path / "store",
         )
         assert store_result.exit_code == 0
 
@@ -490,7 +565,10 @@ class TestMachinePassStatistics:
     def test_statistics_format(self, run_rockclimb_machine, tmp_path):
         src = _write_src(tmp_path, SIMPLE_LINEAR)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0
         assert "RockClimb-Machine" in result.stderr
@@ -529,7 +607,10 @@ class TestCallHandling:
         argument registers (so recovery into the first region restores args)."""
         src = _write_src(tmp_path, TWO_ARG_LEAF)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0, result.stderr
         mir = result.output_mir
@@ -551,7 +632,10 @@ class TestCallHandling:
         own entry/exit boundaries (shared across call sites)."""
         src = _write_src(tmp_path, CALLER_CALLEE_TWICE)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0, result.stderr
         mir = result.output_mir
@@ -586,7 +670,10 @@ class TestCallHandling:
         block containing it cannot fit one charge."""
         src = _write_src(tmp_path, "int divfn(int a, int b) { return a / b; }")
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert (
             "does not fit one charge" in result.stderr
@@ -600,7 +687,10 @@ class TestCallHandling:
         carries its own entry/exit boundaries, and the recursive call is cheap."""
         src = _write_src(tmp_path, RECURSION)
         result = run_rockclimb_machine(
-            src, ASSEMBLY_ENERGY_CONFIG, ROCKCLIMB_PARAMS, tmp_path,
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
         )
         assert result.exit_code == 0, result.stderr
         mir = result.output_mir
