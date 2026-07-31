@@ -41,11 +41,11 @@ def find_device() -> str | None:
 
 def read_serial_output(
     *,
-    device: str | None = None,
-    baud: int = 9600,
-    timeout: float = 30,
-    end_marker: str = "END_OUTPUT",
-    reset_cmd: str | None = None,
+    device: str | None,
+    baud: int,
+    timeout: float,
+    end_marker: str,
+    reset_cmd: str | None,
 ) -> tuple[list[str], bool]:
     """Read UART output until end marker or timeout.
 

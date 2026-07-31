@@ -50,8 +50,8 @@ def run_chunked_benchmarks(
     capture_timeout_seconds: float,
     cpu_freq: int,
     pass_log_level: str,
-    clang_opt_level: int = 3,
-    opt_level: int = 3,
+    clang_opt_level: int,
+    opt_level: int,
 ) -> None:
     """Compile and measure chunking-only baselines for all benchmarks.
 

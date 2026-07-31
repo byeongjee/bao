@@ -58,8 +58,8 @@ class BenchResult:
     cap_label: str
     status: Status
     detail: str
-    baseline_result: str | None = None
-    algorithm_result: str | None = None
+    baseline_result: str | None
+    algorithm_result: str | None
 
 
 @dataclass
@@ -216,7 +216,14 @@ def _verify_one(
         except (CompilationError, OSError) as exc:
             msg = f"Baseline compilation failed: {exc}"
             logger.error("  %s", msg)
-            return BenchResult(bench_name, cap_label, Status.ERROR, msg)
+            return BenchResult(
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
+                baseline_result=None,
+                algorithm_result=None,
+            )
 
         try:
             saleae_run(
@@ -236,7 +243,14 @@ def _verify_one(
         except (DeviceError, OSError) as exc:
             msg = f"Baseline flash/read failed: {exc}"
             logger.error("  %s", msg)
-            return BenchResult(bench_name, cap_label, Status.ERROR, msg)
+            return BenchResult(
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
+                baseline_result=None,
+                algorithm_result=None,
+            )
 
         baseline_done = str(baseline_nvm.get("__nvm_done", ""))
         baseline_result = str(baseline_nvm.get("__nvm_result", ""))
@@ -247,12 +261,26 @@ def _verify_one(
         if baseline_done != "1":
             msg = f"Baseline did not complete (__nvm_done={baseline_done})"
             logger.error("  %s", msg)
-            return BenchResult(bench_name, cap_label, Status.ERROR, msg)
+            return BenchResult(
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
+                baseline_result=None,
+                algorithm_result=None,
+            )
 
         if not baseline_result:
             msg = "No RESULT from baseline"
             logger.error("  %s", msg)
-            return BenchResult(bench_name, cap_label, Status.ERROR, msg)
+            return BenchResult(
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
+                baseline_result=None,
+                algorithm_result=None,
+            )
 
         # -- B: Compile instrumented --
         try:
@@ -279,6 +307,7 @@ def _verify_one(
                     Status.SKIP,
                     infeasible,
                     baseline_result=baseline_result,
+                    algorithm_result=None,
                 )
             msg = f"{algorithm} compilation failed"
             logger.debug("  %s: %s", msg, compile_output[:200])
@@ -288,6 +317,7 @@ def _verify_one(
                 Status.ERROR,
                 msg,
                 baseline_result=baseline_result,
+                algorithm_result=None,
             )
 
         # -- C: Check infeasibility --
@@ -300,6 +330,7 @@ def _verify_one(
                 Status.SKIP,
                 infeasible,
                 baseline_result=baseline_result,
+                algorithm_result=None,
             )
 
         inst_elf = inst.elf_file
@@ -312,6 +343,7 @@ def _verify_one(
                 Status.ERROR,
                 msg,
                 baseline_result=baseline_result,
+                algorithm_result=None,
             )
 
         # -- D: Flash + read instrumented --
@@ -334,6 +366,7 @@ def _verify_one(
                 Status.ERROR,
                 msg,
                 baseline_result=baseline_result,
+                algorithm_result=None,
             )
 
         inst_done = str(inst_nvm.get("__nvm_done", ""))
@@ -349,6 +382,7 @@ def _verify_one(
                 Status.ERROR,
                 msg,
                 baseline_result=baseline_result,
+                algorithm_result=None,
             )
 
         if not inst_result_val:
@@ -360,6 +394,7 @@ def _verify_one(
                 Status.ERROR,
                 msg,
                 baseline_result=baseline_result,
+                algorithm_result=None,
             )
 
         # -- E: Compare --

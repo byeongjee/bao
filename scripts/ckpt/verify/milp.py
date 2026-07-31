@@ -60,6 +60,7 @@ def verify_milp(
                 milp_gap=0.0,
                 milp_log_file="",
                 coarse_allocation=coarse_allocation,
+                save_temps=False,
             ),
         )
         return InstrumentedOutput(

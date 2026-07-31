@@ -53,7 +53,9 @@ def test_collect_bb_freq_links_math_library(tmp_path, monkeypatch):
 
     assert bb_freq_json == tmp_path / "bb_freq.json"
 
-    compile_cmd = next(cmd for step_name, cmd, _cwd in calls if step_name == "bb-freq-compile")
+    compile_cmd = next(
+        cmd for step_name, cmd, _cwd in calls if step_name == "bb-freq-compile"
+    )
     assert "-lm" in compile_cmd
     assert compile_cmd[compile_cmd.index("-lm") + 1] == "-o"
 
@@ -155,6 +157,9 @@ def test_schematic_trace_compile_links_math_library(tmp_path, monkeypatch):
         clang_opt_level=3,
         force_checkpoint_on_incompatible_loops=False,
         recompute_energy_after_new_checkpoint=False,
+        save_temps=False,
+        trace_file=None,
+        linker_script=None,
     )
 
     trace_json, _profiling_ms = schematic._collect_or_reuse_trace(
@@ -167,7 +172,9 @@ def test_schematic_trace_compile_links_math_library(tmp_path, monkeypatch):
 
     assert trace_json == tmp_path / "schematic_trace.json"
 
-    compile_cmd = next(cmd for step_name, cmd, _cwd in calls if step_name == "trace-compile")
+    compile_cmd = next(
+        cmd for step_name, cmd, _cwd in calls if step_name == "trace-compile"
+    )
     assert "-lm" in compile_cmd
     assert compile_cmd[compile_cmd.index("-lm") + 1] == "-o"
 
@@ -213,6 +220,9 @@ def test_schematic_pass_forwards_recompute_flag(tmp_path, monkeypatch):
         clang_opt_level=3,
         force_checkpoint_on_incompatible_loops=False,
         recompute_energy_after_new_checkpoint=False,
+        save_temps=False,
+        trace_file=None,
+        linker_script=None,
     )
 
     schematic._run_schematic_pass(

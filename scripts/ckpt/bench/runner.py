@@ -254,7 +254,7 @@ def run_benchmark_matrix(
     compile_fn: CompileFn,
     output_csv: Path,
     *,
-    nvm_symbols: list[str] | None = None,
+    nvm_symbols: list[str] | None,
     device_debug: bool,
     csv_header: list[str],
     row_builder: RowBuilder,

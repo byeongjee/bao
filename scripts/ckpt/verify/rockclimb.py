@@ -55,6 +55,8 @@ def verify_rockclimb(
                 clang_opt_level=3,
                 opt_level=3,
                 max_unroll=None,
+                save_temps=False,
+                linker_script=None,
             ),
         )
         return InstrumentedOutput(

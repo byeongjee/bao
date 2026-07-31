@@ -17,7 +17,7 @@ class ProjectEnv:
     llvm_dir: Path | None
     msp430gcc_toolchain_path: Path
     msp430gcc_support_path: Path
-    device: str = "MSP430FR5994"
+    device: str
 
     # Pass libraries
     pass_lib: Path = field(init=False)
@@ -132,4 +132,5 @@ class ProjectEnv:
             llvm_dir=llvm_dir,
             msp430gcc_toolchain_path=msp430gcc,
             msp430gcc_support_path=msp430gcc_support,
+            device="MSP430FR5994",
         )

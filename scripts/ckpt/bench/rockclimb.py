@@ -84,13 +84,13 @@ def run_rockclimb_benchmarks(
     env: ProjectEnv,
     tc: Toolchain,
     *,
-    benchmarks: list[str] | None = None,
-    caps: list[str] | None = None,
-    output_csv: Path | None = None,
+    benchmarks: list[str] | None,
+    caps: list[str] | None,
+    output_csv: Path | None,
     device_debug: bool,
     capture_timeout_seconds: float,
     halt_mode: str,
-    energy_config: Path | None = None,
+    energy_config: Path | None,
     cpu_freq: int,
     max_unroll: int | None,
     pass_log_level: str,
@@ -150,6 +150,8 @@ def run_rockclimb_benchmarks(
                 clang_opt_level=3,
                 opt_level=3,
                 max_unroll=max_unroll,
+                save_temps=False,
+                linker_script=None,
             )
 
             result: RockClimbCompileResult = compile_rockclimb(tc, env, opts)

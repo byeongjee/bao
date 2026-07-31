@@ -124,14 +124,14 @@ def run_milp_benchmarks(
     env: ProjectEnv,
     tc: Toolchain,
     *,
-    benchmarks: list[str] | None = None,
-    caps: list[str] | None = None,
-    output_csv: Path | None = None,
+    benchmarks: list[str] | None,
+    caps: list[str] | None,
+    output_csv: Path | None,
     device_debug: bool,
     capture_timeout_seconds: float,
     halt_mode: str,
     estimator_mode: str,
-    energy_config: Path | None = None,
+    energy_config: Path | None,
     cpu_freq: int,
     coarse_allocation: bool,
     milp_gap: float,
@@ -206,6 +206,7 @@ def run_milp_benchmarks(
                 milp_gap=milp_gap,
                 milp_log_file="",
                 coarse_allocation=coarse_allocation,
+                save_temps=False,
             )
 
             result: MilpCompileResult = compile_milp(tc, env, opts)

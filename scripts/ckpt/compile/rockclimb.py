@@ -43,8 +43,8 @@ class RockClimbCompileOptions:
     clang_opt_level: int
     opt_level: int
     max_unroll: int | None
-    save_temps: bool = False
-    linker_script: Path | None = None
+    save_temps: bool
+    linker_script: Path | None
 
 
 @dataclass

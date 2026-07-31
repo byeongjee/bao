@@ -25,7 +25,7 @@ _ENERGY_CONFIG_MAP: dict[str, str] = {
 
 def discover_benchmarks(
     env: ProjectEnv,
-    filter_names: list[str] | None = None,
+    filter_names: list[str] | None,
 ) -> list[Path]:
     """Find benchmark C files in benchmarks/intermittent/.
 
@@ -59,7 +59,7 @@ class CapacitorConfig:
 def discover_capacitors(
     env: ProjectEnv,
     algorithm: str,
-    filter_caps: list[str] | None = None,
+    filter_caps: list[str] | None,
 ) -> list[CapacitorConfig]:
     """Discover capacitor configurations for an algorithm.
 
