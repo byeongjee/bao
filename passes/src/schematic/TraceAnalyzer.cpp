@@ -29,12 +29,6 @@ struct FixedCheckpointEdge {
     RegionAllocation *dstAlloc;
 };
 
-static std::string getBlockName(const SchematicBlock *block) {
-    if (const llvm::BasicBlock *BB = block->getLLVMBlock())
-        return BB->getName().str();
-    return block->getName().str();
-}
-
 static std::string describeFixedEdgeOrigin(llvm::Loop *loopScope, llvm::StringRef reason,
                                            llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) {
     std::string scope = loopScope ? "loop" : "function";
@@ -193,8 +187,8 @@ static bool energySnapshotsDiffer(const EnergySnapshot &before, const EnergySnap
 static std::string describeTraceOrigin(const std::vector<SchematicBlock *> &trace,
                                        llvm::Loop *loopScope) {
     std::string scope = loopScope ? "loop" : "function";
-    std::string start = getBlockName(trace.front());
-    std::string end = getBlockName(trace.back());
+    std::string start = trace.front()->displayName();
+    std::string end = trace.back()->displayName();
     return scope + "-rcg[" + start + " -> " + end + "]";
 }
 
@@ -350,12 +344,7 @@ bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution 
                 CFGEdge forced{subPath[subPath.size() - 2], endBlock};
                 std::string origin =
                     (loopScope ? "loop" : "function") + std::string("-forced-incompatible[") +
-                    (startBlock->getLLVMBlock() ? startBlock->getLLVMBlock()->getName().str()
-                                                : startBlock->getName().str()) +
-                    " -> " +
-                    (endBlock->getLLVMBlock() ? endBlock->getLLVMBlock()->getName().str()
-                                              : endBlock->getName().str()) +
-                    "]";
+                    startBlock->displayName() + " -> " + endBlock->displayName() + "]";
                 enableCheckpoint(solution, forced, origin);
                 // Reset E_left for all blocks in the current loop scope
                 // so that later sub-traces use a fresh energy budget
@@ -367,12 +356,8 @@ bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution 
                             meta.E_left = std::numeric_limits<double>::max();
                     }
                 }
-                llvm::errs() << "[SCHEMATIC] Forced checkpoint at "
-                             << (forced.src->getLLVMBlock() ? forced.src->getLLVMBlock()->getName()
-                                                            : forced.src->getName())
-                             << " -> "
-                             << (forced.dst->getLLVMBlock() ? forced.dst->getLLVMBlock()->getName()
-                                                            : forced.dst->getName())
+                llvm::errs() << "[SCHEMATIC] Forced checkpoint at " << forced.src->displayName()
+                             << " -> " << forced.dst->displayName()
                              << " due to incompatible loop allocations\n";
                 subPath.pop_back();
 

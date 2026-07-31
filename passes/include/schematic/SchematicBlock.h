@@ -34,6 +34,11 @@ class SchematicBlock {
     llvm::StringRef getName() const { return name_; }
     bool isSynthetic() const { return bb_ == nullptr; }
 
+    /// Name for diagnostics: the live LLVM block name (name_ is cached at
+    /// construction and can go stale if the block is renamed), or the cached
+    /// name for synthetic blocks.
+    std::string displayName() const { return bb_ ? bb_->getName().str() : name_; }
+
     const std::vector<SchematicBlock *> &predecessors() const { return preds_; }
     const std::vector<SchematicBlock *> &successors() const { return succs_; }
 
