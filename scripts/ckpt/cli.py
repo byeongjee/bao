@@ -393,7 +393,7 @@ def _handle_accumulate_keys(result, accumulate_keys: str | None) -> None:
 @_opt_level_option
 @_clang_opt_level_option(3)
 @_extra_includes_option
-@_cpu_freq_option("1")
+@_cpu_freq_option("16")
 @_save_temps_flag
 @_milp_gap_option
 @click.option(
@@ -521,7 +521,7 @@ def compile_milp_cmd(
     is_flag=True,
     help="Disable assembly-based pre-computed BB energy; use MIR-level estimation instead.",
 )
-@_cpu_freq_option("1")
+@_cpu_freq_option("16")
 @_max_unroll_option
 @_save_temps_flag
 @_accumulate_keys_option
@@ -750,7 +750,7 @@ def _compile_schematic_options(clang_opt_default: int):
         _clang_opt_level_option(clang_opt_default),
         _extra_includes_option,
         _estimator_mode_option,
-        _cpu_freq_option("1"),
+        _cpu_freq_option("16"),
         _save_temps_flag,
         _accumulate_keys_option,
         _schematic_tuning_options,
@@ -790,7 +790,7 @@ def compile_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
 @_opt_level_option
 @_clang_opt_level_option(3)
 @_extra_includes_option
-@_cpu_freq_option("1")
+@_cpu_freq_option("16")
 @_compile_csv_option
 @click.pass_context
 def compile_uninstrumented_cmd(
@@ -874,7 +874,7 @@ def compile_uninstrumented_cmd(
 @_opt_level_option
 @_clang_opt_level_option(3)
 @_extra_includes_option
-@_cpu_freq_option("1")
+@_cpu_freq_option("16")
 @click.pass_context
 def compile_chunked_cmd(
     ctx: click.Context,
