@@ -18,11 +18,10 @@ set_target_properties(bb-energy-analyzer PROPERTIES
 
 # Get LLVM components needed for this tool
 # Note: We use external msp430-elf-objdump for disassembly since LLVM may not
-# have MSP430 target. Only need DWARF parsing and support libraries.
+# have MSP430 target. Only need DWARF parsing; object/support come in as
+# transitive dependencies (listing them explicitly duplicates them on the
+# link line, which the macOS linker warns about).
 llvm_map_components_to_libnames(LLVM_LIBS
-    core
-    support
-    object
     debuginfodwarf
 )
 
