@@ -1255,7 +1255,7 @@ def verify() -> None:
 @_cap_multi_option
 @_energy_override_option
 @_verify_halt_mode_option
-@_cpu_freq_option("1")
+@_cpu_freq_option("16")
 @_saleae_timeout_option
 @click.pass_context
 def verify_rockclimb_cmd(
@@ -1291,7 +1291,7 @@ def verify_rockclimb_cmd(
 @_energy_override_option
 @_verify_halt_mode_option
 @_estimator_mode_option
-@_cpu_freq_option("1")
+@_cpu_freq_option("16")
 @_coarse_allocation_flag
 @_saleae_timeout_option
 @click.pass_context
@@ -1331,7 +1331,7 @@ _verify_schematic_options = _add_options(
     _energy_override_option,
     _verify_halt_mode_option,
     _estimator_mode_option,
-    _cpu_freq_option("1"),
+    _cpu_freq_option("16"),
     _schematic_tuning_options,
     _saleae_timeout_option,
 )
