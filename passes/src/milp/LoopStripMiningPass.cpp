@@ -698,8 +698,8 @@ static bool supportsExitRewriteForm(Loop *L, uint64_t N) {
         return false;
     }
 
-    auto *ExitBr = dyn_cast<BranchInst>(ExitingBB->getTerminator());
-    if (!ExitBr || !ExitBr->isConditional()) {
+    auto *ExitBr = dyn_cast<CondBrInst>(ExitingBB->getTerminator());
+    if (!ExitBr) {
         return false;
     }
 
@@ -825,8 +825,8 @@ static bool tryStripMiningPlan(Loop *L, uint64_t K, double iterEnergy,
 static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double iterEnergy,
                               std::optional<uint64_t> exactTripCount, PlanResult &result) {
     BasicBlock *Header = L->getHeader();
-    auto *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
-    if (!LatchBr) {
+    Instruction *LatchBr = Latch->getTerminator();
+    if (!isa<UncondBrInst>(LatchBr) && !isa<CondBrInst>(LatchBr)) {
         result.skipReason = "latch-not-branch-inst";
         result.detail.skipReason = result.skipReason;
         return;
@@ -1184,8 +1184,8 @@ static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
         return false;
     }
 
-    auto *Br = dyn_cast<BranchInst>(CounterCheck->getTerminator());
-    if (!Br || !Br->isConditional()) {
+    auto *Br = dyn_cast<CondBrInst>(CounterCheck->getTerminator());
+    if (!Br) {
         return false;
     }
 
@@ -1403,8 +1403,8 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     Type *IVTy = IV->getType();
 
     // ── Phase 2: Find exit condition ──
-    auto *ExitBr = dyn_cast<BranchInst>(ExitingBB->getTerminator());
-    if (!ExitBr || !ExitBr->isConditional())
+    auto *ExitBr = dyn_cast<CondBrInst>(ExitingBB->getTerminator());
+    if (!ExitBr)
         return false;
 
     auto *ExitCmp = dyn_cast<ICmpInst>(ExitBr->getCondition());
@@ -1631,8 +1631,8 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
         return false;
 
     // ── Phase 2: Find latch backedge index (which successor == Header) ──
-    auto *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
-    if (!LatchBr)
+    Instruction *LatchBr = Latch->getTerminator();
+    if (!isa<UncondBrInst>(LatchBr) && !isa<CondBrInst>(LatchBr))
         return false;
 
     unsigned backedgeIdx = UINT_MAX;
