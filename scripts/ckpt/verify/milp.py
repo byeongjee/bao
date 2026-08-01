@@ -8,24 +8,23 @@ from ..bench.milp import NVM_SYMBOLS
 from ..compile.milp import MilpCompileOptions, compile_milp
 from ..env import ProjectEnv
 from ..toolchain import Toolchain
-from .common import InstrumentedOutput, verify_algorithm
+from .common import (
+    AlgorithmSpec,
+    BenchResult,
+    InstrumentedOutput,
+    verify_algorithms,
+)
 
 
-def verify_milp(
+def milp_spec(
     env: ProjectEnv,
-    tc: Toolchain,
     *,
-    benchmarks: list[str] | None,
-    caps: list[str] | None,
-    halt_mode: str,
     energy_config: Path | None,
     estimator_mode: str,
-    cpu_freq: int,
-    capture_timeout_seconds: float,
     coarse_allocation: bool,
     pass_log_level: str,
-) -> bool:
-    """Verify semantic correctness of MILP checkpoint insertion."""
+) -> AlgorithmSpec:
+    """Build the MILP verification spec."""
     from ..bench.config import default_energy_config
 
     if energy_config is None:
@@ -70,15 +69,42 @@ def verify_milp(
             elf_file=result.elf_file,
         )
 
-    return verify_algorithm(
+    return AlgorithmSpec(
+        name="milp",
+        nvm_symbols=NVM_SYMBOLS,
+        compile_instrumented=compile_instrumented,
+    )
+
+
+def verify_milp(
+    env: ProjectEnv,
+    tc: Toolchain,
+    *,
+    benchmarks: list[str] | None,
+    caps: list[str] | None,
+    halt_mode: str,
+    energy_config: Path | None,
+    estimator_mode: str,
+    cpu_freq: int,
+    capture_timeout_seconds: float,
+    coarse_allocation: bool,
+    pass_log_level: str,
+) -> list[BenchResult]:
+    """Verify semantic correctness of MILP checkpoint insertion."""
+    spec = milp_spec(
+        env,
+        energy_config=energy_config,
+        estimator_mode=estimator_mode,
+        coarse_allocation=coarse_allocation,
+        pass_log_level=pass_log_level,
+    )
+    return verify_algorithms(
         env,
         tc,
-        algorithm="milp",
+        algorithms=[spec],
         benchmarks=benchmarks,
         caps=caps,
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
-        nvm_symbols=NVM_SYMBOLS,
-        compile_instrumented=compile_instrumented,
-    )
+    )[spec.name]
