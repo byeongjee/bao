@@ -8,15 +8,16 @@ CompileFlags:
     - "-fno-lifetime-dse"
 
 ---
-# Suppress false-positive errors in MSP430 cross-compiled files
-# (macOS clang doesn't have MSP430 support)
+# passes/runtime/ sources are built by the ckpt toolchain (msp430-elf-gcc for
+# device runtimes, native clang for the trace/profiling/mock runtimes) and
+# have no compile_commands.json entries, so clangd analyzes them with host
+# flags and emits bogus diagnostics (missing msp430.h, invalid section
+# attributes, reserved-identifier warnings for intentional runtime symbols).
+# Suppress all diagnostics there; these files are validated by the real
+# cross-compilation in the test and benchmark pipelines.
 If:
-  PathMatch: passes/runtime/rockclimb_.*\.c
+  PathMatch: passes/runtime/.*
 Diagnostics:
   Suppress: ['*']
-
----
-If:
-  PathMatch: passes/runtime/rockclimb_.*\.h
-Diagnostics:
-  Suppress: ['*']
+  ClangTidy:
+    Remove: ['*']
