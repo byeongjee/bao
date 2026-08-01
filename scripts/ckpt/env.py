@@ -28,16 +28,13 @@ class ProjectEnv:
     # Runtime files
     milp_runtime: Path = field(init=False)
     milp_boot: Path = field(init=False)
-    milp_mock_ckpt_counter: Path = field(init=False)
     milp_linker: Path = field(init=False)
 
-    rockclimb_mock_ckpt_counter: Path = field(init=False)
     rockclimb_boot: Path = field(init=False)
     rockclimb_runtime: Path = field(init=False)
     rockclimb_linker: Path = field(init=False)
 
     schematic_trace_runtime: Path = field(init=False)
-    schematic_mock_ckpt_counter: Path = field(init=False)
     schematic_runtime: Path = field(init=False)
     schematic_boot: Path = field(init=False)
     schematic_linker: Path = field(init=False)
@@ -69,22 +66,13 @@ class ProjectEnv:
 
         object.__setattr__(self, "milp_runtime", rt / "milp_runtime.c")
         object.__setattr__(self, "milp_boot", rt / "milp_boot.S")
-        object.__setattr__(
-            self, "milp_mock_ckpt_counter", rt / "milp_mock_ckpt_counter.c"
-        )
         object.__setattr__(self, "milp_linker", rt / "milp_msp430fr5994.ld")
-        object.__setattr__(
-            self, "rockclimb_mock_ckpt_counter", rt / "rockclimb_mock_ckpt_counter.c"
-        )
         object.__setattr__(self, "rockclimb_boot", rt / "rockclimb_boot.S")
         object.__setattr__(self, "rockclimb_runtime", rt / "rockclimb_runtime.c")
         object.__setattr__(self, "rockclimb_linker", rt / "rockclimb_msp430fr5994.ld")
 
         object.__setattr__(
             self, "schematic_trace_runtime", rt / "schematic_trace_runtime.c"
-        )
-        object.__setattr__(
-            self, "schematic_mock_ckpt_counter", rt / "schematic_mock_ckpt_counter.c"
         )
         object.__setattr__(self, "schematic_runtime", rt / "schematic_runtime.c")
         object.__setattr__(self, "schematic_boot", rt / "schematic_boot.S")
