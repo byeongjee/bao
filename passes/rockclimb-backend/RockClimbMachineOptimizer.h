@@ -4,7 +4,6 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
@@ -68,16 +67,16 @@ class RockClimbMachineOptimizer {
 
     double regStoreEnergy_;
     MSP430Constants C_;
-    llvm::DenseMap<const llvm::MachineBasicBlock *, llvm::SmallSet<llvm::MCPhysReg, 12>> liveIn_;
-    llvm::SmallSet<llvm::MCPhysReg, 12> defsInRegion_;
 
     void identifyLoopHeaders();
     void identifyExitBlocks();
     void computeTopologicalOrder();
     double getBlockCost(llvm::MachineBasicBlock *MBB) const;
 
-    void collectBlockDefs(llvm::MachineBasicBlock *MBB);
-    double computeCkptOverhead(llvm::MachineBasicBlock *MBB) const;
+    /// Algorithm 1 line 2: Cycle_bb = Cycle_ori_bb + CkptCycles_bb.
+    /// Adds the cost of the distributed checkpoint stores that will be
+    /// inserted into each block to that block's energy cost.
+    void addDistributedSaveCosts();
 
     MachineRockClimbResult partitionRegions();
 };
