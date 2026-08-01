@@ -25,7 +25,8 @@ class MachineEnergyEstimator {
     explicit MachineEnergyEstimator(const std::string &configPath);
 
     /// Load pre-computed per-BB energy from bb-energy-analyzer output JSON.
-    /// Falls back to instruction-level estimation for blocks not in the data.
+    /// Blocks with billable instructions missing from the data abort
+    /// compilation (report_fatal_error); code-free blocks cost zero.
     static std::unique_ptr<MachineEnergyEstimator>
     fromPrecomputed(const std::string &energyDataPath);
 
