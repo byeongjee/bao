@@ -1,7 +1,7 @@
 #pragma once
 
-#define PLOG_LOCAL // keep plog symbols private to each shared library
-#include <plog/Log.h>
+#define PLOG_LOCAL    // keep plog symbols private to each shared library
+#include <plog/Log.h> // IWYU pragma: export
 
 // Bridge LLVM types to plog's << operator (plog uses std::ostream, not raw_ostream)
 #include "llvm/ADT/StringRef.h"
