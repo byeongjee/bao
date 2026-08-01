@@ -42,6 +42,7 @@ def verify_schematic(
         cap_config: Path,
         halt_mode: str,
         cpu_freq: int,
+        extra_defines: list[str],
     ) -> InstrumentedOutput:
         result = compile_schematic(
             tc,
@@ -66,6 +67,7 @@ def verify_schematic(
                 save_temps=False,
                 trace_file=None,
                 linker_script=None,
+                extra_defines=extra_defines,
             ),
         )
         return InstrumentedOutput(

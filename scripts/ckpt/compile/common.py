@@ -109,6 +109,7 @@ def compile_annotated_ir(
     device_debug: bool,
     cpu_freq: int,
     extra_includes: list[str],
+    extra_defines: list[str],
 ) -> Path:
     """Shared phase 1 of the instrumented pipelines: C -> raw IR -> tripcounts.
 
@@ -128,7 +129,7 @@ def compile_annotated_ir(
         debug=debug,
         device_debug=device_debug,
         extra_includes=includes,
-        extra_defines=[f"F_CPU={cpu_freq}"],
+        extra_defines=[f"F_CPU={cpu_freq}", *extra_defines],
     )
 
     tripcount_ll = tmp / "tripcount.ll"

@@ -37,6 +37,7 @@ def verify_rockclimb(
         cap_config: Path,
         halt_mode: str,
         cpu_freq: int,
+        extra_defines: list[str],
     ) -> InstrumentedOutput:
         result = compile_rockclimb(
             tc,
@@ -57,6 +58,7 @@ def verify_rockclimb(
                 max_unroll=None,
                 save_temps=False,
                 linker_script=None,
+                extra_defines=extra_defines,
             ),
         )
         return InstrumentedOutput(

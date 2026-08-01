@@ -50,6 +50,7 @@ class MilpCompileOptions:
     coarse_allocation: bool
     save_temps: bool
     extra_includes: list[str] = field(default_factory=list)
+    extra_defines: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -103,6 +104,7 @@ def compile_milp(
             device_debug=opts.device_debug,
             cpu_freq=opts.cpu_freq,
             extra_includes=opts.extra_includes,
+            extra_defines=opts.extra_defines,
         )
 
         # Middle-end optimization
