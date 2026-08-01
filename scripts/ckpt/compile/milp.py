@@ -99,6 +99,10 @@ def compile_milp(
             env,
             input_c=opts.input_c,
             tmp=tmp,
+            # -O0 keeps clang's blanket noinline on every function, so the
+            # later optimize_ir never inlines — this pipeline depends on that
+            # to keep functions separate.
+            raw_frontend=False,
             debug=opts.debug,
             device_debug=opts.device_debug,
             cpu_freq=opts.cpu_freq,

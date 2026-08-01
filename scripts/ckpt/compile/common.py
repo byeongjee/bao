@@ -54,12 +54,19 @@ def compile_to_ir(
     output_ll: Path,
     *,
     clang_opt_level: int,
+    raw_ir: bool,
     debug: bool,
     device_debug: bool,
     extra_includes: list[str] | None = None,
     extra_defines: list[str] | None = None,
 ) -> StepResult:
-    """Compile a C source file to LLVM IR targeting msp430-elf."""
+    """Compile a C source file to LLVM IR targeting msp430-elf.
+
+    With *raw_ir* (requires clang_opt_level >= 1), emit the frontend IR
+    without running any LLVM passes (``-disable-llvm-passes``): untransformed
+    code with -O{n} attributes and metadata (TBAA, lifetimes) and no blanket
+    ``noinline``, so user-written ``noinline`` survives.
+    """
     cmd: list[str] = [
         tc.clang,
         "--target=msp430-elf",
@@ -74,7 +81,11 @@ def compile_to_ir(
         str(env.msp430gcc_support_path / "msp430-elf" / "include"),
     ]
 
-    if clang_opt_level == 0:
+    if raw_ir:
+        if clang_opt_level == 0:
+            raise ValueError("raw_ir requires clang_opt_level >= 1")
+        cmd += ["-Xclang", "-disable-llvm-passes"]
+    elif clang_opt_level == 0:
         cmd += ["-Xclang", "-disable-O0-optnone"]
 
     for inc in extra_includes or []:
@@ -98,16 +109,25 @@ def compile_annotated_ir(
     *,
     input_c: Path,
     tmp: Path,
+    raw_frontend: bool,
     debug: bool,
     device_debug: bool,
     cpu_freq: int,
     extra_includes: list[str],
 ) -> Path:
-    """Shared phase 1 of the instrumented pipelines: C -> -O0 IR -> tripcounts.
+    """Shared phase 1 of the instrumented pipelines: C -> frontend IR -> tripcounts.
 
-    Compiles at -O0 (preserving loop structure for exact trip-count
-    annotation) with the runtime headers on the include path, then runs the
-    tripcount-annotation pass. Later stages re-optimize as needed.
+    Either way no LLVM passes have run on the returned IR, preserving the
+    source loop structure for exact trip-count annotation:
+
+    - raw_frontend=False: clang -O0 (-disable-O0-optnone). Every function
+      carries clang's blanket ``noinline``, so later optimize_ir runs never
+      inline anything — the milp/schematic/chunked pipelines rely on that to
+      keep functions separate.
+    - raw_frontend=True: clang -O3 -disable-llvm-passes. Frontend IR with -O3
+      metadata (TBAA, lifetimes) and no blanket ``noinline``: user-written
+      ``noinline`` is preserved and later optimize_ir inlines normally.
+
     Returns the annotated IR path (tmp/tripcount.ll).
     """
     input_ll = tmp / "input.ll"
@@ -119,7 +139,8 @@ def compile_annotated_ir(
         env,
         input_c,
         input_ll,
-        clang_opt_level=0,
+        clang_opt_level=3 if raw_frontend else 0,
+        raw_ir=raw_frontend,
         debug=debug,
         device_debug=device_debug,
         extra_includes=includes,
@@ -238,75 +259,6 @@ def optimize_ir_with_options(
     return run(
         cmd,
         step_name=f"optimize-ir-O{opt_level}",
-    )
-
-
-_NOINLINE_FUNCTIONS = frozenset(
-    {
-        "timing_gpio_init",
-        "timing_gpio_start",
-        "timing_gpio_stop",
-        "_timing_delay_cycles",
-        "bench_halt",
-        "main",
-    }
-)
-"""Benchmark infrastructure functions that must never be inlined."""
-
-
-def strip_noinline_for_optimization(input_ll: Path, output_ll: Path) -> None:
-    """Strip ``noinline`` from attribute groups, then re-add it to infra functions.
-
-    At -O0 clang puts ``noinline`` on a shared attribute group used by every
-    function.  We remove it globally so the inliner can act on business-logic
-    helpers, then add ``noinline`` back as an inline attribute on benchmark
-    infrastructure functions that must stay separate.
-    """
-    import re
-
-    text = input_ll.read_text()
-
-    # Remove noinline from attribute groups: "attributes #N = { ... noinline ... }"
-    text = re.sub(r"(?<=\s)noinline(?=[\s}])", "", text)
-
-    # Re-add noinline to infrastructure function definitions.
-    # Match: define ... @funcname(  →  define ... @funcname( with noinline before #N
-    for name in _NOINLINE_FUNCTIONS:
-        # Pattern: "define ... @name(" — insert noinline before the attribute group ref
-        text = re.sub(
-            rf"(define\s[^@]*@{re.escape(name)}\([^)]*\)\s*)(#\d+)",
-            r"\1noinline \2",
-            text,
-        )
-
-    output_ll.write_text(text)
-
-
-def inline_functions(
-    tc: Toolchain,
-    input_ll: Path,
-    output_ll: Path,
-) -> StepResult:
-    """Run LLVM inlining passes without other optimizations.
-
-    At -O0 clang marks all functions ``noinline`` via a shared attribute group,
-    which prevents the inliner from acting.  We strip ``noinline`` from the
-    attribute groups but re-add it to benchmark infrastructure functions (timing,
-    halt) so only business-logic helpers get inlined.
-    """
-    stripped_ll = input_ll.with_name(input_ll.stem + "_stripped.ll")
-    strip_noinline_for_optimization(input_ll, stripped_ll)
-
-    return run(
-        [
-            tc.opt,
-            "-passes=always-inline,inline",
-            "-S",
-            str(stripped_ll),
-            "-o",
-            str(output_ll),
-        ],
-        step_name="inline-functions",
     )
 
 
