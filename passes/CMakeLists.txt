@@ -8,8 +8,7 @@ include(FetchContent)
 FetchContent_Declare(json
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
 FetchContent_Declare(plog
-    GIT_REPOSITORY https://github.com/SergiusTheBest/plog.git
-    GIT_TAG        1.1.11)
+    URL https://github.com/SergiusTheBest/plog/archive/refs/tags/1.1.11.tar.gz)
 FetchContent_MakeAvailable(json plog)
 
 # Find LLVM
