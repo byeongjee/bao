@@ -317,8 +317,9 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     // Create base checkpoint context (estimator + CFG).
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(), "schematic pass");
     if (!ctxResult.success()) {
-        if (!ctxResult.shouldSkip())
+        if (!ctxResult.shouldSkip()) {
             PLOGE << ctxResult.errorMessage;
+        }
         return false;
     }
     auto &ctx = *ctxResult.context;
