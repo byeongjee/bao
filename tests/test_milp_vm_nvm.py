@@ -139,3 +139,36 @@ def test_vm_nvm_basic_with_coarse_allocation(run_milp, tmp_path):
     )
 
     check_assertions(result, {"exit": 0, "has_shadow": ["g_hot"]})
+
+
+# ---------------------------------------------------------------------------
+# Test 4: Pointer-IV access to a VM-placed global (phi-based pointer)
+# ---------------------------------------------------------------------------
+def test_vm_rewrite_through_pointer_phi(run_milp, tmp_path):
+    """scenario_ptr_iv_vm.c: phi-derived accesses to a VM-placed array are rewritten.
+
+    The loop walks g_hot via a pointer induction variable, so its accesses
+    reach the global only through a phi. Strict mode must accept the
+    single-base phi (not skip the function), and the instrumenter must
+    redirect the accesses to the shadow via the runtime-offset form
+    shadow + (p - g_hot).
+    """
+    src = SCENARIOS_DIR / "scenario_ptr_iv_vm.c"
+    energy_config = CONFIGS_DIR / "scenario_config.json"
+    milp_config = CONFIGS_DIR / "scenario_ptr_iv_vm_milp_config.json"
+
+    result = run_milp(src, energy_config, milp_config, tmp_path)
+
+    check_assertions(result, {"exit": 0, "has_shadow": ["g_hot"]})
+
+    ir = result.output_ir
+
+    # The phi-based accesses must be redirected via the runtime-offset form
+    # (vm.off/vm.addr are only emitted for derived pointers).
+    assert "vm.off" in ir and "vm.addr" in ir, (
+        "Expected phi-derived accesses to be rewritten as "
+        "shadow + (p - g_hot) (vm.off/vm.addr in IR)"
+    )
+    assert "getelementptr i8, ptr @__vm_shadow_g_hot" in ir, (
+        "Expected the rewritten address to be based on @__vm_shadow_g_hot"
+    )
