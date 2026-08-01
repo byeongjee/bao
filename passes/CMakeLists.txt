@@ -5,6 +5,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Fetch nlohmann/json (header-only JSON library)
 include(FetchContent)
+# Treat json headers as system headers so warnings from them are suppressed
+set(JSON_SystemInclude ON CACHE INTERNAL "")
 FetchContent_Declare(json
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
 FetchContent_Declare(plog
