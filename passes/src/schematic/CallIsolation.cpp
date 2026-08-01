@@ -181,6 +181,12 @@ std::vector<IsolatedCall> collectIsolatedCalls(Function &F) {
         IsolatedCall ic = kv.second;
         if (ic.entry && !ic.exit)
             ic.exit = ic.entry->getSingleSuccessor();
+        // Drop half-marked groups. Inlining the call deletes it along with its
+        // call_entry marker while the exit block's call_exit marker survives,
+        // leaving a group with no entry/callee. Callers must see complete call
+        // sites only, so such leftovers are ignored rather than folded.
+        if (!ic.entry || !ic.exit || !ic.callee)
+            continue;
         out.push_back(ic);
     }
     return out;

@@ -82,6 +82,7 @@ def compile_schematic(
 
     Pipeline:
       compile_to_ir (raw -O3 frontend) -> tripcount-annotation -> optimize_ir ->
+      call-isolation ->
       (if no trace file: trace-collect -> compile native -> run -> get trace.json) ->
       (if trace_only: copy trace, return) ->
       schematic pass -> compile to object ->
@@ -109,24 +110,27 @@ def compile_schematic(
             extra_defines=opts.extra_defines,
         )
 
+        # Middle-end optimization
+        optimized_ll = tmp / "input_optimized.ll"
+        optimize_ir(
+            tc,
+            tripcount_ll,
+            optimized_ll,
+            opt_level=opts.clang_opt_level,
+        )
+
         # Isolate function calls so the inter-procedural SCHEMATIC pass can fold
         # each callee's summary onto its call sites (replaces full inlining). The
         # same isolated IR feeds trace collection, energy analysis, and the solve
-        # pass. At -Oc 0 only always_inline functions are expanded, so remaining
-        # calls survive; at -Oc >= 1 the optimize_ir step below re-inlines and
-        # strips the isolation metadata, and the run degrades gracefully to the
-        # single-function path.
-        isolated_ll = tmp / "isolated.ll"
-        isolate_calls(tc, env, tripcount_ll, isolated_ll)
-
-        # Middle-end optimization
-        schematic_input_ll = tmp / "input_optimized.ll"
-        optimize_ir(
-            tc,
-            isolated_ll,
-            schematic_input_ll,
-            opt_level=opts.clang_opt_level,
-        )
+        # pass.
+        #
+        # This MUST run after optimize_ir: inlining deletes the call and with it
+        # the call_entry marker, but leaves the split exit block's call_exit
+        # marker behind, so isolating first yields half-marked call sites. Only
+        # calls the inliner left alone are isolated, and nothing rewrites the IR
+        # between here and the solve pass.
+        schematic_input_ll = tmp / "isolated.ll"
+        isolate_calls(tc, env, optimized_ll, schematic_input_ll)
 
         # Trace collection
         trace_json, profiling_ms = _collect_or_reuse_trace(
