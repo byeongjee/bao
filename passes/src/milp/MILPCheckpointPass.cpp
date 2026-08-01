@@ -33,7 +33,6 @@ extern cl::opt<double> MILPTimeLimitOpt;
 extern cl::opt<double> MILPGapOpt;
 extern cl::opt<std::string> MILPLogFileOpt;
 extern cl::opt<bool> MILPCoarseAllocationOpt;
-extern cl::opt<bool> AddDebugMarkersOpt;
 extern cl::opt<std::string> BBFreqFileOpt;
 
 namespace {
@@ -417,8 +416,7 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     }
 
     // Step 7: Instrument IR (Pass F)
-    bool addDebugMarkers = AddDebugMarkersOpt.getValue() || ctx.milpParams.addDebugMarkers;
-    CheckpointInstrumenter instrumenter(*F.getParent(), addDebugMarkers);
+    CheckpointInstrumenter instrumenter(*F.getParent());
     unsigned inserted = instrumenter.instrumentFunction(F, solution, *abstractCFG.model,
                                                         *abstractCFG.model, *ctx.stateAnalysis);
 

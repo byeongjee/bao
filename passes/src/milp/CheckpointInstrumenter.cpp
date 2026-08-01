@@ -19,8 +19,7 @@
 
 namespace checkpoint {
 
-CheckpointInstrumenter::CheckpointInstrumenter(llvm::Module &M, bool addDebugMarkers)
-    : M_(M), addDebugMarkers_(addDebugMarkers) {
+CheckpointInstrumenter::CheckpointInstrumenter(llvm::Module &M) : M_(M) {
     declareRuntimeFunctions();
 }
 
@@ -33,37 +32,10 @@ void CheckpointInstrumenter::declareRuntimeFunctions() {
     M_.getOrInsertFunction("__region_boundary", VoidTy);
 
     // NOTE: Per-operation debug counters (cnt_save_vreg, cnt_restore_vreg,
-    // cnt_store_mem, cnt_restore_mem) are disabled to reduce code size.
-    // Each counter increment inserts a load-add-store sequence per
-    // save/restore/commit point, which overflows FRAM on large benchmarks
-    // (e.g., RSA overflows by ~38KB).
+    // cnt_store_mem, cnt_restore_mem) were removed: each counter increment
+    // inserts a load-add-store sequence per save/restore/commit point, which
+    // overflows FRAM on large benchmarks (e.g., RSA overflows by ~38KB).
     // Only cnt_boundary (incremented in boot.S assembly) is kept.
-    //
-    // To re-enable, uncomment the block below and the emitCounterIncrement
-    // calls in insertRegionBoundaries().
-    //
-    // if (addDebugMarkers_) {
-    //     llvm::Type *I16Ty = llvm::Type::getInt16Ty(Ctx);
-    //     auto getOrCreateCounter = [&](const char *name) -> llvm::GlobalVariable * {
-    //         if (auto *existing = M_.getGlobalVariable(name))
-    //             return existing;
-    //         auto *GV = new llvm::GlobalVariable(M_, I16Ty, /*isConstant=*/false,
-    //                                             llvm::GlobalValue::ExternalLinkage,
-    //                                             /*Initializer=*/nullptr, name);
-    //         return GV;
-    //     };
-    //     cntSaveVregGV_ = getOrCreateCounter("cnt_save_vreg");
-    //     cntRestoreVregGV_ = getOrCreateCounter("cnt_restore_vreg");
-    //     cntStoreMemGV_ = getOrCreateCounter("cnt_store_mem");
-    //     cntRestoreMemGV_ = getOrCreateCounter("cnt_restore_mem");
-    // }
-}
-
-void CheckpointInstrumenter::emitCounterIncrement(llvm::IRBuilder<> &builder,
-                                                  llvm::GlobalVariable *counter) {
-    llvm::Value *val = builder.CreateLoad(counter->getValueType(), counter);
-    llvm::Value *inc = builder.CreateAdd(val, llvm::ConstantInt::get(counter->getValueType(), 1));
-    builder.CreateStore(inc, counter);
 }
 
 unsigned CheckpointInstrumenter::instrumentFunction(llvm::Function &F, const MILPSolution &solution,
@@ -320,8 +292,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                            "eligible global commit requires a VM shadow");
                     builder.CreateMemCpy(GV, GV->getAlign(), shadowIt->second,
                                          shadowIt->second->getAlign(), size);
-                    // if (addDebugMarkers_)
-                    //     emitCounterIncrement(builder, cntStoreMemGV_);
                 } else if (llvm::isa<llvm::AllocaInst>(V)) {
                     llvm::Value *size =
                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(M_.getContext()), sizeBytes);
@@ -337,8 +307,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     auto addrIt = allocaAddrMap_.find(V);
                     assert(addrIt != allocaAddrMap_.end() && "alloca commit requires an addr slot");
                     builder.CreateStore(AI, addrIt->second);
-                    // if (addDebugMarkers_)
-                    //     emitCounterIncrement(builder, cntStoreMemGV_);
                 } else {
                     // SSA value: unified commit via GetValueInMiddleOfBlock.
                     auto backupIt = nvmBackupMap_.find(V);
@@ -361,8 +329,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     }
                     llvm::Value *reachingVal = commitUpdater.GetValueInMiddleOfBlock(&BB);
                     builder.CreateStore(reachingVal, backupIt->second);
-                    // if (addDebugMarkers_)
-                    //     emitCounterIncrement(builder, cntSaveVregGV_);
                 }
                 inserted++;
             }
@@ -417,8 +383,6 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                    "needRestore requires a VM shadow for the global");
             builder.CreateMemCpy(shadowIt->second, shadowIt->second->getAlign(), GV, GV->getAlign(),
                                  size);
-            // if (addDebugMarkers_)
-            //     emitCounterIncrement(builder, cntRestoreMemGV_);
             inserted++;
         }
 
@@ -454,15 +418,11 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 }
                 builder.CreateMemCpy(dst, AI->getAlign(), backupIt->second,
                                      backupIt->second->getAlign(), size);
-                // if (addDebugMarkers_)
-                //     emitCounterIncrement(builder, cntRestoreMemGV_);
                 inserted++;
             } else {
                 // SSA restore: load from NVM backup, record for SSAUpdater.
                 llvm::Value *restored = builder.CreateLoad(V->getType(), backupIt->second);
                 ssaRestoreDefs[V].emplace_back(builder.GetInsertBlock(), restored);
-                // if (addDebugMarkers_)
-                //     emitCounterIncrement(builder, cntRestoreVregGV_);
                 inserted++;
             }
         }
