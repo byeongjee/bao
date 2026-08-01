@@ -295,7 +295,7 @@ Sample configs are in `benchmarks/` and `tests/`.
 - C++17, compiled with `-fno-exceptions -fno-rtti` to match LLVM.
 - LLVM-style formatting, 4-space indentation.
 - `PascalCase` for C++ classes, `snake_case` for scripts/files, `test_*.c` for tests, `*_config.json` for configs.
-- Commit style: short imperative subjects (e.g., "Fix deprecated PHI insertion API in MILP instrumenter"). Scope commits to one logical change.
+- Commit style: short imperative subjects (e.g., "Fix deprecated PHI insertion API in MILP instrumenter"). Scope commits to one logical change. Keep messages concise and focused on *why* the change was made, not a restatement of *what* the diff does.
 - **Never commit design documents, specs, plans, or notes.** Write them as untracked files and leave them untracked. This applies even when a skill or workflow instructs otherwise. Only code, tests, configs, and files the user explicitly asks to commit belong in git.
 - All code lives in `namespace checkpoint { }`.
 - **Python internal functions must not have default parameter values.** Defaults belong only in the CLI layer (`cli.py`). Internal functions (compile pipelines, benchmark runners, helpers) and dataclass fields must require all values explicitly — no `= None`, no `= ""`, no `= 0`. The only exceptions are `field(default_factory=list)` for empty collections in dataclasses.
