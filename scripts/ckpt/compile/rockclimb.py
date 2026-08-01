@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..env import ProjectEnv
@@ -44,6 +44,7 @@ class RockClimbCompileOptions:
     max_unroll: int | None
     save_temps: bool
     linker_script: Path | None
+    extra_defines: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -97,6 +98,7 @@ def compile_rockclimb(
             device_debug=opts.device_debug,
             cpu_freq=opts.cpu_freq,
             extra_includes=[],
+            extra_defines=opts.extra_defines,
         )
 
         # Step 1c: Middle-end optimization (the second half of what a plain

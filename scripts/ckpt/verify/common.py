@@ -44,6 +44,11 @@ _BASELINE_NVM_SYMBOLS = [
     "__nvm_result",
 ]
 
+# Defines applied to every verification build. Benchmarks may use VERIFY_BUILD
+# to shrink their workload; baseline and instrumented binaries must be compiled
+# with the same defines or their results diverge.
+VERIFY_DEFINES = ("VERIFY_BUILD",)
+
 
 class Status(Enum):
     PASS = "PASS"
@@ -71,9 +76,10 @@ class InstrumentedOutput:
 
 
 # Callback: compile the instrumented binary for one (benchmark, capacitor).
-# Signature: (tc, env, bench_path, workdir, cap_config, halt_mode, cpu_freq)
+# Signature: (tc, env, bench_path, workdir, cap_config, halt_mode, cpu_freq,
+#             extra_defines)
 CompileInstrumentedFn = Callable[
-    [Toolchain, ProjectEnv, Path, Path, Path, str, int],
+    [Toolchain, ProjectEnv, Path, Path, Path, str, int, list[str]],
     InstrumentedOutput,
 ]
 
@@ -169,6 +175,7 @@ def _compile_baseline(
             opt_level=3,
             clang_opt_level=3,
             link=True,
+            extra_defines=list(VERIFY_DEFINES),
         ),
     )
 
@@ -292,6 +299,7 @@ def _verify_one(
                 cap_config,
                 halt_mode,
                 cpu_freq,
+                list(VERIFY_DEFINES),
             )
             compile_output = inst.compile_output
         except CompilationError as exc:

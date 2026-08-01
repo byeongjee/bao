@@ -39,6 +39,7 @@ def verify_milp(
         cap_config: Path,
         halt_mode: str,
         cpu_freq: int,
+        extra_defines: list[str],
     ) -> InstrumentedOutput:
         result = compile_milp(
             tc,
@@ -61,6 +62,7 @@ def verify_milp(
                 milp_log_file="",
                 coarse_allocation=coarse_allocation,
                 save_temps=False,
+                extra_defines=extra_defines,
             ),
         )
         return InstrumentedOutput(

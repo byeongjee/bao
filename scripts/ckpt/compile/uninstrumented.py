@@ -32,6 +32,7 @@ class UninstrumentedCompileOptions:
     clang_opt_level: int
     link: bool
     extra_includes: list[str] = field(default_factory=list)
+    extra_defines: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -76,7 +77,7 @@ def compile_uninstrumented(
         debug=False,
         device_debug=opts.device_debug,
         extra_includes=extra_includes,
-        extra_defines=[f"F_CPU={opts.cpu_freq}"],
+        extra_defines=[f"F_CPU={opts.cpu_freq}", *opts.extra_defines],
     )
 
     # Phase 2: middle-end optimization at the requested level. default<O0>

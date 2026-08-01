@@ -13,7 +13,15 @@
 
 #define NUM_FUNCS 8U
 #define RNG_SEED 0x0C728394u
+
+/* VERIFY_BUILD (defined by `ckpt verify`) shrinks the workload: verification
+ * crosses the same static region boundaries regardless of iteration count,
+ * and BOR halt mode makes the full workload impractically slow. */
+#ifdef VERIFY_BUILD
+#define ITERATIONS 500U
+#else
 #define ITERATIONS 20000U
+#endif
 
 static uint32_t g_seed __attribute__((section(".fram"))) = RNG_SEED;
 static uint32_t g_totals[NUM_FUNCS] __attribute__((used, section(".fram")));
