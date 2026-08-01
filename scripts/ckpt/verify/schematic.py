@@ -8,27 +8,26 @@ from ..bench.schematic import NVM_SYMBOLS
 from ..compile.schematic import SchematicCompileOptions, compile_schematic
 from ..env import ProjectEnv
 from ..toolchain import Toolchain
-from .common import InstrumentedOutput, verify_algorithm
+from .common import (
+    AlgorithmSpec,
+    BenchResult,
+    InstrumentedOutput,
+    verify_algorithms,
+)
 
 
-def verify_schematic(
+def schematic_spec(
     env: ProjectEnv,
-    tc: Toolchain,
     *,
-    benchmarks: list[str] | None,
-    caps: list[str] | None,
-    halt_mode: str,
     energy_config: Path | None,
     estimator_mode: str,
-    cpu_freq: int,
-    capture_timeout_seconds: float,
     clang_opt_level: int,
     pass_log_level: str,
     algorithm_label: str,
     force_checkpoint_on_incompatible_loops: bool,
     recompute_energy_after_new_checkpoint: bool,
-) -> bool:
-    """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
+) -> AlgorithmSpec:
+    """Build the SCHEMATIC verification spec."""
     from ..bench.config import default_energy_config
 
     if energy_config is None:
@@ -75,15 +74,48 @@ def verify_schematic(
             elf_file=result.elf_file,
         )
 
-    return verify_algorithm(
+    return AlgorithmSpec(
+        name=algorithm_label,
+        nvm_symbols=NVM_SYMBOLS,
+        compile_instrumented=compile_instrumented,
+    )
+
+
+def verify_schematic(
+    env: ProjectEnv,
+    tc: Toolchain,
+    *,
+    benchmarks: list[str] | None,
+    caps: list[str] | None,
+    halt_mode: str,
+    energy_config: Path | None,
+    estimator_mode: str,
+    cpu_freq: int,
+    capture_timeout_seconds: float,
+    clang_opt_level: int,
+    pass_log_level: str,
+    algorithm_label: str,
+    force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
+) -> list[BenchResult]:
+    """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
+    spec = schematic_spec(
+        env,
+        energy_config=energy_config,
+        estimator_mode=estimator_mode,
+        clang_opt_level=clang_opt_level,
+        pass_log_level=pass_log_level,
+        algorithm_label=algorithm_label,
+        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
+    )
+    return verify_algorithms(
         env,
         tc,
-        algorithm=algorithm_label,
+        algorithms=[spec],
         benchmarks=benchmarks,
         caps=caps,
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
-        nvm_symbols=NVM_SYMBOLS,
-        compile_instrumented=compile_instrumented,
-    )
+    )[spec.name]

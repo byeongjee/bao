@@ -125,9 +125,13 @@ ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [--timeout SECONDS] [--c
 
 # Semantic verification defaults to --halt-mode bor, which destroys modeled volatile state
 # before checkpoint recovery. Compile and bench default to swbor for continuous-power measurement.
+# Multi-value --cap accepts repeats or comma lists; bare numbers get a uF suffix (--cap 5,10,50).
 ckpt verify milp       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS]
 ckpt verify rockclimb  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--cpu-freq] [--timeout SECONDS]
 ckpt verify schematic  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS]
+# verify all runs milp, rockclimb, schematic, schematicO3 sequentially (baseline runs once per
+# benchmark, shared across caps and algorithms) and prints a combined report (-o also writes it to a file).
+ckpt verify all        [BENCHMARKS...] [--cap 5,10,50] [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS] [-o REPORT]
 
 # Analysis
 ckpt analyze strip-mining LOG_FILE [-o CSV]

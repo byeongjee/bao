@@ -8,22 +8,21 @@ from ..bench.rockclimb import NVM_SYMBOLS
 from ..compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 from ..env import ProjectEnv
 from ..toolchain import Toolchain
-from .common import InstrumentedOutput, verify_algorithm
+from .common import (
+    AlgorithmSpec,
+    BenchResult,
+    InstrumentedOutput,
+    verify_algorithms,
+)
 
 
-def verify_rockclimb(
+def rockclimb_spec(
     env: ProjectEnv,
-    tc: Toolchain,
     *,
-    benchmarks: list[str] | None,
-    caps: list[str] | None,
-    halt_mode: str,
     energy_config: Path | None,
-    cpu_freq: int,
-    capture_timeout_seconds: float,
     pass_log_level: str,
-) -> bool:
-    """Verify semantic correctness of RockClimb checkpoint insertion."""
+) -> AlgorithmSpec:
+    """Build the RockClimb verification spec."""
     from ..bench.config import default_energy_config
 
     if energy_config is None:
@@ -66,15 +65,38 @@ def verify_rockclimb(
             elf_file=result.elf_file,
         )
 
-    return verify_algorithm(
+    return AlgorithmSpec(
+        name="rockclimb",
+        nvm_symbols=NVM_SYMBOLS,
+        compile_instrumented=compile_instrumented,
+    )
+
+
+def verify_rockclimb(
+    env: ProjectEnv,
+    tc: Toolchain,
+    *,
+    benchmarks: list[str] | None,
+    caps: list[str] | None,
+    halt_mode: str,
+    energy_config: Path | None,
+    cpu_freq: int,
+    capture_timeout_seconds: float,
+    pass_log_level: str,
+) -> list[BenchResult]:
+    """Verify semantic correctness of RockClimb checkpoint insertion."""
+    spec = rockclimb_spec(
+        env,
+        energy_config=energy_config,
+        pass_log_level=pass_log_level,
+    )
+    return verify_algorithms(
         env,
         tc,
-        algorithm="rockclimb",
+        algorithms=[spec],
         benchmarks=benchmarks,
         caps=caps,
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
-        nvm_symbols=NVM_SYMBOLS,
-        compile_instrumented=compile_instrumented,
-    )
+    )[spec.name]

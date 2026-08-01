@@ -76,8 +76,33 @@ _cap_option = click.option(
     "--cap",
     help="Capacitor size (e.g. 1uF) — resolves to benchmarks/config_{cap}.json.",
 )
+
+
+def _expand_caps(values: tuple[str, ...]) -> tuple[str, ...]:
+    """Split comma-separated --cap values; bare numbers get a uF suffix."""
+    caps: list[str] = []
+    for value in values:
+        for token in value.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            if token.replace(".", "", 1).isdigit():
+                token += "uF"
+            caps.append(token)
+    return tuple(caps)
+
+
+def _cap_callback(
+    ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
+) -> tuple[str, ...]:
+    return _expand_caps(value)
+
+
 _cap_multi_option = click.option(
-    "--cap", multiple=True, help="Capacitor sizes (e.g., 1uF 10uF)."
+    "--cap",
+    multiple=True,
+    callback=_cap_callback,
+    help="Capacitor sizes; repeat or comma-separate (e.g., 5uF,10uF or 5,10,50).",
 )
 _output_option = click.option("-o", "--output", type=click.Path())
 _output_csv_option = click.option(
@@ -1268,9 +1293,10 @@ def verify_rockclimb_cmd(
     timeout: float,
 ) -> None:
     """Verify semantic correctness of RockClimb checkpoint insertion."""
+    from .verify.common import all_ok
     from .verify.rockclimb import verify_rockclimb
 
-    success = verify_rockclimb(
+    results = verify_rockclimb(
         ctx.obj["env"],
         ctx.obj["tc"],
         benchmarks=_list_or_none(benchmarks),
@@ -1281,7 +1307,7 @@ def verify_rockclimb_cmd(
         cpu_freq=_mhz_to_hz(cpu_freq),
         pass_log_level=ctx.obj["pass_log_level"],
     )
-    if not success:
+    if not all_ok(results):
         raise SystemExit(1)
 
 
@@ -1307,9 +1333,10 @@ def verify_milp_cmd(
     timeout: float,
 ) -> None:
     """Verify semantic correctness of MILP checkpoint insertion."""
+    from .verify.common import all_ok
     from .verify.milp import verify_milp
 
-    success = verify_milp(
+    results = verify_milp(
         ctx.obj["env"],
         ctx.obj["tc"],
         benchmarks=_list_or_none(benchmarks),
@@ -1322,7 +1349,7 @@ def verify_milp_cmd(
         coarse_allocation=coarse_allocation,
         pass_log_level=ctx.obj["pass_log_level"],
     )
-    if not success:
+    if not all_ok(results):
         raise SystemExit(1)
 
 
@@ -1352,9 +1379,10 @@ def _verify_schematic_impl(
     recompute_energy_after_new_checkpoint: bool,
     timeout: float,
 ) -> None:
+    from .verify.common import all_ok
     from .verify.schematic import verify_schematic
 
-    success = verify_schematic(
+    results = verify_schematic(
         ctx.obj["env"],
         ctx.obj["tc"],
         benchmarks=_list_or_none(benchmarks),
@@ -1370,7 +1398,7 @@ def _verify_schematic_impl(
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
         recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
-    if not success:
+    if not all_ok(results):
         raise SystemExit(1)
 
 
@@ -1394,6 +1422,59 @@ def verify_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
     _verify_schematic_impl(
         ctx, algorithm_label="schematicO3", clang_opt_level=3, **kwargs
     )
+
+
+@verify.command("all")
+@click.argument("benchmarks", nargs=-1)
+@_cap_multi_option
+@_energy_override_option
+@_verify_halt_mode_option
+@_estimator_mode_option
+@_cpu_freq_option("16")
+@_saleae_timeout_option
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(),
+    help="Also write the final report to this file.",
+)
+@click.pass_context
+def verify_all_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    cap: tuple[str, ...],
+    energy_config: str | None,
+    halt_mode: str,
+    estimator_mode: str,
+    cpu_freq: str,
+    timeout: float,
+    output: str | None,
+) -> None:
+    """Verify milp, rockclimb, schematic, and schematicO3 sequentially."""
+    from .verify.all import format_report, verify_all
+    from .verify.common import all_ok
+
+    results = verify_all(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
+        halt_mode=halt_mode,
+        energy_config=_path_or_none(energy_config),
+        estimator_mode=estimator_mode,
+        cpu_freq=_mhz_to_hz(cpu_freq),
+        capture_timeout_seconds=timeout,
+        pass_log_level=ctx.obj["pass_log_level"],
+    )
+
+    report = format_report(results, halt_mode)
+    click.echo(report)
+    if output:
+        Path(output).write_text(report + "\n")
+        logger.info("Report written to %s", output)
+
+    if not all(all_ok(algo_results) for algo_results in results.values()):
+        raise SystemExit(1)
 
 
 # =========================================================================

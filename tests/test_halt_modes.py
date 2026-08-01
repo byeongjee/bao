@@ -10,6 +10,7 @@ from ckpt.cli import (
     compile_rockclimb_cmd,
     compile_schematic_cmd,
     compile_schematic_o3_cmd,
+    verify_all_cmd,
     verify_milp_cmd,
     verify_rockclimb_cmd,
     verify_schematic_cmd,
@@ -34,6 +35,7 @@ VERIFICATION_COMMANDS = (
     verify_rockclimb_cmd,
     verify_schematic_cmd,
     verify_schematic_o3_cmd,
+    verify_all_cmd,
 )
 
 
