@@ -53,26 +53,29 @@ def compile_to_ir(
     input_c: Path,
     output_ll: Path,
     *,
-    clang_opt_level: int,
-    raw_ir: bool,
     debug: bool,
     device_debug: bool,
     extra_includes: list[str] | None = None,
     extra_defines: list[str] | None = None,
 ) -> StepResult:
-    """Compile a C source file to LLVM IR targeting msp430-elf.
+    """Emit raw frontend LLVM IR for a C source file (msp430-elf).
 
-    With *raw_ir* (requires clang_opt_level >= 1), emit the frontend IR
-    without running any LLVM passes (``-disable-llvm-passes``): untransformed
-    code with -O{n} attributes and metadata (TBAA, lifetimes) and no blanket
-    ``noinline``, so user-written ``noinline`` survives.
+    ``-O3 -Xclang -disable-llvm-passes`` is clang's IRGen output with no pass
+    run: untransformed code whose loop structure still matches the source,
+    carrying the optimizer metadata (TBAA, lifetimes) and exactly the function
+    attributes written in the source (no clang-added blanket ``noinline``).
+    The -O3 here selects what IRGen emits, not an optimization level — all
+    optimization happens later in optimize_ir, whose level is the only
+    optimization knob.
     """
     cmd: list[str] = [
         tc.clang,
         "--target=msp430-elf",
         "-S",
         "-emit-llvm",
-        f"-O{clang_opt_level}",
+        "-O3",
+        "-Xclang",
+        "-disable-llvm-passes",
         "-D__MSP430FR5994__",
         f"-I{env.project_dir / 'passes' / 'include'}",
         "-isystem",
@@ -80,13 +83,6 @@ def compile_to_ir(
         "-isystem",
         str(env.msp430gcc_support_path / "msp430-elf" / "include"),
     ]
-
-    if raw_ir:
-        if clang_opt_level == 0:
-            raise ValueError("raw_ir requires clang_opt_level >= 1")
-        cmd += ["-Xclang", "-disable-llvm-passes"]
-    elif clang_opt_level == 0:
-        cmd += ["-Xclang", "-disable-O0-optnone"]
 
     for inc in extra_includes or []:
         cmd.append(f"-I{inc}")
@@ -109,26 +105,16 @@ def compile_annotated_ir(
     *,
     input_c: Path,
     tmp: Path,
-    raw_frontend: bool,
     debug: bool,
     device_debug: bool,
     cpu_freq: int,
     extra_includes: list[str],
 ) -> Path:
-    """Shared phase 1 of the instrumented pipelines: C -> frontend IR -> tripcounts.
+    """Shared phase 1 of the instrumented pipelines: C -> raw IR -> tripcounts.
 
-    Either way no LLVM passes have run on the returned IR, preserving the
-    source loop structure for exact trip-count annotation:
-
-    - raw_frontend=False: clang -O0 (-disable-O0-optnone). Every function
-      carries clang's blanket ``noinline``, so later optimize_ir runs never
-      inline anything — the milp/schematic/chunked pipelines rely on that to
-      keep functions separate.
-    - raw_frontend=True: clang -O3 -disable-llvm-passes. Frontend IR with -O3
-      metadata (TBAA, lifetimes) and no blanket ``noinline``: user-written
-      ``noinline`` is preserved and later optimize_ir inlines normally.
-
-    Returns the annotated IR path (tmp/tripcount.ll).
+    No LLVM pass has run on the returned IR, so the ``__loop_tripcount``
+    markers still sit inside their source loops for exact trip-count
+    annotation. Returns the annotated IR path (tmp/tripcount.ll).
     """
     input_ll = tmp / "input.ll"
     includes = list(extra_includes)
@@ -139,8 +125,6 @@ def compile_annotated_ir(
         env,
         input_c,
         input_ll,
-        clang_opt_level=3 if raw_frontend else 0,
-        raw_ir=raw_frontend,
         debug=debug,
         device_debug=device_debug,
         extra_includes=includes,

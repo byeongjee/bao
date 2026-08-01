@@ -52,7 +52,7 @@ def compile_uninstrumented(
     """Compile without checkpoint insertion.
 
     Pipeline:
-      compile_to_ir(-O0) → optional optimize_ir(-O{clang_opt_level})
+      compile_to_ir (raw -O3 frontend) → optimize_ir(-O{clang_opt_level})
       → compile_to_object(-O{opt_level}) → link
 
     No checkpoint pass, no energy estimation, no profiling.
@@ -66,27 +66,23 @@ def compile_uninstrumented(
     extra_includes = list(opts.extra_includes)
     extra_includes.append(str(env.project_dir / "passes" / "runtime"))
 
-    # Phase 1: C → LLVM IR at -O0
+    # Phase 1: C → raw frontend LLVM IR
     input_ll = opts.output.with_suffix(".input.ll")
     compile_to_ir(
         tc,
         env,
         opts.input_c,
         input_ll,
-        clang_opt_level=0,
-        raw_ir=False,
         debug=False,
         device_debug=opts.device_debug,
         extra_includes=extra_includes,
         extra_defines=[f"F_CPU={opts.cpu_freq}"],
     )
 
-    # Phase 2: Optional IR optimization. clang_opt_level=0 preserves the
-    # frontend O0 IR shape while still allowing llc/gcc backend optimization.
-    optimized_ll = input_ll
-    if opts.clang_opt_level != 0:
-        optimized_ll = opts.output.with_suffix(".optimized.ll")
-        optimize_ir(tc, input_ll, optimized_ll, opt_level=opts.clang_opt_level)
+    # Phase 2: middle-end optimization at the requested level. default<O0>
+    # still runs the always-inliner, matching a plain clang -O0 compile.
+    optimized_ll = opts.output.with_suffix(".optimized.ll")
+    optimize_ir(tc, input_ll, optimized_ll, opt_level=opts.clang_opt_level)
 
     # Phase 3: Compile to MSP430 object
     out_s = opts.output.with_suffix(".s")
