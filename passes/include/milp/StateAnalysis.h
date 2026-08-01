@@ -16,6 +16,14 @@
 
 namespace checkpoint {
 
+/// Resolve \p Ptr to its unique underlying GlobalVariable, looking through
+/// phi/select (unlike llvm::getUnderlyingObject). Returns nullptr when the
+/// base is not provably a single global — e.g. a select between two globals,
+/// or a base the lookup cannot resolve. Shared by the strict-mode validator
+/// and the VM-region access rewrite so both agree on which accesses are
+/// statically redirectable to a shadow.
+llvm::GlobalVariable *resolveUniqueUnderlyingGlobal(const llvm::Value *Ptr);
+
 /// Computes candidate-global state data for MILP checkpoint optimization.
 ///
 /// All directly-accessed globals in the function are candidates for VM/NVM

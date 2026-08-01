@@ -25,6 +25,14 @@ static bool isWhitelistedHelperName(llvm::StringRef N) {
 
 } // namespace
 
+llvm::GlobalVariable *resolveUniqueUnderlyingGlobal(const llvm::Value *Ptr) {
+    llvm::SmallVector<const llvm::Value *, 4> objs;
+    llvm::getUnderlyingObjects(Ptr, objs);
+    if (objs.size() != 1)
+        return nullptr;
+    return const_cast<llvm::GlobalVariable *>(llvm::dyn_cast<llvm::GlobalVariable>(objs.front()));
+}
+
 // Static empty containers for safe reference returns
 const std::set<llvm::GlobalVariable *> StateAnalysis::emptyGVSet_;
 const std::set<llvm::Value *> StateAnalysis::emptyValueSet_;
@@ -329,11 +337,15 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
         return true;
     }
 
+    // Accesses resolve via resolveUniqueUnderlyingGlobal, which looks through
+    // phi/select: a pointer whose every possible base is the same candidate
+    // global (e.g. a pointer induction variable over a global array) is
+    // statically redirectable by the instrumenter, so it is not an error.
+    // Multi-base pointers (e.g. a select between two globals) stay unresolved
+    // and fall through to the mayTouchCandidate error below.
     if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
-        const llvm::Value *Obj =
-            llvm::getUnderlyingObject(LI->getPointerOperand()->stripPointerCasts());
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(Obj)) {
-            if (isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV)))
+        if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(LI->getPointerOperand())) {
+            if (isCandidateGlobal(GV))
                 return true;
         }
         if (mayTouchCandidate(/*ref*/ true, /*mod*/ false)) {
@@ -344,10 +356,8 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
     }
 
     if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-        const llvm::Value *Obj =
-            llvm::getUnderlyingObject(SI->getPointerOperand()->stripPointerCasts());
-        if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(Obj)) {
-            if (isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV)))
+        if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(SI->getPointerOperand())) {
+            if (isCandidateGlobal(GV))
                 return true;
         }
         if (mayTouchCandidate(/*ref*/ false, /*mod*/ true)) {
@@ -360,19 +370,13 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
     if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
         bool directCandidate = false;
         if (auto *MCI = llvm::dyn_cast<llvm::MemCpyInst>(MI)) {
-            const llvm::Value *DstObj =
-                llvm::getUnderlyingObject(MCI->getDest()->stripPointerCasts());
-            const llvm::Value *SrcObj =
-                llvm::getUnderlyingObject(MCI->getSource()->stripPointerCasts());
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(DstObj))
-                directCandidate |= isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(SrcObj))
-                directCandidate |= isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
+            if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(MCI->getDest()))
+                directCandidate |= isCandidateGlobal(GV);
+            if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(MCI->getSource()))
+                directCandidate |= isCandidateGlobal(GV);
         } else {
-            const llvm::Value *DstObj =
-                llvm::getUnderlyingObject(MI->getRawDest()->stripPointerCasts());
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(DstObj))
-                directCandidate |= isCandidateGlobal(const_cast<llvm::GlobalVariable *>(GV));
+            if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(MI->getRawDest()))
+                directCandidate |= isCandidateGlobal(GV);
         }
 
         if (!directCandidate && mayTouchCandidate(/*ref*/ true, /*mod*/ true)) {

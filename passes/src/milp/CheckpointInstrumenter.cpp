@@ -4,7 +4,6 @@
 #include "common/ValueOrder.h"
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
@@ -179,6 +178,13 @@ void CheckpointInstrumenter::rewriteAccessesInVMRegions(llvm::Function &F,
     //   shadow + (ptr - global)
     // so an access follows its own block's placement no matter where its
     // pointer operand was computed.
+    //
+    // Bases are resolved with resolveUniqueUnderlyingGlobal, which looks
+    // through phi/select: shadow + (ptr - global) is correct for any runtime
+    // pointer value as long as every possible base is the same global (e.g.
+    // a pointer induction variable over a global array). Pointers with more
+    // than one possible base never reach here — StateAnalysis strict mode
+    // rejects the whole function for those.
     const NodeMap &nodeMap = cfg.getNodeMap();
     const llvm::DataLayout &DL = M_.getDataLayout();
     llvm::Type *intPtrTy = DL.getIntPtrType(M_.getContext());
@@ -186,8 +192,7 @@ void CheckpointInstrumenter::rewriteAccessesInVMRegions(llvm::Function &F,
 
     auto shadowForUnderlying =
         [&](llvm::Value *Ptr) -> std::pair<llvm::GlobalVariable *, llvm::GlobalVariable *> {
-        auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(
-            const_cast<llvm::Value *>(llvm::getUnderlyingObject(Ptr)));
+        llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(Ptr);
         if (!GV)
             return {nullptr, nullptr};
         auto it = shadowMap_.find(GV);
