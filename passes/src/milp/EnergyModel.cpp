@@ -10,7 +10,6 @@
 
 #define JSON_NOEXCEPTION
 #include <algorithm>
-#include <cmath>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
