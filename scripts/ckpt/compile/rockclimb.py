@@ -21,7 +21,6 @@ from .common import (
     link_algorithm,
     optimize_ir_with_options,
     run_assembly_energy,
-    strip_noinline_for_optimization,
     write_assembly_energy_config,
 )
 
@@ -66,8 +65,8 @@ def compile_rockclimb(
     """Run the RockClimb machine-level checkpoint insertion pipeline.
 
     Pipeline:
-      C -> clang(-O0) -> .ll -> tripcount-annotation -> strip_noinline ->
-      optimize_ir ->
+      C -> clang(-O3 -disable-llvm-passes) -> .ll -> tripcount-annotation ->
+      optimize_ir(-O{clang_opt_level}) ->
       pre-rockclimb assembly energy -> rockclimb-preprocess ->
       (if precomputed: assign-bb-debuginfo -> llc to obj -> bb-energy-analyzer) ->
       llc -stop-after=virtregrewriter -> .mir ->
@@ -88,30 +87,30 @@ def compile_rockclimb(
     with compilation_workdir(prefix="ckpt_rockclimb_") as tmp:
         output = opts.output
 
-        # Step 1: C -> -O0 IR -> tripcount annotation, so later opt passes can
-        # rebuild the frontend shape while preserving exact loop-trip counts.
+        # Step 1: C -> raw frontend IR -> tripcount annotation. No passes have
+        # run yet, so markers still sit in their source loops; user-written
+        # noinline attributes are preserved (clang -O>=1 adds no blanket
+        # noinline).
         annotated_ll = compile_annotated_ir(
             tc,
             env,
             input_c=opts.input_c,
             tmp=tmp,
+            raw_frontend=True,
             debug=False,
             device_debug=opts.device_debug,
             cpu_freq=opts.cpu_freq,
             extra_includes=[],
         )
 
-        # Step 1c: Strip clang -O0 noinline attributes so the normal
-        # optimization pipeline can recover the old clang -O3 frontend shape.
+        # Step 1c: Run the standard optimization pipeline (the second half of
+        # what a plain clang -O{n} compile would do).
         rockclimb_input_ll = annotated_ll
         if opts.clang_opt_level != 0:
-            stripped_ll = tmp / "stripped.ll"
-            strip_noinline_for_optimization(annotated_ll, stripped_ll)
-
             optimized_ll = tmp / "optimized.ll"
             optimize_ir_with_options(
                 tc,
-                stripped_ll,
+                annotated_ll,
                 optimized_ll,
                 opt_level=opts.clang_opt_level,
                 disable_loop_unrolling=False,

@@ -74,6 +74,7 @@ def compile_uninstrumented(
         opts.input_c,
         input_ll,
         clang_opt_level=0,
+        raw_ir=False,
         debug=False,
         device_debug=opts.device_debug,
         extra_includes=extra_includes,
