@@ -263,10 +263,6 @@ std::optional<MILPEnergyParams> parseMILPEnergyParams(const std::string &configP
     if (!readBool("loop_strip_mining_enabled", params.loopStripMiningEnabled))
         return std::nullopt;
 
-    params.addDebugMarkers = false;
-    if (!readBool("add_debug_markers", params.addDebugMarkers))
-        return std::nullopt;
-
     if (!readOptionalDouble("loop_strip_mining_cost", params.loopStripMiningCost))
         return std::nullopt;
     if (params.loopStripMiningCost == 0.0 &&
