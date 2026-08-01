@@ -1,4 +1,4 @@
-# MILP-Based Checkpoint Insertion for Intermittent Computing
+# BAO: MILP-Based Checkpoint Insertion for Intermittent Computing
 
 Batteryless devices powered by energy harvesting compute on small bursts of
 energy buffered in a capacitor, and lose power whenever the buffer runs out.
