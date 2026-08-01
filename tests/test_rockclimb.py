@@ -72,7 +72,7 @@ def run_rockclimb_machine(machine_tools):
     def _run(
         src: Path,
         energy_config: Path,
-        rockclimb_config: Path,
+        rockclimb_config: Path | None,
         tmp_path: Path,
         *,
         clang_opt: str = "2",
@@ -120,22 +120,22 @@ def run_rockclimb_machine(machine_tools):
         )
 
         # Step 3: Run RockClimb machine pass
+        cmd = [
+            llc,
+            "-march=msp430",
+            f"-load={pass_lib}",
+            "-run-pass=rockclimb",
+        ]
+        if rockclimb_config is not None:
+            cmd.append(f"-rockclimb-config={rockclimb_config}")
+        cmd.append(
+            f"-rockclimb-energy-data={energy_data}"
+            if energy_data is not None
+            else f"-rockclimb-energy-config={energy_config}"
+        )
+        cmd += [str(mir_file), "-o", str(out_mir)]
         result = subprocess.run(
-            [
-                llc,
-                "-march=msp430",
-                f"-load={pass_lib}",
-                "-run-pass=rockclimb",
-                f"-rockclimb-config={rockclimb_config}",
-                (
-                    f"-rockclimb-energy-data={energy_data}"
-                    if energy_data is not None
-                    else f"-rockclimb-energy-config={energy_config}"
-                ),
-                str(mir_file),
-                "-o",
-                str(out_mir),
-            ],
+            cmd,
             capture_output=True,
             text=True,
             check=False,
@@ -406,6 +406,50 @@ class TestMachinePassLoop:
         assert match, "Could not find region count in stderr"
         regions = int(match.group(1))
         assert regions >= 2, f"Expected >=2 regions for loop, got {regions}"
+
+
+IRREDUCIBLE_GOTO = """\
+// A goto into the loop body gives the cycle two entry points, so it is not
+// a natural loop and MachineLoopInfo does not recognize it (compile at -O0;
+// at -O2 SimplifyCFG makes the CFG reducible again by duplication).
+int irreducible_entry(int n, int enter_mid) {
+    int acc = 0;
+    int i = 0;
+    if (enter_mid)
+        goto mid;
+    for (; i < n; i++) {
+        acc += i;
+    mid:
+        acc ^= n;
+    }
+    return acc;
+}
+"""
+
+
+class TestMachinePassIrreducible:
+    """Cycles that are not natural loops must still be cut by boundaries."""
+
+    def test_irreducible_cycle_gets_boundary(self, run_rockclimb_machine, tmp_path):
+        """MachineLoopInfo does not report irreducible cycles as loops, so the
+        loop-header rule alone leaves them without a boundary — their energy
+        accumulation would be unbounded and unchecked (silently unsound under
+        intermittent power).  Retreating-edge targets must therefore be
+        mandatory boundaries."""
+        src = write_src(tmp_path, IRREDUCIBLE_GOTO)
+        result = run_rockclimb_machine(
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
+            clang_opt="0",
+        )
+        assert result.exit_code == 0, result.stderr
+        boundaries = _region_boundaries_per_func(result.stderr)
+        # entry + exit + the retreating-edge target inside the cycle
+        assert boundaries.get("irreducible_entry", 0) >= 3, (
+            f"Irreducible cycle was not cut by a boundary: {boundaries}"
+        )
 
 
 class TestMachinePassDistributedCkpt:
@@ -772,3 +816,50 @@ class TestCallHandling:
         )
         assert result.exit_code != 0, "pass should abort on incomplete energy data"
         assert "no precomputed energy" in result.stderr, result.stderr
+
+
+class TestMachinePassConfigErrors:
+    """Configuration errors must abort llc instead of silently emitting an
+    uninstrumented binary with exit code 0."""
+
+    def test_missing_config_aborts(self, run_rockclimb_machine, tmp_path):
+        src = write_src(tmp_path, SIMPLE_LINEAR)
+        result = run_rockclimb_machine(
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            None,
+            tmp_path,
+        )
+        assert result.exit_code != 0, "llc should abort without -rockclimb-config"
+        assert "-rockclimb-config not specified" in result.stderr, result.stderr
+
+    def test_nonpositive_esafe_reports_clear_infeasibility(
+        self, run_rockclimb_machine, tmp_path
+    ):
+        """A capacity below the fixed E_pro/E_epi/restore overhead must report
+        a clear E_safe infeasibility (keeping the driver's SKIP flow), not a
+        confusing per-block "exceeds E_safe (negative)" message."""
+        tiny_cap = tmp_path / "tiny_cap.json"
+        tiny_cap.write_text(
+            json.dumps(
+                {
+                    "capacity": 5.0,
+                    "E_pro": 5.0,
+                    "E_epi": 3.0,
+                    "N_reg": 16,
+                    "reg_store_energy": 2.0,
+                    "reg_restore_energy": 2.0,
+                }
+            )
+        )
+        src = write_src(tmp_path, SIMPLE_LINEAR)
+        result = run_rockclimb_machine(
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            tiny_cap,
+            tmp_path,
+        )
+        assert result.exit_code == 0
+        assert re.search(
+            r"Region partitioning failed: E_safe .* <= 0", result.stderr
+        ), result.stderr

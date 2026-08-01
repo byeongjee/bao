@@ -60,6 +60,12 @@ class RockClimbMachineOptimizer {
     /// Blocks in reverse post-order
     std::vector<llvm::MachineBasicBlock *> topoOrder_;
 
+    /// Targets of retreating edges (mandatory boundaries). In a reducible CFG
+    /// these are exactly the natural-loop headers; for irreducible cycles —
+    /// which MachineLoopInfo does not recognize — they are the only thing
+    /// that bounds the energy accumulated around the cycle.
+    llvm::SmallPtrSet<llvm::MachineBasicBlock *, 16> retreatingTargets_;
+
     double regStoreEnergy_;
     MSP430Constants C_;
     llvm::DenseMap<const llvm::MachineBasicBlock *, llvm::SmallSet<llvm::MCPhysReg, 12>> liveIn_;
