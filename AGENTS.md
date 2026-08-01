@@ -30,8 +30,8 @@ clang-tidy is not part of the hook (~5s per file). Run it manually with `scripts
 ## Running Passes
 
 ```bash
-# Compile C to LLVM IR (must use -Xclang -disable-O0-optnone for -O0 code)
-clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
+# Compile C to raw frontend LLVM IR (no LLVM passes run; matches the ckpt pipeline)
+clang -S -emit-llvm -O3 -Xclang -disable-llvm-passes input.c -o input.ll
 
 # MILP checkpoint insertion (-passes=checkpoint and -passes=milp are aliases)
 opt -load-pass-plugin=./passes/build/CheckpointPass.so \

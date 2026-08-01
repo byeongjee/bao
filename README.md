@@ -91,10 +91,11 @@ frequencies from a JSON file produced by the repository's own profiling
 instrumentation (the `bb-freq-collect` pass), passed via `-bb-freq-file`:
 
 ```bash
-# -O0 emits IR whose loops still mirror the source, so trip-count markers can
-# be annotated first; optimization happens later in opt (-passes=default<O3>).
-# -disable-O0-optnone lets passes run on -O0 IR.
-clang -S -emit-llvm -O0 -Xclang -disable-O0-optnone input.c -o input.ll
+# -O3 -disable-llvm-passes emits clang's raw frontend IR (no pass has run):
+# loops still mirror the source, so trip-count markers can be annotated first,
+# and the IR carries optimizer metadata (TBAA, lifetimes) with no blanket
+# noinline. Optimization happens later in opt (-passes=default<O3>).
+clang -S -emit-llvm -O3 -Xclang -disable-llvm-passes input.c -o input.ll
 
 # Instrument for BB-frequency profiling, run natively → bb_freq.json
 opt -load-pass-plugin=./passes/build/CheckpointPass.so \
