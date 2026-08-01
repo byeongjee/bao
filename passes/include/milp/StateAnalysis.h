@@ -28,7 +28,8 @@ llvm::GlobalVariable *resolveUniqueUnderlyingGlobal(const llvm::Value *Ptr);
 ///
 /// All directly-accessed globals in the function are candidates for VM/NVM
 /// placement. Intra-procedural analysis only with strict unresolved-memory
-/// policy (diagnostic + function-level abort).
+/// policy: unresolved effects are diagnostics that the MILP pass turns into
+/// a fatal compile error.
 ///
 /// V_inelig includes:
 /// - Static allocas (stack slots)

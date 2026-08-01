@@ -9,6 +9,7 @@
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
@@ -137,7 +138,14 @@ void CheckpointInstrumenter::createNVMBackupGlobals(llvm::Function &F, const MIL
             backupType = Inst->getType();
             backupName = "__nvm_ssa_" + std::to_string(ssaCounter++);
         } else {
-            continue;
+            // Only allocas and SSA instructions are supported here. Anything
+            // else (e.g. a GlobalVariable) has no def tracking or backup
+            // emission path — silently skipping it would drop its state
+            // across region boundaries.
+            llvm::report_fatal_error(llvm::Twine("MILP instrumenter: unsupported ineligible "
+                                                 "object kind for '") +
+                                         V->getName() + "'",
+                                     /*gen_crash_diag=*/false);
         }
 
         auto *backup = new llvm::GlobalVariable(

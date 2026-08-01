@@ -162,7 +162,8 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     auto ctxResult = createCheckpointContext(F, LI, EnergyConfigOpt.getValue(), "checkpoint pass");
     if (!ctxResult.success()) {
         if (!ctxResult.shouldSkip()) {
-            PLOGE << ctxResult.errorMessage;
+            report_fatal_error(Twine("MILP checkpoint pass: ") + ctxResult.errorMessage,
+                               /*gen_crash_diag=*/false);
         }
         return PreservedAnalyses::all();
     }
@@ -210,16 +211,19 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
     ctx.stateAnalysis = std::make_unique<StateAnalysis>(F, AA, *ctx.cfg);
     if (ctx.stateAnalysis->hasAnalysisErrors()) {
         ctx.stateAnalysis->printAnalysisErrors(errs());
-        PLOGW << "Skipping MILP instrumentation for function " << F.getName()
-              << " due to unresolved memory/call effects.";
-        return preservedOnSkip();
+        report_fatal_error(Twine("MILP checkpoint pass: unresolved memory/call effects in "
+                                 "function '") +
+                               F.getName() +
+                               "' (see errors above); cannot guarantee checkpoint correctness",
+                           /*gen_crash_diag=*/false);
     }
 
     // Step 4: Parse MILP energy params and build EnergyModel (Pass C/D)
     auto milpParamsOpt = parseMILPEnergyParams(MILPConfigOpt.getValue());
     if (!milpParamsOpt) {
-        PLOGE << "Error: Failed to parse MILP config: " << MILPConfigOpt.getValue();
-        return preservedOnSkip();
+        report_fatal_error(Twine("MILP checkpoint pass: failed to parse MILP config: ") +
+                               MILPConfigOpt.getValue(),
+                           /*gen_crash_diag=*/false);
     }
     ctx.milpParams = *milpParamsOpt;
     ctx.energyModel =
