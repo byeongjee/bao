@@ -18,6 +18,12 @@ RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(MachineFunction &MF,
       nvmRegsGV_(nvmRegsGV) {}
 
 MachineInstr *RockClimbMachineInstrumenter::emitBoundaryCall(MachineBasicBlock &MBB) {
+    // INVARIANT: recovery restores R4-R15/SP/PC but NOT SR, so a region-start
+    // block must never consume status flags produced before the boundary.
+    // This holds at -stop-after=virtregrewriter (compare and conditional
+    // branch are still colocated per block) but would silently break if this
+    // pass ever moved after branch folding, which creates SR-live-in blocks.
+    //
     // Insert at the beginning of the block, after any PHI-like copies
     // (shouldn't exist post-regalloc, but be safe).
     MachineBasicBlock::iterator InsertPt = MBB.begin();
