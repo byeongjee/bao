@@ -70,11 +70,7 @@ static bool instructionUsesOrDefsReg(const MachineInstr &MI, MCPhysReg reg,
     return hasUse || hasDef;
 }
 
-/// True if calling this instruction's target may overwrite __nvm_regs slots:
-/// the callee is a function this pass instruments (defined in the module and
-/// not a runtime helper), or an indirect call whose target is unknown.
-/// External declarations (memcpy, __mspabi_*, libm) are never instrumented.
-static bool callMayClobberNvmRegs(const MachineInstr &MI) {
+bool callMayClobberNvmRegs(const MachineInstr &MI) {
     for (const MachineOperand &MO : MI.operands()) {
         if (MO.isGlobal()) {
             const auto *F = dyn_cast<Function>(MO.getGlobal());

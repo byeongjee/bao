@@ -1,5 +1,6 @@
 #include "RockClimbMachineOptimizer.h"
 #include "MSP430Constants.h"
+#include "MachineDistributedCheckpointing.h"
 #include "MachineEnergyEstimator.h"
 #include "MachineLivenessAnalysis.h"
 
@@ -27,9 +28,69 @@ RockClimbMachineOptimizer::RockClimbMachineOptimizer(MachineFunction &MF, Machin
     identifyExitBlocks();
     computeTopologicalOrder();
 
-    if (regStoreEnergy_ > 0) {
-        const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
-        liveIn_ = computeBulkLiveIn(MF_, TRI);
+    if (regStoreEnergy_ > 0)
+        addDistributedSaveCosts();
+}
+
+void RockClimbMachineOptimizer::addDistributedSaveCosts() {
+    // Algorithm 1 line 2 (PFI paper): Cycle_bb = Cycle_ori_bb + CkptCycles_bb.
+    // The distributed checkpoint stores execute inside the blocks they are
+    // inserted into, so their energy must be part of those blocks' costs —
+    // that is what charges them to the region that actually pays for them at
+    // runtime.
+    //
+    // The exact save placement depends on the region boundaries, which do not
+    // exist yet, but a boundary-independent upper bound does: whatever the
+    // boundary set turns out to be, register R gets at most ONE save in block
+    // B — at R's last def-like point (def, or a call that may clobber R's
+    // __nvm_regs slot) — and only if R is live-out of B (the saved value must
+    // reach a later boundary). Charging that superset keeps every region's
+    // accounted cost >= its real cost.
+    //
+    // Not modeled: the callee-entry argument saves, which execute in the
+    // caller's region (cross-function; covered by the per-boundary E_pro
+    // convention).
+    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
+    const MachineRegisterInfo &MRI = MF_.getRegInfo();
+    auto liveIn = computeBulkLiveIn(MF_, TRI);
+
+    for (MachineBasicBlock &MBB : MF_) {
+        // liveOut = union of successor live-ins
+        SmallSet<MCPhysReg, 12> liveOut;
+        for (const MachineBasicBlock *succ : MBB.successors())
+            for (MCPhysReg reg : liveIn[succ])
+                liveOut.insert(reg);
+        if (liveOut.empty())
+            continue;
+
+        // Def-like points: register defs, and clobbering calls (which get a
+        // post-call re-save of any live register, so they count for all).
+        bool hasClobberingCall = false;
+        SmallSet<MCPhysReg, 12> defined;
+        for (const MachineInstr &MI : MBB) {
+            if (MI.isCall() && callMayClobberNvmRegs(MI))
+                hasClobberingCall = true;
+            for (const MachineOperand &MO : MI.operands()) {
+                if (!MO.isReg() || !MO.isDef() || !MO.getReg().isPhysical())
+                    continue;
+                MCPhysReg reg = MO.getReg().asMCReg();
+                if (MRI.isReserved(reg))
+                    continue;
+                for (unsigned r = C_.R4.id(); r <= C_.R15.id(); ++r) {
+                    if (TRI->regsOverlap(reg, r)) {
+                        defined.insert(static_cast<MCPhysReg>(r));
+                        break;
+                    }
+                }
+            }
+        }
+
+        unsigned saves = 0;
+        for (MCPhysReg reg : liveOut) {
+            if (hasClobberingCall || defined.count(reg))
+                ++saves;
+        }
+        energyCosts_[&MBB] += saves * regStoreEnergy_;
     }
 }
 
@@ -110,42 +171,6 @@ double RockClimbMachineOptimizer::getBlockCost(MachineBasicBlock *MBB) const {
     return (it != energyCosts_.end()) ? it->second : 0.0;
 }
 
-void RockClimbMachineOptimizer::collectBlockDefs(MachineBasicBlock *MBB) {
-    if (regStoreEnergy_ <= 0)
-        return; // overhead disabled — defsInRegion_ is never consulted
-    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
-    const MachineRegisterInfo &MRI = MF_.getRegInfo();
-    for (const MachineInstr &MI : *MBB) {
-        for (const MachineOperand &MO : MI.operands()) {
-            if (!MO.isReg() || !MO.isDef() || !MO.getReg().isPhysical())
-                continue;
-            MCPhysReg reg = MO.getReg().asMCReg();
-            if (MRI.isReserved(reg))
-                continue;
-            for (unsigned r = C_.R4.id(); r <= C_.R15.id(); ++r) {
-                if (TRI->regsOverlap(reg, r)) {
-                    defsInRegion_.insert(static_cast<MCPhysReg>(r));
-                    break;
-                }
-            }
-        }
-    }
-}
-
-double RockClimbMachineOptimizer::computeCkptOverhead(MachineBasicBlock *MBB) const {
-    if (regStoreEnergy_ <= 0)
-        return 0.0;
-    auto it = liveIn_.find(MBB);
-    if (it == liveIn_.end())
-        return 0.0;
-    unsigned count = 0;
-    for (MCPhysReg reg : it->second) {
-        if (defsInRegion_.count(reg))
-            ++count;
-    }
-    return count * regStoreEnergy_;
-}
-
 MachineRockClimbResult RockClimbMachineOptimizer::optimize() {
     return partitionRegions();
 }
@@ -176,8 +201,6 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
     if (entryIsBoundary)
         boundarySet.insert(entryMBB);
 
-    defsInRegion_.clear();
-
     // Process blocks in topological order
     for (size_t i = 0; i < topoOrder_.size(); ++i) {
         MachineBasicBlock *MBB = topoOrder_[i];
@@ -195,16 +218,15 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
 
         double accum_cycle;
         if (isBoundary) {
-            defsInRegion_.clear();
             accum_cycle = Cycle_bbi;
         } else {
+            // Block costs already include the distributed checkpoint stores
+            // (addDistributedSaveCosts), so accum is the region's real energy
+            // and no separate save-overhead term is needed here.
             double candidate = Cycle_bbi + incomeCycle[MBB];
-            double ckptOverhead = computeCkptOverhead(MBB);
-
-            if (candidate + ckptOverhead >= E_safe_) {
+            if (candidate >= E_safe_) {
                 boundarySet.insert(MBB);
                 isBoundary = true;
-                defsInRegion_.clear();
                 accum_cycle = Cycle_bbi;
             } else {
                 accum_cycle = candidate;
@@ -223,8 +245,6 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
                                   "); single block does not fit one charge";
             return result;
         }
-
-        collectBlockDefs(MBB);
 
         // Propagate to successors
         for (MachineBasicBlock *succ : MBB->successors()) {

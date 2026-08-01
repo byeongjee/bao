@@ -12,6 +12,12 @@
 
 namespace checkpoint {
 
+/// True if calling this instruction's target may overwrite __nvm_regs slots:
+/// the callee is a function this pass instruments (defined in the module and
+/// not a runtime helper), or an indirect call whose target is unknown.
+/// External declarations (memcpy, __mspabi_*, libm) are never instrumented.
+bool callMayClobberNvmRegs(const llvm::MachineInstr &MI);
+
 struct MachineCheckpointPoint {
     llvm::MachineInstr *afterInst = nullptr;
     llvm::MCPhysReg reg = 0; // Physical register (e.g., MSP430::R4)
