@@ -108,6 +108,29 @@ def test_milp_infeasible(run_milp, tmp_path):
 # ---------------------------------------------------------------------------
 # Missing bb-freq-file test
 # ---------------------------------------------------------------------------
+def test_milp_fails_on_multi_base_pointer(run_milp, tmp_path):
+    """test_mixed_base_ptr.c: an access whose pointer can root at more than
+    one candidate global cannot be redirected to a single VM shadow, so the
+    pass must fail the compile explicitly rather than silently skip the
+    function."""
+    result = run_milp(
+        TESTS_DIR / "test_mixed_base_ptr.c",
+        ESTIMATOR_UNIFORM,
+        MILP_PARAMS,
+        tmp_path,
+    )
+    check_assertions(
+        result,
+        {
+            "exit": "nonzero",
+            "stderr_contains": "unresolved memory/call effects",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Missing bb-freq-file test
+# ---------------------------------------------------------------------------
 def test_milp_missing_bb_freq(run_milp, tmp_path):
     result = run_milp(
         TESTS_DIR / "test_linear.c",
