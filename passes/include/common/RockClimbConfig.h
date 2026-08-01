@@ -12,7 +12,6 @@ struct RockClimbParams {
     double regRestoreEnergy = 0.0;
     double regStoreEnergy = 0.0;
     bool distributedCheckpointing = true;
-    bool addDebugMarkers = false;
 
     double calculateESafe() const {
         // PC and SP recovery are accounted for in E_pro already.

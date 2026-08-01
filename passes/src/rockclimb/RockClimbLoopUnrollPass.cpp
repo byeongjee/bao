@@ -216,9 +216,6 @@ computeWorstCaseIterationEnergy(Loop *L, const DenseMap<const BasicBlock *, doub
             if (!L->contains(Succ)) {
                 continue;
             }
-            if (BB == Latch && Succ == Header) {
-                continue;
-            }
             double succEnergy = dfs(Succ);
             if (succEnergy < 0.0) {
                 continue;
@@ -284,7 +281,7 @@ computeWorstCaseIterationEnergy(Loop *L, const DenseMap<const BasicBlock *, doub
 }
 
 static PlanResult computePlan(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                              checkpoint::RockClimbParams params, LoopInfo &LI,
+                              const checkpoint::RockClimbParams &params, LoopInfo &LI,
                               ScalarEvolution &SE) {
     PlanResult result;
 
@@ -365,8 +362,8 @@ static PlanResult computePlan(Loop *L, const DenseMap<const BasicBlock *, double
 }
 
 static void selectInNest(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                         checkpoint::RockClimbParams params, LoopInfo &LI, ScalarEvolution &SE,
-                         std::vector<SelectedLoopPlan> &out) {
+                         const checkpoint::RockClimbParams &params, LoopInfo &LI,
+                         ScalarEvolution &SE, std::vector<SelectedLoopPlan> &out) {
     PlanResult planResult = computePlan(L, blockEnergy, params, LI, SE);
     if (planResult.plan) {
         out.push_back({WeakTrackingVH(L->getHeader()), *planResult.plan});
@@ -380,7 +377,7 @@ static void selectInNest(Loop *L, const DenseMap<const BasicBlock *, double> &bl
 
 static std::vector<SelectedLoopPlan>
 selectLoopsToUnroll(LoopInfo &LI, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                    checkpoint::RockClimbParams params, ScalarEvolution &SE) {
+                    const checkpoint::RockClimbParams &params, ScalarEvolution &SE) {
     std::vector<SelectedLoopPlan> selected;
     for (Loop *L : LI) {
         selectInNest(L, blockEnergy, params, LI, SE, selected);

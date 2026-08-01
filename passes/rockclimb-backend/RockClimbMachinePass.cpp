@@ -13,16 +13,13 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/JSON.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include "common/BlockUtils.h"
 #include "common/Logger.h"
 #include "common/PassStatistics.h"
 
 #include <chrono>
-#include <fstream>
 #include <set>
-#include <sstream>
 
 using namespace llvm;
 
@@ -39,11 +36,6 @@ static cl::opt<std::string>
 static cl::opt<std::string> RockClimbMachineEnergyDataOpt(
     "rockclimb-energy-data", cl::desc("Pre-computed per-BB energy JSON (from bb-energy-analyzer)"),
     cl::value_desc("filename"), cl::init(""));
-
-static cl::opt<bool> AddDebugMarkersOpt("add-debug-markers",
-                                        cl::desc("Emit runtime function calls for register "
-                                                 "save/restore (for mock counter debugging)"),
-                                        cl::init(false));
 
 namespace checkpoint {
 /// Build a CommonStats struct for RockClimb, computing edge count and timing.
@@ -133,49 +125,38 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     PLOGI << "  Basic blocks: " << MF.size();
 
     // Create energy estimator
-    std::unique_ptr<MachineEnergyEstimator> estimatorOwned;
-    MachineEnergyEstimator *estimatorPtr = nullptr;
-
+    std::unique_ptr<MachineEnergyEstimator> estimator;
     if (hasPrecomputed) {
-        estimatorOwned =
+        estimator =
             MachineEnergyEstimator::fromPrecomputed(RockClimbMachineEnergyDataOpt.getValue());
-        if (!estimatorOwned) {
+        if (!estimator) {
             PLOGE << "Error: Failed to load pre-computed energy data";
             return false;
         }
-        estimatorPtr = estimatorOwned.get();
     } else {
-        estimatorOwned =
+        estimator =
             std::make_unique<MachineEnergyEstimator>(RockClimbMachineEnergyConfigOpt.getValue());
-        estimatorPtr = estimatorOwned.get();
     }
-
-    MachineEnergyEstimator &estimator = *estimatorPtr;
 
     // Report required/missing energy keys for MIR estimation mode
     std::set<std::string> requiredEnergyKeys, missingEnergyKeys;
     if (!hasPrecomputed) {
-        estimator.collectRequiredKeys(MF, requiredEnergyKeys, missingEnergyKeys);
+        estimator->collectRequiredKeys(MF, requiredEnergyKeys, missingEnergyKeys);
 
-        {
-            std::string reqList;
+        auto joinKeys = [](const std::set<std::string> &keys) {
+            std::string list;
             bool first = true;
-            for (const auto &key : requiredEnergyKeys) {
-                reqList += (first ? " " : ", ") + key;
+            for (const auto &key : keys) {
+                list += (first ? " " : ", ") + key;
                 first = false;
             }
-            PLOGI << "--- Energy parameters for " << MF.getName() << " ---";
-            PLOGI << "  Required (" << requiredEnergyKeys.size() << " keys):" << reqList;
-        }
-        {
-            std::string missList;
-            bool first = true;
-            for (const auto &key : missingEnergyKeys) {
-                missList += (first ? " " : ", ") + key;
-                first = false;
-            }
-            PLOGI << "  Missing  (" << missingEnergyKeys.size() << " keys):" << missList;
-        }
+            return list;
+        };
+        PLOGI << "--- Energy parameters for " << MF.getName() << " ---";
+        PLOGI << "  Required (" << requiredEnergyKeys.size()
+              << " keys):" << joinKeys(requiredEnergyKeys);
+        PLOGI << "  Missing  (" << missingEnergyKeys.size()
+              << " keys):" << joinKeys(missingEnergyKeys);
     }
 
     // Get MachineLoopInfo
@@ -183,7 +164,7 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
 
     // Algorithm 1: region partitioning
     double regStoreEnergy = params.distributedCheckpointing ? params.regStoreEnergy : 0.0;
-    RockClimbMachineOptimizer optimizer(MF, MLI, estimator, E_safe, regStoreEnergy);
+    RockClimbMachineOptimizer optimizer(MF, MLI, *estimator, E_safe, regStoreEnergy);
 
     MachineRockClimbResult result = optimizer.optimize();
     if (!result.feasible) {
@@ -199,9 +180,6 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
         checkpointPoints = distCkpt.analyze();
     }
 
-    // Resolve addDebugMarkers from CLI option or config
-    bool addDebugMarkers = AddDebugMarkersOpt.getValue() || params.addDebugMarkers;
-
     // Get or create __nvm_regs as an external global: [16 x i16]
     Module *M = const_cast<Module *>(MF.getFunction().getParent());
     GlobalVariable *nvmRegsGV = M->getGlobalVariable("__nvm_regs");
@@ -213,69 +191,34 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
                                /*Initializer=*/nullptr, "__nvm_regs");
     }
 
-    // Get or create debug counter globals (uint32_t in .nvm section)
-    GlobalVariable *cntBoundaryGV = nullptr;
-    GlobalVariable *cntSaveGV = nullptr;
-    GlobalVariable *cntRestoreGV = nullptr;
-    if (addDebugMarkers) {
-        auto *i32Ty = Type::getInt32Ty(M->getContext());
-        auto getOrCreateCounter = [&](const char *name) -> GlobalVariable * {
-            GlobalVariable *gv = M->getGlobalVariable(name);
-            if (!gv) {
-                gv = new GlobalVariable(*M, i32Ty, /*isConstant=*/false,
-                                        GlobalValue::ExternalLinkage,
-                                        /*Initializer=*/nullptr, name);
-            }
-            return gv;
-        };
-        cntBoundaryGV = getOrCreateCounter("cnt_boundary");
-        cntSaveGV = getOrCreateCounter("cnt_save_reg");
-        cntRestoreGV = getOrCreateCounter("cnt_restore_reg");
-    }
-
     // Instrumentation
-    RockClimbMachineInstrumenter instrumenter(MF, addDebugMarkers, nvmRegsGV, cntBoundaryGV,
-                                              cntSaveGV, cntRestoreGV);
+    RockClimbMachineInstrumenter instrumenter(MF, nvmRegsGV);
     unsigned insertedCount = instrumenter.instrument(result.regionBoundaries, checkpointPoints,
                                                      params.distributedCheckpointing);
 
-    const auto totalEnd = std::chrono::steady_clock::now();
-    double totalMs = std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
+    CommonStats stats = buildRockClimbStats(MF, totalStart);
+    stats.regions = result.regions.size();
+    stats.regionBoundaries = result.regionBoundaries.size();
 
-    // Compute edge count
-    unsigned edgeCount = 0;
-    for (auto &MBB : MF)
-        edgeCount += MBB.succ_size();
-
-    // Print statistics
     // Boundary checks = all region boundaries (the entry boundary is now
     // emitted too, with live-in argument saves).
     unsigned boundaryChecks = static_cast<unsigned>(result.regionBoundaries.size());
     PLOGI << "=== Checkpoint Insertion Statistics ===";
-    PLOGI << "  Pass:                            RockClimb-Machine";
-    PLOGI << "  Function:                        " << MF.getName();
-    PLOGI << "  Basic blocks:                    " << MF.size();
-    PLOGI << "  Edges:                           " << edgeCount;
-    PLOGI << "  Regions:                         " << result.regions.size();
-    PLOGI << "  Region boundaries:               " << result.regionBoundaries.size();
+    PLOGI << "  Pass:                            " << stats.passName;
+    PLOGI << "  Function:                        " << stats.functionName;
+    PLOGI << "  Basic blocks:                    " << stats.basicBlocks;
+    PLOGI << "  Edges:                           " << stats.edges;
+    PLOGI << "  Regions:                         " << stats.regions;
+    PLOGI << "  Region boundaries:               " << stats.regionBoundaries;
     PLOGI << "  --- RockClimb-Machine-specific ---";
     PLOGI << "  Boundary checks:                 " << boundaryChecks;
     PLOGI << "  Register checkpoints:            " << checkpointPoints.size();
     PLOGI << "  Total instrumentation points:    " << insertedCount;
-    PLOGI << "  Compilation time (ms):           " << totalMs;
-    PLOGI << "  Peak RSS (KB):                   " << checkpoint::getPeakRSSKb();
+    PLOGI << "  Compilation time (ms):           " << stats.compilationTimeMs;
+    PLOGI << "  Peak RSS (KB):                   " << stats.peakRSSKb;
 
     if (!StatsJsonOpt.empty()) {
-        CommonStats c;
-        c.passName = "RockClimb-Machine";
-        c.functionName = MF.getName().str();
-        c.basicBlocks = MF.size();
-        c.edges = edgeCount;
-        c.regions = result.regions.size();
-        c.regionBoundaries = result.regionBoundaries.size();
-        c.compilationTimeMs = totalMs;
-        c.peakRSSKb = getPeakRSSKb();
-        auto root = commonStatsToJSON(c);
+        auto root = commonStatsToJSON(stats);
         root["boundary_checks"] = static_cast<int64_t>(boundaryChecks);
         root["feasible"] = true;
         if (!requiredEnergyKeys.empty()) {

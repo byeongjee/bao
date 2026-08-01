@@ -15,16 +15,12 @@ namespace checkpoint {
 /// At region boundaries: CALL __region_boundary
 /// At register saves:    MOV16mr physReg, &__nvm_regs[regId]
 ///
-/// When addDebugMarkers is enabled, also inserts inline NVM counter
-/// increments (ADD16mi) for profiling — no function calls, so no
-/// post-regalloc register clobber issues.
+/// Debug counters (cnt_boundary, cnt_restore_reg) are maintained by
+/// rockclimb_boot.S under DEVICE_DEBUG, not by inserted code.
 class RockClimbMachineInstrumenter {
   public:
-    explicit RockClimbMachineInstrumenter(llvm::MachineFunction &MF, bool addDebugMarkers,
-                                          llvm::GlobalVariable *nvmRegsGV,
-                                          llvm::GlobalVariable *cntBoundaryGV,
-                                          llvm::GlobalVariable *cntSaveGV,
-                                          llvm::GlobalVariable *cntRestoreGV);
+    explicit RockClimbMachineInstrumenter(llvm::MachineFunction &MF,
+                                          llvm::GlobalVariable *nvmRegsGV);
 
     /// Insert boundary check call at the start of MBB
     void insertBoundaryCheck(llvm::MachineBasicBlock &MBB);
@@ -35,7 +31,7 @@ class RockClimbMachineInstrumenter {
     /// (the per-function distributed analysis cannot reach the caller).
     void insertEntryBoundary(llvm::MachineBasicBlock &entryMBB);
 
-    /// Insert inline register save (and optional debug counter) after the given instruction
+    /// Insert inline register save after the given instruction
     void insertRegisterCheckpoint(const MachineCheckpointPoint &ckpt);
 
     /// Instrument the function with all boundaries and checkpoints.
@@ -45,21 +41,14 @@ class RockClimbMachineInstrumenter {
                         bool enableDistributedCkpt);
 
   private:
-    /// Emit a flag-safe uint32_t counter increment:
-    /// PUSH SR, ADD16mi low word, ADDC16mc high word, POP SR.
-    /// Preserves status register flags across the increment.
-    void emitCounterIncrement(llvm::MachineBasicBlock &MBB,
-                              llvm::MachineBasicBlock::iterator InsertPt, const llvm::DebugLoc &DL,
-                              llvm::GlobalVariable *counterGV, int64_t amount);
+    /// Insert CALL __region_boundary at the top of MBB (after any PHIs) and
+    /// mark caller-saved R11-R15 clobbered. Returns the call instruction.
+    llvm::MachineInstr *emitBoundaryCall(llvm::MachineBasicBlock &MBB);
 
     llvm::MachineFunction &MF_;
     const llvm::TargetInstrInfo *TII_;
     MSP430Constants C_;
-    bool addDebugMarkers_;
     llvm::GlobalVariable *nvmRegsGV_;
-    llvm::GlobalVariable *cntBoundaryGV_;
-    llvm::GlobalVariable *cntSaveGV_;
-    llvm::GlobalVariable *cntRestoreGV_;
 };
 
 } // namespace checkpoint

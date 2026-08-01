@@ -6,45 +6,21 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 
+#include <cassert>
+
 using namespace llvm;
 
 namespace checkpoint {
 
-RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(
-    MachineFunction &MF, bool addDebugMarkers, GlobalVariable *nvmRegsGV,
-    GlobalVariable *cntBoundaryGV, GlobalVariable *cntSaveGV, GlobalVariable *cntRestoreGV)
+RockClimbMachineInstrumenter::RockClimbMachineInstrumenter(MachineFunction &MF,
+                                                           GlobalVariable *nvmRegsGV)
     : MF_(MF), TII_(MF.getSubtarget().getInstrInfo()), C_(MSP430Constants::resolve(MF)),
-      addDebugMarkers_(addDebugMarkers), nvmRegsGV_(nvmRegsGV), cntBoundaryGV_(cntBoundaryGV),
-      cntSaveGV_(cntSaveGV), cntRestoreGV_(cntRestoreGV) {}
+      nvmRegsGV_(nvmRegsGV) {}
 
-void RockClimbMachineInstrumenter::emitCounterIncrement(MachineBasicBlock &MBB,
-                                                        MachineBasicBlock::iterator InsertPt,
-                                                        const DebugLoc &DL,
-                                                        GlobalVariable *counterGV, int64_t amount) {
-    // Wrap the 32-bit increment with PUSH SR / POP SR to preserve status flags.
-    // ADD16mi and ADDC16mc clobber SR (V, N, Z, C), which can break
-    // conditional branches that depend on flags set by earlier instructions.
-    BuildMI(MBB, InsertPt, DL, TII_->get(C_.PUSH16r)).addReg(C_.SR);
-
-    BuildMI(MBB, InsertPt, DL, TII_->get(C_.ADD16mi))
-        .addReg(C_.SR)               // base = SR (absolute addressing)
-        .addGlobalAddress(counterGV) // address of counter
-        .addImm(amount);
-
-    BuildMI(MBB, InsertPt, DL, TII_->get(C_.ADDC16mc))
-        .addReg(C_.SR)                  // base = SR (absolute addressing)
-        .addGlobalAddress(counterGV, 2) // high half of uint32_t counter
-        .addImm(0);
-
-    BuildMI(MBB, InsertPt, DL, TII_->get(C_.POP16r)).addReg(C_.SR, RegState::Define);
-}
-
-void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
-    // Insert CALL __region_boundary at the beginning of the block,
-    // after any PHI-like copies at the start.
+MachineInstr *RockClimbMachineInstrumenter::emitBoundaryCall(MachineBasicBlock &MBB) {
+    // Insert at the beginning of the block, after any PHI-like copies
+    // (shouldn't exist post-regalloc, but be safe).
     MachineBasicBlock::iterator InsertPt = MBB.begin();
-
-    // Skip past any PHI nodes (shouldn't exist post-regalloc, but be safe)
     while (InsertPt != MBB.end() && InsertPt->isPHI())
         ++InsertPt;
 
@@ -52,18 +28,21 @@ void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
     if (InsertPt != MBB.end())
         DL = InsertPt->getDebugLoc();
 
-    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
-
-    // CALL __region_boundary
     MachineInstr *CallMI =
         BuildMI(MBB, InsertPt, DL, TII_->get(C_.CALLi)).addExternalSymbol("__region_boundary");
 
-    // Mark caller-saved registers as implicitly defined/clobbered by the call.
-    // Post-regalloc, we must declare which registers the call may overwrite.
-    // MSP430 caller-saved: R11-R15 (contiguous, verified by MSP430Constants).
-    for (unsigned reg = C_.R15.id() - 4; reg <= C_.R15.id(); ++reg) {
+    // Mark caller-saved registers (R11-R15) as implicitly clobbered by the
+    // call. Post-regalloc, we must declare which registers the call may
+    // overwrite.
+    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
+    for (unsigned reg = C_.R11.id(); reg <= C_.R15.id(); ++reg)
         CallMI->addRegisterDefined(reg, TRI);
-    }
+
+    return CallMI;
+}
+
+void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
+    emitBoundaryCall(MBB);
 
     // cnt_boundary and cnt_restore_reg are counted in assembly
     // (rockclimb_boot.S) under #ifdef DEVICE_DEBUG, consistent with
@@ -71,16 +50,6 @@ void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
 }
 
 void RockClimbMachineInstrumenter::insertEntryBoundary(MachineBasicBlock &entryMBB) {
-    MachineBasicBlock::iterator InsertPt = entryMBB.begin();
-    while (InsertPt != entryMBB.end() && InsertPt->isPHI())
-        ++InsertPt;
-
-    DebugLoc DL;
-    if (InsertPt != entryMBB.end())
-        DL = InsertPt->getDebugLoc();
-
-    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
-
     // Determine the function's live-in (argument) registers BEFORE inserting the
     // boundary call (which marks R11–R15 clobbered). A register is a live-in arg
     // if it is read before being written from the entry block. isRegLiveFromBlock
@@ -88,6 +57,7 @@ void RockClimbMachineInstrumenter::insertEntryBoundary(MachineBasicBlock &entryM
     // $r13`) as a use of $r12, which a naive def-first scan would miss. Locals
     // are written before read (not live-in) and are preserved across power loss
     // via the FRAM stack, so this set is exactly the register arguments.
+    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
     SmallVector<MCPhysReg, 8> argRegs;
     for (unsigned r = C_.R4.id(); r <= C_.R15.id(); ++r) {
         MCPhysReg reg = static_cast<MCPhysReg>(r);
@@ -98,13 +68,11 @@ void RockClimbMachineInstrumenter::insertEntryBoundary(MachineBasicBlock &entryM
     // Boundary checkpoint at function entry (recovery point for the callee's
     // first region; bounds the caller→callee span together with the caller's
     // own region cutting).
-    MachineInstr *CallMI =
-        BuildMI(entryMBB, InsertPt, DL, TII_->get(C_.CALLi)).addExternalSymbol("__region_boundary");
-    for (unsigned reg = C_.R15.id() - 4; reg <= C_.R15.id(); ++reg)
-        CallMI->addRegisterDefined(reg, TRI);
+    MachineInstr *CallMI = emitBoundaryCall(entryMBB);
 
     // Save the function's live-in (argument) registers immediately BEFORE the
     // boundary call, so recovery into the entry region restores correct args.
+    DebugLoc DL = CallMI->getDebugLoc();
     MachineBasicBlock::iterator SavePt(CallMI); // saves go before the boundary
     for (MCPhysReg reg : argRegs) {
         unsigned regId = reg - C_.R4.id();
@@ -128,18 +96,10 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
     ++InsertPt; // Insert AFTER the defining instruction
 
     DebugLoc DL = ckpt.afterInst->getDebugLoc();
-    const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
 
-    // Determine the source register for the MOV.
-    // If the physical register is GR8, promote to its GR16 super-register.
-    unsigned srcReg = ckpt.reg;
-    const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(srcReg);
-    if (RC && RC->getID() == C_.GR8RegClassID) {
-        MCPhysReg superReg =
-            TRI->getMatchingSuperReg(srcReg, C_.subreg_8bit, TRI->getMinimalPhysRegClass(C_.R4));
-        if (superReg)
-            srcReg = superReg;
-    }
+    // The analysis normalizes sub-registers to their 16-bit GPR.
+    assert(ckpt.reg >= C_.R4.id() && ckpt.reg <= C_.R15.id() &&
+           "checkpoint register must be a 16-bit GPR R4-R15");
 
     // Inline save: MOV16mr physReg, &__nvm_regs[regId]
     // memdst operands: (base=SR for absolute addressing, disp=GlobalAddress+offset)
@@ -147,17 +107,12 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
         .addReg(C_.SR) // base = SR (absolute addressing)
         .addGlobalAddress(nvmRegsGV_,
                           static_cast<int64_t>(ckpt.regId) * 2) // disp = &__nvm_regs + regId*2
-        .addReg(srcReg);                                        // source register
+        .addReg(ckpt.reg);                                      // source register
 
-    // NOTE: Per-save debug counters are disabled to control code size.
-    // Each distributed save-point increment injects a flag-preserving
-    // PUSH/ADD/ADDC/POP sequence, which bloats large benchmarks enough
-    // to overflow FRAM. Keep the register save itself, but skip the
-    // counter update.
-    //
-    // if (addDebugMarkers_ && cntSaveGV_) {
-    //     emitCounterIncrement(*MBB, InsertPt, DL, cntSaveGV_, 1);
-    // }
+    // NOTE: No per-save debug counter here on purpose: each flag-preserving
+    // increment (PUSH SR / ADD / ADDC / POP SR) bloated large benchmarks
+    // past FRAM capacity. Boundary and restore counters are maintained in
+    // rockclimb_boot.S under DEVICE_DEBUG.
 }
 
 unsigned

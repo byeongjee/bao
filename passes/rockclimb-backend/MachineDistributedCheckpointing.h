@@ -38,10 +38,6 @@ class MachineDistributedCheckpointing {
 
     std::vector<MachineCheckpointPoint> analyze();
 
-    unsigned getCheckpointedRegisterCount() const {
-        return static_cast<unsigned>(regIdMap_.size());
-    }
-
   private:
     const std::vector<MachineRegionInfo> &regions_;
     const llvm::MachineFunction &MF_;
@@ -56,11 +52,10 @@ class MachineDistributedCheckpointing {
     bool isCheckpointableReg(llvm::MCPhysReg reg) const;
 
     /// Create checkpoint points at last-reaching definitions of `reg`
-    /// in `predBlockSet`.
+    /// in `predBlockSet`. Only called for registers live at the boundary.
     void
     findLastReachingDefs(const llvm::SmallPtrSetImpl<const llvm::MachineBasicBlock *> &predBlockSet,
-                         llvm::MCPhysReg reg, bool boundaryLive,
-                         llvm::MachineBasicBlock *regionStart,
+                         llvm::MCPhysReg reg, llvm::MachineBasicBlock *regionStart,
                          std::vector<MachineCheckpointPoint> &checkpoints);
 };
 

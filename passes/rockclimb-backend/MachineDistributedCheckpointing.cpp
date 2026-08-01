@@ -134,8 +134,7 @@ static bool reverseTransferBlock(const MachineBasicBlock &MBB, MCPhysReg reg,
 
 void MachineDistributedCheckpointing::findLastReachingDefs(
     const SmallPtrSetImpl<const MachineBasicBlock *> &predBlockSet, MCPhysReg reg,
-    bool boundaryLive, MachineBasicBlock *regionStart,
-    std::vector<MachineCheckpointPoint> &checkpoints) {
+    MachineBasicBlock *regionStart, std::vector<MachineCheckpointPoint> &checkpoints) {
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
     unsigned regId = assignRegId(reg);
     DenseMap<const MachineBasicBlock *, bool> needIn;
@@ -164,7 +163,7 @@ void MachineDistributedCheckpointing::findLastReachingDefs(
             bool newNeedIn =
                 reverseTransferBlock(MBB, reg, TRI, needOut, nullptr, regionStart, regId);
             if (&MBB == regionStart)
-                newNeedIn = boundaryLive || newNeedIn;
+                newNeedIn = true; // reg is live at the boundary's recovery point
 
             if (needIn.lookup(&MBB) != newNeedIn) {
                 needIn[&MBB] = newNeedIn;
@@ -251,10 +250,9 @@ std::vector<MachineCheckpointPoint> MachineDistributedCheckpointing::analyze() {
         // the top — all original instructions follow it and re-execute
         // on recovery.
         for (MCPhysReg reg : defsInPreds) {
-            bool boundaryLive = isRegLiveFromBlock(region.startBlock, reg, TRI);
-            if (!boundaryLive)
+            if (!isRegLiveFromBlock(region.startBlock, reg, TRI))
                 continue;
-            findLastReachingDefs(predBlockSet, reg, boundaryLive, region.startBlock, checkpoints);
+            findLastReachingDefs(predBlockSet, reg, region.startBlock, checkpoints);
         }
     }
 
