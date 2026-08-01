@@ -2001,7 +2001,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
               << " E_iter_wc=" << item.plan.iterEnergy;
     }
 
-    if (verifyFunction(F, &errs())) {
+    if (changed && verifyFunction(F, &errs())) {
         report_fatal_error(Twine("LoopStripMiningPass: verifier reported errors in ") +
                                F.getName() + "; aborting instead of passing broken IR downstream",
                            /*gen_crash_diag=*/false);
