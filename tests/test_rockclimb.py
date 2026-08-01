@@ -294,6 +294,48 @@ int boundary_block_defs(int *arr, int n) {
 }
 """
 
+CROSS_FUNCTION_CALL = """\
+// __nvm_regs is shared by every instrumented function.  The caller loads
+// `x` into a callee-saved register before the call and keeps it live across
+// the post-call loop-header boundary without redefining it.  work() uses
+// enough values live across its loop back-edge to occupy the callee-saved
+// registers, so its own distributed saves overwrite the caller's slots
+// (its epilogue restores only the register values, not the slots).  The
+// caller must therefore re-save x's slot AFTER the call; otherwise
+// recovery at the post-call boundary restores work()'s stale value.
+volatile unsigned seed_v = 0x1234;
+volatile unsigned iters_v = 40;
+
+__attribute__((noinline)) unsigned work(unsigned n) {
+    unsigned a0 = 1, a1 = 2, a2 = 3, a3 = 4, a4 = 5;
+    unsigned a5 = 6, a6 = 7, a7 = 8, a8 = 9, a9 = 10;
+    for (unsigned i = 0; i < n; i++) {
+        a0 += i;
+        a1 ^= a0;
+        a2 += a1 >> 1;
+        a3 ^= a2 + i;
+        a4 += a3;
+        a5 ^= a4 >> 2;
+        a6 += a5;
+        a7 ^= a6 + i;
+        a8 += a7;
+        a9 ^= a8;
+    }
+    return a0 ^ a1 ^ a2 ^ a3 ^ a4 ^ a5 ^ a6 ^ a7 ^ a8 ^ a9;
+}
+
+unsigned caller(void) {
+    unsigned x = seed_v;
+    unsigned r = work(iters_v);
+    unsigned acc = 0;
+    unsigned n = iters_v;
+    for (unsigned i = 0; i < n; i++) {
+        acc = (acc + x) ^ (acc >> 3);
+    }
+    return acc ^ r;
+}
+"""
+
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -445,6 +487,56 @@ class TestMachinePassDistributedCkpt:
             assert "__nvm_regs" in result.output_asm, (
                 f"MIR has {saves_mir} saves but assembly has no __nvm_regs references"
             )
+
+    def test_call_clobbered_slot_resaved_after_call(
+        self, run_rockclimb_machine, tmp_path
+    ):
+        """A register live across a call to an instrumented callee must have
+        its __nvm_regs slot re-saved AFTER the call: the callee's own
+        distributed saves overwrite the slot even though the register value
+        itself is preserved (callee-saved ABI).  A save placed only at the
+        pre-call definition leaves the slot stale, so recovery at the next
+        boundary in the caller restores the callee's value."""
+        src = write_src(tmp_path, CROSS_FUNCTION_CALL)
+        result = run_rockclimb_machine(
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
+        )
+        assert result.exit_code == 0, result.stderr
+
+        caller_mir = _extract_function_mir(result.output_mir, "caller")
+
+        # The callee must itself write __nvm_regs slots (the clobber premise).
+        work_mir = _extract_function_mir(result.output_mir, "work")
+        assert count_mir_reg_saves(work_mir) > 0, (
+            "work() should have distributed saves that overwrite __nvm_regs"
+        )
+
+        # Find the register holding x (loaded from seed_v before the call).
+        load = re.search(r"\$r(\d+) = MOV16rm \$sr, @seed_v", caller_mir)
+        assert load, "Expected a register load of seed_v in caller"
+        regnum = int(load.group(1))
+        assert 4 <= regnum <= 10, (
+            f"Test premise broken: x in $r{regnum}, expected a callee-saved "
+            "register (r4-r10) live across the call"
+        )
+
+        call = re.search(r"CALLi @work", caller_mir)
+        assert call, "Expected direct call to work in caller"
+
+        # The fix: x's slot must be (re-)saved after the call.
+        slot = (regnum - 4) * 2
+        slot_pat = rf"@__nvm_regs \+ {slot}" if slot else r"@__nvm_regs(?! \+)"
+        save_after_call = re.search(
+            rf"MOV16mr \$sr, {slot_pat}, \$r{regnum}\b",
+            caller_mir[call.end() :],
+        )
+        assert save_after_call, (
+            f"Expected $r{regnum} slot save after CALLi @work — without it, "
+            "recovery at the post-call boundary restores work()'s stale value"
+        )
 
     def test_reg_store_energy_creates_more_boundaries(
         self, run_rockclimb_machine, tmp_path

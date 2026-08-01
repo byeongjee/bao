@@ -1,10 +1,12 @@
 #include "MachineDistributedCheckpointing.h"
 #include "MachineLivenessAnalysis.h"
+#include "RockClimbMachinePass.h"
 
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/Function.h"
 
 #include <cassert>
 #include <set>
@@ -68,6 +70,24 @@ static bool instructionUsesOrDefsReg(const MachineInstr &MI, MCPhysReg reg,
     return hasUse || hasDef;
 }
 
+/// True if calling this instruction's target may overwrite __nvm_regs slots:
+/// the callee is a function this pass instruments (defined in the module and
+/// not a runtime helper), or an indirect call whose target is unknown.
+/// External declarations (memcpy, __mspabi_*, libm) are never instrumented.
+static bool callMayClobberNvmRegs(const MachineInstr &MI) {
+    for (const MachineOperand &MO : MI.operands()) {
+        if (MO.isGlobal()) {
+            const auto *F = dyn_cast<Function>(MO.getGlobal());
+            if (!F)
+                return true; // alias/unknown target — assume instrumented
+            return !F->isDeclaration() && !isRuntimeFunction(F->getName());
+        }
+        if (MO.isSymbol())
+            return false; // lowered libcall — never instrumented
+    }
+    return true; // indirect call: unknown target may be instrumented
+}
+
 static bool reverseTransferBlock(const MachineBasicBlock &MBB, MCPhysReg reg,
                                  const TargetRegisterInfo *TRI, bool needAfterBlock,
                                  std::vector<MachineCheckpointPoint> *checkpoints,
@@ -77,7 +97,17 @@ static bool reverseTransferBlock(const MachineBasicBlock &MBB, MCPhysReg reg,
     for (auto It = MBB.instr_rbegin(), End = MBB.instr_rend(); It != End; ++It) {
         const MachineInstr &MI = *It;
         bool hasDef = false;
-        if (!instructionUsesOrDefsReg(MI, reg, TRI, hasDef))
+        bool touchesReg = instructionUsesOrDefsReg(MI, reg, TRI, hasDef);
+
+        // __nvm_regs is shared by every instrumented function: a callee's own
+        // distributed saves overwrite the caller's slots even though the
+        // register values themselves are preserved (callee-saved ABI). Treat
+        // such calls as defs so the still-correct register value is re-saved
+        // after the call and earlier definitions stop being candidates.
+        if (MI.isCall() && callMayClobberNvmRegs(MI))
+            hasDef = true;
+
+        if (!touchesReg && !hasDef)
             continue;
 
         if (hasDef && need && checkpoints != nullptr && !MI.isTerminator()) {

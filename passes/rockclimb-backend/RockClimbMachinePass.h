@@ -4,6 +4,10 @@
 
 namespace checkpoint {
 
+/// Runtime/instrumentation functions that the pass never checkpoints
+/// (and that therefore never write __nvm_regs).
+bool isRuntimeFunction(llvm::StringRef name);
+
 class RockClimbMachinePass : public llvm::MachineFunctionPass {
   public:
     static char ID;
