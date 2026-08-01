@@ -87,35 +87,28 @@ def compile_rockclimb(
     with compilation_workdir(prefix="ckpt_rockclimb_") as tmp:
         output = opts.output
 
-        # Step 1: C -> raw frontend IR -> tripcount annotation. No passes have
-        # run yet, so markers still sit in their source loops; user-written
-        # noinline attributes are preserved (clang -O>=1 adds no blanket
-        # noinline).
+        # Step 1: C -> raw frontend IR -> tripcount annotation.
         annotated_ll = compile_annotated_ir(
             tc,
             env,
             input_c=opts.input_c,
             tmp=tmp,
-            raw_frontend=True,
             debug=False,
             device_debug=opts.device_debug,
             cpu_freq=opts.cpu_freq,
             extra_includes=[],
         )
 
-        # Step 1c: Run the standard optimization pipeline (the second half of
-        # what a plain clang -O{n} compile would do).
-        rockclimb_input_ll = annotated_ll
-        if opts.clang_opt_level != 0:
-            optimized_ll = tmp / "optimized.ll"
-            optimize_ir_with_options(
-                tc,
-                annotated_ll,
-                optimized_ll,
-                opt_level=opts.clang_opt_level,
-                disable_loop_unrolling=False,
-            )
-            rockclimb_input_ll = optimized_ll
+        # Step 1c: Middle-end optimization (the second half of what a plain
+        # clang -O{n} compile would do).
+        rockclimb_input_ll = tmp / "optimized.ll"
+        optimize_ir_with_options(
+            tc,
+            annotated_ll,
+            rockclimb_input_ll,
+            opt_level=opts.clang_opt_level,
+            disable_loop_unrolling=False,
+        )
 
         # Step 1d: Preprocess loops for RockClimb's energy-budgeted unroll policy.
         preprocess_output = _run_rockclimb_preprocess(

@@ -80,7 +80,7 @@ def compile_schematic(
     """Run the SCHEMATIC checkpoint insertion pipeline.
 
     Pipeline:
-      compile_to_ir(-O0) -> tripcount-annotation -> optimize_ir ->
+      compile_to_ir (raw -O3 frontend) -> tripcount-annotation -> optimize_ir ->
       (if no trace file: trace-collect -> compile native -> run -> get trace.json) ->
       (if trace_only: copy trace, return) ->
       schematic pass -> compile to object ->
@@ -101,10 +101,6 @@ def compile_schematic(
             env,
             input_c=opts.input_c,
             tmp=tmp,
-            # -O0 keeps clang's blanket noinline on every function, so the
-            # later optimize_ir never inlines — this pipeline depends on that
-            # to keep functions separate.
-            raw_frontend=False,
             debug=opts.debug,
             device_debug=opts.device_debug,
             cpu_freq=opts.cpu_freq,
@@ -114,23 +110,21 @@ def compile_schematic(
         # Isolate function calls so the inter-procedural SCHEMATIC pass can fold
         # each callee's summary onto its call sites (replaces full inlining). The
         # same isolated IR feeds trace collection, energy analysis, and the solve
-        # pass. At -O0 the calls survive (no inliner has run); at -O>=1 the
-        # optimize_ir step below re-inlines and strips the isolation metadata, so
-        # the run degrades gracefully to the single-function path.
+        # pass. At -Oc 0 only always_inline functions are expanded, so remaining
+        # calls survive; at -Oc >= 1 the optimize_ir step below re-inlines and
+        # strips the isolation metadata, and the run degrades gracefully to the
+        # single-function path.
         isolated_ll = tmp / "isolated.ll"
         isolate_calls(tc, env, tripcount_ll, isolated_ll)
 
-        # Frontend optimization
-        schematic_input_ll = isolated_ll
-        if opts.clang_opt_level != 0:
-            optimized_ll = tmp / "input_optimized.ll"
-            optimize_ir(
-                tc,
-                isolated_ll,
-                optimized_ll,
-                opt_level=opts.clang_opt_level,
-            )
-            schematic_input_ll = optimized_ll
+        # Middle-end optimization
+        schematic_input_ll = tmp / "input_optimized.ll"
+        optimize_ir(
+            tc,
+            isolated_ll,
+            schematic_input_ll,
+            opt_level=opts.clang_opt_level,
+        )
 
         # Trace collection
         trace_json, profiling_ms = _collect_or_reuse_trace(

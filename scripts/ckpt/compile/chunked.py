@@ -63,7 +63,7 @@ def compile_chunked(
 
     Pipeline (the MILP assembly-mode pipeline up to and including the
     reclamp phase, then straight to codegen):
-      compile_to_ir(-O0) -> tripcount annotation -> optimize_ir ->
+      compile_to_ir (raw -O3 frontend) -> tripcount annotation -> optimize_ir ->
       pre-strip-mining assembly energy -> milp-preprocess ->
       post-strip-mining assembly energy -> milp-reclamp-only ->
       compile to object -> link with uninstrumented boot.S + runtime
@@ -80,22 +80,15 @@ def compile_chunked(
             env,
             input_c=opts.input_c,
             tmp=tmp,
-            # -O0 keeps clang's blanket noinline on every function, so the
-            # later optimize_ir never inlines — this pipeline depends on that
-            # to keep functions separate.
-            raw_frontend=False,
             debug=False,
             device_debug=opts.device_debug,
             cpu_freq=opts.cpu_freq,
             extra_includes=opts.extra_includes,
         )
 
-        # Frontend optimization
-        chunk_input_ll = tripcount_ll
-        if opts.clang_opt_level != 0:
-            optimized_ll = tmp / "input_optimized.ll"
-            optimize_ir(tc, tripcount_ll, optimized_ll, opt_level=opts.clang_opt_level)
-            chunk_input_ll = optimized_ll
+        # Middle-end optimization
+        chunk_input_ll = tmp / "input_optimized.ll"
+        optimize_ir(tc, tripcount_ll, chunk_input_ll, opt_level=opts.clang_opt_level)
 
         # Phase 2: Pre-strip-mining assembly energy
         pre_bb_energy, _ = run_assembly_energy(

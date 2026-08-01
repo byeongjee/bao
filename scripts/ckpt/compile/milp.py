@@ -73,13 +73,13 @@ def compile_milp(
     """Run the full MILP checkpoint insertion pipeline.
 
     Assembly mode (two-pass):
-      compile_to_ir(-O0) -> tripcount annotation -> optimize_ir ->
+      compile_to_ir (raw -O3 frontend) -> tripcount annotation -> optimize_ir ->
       pre-strip-mining assembly energy -> milp-preprocess ->
       post-strip-mining assembly energy -> bb-freq-collect-only + collect_bb_freq ->
       milp-solve-only -> compile to object
 
     IR mode (single-pass):
-      compile_to_ir(-O0) -> tripcount annotation -> optimize_ir ->
+      compile_to_ir (raw -O3 frontend) -> tripcount annotation -> optimize_ir ->
       bb-freq-collect -> collect_bb_freq -> milp pass -> compile to object
 
     Both modes optionally link with milp_boot.S + milp_runtime.c.
@@ -99,22 +99,15 @@ def compile_milp(
             env,
             input_c=opts.input_c,
             tmp=tmp,
-            # -O0 keeps clang's blanket noinline on every function, so the
-            # later optimize_ir never inlines — this pipeline depends on that
-            # to keep functions separate.
-            raw_frontend=False,
             debug=opts.debug,
             device_debug=opts.device_debug,
             cpu_freq=opts.cpu_freq,
             extra_includes=opts.extra_includes,
         )
 
-        # Frontend optimization
-        milp_input_ll = tripcount_ll
-        if opts.clang_opt_level != 0:
-            optimized_ll = tmp / "input_optimized.ll"
-            optimize_ir(tc, tripcount_ll, optimized_ll, opt_level=opts.clang_opt_level)
-            milp_input_ll = optimized_ll
+        # Middle-end optimization
+        milp_input_ll = tmp / "input_optimized.ll"
+        optimize_ir(tc, tripcount_ll, milp_input_ll, opt_level=opts.clang_opt_level)
 
         # Build extra flags for MILP passes
         milp_extra_flags: list[str] = []
