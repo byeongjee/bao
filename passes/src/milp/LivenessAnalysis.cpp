@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <map>
+#include <optional>
 
 namespace checkpoint {
 
@@ -34,7 +35,9 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
             auto key = std::make_pair(static_cast<const llvm::BasicBlock *>(&BB), GV);
             BlockGVInfo info;
             bool seenMustStore = false;
-            uint64_t gvBytes = DL.getTypeAllocSize(GV->getValueType()).getFixedValue();
+            // Store size, not alloc size: tail padding carries no program
+            // data, so a whole-value store of a padded struct still kills.
+            uint64_t gvBytes = DL.getTypeStoreSize(GV->getValueType()).getFixedValue();
 
             for (llvm::Instruction &I : BB) {
                 auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
@@ -43,15 +46,25 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
                 if (llvm::isRefSet(MRI) && !seenMustStore)
                     info.loadBeforeMustStore = true;
 
-                // A store kills liveness only when it provably overwrites the
-                // entire global. An element store like g[0] = x folds its
-                // all-zero GEP away and looks like a store to the global
-                // itself, but only covers part of an aggregate.
+                // A write kills liveness only when it provably overwrites the
+                // entire global: a store of a value covering the full size, or
+                // a mem intrinsic writing at least the full size. An element
+                // store like g[0] = x folds its all-zero GEP away and looks
+                // like a store to the global itself, but only covers part of
+                // an aggregate.
                 if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
                     llvm::Value *Ptr = SI->getPointerOperand()->stripPointerCasts();
                     if (Ptr == GV &&
                         DL.getTypeStoreSize(SI->getValueOperand()->getType()).getFixedValue() >=
                             gvBytes) {
+                        info.hasMustStore = true;
+                        seenMustStore = true;
+                    }
+                }
+                if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
+                    auto *LenCI = llvm::dyn_cast<llvm::ConstantInt>(MI->getLength());
+                    if (MI->getRawDest()->stripPointerCasts() == GV && LenCI &&
+                        LenCI->getZExtValue() >= gvBytes) {
                         info.hasMustStore = true;
                         seenMustStore = true;
                     }
@@ -129,6 +142,7 @@ computeIneligAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAna
     std::map<std::pair<const llvm::BasicBlock *, llvm::Value *>, BlockVarInfo> blockVarInfo;
 
     // Phase 1: Per-instruction scan (iterate F for non-const access).
+    const llvm::DataLayout &DL = F.getParent()->getDataLayout();
     for (llvm::BasicBlock &BB : F) {
         for (llvm::Value *V : allocaIneligs) {
             auto key = std::make_pair(static_cast<const llvm::BasicBlock *>(&BB), V);
@@ -136,8 +150,17 @@ computeIneligAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAna
             bool seenMustStore = false;
 
             auto *AI = llvm::cast<llvm::AllocaInst>(V);
-            const llvm::DataLayout &DL = F.getParent()->getDataLayout();
-            auto allocaBytes = AI->getAllocationSize(DL);
+            // Kill threshold: tail padding carries no program data, so for
+            // single-element allocas a write covering the allocated type's
+            // store size is a full overwrite.
+            std::optional<uint64_t> killBytes;
+            if (auto allocaBytes = AI->getAllocationSize(DL)) {
+                auto *NumElts = llvm::dyn_cast<llvm::ConstantInt>(AI->getArraySize());
+                if (NumElts && NumElts->isOne())
+                    killBytes = DL.getTypeStoreSize(AI->getAllocatedType()).getFixedValue();
+                else
+                    killBytes = allocaBytes->getFixedValue();
+            }
             for (llvm::Instruction &I : BB) {
                 // Reads are detected via alias analysis so accesses through
                 // GEPs (array elements, struct fields) are visible.  A
@@ -153,17 +176,17 @@ computeIneligAllocaLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAna
                     info.loadBeforeMustStore = true;
 
                 if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-                    if (SI->getPointerOperand()->stripPointerCasts() == AI && allocaBytes &&
+                    if (SI->getPointerOperand()->stripPointerCasts() == AI && killBytes &&
                         DL.getTypeStoreSize(SI->getValueOperand()->getType()).getFixedValue() >=
-                            allocaBytes->getFixedValue()) {
+                            *killBytes) {
                         info.hasMustStore = true;
                         seenMustStore = true;
                     }
                 }
                 if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
                     auto *LenCI = llvm::dyn_cast<llvm::ConstantInt>(MI->getLength());
-                    if (MI->getRawDest()->stripPointerCasts() == AI && allocaBytes && LenCI &&
-                        LenCI->getZExtValue() >= allocaBytes->getFixedValue()) {
+                    if (MI->getRawDest()->stripPointerCasts() == AI && killBytes && LenCI &&
+                        LenCI->getZExtValue() >= *killBytes) {
                         info.hasMustStore = true;
                         seenMustStore = true;
                     }
