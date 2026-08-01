@@ -100,9 +100,6 @@ bool parseRockClimbParams(llvm::StringRef configPath, RockClimbParams &params) {
     }
     params.distributedCheckpointing = distributed.value_or(true);
 
-    if (auto val = root->getBoolean("add_debug_markers"))
-        params.addDebugMarkers = *val;
-
     return true;
 }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MSP430Constants.h"
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
@@ -38,9 +40,6 @@ class RockClimbMachineOptimizer {
 
     MachineRockClimbResult optimize();
 
-    /// Get blocks whose individual cost exceeds E_safe
-    std::vector<llvm::MachineBasicBlock *> getInfeasibleBlocks() const;
-
   private:
     llvm::MachineFunction &MF_;
     llvm::MachineLoopInfo &MLI_;
@@ -62,6 +61,7 @@ class RockClimbMachineOptimizer {
     std::vector<llvm::MachineBasicBlock *> topoOrder_;
 
     double regStoreEnergy_;
+    MSP430Constants C_;
     llvm::DenseMap<const llvm::MachineBasicBlock *, llvm::SmallSet<llvm::MCPhysReg, 12>> liveIn_;
     llvm::SmallSet<llvm::MCPhysReg, 12> defsInRegion_;
 

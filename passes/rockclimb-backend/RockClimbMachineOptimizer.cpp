@@ -17,8 +17,8 @@ namespace checkpoint {
 RockClimbMachineOptimizer::RockClimbMachineOptimizer(MachineFunction &MF, MachineLoopInfo &MLI,
                                                      const MachineEnergyEstimator &estimator,
                                                      double E_safe, double reg_store_energy)
-    : MF_(MF), MLI_(MLI), estimator_(estimator), E_safe_(E_safe),
-      regStoreEnergy_(reg_store_energy) {
+    : MF_(MF), MLI_(MLI), estimator_(estimator), E_safe_(E_safe), regStoreEnergy_(reg_store_energy),
+      C_(MSP430Constants::resolve(MF)) {
     // Compute per-block energy costs
     for (MachineBasicBlock &MBB : MF_)
         energyCosts_[&MBB] = estimator_.estimateBlock(MBB);
@@ -92,9 +92,10 @@ double RockClimbMachineOptimizer::getBlockCost(MachineBasicBlock *MBB) const {
 }
 
 void RockClimbMachineOptimizer::collectBlockDefs(MachineBasicBlock *MBB) {
+    if (regStoreEnergy_ <= 0)
+        return; // overhead disabled — defsInRegion_ is never consulted
     const TargetRegisterInfo *TRI = MF_.getSubtarget().getRegisterInfo();
     const MachineRegisterInfo &MRI = MF_.getRegInfo();
-    const MSP430Constants C = MSP430Constants::resolve(MF_);
     for (const MachineInstr &MI : *MBB) {
         for (const MachineOperand &MO : MI.operands()) {
             if (!MO.isReg() || !MO.isDef() || !MO.getReg().isPhysical())
@@ -102,7 +103,7 @@ void RockClimbMachineOptimizer::collectBlockDefs(MachineBasicBlock *MBB) {
             MCPhysReg reg = MO.getReg().asMCReg();
             if (MRI.isReserved(reg))
                 continue;
-            for (unsigned r = C.R4.id(); r <= C.R15.id(); ++r) {
+            for (unsigned r = C_.R4.id(); r <= C_.R15.id(); ++r) {
                 if (TRI->regsOverlap(reg, r)) {
                     defsInRegion_.insert(static_cast<MCPhysReg>(r));
                     break;
@@ -124,15 +125,6 @@ double RockClimbMachineOptimizer::computeCkptOverhead(MachineBasicBlock *MBB) co
             ++count;
     }
     return count * regStoreEnergy_;
-}
-
-std::vector<MachineBasicBlock *> RockClimbMachineOptimizer::getInfeasibleBlocks() const {
-    std::vector<MachineBasicBlock *> infeasible;
-    for (MachineBasicBlock &MBB : MF_) {
-        if (getBlockCost(&MBB) >= E_safe_)
-            infeasible.push_back(&MBB);
-    }
-    return infeasible;
 }
 
 MachineRockClimbResult RockClimbMachineOptimizer::optimize() {
