@@ -113,8 +113,6 @@ def compile_milp(
 
         # Build extra flags for MILP passes
         milp_extra_flags: list[str] = []
-        if opts.device_debug:
-            milp_extra_flags.append("-add-debug-markers")
         milp_extra_flags.append(f"-ckpt-log-level={opts.pass_log_level}")
         milp_extra_flags.append(f"-milp-gap={opts.milp_gap}")
         if opts.milp_log_file:
