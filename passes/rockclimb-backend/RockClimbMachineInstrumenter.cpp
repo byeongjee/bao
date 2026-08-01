@@ -50,9 +50,8 @@ MachineInstr *RockClimbMachineInstrumenter::emitBoundaryCall(MachineBasicBlock &
 void RockClimbMachineInstrumenter::insertBoundaryCheck(MachineBasicBlock &MBB) {
     emitBoundaryCall(MBB);
 
-    // cnt_boundary and cnt_restore_reg are counted in assembly
-    // (rockclimb_boot.S) under #ifdef DEVICE_DEBUG, consistent with
-    // MILP and SCHEMATIC.
+    // cnt_boundary is counted in assembly (rockclimb_boot.S) under
+    // #ifdef DEVICE_DEBUG, consistent with MILP and SCHEMATIC.
 }
 
 void RockClimbMachineInstrumenter::insertEntryBoundary(MachineBasicBlock &entryMBB) {
@@ -117,7 +116,7 @@ void RockClimbMachineInstrumenter::insertRegisterCheckpoint(const MachineCheckpo
 
     // NOTE: No per-save debug counter here on purpose: each flag-preserving
     // increment (PUSH SR / ADD / ADDC / POP SR) bloated large benchmarks
-    // past FRAM capacity. Boundary and restore counters are maintained in
+    // past FRAM capacity. The boundary counter is maintained in
     // rockclimb_boot.S under DEVICE_DEBUG.
 }
 

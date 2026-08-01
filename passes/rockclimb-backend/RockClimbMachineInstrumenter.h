@@ -15,8 +15,8 @@ namespace checkpoint {
 /// At region boundaries: CALL __region_boundary
 /// At register saves:    MOV16mr physReg, &__nvm_regs[regId]
 ///
-/// Debug counters (cnt_boundary, cnt_restore_reg) are maintained by
-/// rockclimb_boot.S under DEVICE_DEBUG, not by inserted code.
+/// The debug counter (cnt_boundary) is maintained by rockclimb_boot.S
+/// under DEVICE_DEBUG, not by inserted code.
 class RockClimbMachineInstrumenter {
   public:
     explicit RockClimbMachineInstrumenter(llvm::MachineFunction &MF,

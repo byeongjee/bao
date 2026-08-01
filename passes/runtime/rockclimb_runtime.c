@@ -8,7 +8,7 @@
  * __region_boundary is provided by rockclimb_boot.S (assembly).
  *
  * When compiled with -DDEVICE_DEBUG, also provides:
- *   - NVM debug counters (cnt_boundary, cnt_restore_reg)
+ *   - NVM debug counter (cnt_boundary)
  *   - NVM result storage (__nvm_result, __nvm_done)
  *   - UART output for profiling
  *   - debug_init() / debug_exit() API
@@ -48,7 +48,6 @@ void bench_halt(void) {
  * ============================================================================ */
 
 __attribute__((section(".nvm"))) uint32_t cnt_boundary = 0;
-__attribute__((section(".nvm"))) uint32_t cnt_restore_reg = 0;
 
 /* NVM result storage — read by host via mspdebug md (bypasses UART) */
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
@@ -58,9 +57,6 @@ void debug_exit(int result) {
     debug_exit_begin(result);
     uart_puts("  __region_boundary:    ");
     uart_put_u32(cnt_boundary);
-    uart_puts("\r\n");
-    uart_puts("  reg_restores:         ");
-    uart_put_u32(cnt_restore_reg);
     uart_puts("\r\n");
     debug_exit_end();
 }

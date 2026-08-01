@@ -51,7 +51,6 @@ CSV_HEADER: list[str] = [
     "profiling_time_ms",
     "execution_time_us",
     "runtime_region_boundary_calls",
-    "runtime_debug_restore_reg_calls",
     "result",
 ]
 
@@ -59,7 +58,6 @@ NVM_SYMBOLS: list[str] = [
     "__nvm_done",
     "__nvm_result",
     "cnt_boundary",
-    "cnt_restore_reg",
 ]
 
 
@@ -73,7 +71,6 @@ def build_row(
     """Build RockClimb-specific CSV fields."""
     return {
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
-        "runtime_debug_restore_reg_calls": nvm_counter(nvm, "restore_reg"),
     }
 
 
