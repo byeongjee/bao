@@ -196,7 +196,6 @@ bool CheckpointOptimizer::solve() {
         solved_ = true;
 
         int status = model_->get(GRB_IntAttr_Status);
-        modelKnownInfeasible_ = (status == GRB_INFEASIBLE || status == GRB_INF_OR_UNBD);
         if (status == GRB_OPTIMAL) {
             extractSolution();
             solution_.solverStatus = SolverStatus::Optimal;
@@ -315,14 +314,17 @@ void CheckpointOptimizer::computeProblemSizeStats() {
             baseSizeStatsComputed_ = true;
         }
 
-        // GRBModel::presolve() throws GRBException on an infeasible model.
-        // Only presolve once optimize() has run and ruled out infeasibility;
-        // until then the after-presolve fields stay 0.
-        if (!presolveStatsComputed_ && solved_ && !modelKnownInfeasible_) {
+        // Presolve must run BEFORE optimize(): afterwards Gurobi uses the
+        // incumbent objective as a cutoff and presolve reduces the model to
+        // nothing, reporting 0 variables/constraints. GRBModel::presolve()
+        // throws GRBException on an infeasible model; the catch below leaves
+        // the after-presolve fields at 0 in that case (marked computed so it
+        // is not retried).
+        if (!presolveStatsComputed_ && !solved_) {
+            presolveStatsComputed_ = true;
             GRBModel presolved = model_->presolve();
             problemSizeStats_.variablesAfterPresolve = presolved.get(GRB_IntAttr_NumVars);
             problemSizeStats_.constraintsAfterPresolve = presolved.get(GRB_IntAttr_NumConstrs);
-            presolveStatsComputed_ = true;
         }
     } catch (const GRBException &e) {
         PLOGE << "Gurobi error while computing problem-size stats: " << e.getMessage() << " (code "
