@@ -76,6 +76,7 @@ def run_rockclimb_machine(machine_tools):
         tmp_path: Path,
         *,
         clang_opt: str = "2",
+        energy_data: Path | None = None,
     ) -> MachinePassResult:
         clang = machine_tools["clang"]
         llc = machine_tools["llc"]
@@ -126,7 +127,11 @@ def run_rockclimb_machine(machine_tools):
                 f"-load={pass_lib}",
                 "-run-pass=rockclimb",
                 f"-rockclimb-config={rockclimb_config}",
-                f"-rockclimb-energy-config={energy_config}",
+                (
+                    f"-rockclimb-energy-data={energy_data}"
+                    if energy_data is not None
+                    else f"-rockclimb-energy-config={energy_config}"
+                ),
                 str(mir_file),
                 "-o",
                 str(out_mir),
@@ -745,3 +750,25 @@ class TestCallHandling:
         mir = result.output_mir
         assert count_inmodule_calls(mir, "fib") >= 1, "recursive call should remain"
         assert count_mir_calls(mir, "__region_boundary") >= 1
+
+    def test_missing_precomputed_block_energy_aborts(
+        self, run_rockclimb_machine, tmp_path
+    ):
+        """Precomputed mode must abort when a block with real instructions is
+        missing from the bb-energy data.  Silently falling back to the
+        configless default cost (1.0 per instruction) undersizes regions and
+        only fails later, non-deterministically, on the device."""
+        energy_data = tmp_path / "bb_energy.json"
+        energy_data.write_text(
+            json.dumps({"functions": {"test_loop": {"bb_energy": {}}}})
+        )
+        src = write_src(tmp_path, SIMPLE_LOOP)
+        result = run_rockclimb_machine(
+            src,
+            ASSEMBLY_ENERGY_CONFIG,
+            ROCKCLIMB_PARAMS,
+            tmp_path,
+            energy_data=energy_data,
+        )
+        assert result.exit_code != 0, "pass should abort on incomplete energy data"
+        assert "no precomputed energy" in result.stderr, result.stderr

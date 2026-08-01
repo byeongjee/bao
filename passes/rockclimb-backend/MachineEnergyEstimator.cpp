@@ -4,6 +4,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "common/Logger.h"
@@ -18,6 +19,12 @@
 using namespace llvm;
 
 namespace checkpoint {
+
+/// True for instructions that produce no machine code and carry no energy
+/// cost (pseudos, debug values, etc.).
+static bool isZeroCostInstr(const MachineInstr &MI) {
+    return MI.isPseudo() || MI.isDebugInstr() || MI.isImplicitDef() || MI.isKill() || MI.isLabel();
+}
 
 /// Resolve a call instruction's target name (for target-aware call energy).
 /// Returns the global/symbol name for a direct call, or "" for an indirect
@@ -100,8 +107,26 @@ double MachineEnergyEstimator::estimateBlock(const MachineBasicBlock &MBB) const
         double energy = lookupPrecomputed(MBB);
         if (energy >= 0.0)
             return energy;
-        // Fall through to instruction-level estimation if not found
-        // (only works if model_ was loaded with a config)
+
+        // Blocks that emit no machine code have no DWARF line and thus no
+        // entry in the analyzer output; their true cost is zero.
+        bool hasBillable = false;
+        for (const MachineInstr &MI : MBB) {
+            if (!isZeroCostInstr(MI)) {
+                hasBillable = true;
+                break;
+            }
+        }
+        if (!hasBillable)
+            return 0.0;
+
+        // A non-empty block missing from the data means the mirbb index
+        // mapping is broken; continuing would silently undersize regions
+        // (the fallback model has no config in precomputed mode).
+        report_fatal_error(Twine("MachineEnergyEstimator: no precomputed energy for ") +
+                               MBB.getParent()->getName() + ":mirbb" + Twine(MBB.getNumber()) +
+                               "; bb-energy data does not match this MIR",
+                           /*gen_crash_diag=*/false);
     }
 
     double total = 0.0;
@@ -112,8 +137,7 @@ double MachineEnergyEstimator::estimateBlock(const MachineBasicBlock &MBB) const
 }
 
 double MachineEnergyEstimator::estimateInstruction(const MachineInstr &MI) const {
-    // Skip pseudo-instructions and debug values
-    if (MI.isPseudo() || MI.isDebugInstr() || MI.isImplicitDef() || MI.isKill() || MI.isLabel())
+    if (isZeroCostInstr(MI))
         return 0.0;
 
     const TargetInstrInfo *TII = MI.getParent()->getParent()->getSubtarget().getInstrInfo();
@@ -266,7 +290,7 @@ std::string MachineEnergyEstimator::getAddressingMode(const MachineInstr &MI,
 }
 
 std::string MachineEnergyEstimator::getInstructionKey(const MachineInstr &MI) const {
-    if (MI.isPseudo() || MI.isDebugInstr() || MI.isImplicitDef() || MI.isKill() || MI.isLabel())
+    if (isZeroCostInstr(MI))
         return "";
 
     const TargetInstrInfo *TII = MI.getParent()->getParent()->getSubtarget().getInstrInfo();
@@ -286,8 +310,7 @@ void MachineEnergyEstimator::collectRequiredKeys(const MachineFunction &MF,
                                                  std::set<std::string> &missingKeys) const {
     for (const MachineBasicBlock &MBB : MF) {
         for (const MachineInstr &MI : MBB) {
-            if (MI.isPseudo() || MI.isDebugInstr() || MI.isImplicitDef() || MI.isKill() ||
-                MI.isLabel())
+            if (isZeroCostInstr(MI))
                 continue;
 
             const TargetInstrInfo *TII = MI.getParent()->getParent()->getSubtarget().getInstrInfo();
