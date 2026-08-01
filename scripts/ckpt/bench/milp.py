@@ -49,8 +49,6 @@ CSV_HEADER: list[str] = [
     "profiling_time_ms",
     "execution_time_us",
     "runtime_region_boundary_calls",
-    "runtime_debug_save_vreg_calls",
-    "runtime_debug_restore_vreg_calls",
     "runtime_debug_store_mem_calls",
     "runtime_debug_restore_mem_calls",
     "candidate_globals",
@@ -71,8 +69,6 @@ NVM_SYMBOLS: list[str] = [
     "__nvm_done",
     "__nvm_result",
     "cnt_boundary",
-    "cnt_save_vreg",
-    "cnt_restore_vreg",
     "cnt_store_mem",
     "cnt_restore_mem",
 ]
@@ -102,8 +98,6 @@ def build_row(
         optimal = "yes" if optimal == "yes" else "no"
     return {
         "runtime_region_boundary_calls": nvm_counter(nvm, "region_boundary"),
-        "runtime_debug_save_vreg_calls": nvm_counter(nvm, "save_vreg"),
-        "runtime_debug_restore_vreg_calls": nvm_counter(nvm, "restore_vreg"),
         "runtime_debug_store_mem_calls": nvm_counter(nvm, "store_mem"),
         "runtime_debug_restore_mem_calls": nvm_counter(nvm, "restore_mem"),
         "candidate_globals": stats.candidate_globals or 0,

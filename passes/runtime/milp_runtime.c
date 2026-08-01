@@ -10,7 +10,7 @@
  * __region_boundary is provided by milp_boot.S (assembly).
  *
  * When compiled with -DDEVICE_DEBUG, also provides:
- *   - NVM debug counters (cnt_boundary, cnt_save_vreg, etc.)
+ *   - NVM debug counters (cnt_boundary, cnt_store_mem, etc.)
  *   - NVM result storage (__nvm_result, __nvm_done)
  *   - UART output for profiling
  *   - debug_init() / debug_exit() API
@@ -48,15 +48,10 @@ void bench_halt(void) {
  * NVM Debug Counters
  *
  * cnt_boundary — incremented in assembly (__region_boundary in milp_boot.S)
- * cnt_save_vreg, cnt_restore_vreg — incremented at IR level by instrumenter
  * cnt_store_mem, cnt_restore_mem — incremented at IR level by instrumenter
- *
- * "vreg" counters count IR-level value saves, not physical register saves.
  * ============================================================================ */
 
 __attribute__((section(".nvm"))) uint32_t cnt_boundary = 0;
-__attribute__((section(".nvm"))) uint32_t cnt_save_vreg = 0;
-__attribute__((section(".nvm"))) uint32_t cnt_restore_vreg = 0;
 __attribute__((section(".nvm"))) uint32_t cnt_store_mem = 0;
 __attribute__((section(".nvm"))) uint32_t cnt_restore_mem = 0;
 
@@ -68,12 +63,6 @@ void debug_exit(int result) {
     debug_exit_begin(result);
     uart_puts("  __region_boundary:    ");
     uart_put_u32(cnt_boundary);
-    uart_puts("\r\n");
-    uart_puts("  vreg_saves:           ");
-    uart_put_u32(cnt_save_vreg);
-    uart_puts("\r\n");
-    uart_puts("  vreg_restores:        ");
-    uart_put_u32(cnt_restore_vreg);
     uart_puts("\r\n");
     uart_puts("  mem_stores:           ");
     uart_put_u32(cnt_store_mem);
