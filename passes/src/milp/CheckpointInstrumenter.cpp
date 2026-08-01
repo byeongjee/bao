@@ -31,11 +31,12 @@ void CheckpointInstrumenter::declareRuntimeFunctions() {
     // asm (with full GPR clobbers) rather than through this callee.
     M_.getOrInsertFunction("__region_boundary", VoidTy);
 
-    // NOTE: Per-operation debug counters (cnt_save_vreg, cnt_restore_vreg,
-    // cnt_store_mem, cnt_restore_mem) were removed: each counter increment
-    // inserts a load-add-store sequence per save/restore/commit point, which
-    // overflows FRAM on large benchmarks (e.g., RSA overflows by ~38KB).
-    // Only cnt_boundary (incremented in boot.S assembly) is kept.
+    // NOTE: Per-operation debug counter increments (cnt_save_vreg,
+    // cnt_restore_vreg, cnt_store_mem, cnt_restore_mem) are not emitted:
+    // each increment inserts a load-add-store sequence per
+    // save/restore/commit point, which overflows FRAM on large benchmarks
+    // (e.g., RSA overflows by ~38KB). Only cnt_boundary (incremented in
+    // boot.S assembly) is kept.
 }
 
 unsigned CheckpointInstrumenter::instrumentFunction(llvm::Function &F, const MILPSolution &solution,
