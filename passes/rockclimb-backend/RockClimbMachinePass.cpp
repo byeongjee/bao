@@ -12,6 +12,7 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/JSON.h"
 
 #include "common/BlockUtils.h"
@@ -93,22 +94,22 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
     if (isRuntimeFunction(MF.getName()))
         return false;
 
-    // Validate config paths
-    if (RockClimbMachineConfigOpt.empty()) {
-        PLOGE << "Error: -rockclimb-config not specified";
-        return false;
-    }
+    // Validate config paths. Returning false here would let llc exit 0 with an
+    // uninstrumented binary, so configuration errors abort loudly instead.
+    if (RockClimbMachineConfigOpt.empty())
+        report_fatal_error("RockClimb: -rockclimb-config not specified",
+                           /*gen_crash_diag=*/false);
     bool hasPrecomputed = !RockClimbMachineEnergyDataOpt.empty();
-    if (!hasPrecomputed && RockClimbMachineEnergyConfigOpt.empty()) {
-        PLOGE << "Error: Either -rockclimb-energy-data or "
-                 "-rockclimb-energy-config must be specified";
-        return false;
-    }
+    if (!hasPrecomputed && RockClimbMachineEnergyConfigOpt.empty())
+        report_fatal_error("RockClimb: either -rockclimb-energy-data or "
+                           "-rockclimb-energy-config must be specified",
+                           /*gen_crash_diag=*/false);
 
-    // Parse config
+    // Parse config (details of the failure are logged by the parser)
     RockClimbParams params;
     if (!parseRockClimbParams(RockClimbMachineConfigOpt, params))
-        return false;
+        report_fatal_error(Twine("RockClimb: invalid config ") + RockClimbMachineConfigOpt,
+                           /*gen_crash_diag=*/false);
 
     double E_safe = params.calculateESafe();
 
@@ -124,15 +125,29 @@ bool RockClimbMachinePass::runOnMachineFunction(MachineFunction &MF) {
           << (hasPrecomputed ? "pre-computed (bb-energy-analyzer)" : "MIR instruction-level");
     PLOGI << "  Basic blocks: " << MF.size();
 
+    // A nonpositive budget means the capacitor cannot even cover the fixed
+    // prologue/epilogue/restore overhead — report a clear infeasibility
+    // instead of a confusing "block exceeds E_safe (negative)" for the first
+    // block. ("Region partitioning failed" is the phrase the benchmark
+    // driver's infeasibility detector keys on.)
+    if (E_safe <= 0) {
+        std::string reason = "E_safe " + std::to_string(E_safe) + " <= 0: capacity " +
+                             std::to_string(params.capacity) +
+                             " cannot cover E_pro + E_epi + (N_reg-2)*reg_restore_energy";
+        PLOGE << "Region partitioning failed: " << reason;
+        writeInfeasibleJSON(MF, totalStart, reason);
+        return false;
+    }
+
     // Create energy estimator
     std::unique_ptr<MachineEnergyEstimator> estimator;
     if (hasPrecomputed) {
         estimator =
             MachineEnergyEstimator::fromPrecomputed(RockClimbMachineEnergyDataOpt.getValue());
-        if (!estimator) {
-            PLOGE << "Error: Failed to load pre-computed energy data";
-            return false;
-        }
+        if (!estimator)
+            report_fatal_error(Twine("RockClimb: failed to load pre-computed energy data ") +
+                                   RockClimbMachineEnergyDataOpt,
+                               /*gen_crash_diag=*/false);
     } else {
         estimator =
             std::make_unique<MachineEnergyEstimator>(RockClimbMachineEnergyConfigOpt.getValue());

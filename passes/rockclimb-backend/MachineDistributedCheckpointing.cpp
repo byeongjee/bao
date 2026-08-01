@@ -110,6 +110,13 @@ static bool reverseTransferBlock(const MachineBasicBlock &MBB, MCPhysReg reg,
         if (!touchesReg && !hasDef)
             continue;
 
+        // No save can be inserted after a terminator, so a terminator that
+        // defined a still-needed register would silently escape checkpointing.
+        // MSP430 terminators (branches, returns) never define R4-R15; assert
+        // that assumption instead of relying on it implicitly.
+        assert(!(hasDef && need && MI.isTerminator()) &&
+               "terminator defines a checkpointable register whose save would be dropped");
+
         if (hasDef && need && checkpoints != nullptr && !MI.isTerminator()) {
             MachineCheckpointPoint ckpt;
             ckpt.afterInst = const_cast<MachineInstr *>(&MI);

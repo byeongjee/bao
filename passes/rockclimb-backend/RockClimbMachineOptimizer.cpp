@@ -67,16 +67,35 @@ void RockClimbMachineOptimizer::identifyExitBlocks() {
 
 void RockClimbMachineOptimizer::computeTopologicalOrder() {
     topoOrder_.clear();
+    retreatingTargets_.clear();
     if (MF_.empty())
         return;
 
-    // Reverse post-order: all predecessors (modulo back-edges) visited first.
-    // Back-edges are safe to ignore because loop headers are forced boundaries.
+    // Reverse post-order: all predecessors (modulo retreating edges) visited
+    // first. The income propagation only follows forward edges, which is safe
+    // exactly when every retreating edge lands on a boundary (accumulation
+    // resets there).
     SmallPtrSet<MachineBasicBlock *, 32> visited;
+    DenseMap<const MachineBasicBlock *, unsigned> rpoIndex;
     ReversePostOrderTraversal<MachineFunction *> RPOT(&MF_);
     for (MachineBasicBlock *MBB : RPOT) {
+        rpoIndex[MBB] = static_cast<unsigned>(topoOrder_.size());
         topoOrder_.push_back(MBB);
         visited.insert(MBB);
+    }
+
+    // Force every retreating-edge target to be a boundary. In a reducible CFG
+    // retreating edges are exactly the back edges, whose targets are natural-
+    // loop headers and mandatory boundaries already — no behavior change. But
+    // MachineLoopInfo does not recognize irreducible cycles (e.g. a goto into
+    // a loop body), and any cycle crosses at least one retreating edge, so
+    // this keeps every cycle's energy bounded by a boundary.
+    for (MachineBasicBlock *MBB : topoOrder_) {
+        for (MachineBasicBlock *succ : MBB->successors()) {
+            auto it = rpoIndex.find(succ);
+            if (it != rpoIndex.end() && it->second <= rpoIndex[MBB])
+                retreatingTargets_.insert(succ);
+        }
     }
 
     // Add any unreachable blocks not covered by RPO
@@ -164,10 +183,11 @@ MachineRockClimbResult RockClimbMachineOptimizer::partitionRegions() {
         MachineBasicBlock *MBB = topoOrder_[i];
         double Cycle_bbi = getBlockCost(MBB);
 
-        // Mandatory boundaries: loop headers and function exit (return) blocks.
+        // Mandatory boundaries: loop headers, retreating-edge targets
+        // (irreducible cycle entries), and function exit (return) blocks.
         // (The entry block is already a boundary, inserted above.)
         if (MBB != entryMBB) {
-            if (loopHeaders_.count(MBB) || exitBlocks_.count(MBB))
+            if (loopHeaders_.count(MBB) || retreatingTargets_.count(MBB) || exitBlocks_.count(MBB))
                 boundarySet.insert(MBB);
         }
 
