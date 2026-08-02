@@ -17,7 +17,15 @@
 #define AES_BLOCKLEN 16
 #define AES_KEYLEN 16
 #define AES_keyExpSize 176
+
+/* VERIFY_BUILD (defined by `ckpt verify`) shrinks the workload: BOR halt
+ * mode makes the full 16-block workload impractically slow. Four blocks
+ * still exercise the multi-block CBC chaining paths in both directions. */
+#ifdef VERIFY_BUILD
+#define AES_BUFFER_BLOCKS 4
+#else
 #define AES_BUFFER_BLOCKS 16
+#endif
 #define AES_BUFFER_LEN (AES_BLOCKLEN * AES_BUFFER_BLOCKS)
 
 /* --- Types --- */
@@ -92,9 +100,11 @@ static const uint8_t Rcon[11] = {0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40,
 
 static const uint8_t test_data[AES_BUFFER_LEN] = {
     AES_TEST_VECTOR_64,
+#ifndef VERIFY_BUILD
     AES_TEST_VECTOR_64,
     AES_TEST_VECTOR_64,
     AES_TEST_VECTOR_64,
+#endif
 };
 
 /* --- Macros --- */
