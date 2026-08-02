@@ -103,6 +103,22 @@ void SchematicInstrumenter::createShadowGlobals(llvm::Function &F,
     }
 }
 
+void SchematicInstrumenter::dropLifetimeMarkersForShadowedAllocas(llvm::Function &F) {
+    llvm::SmallVector<llvm::Instruction *, 16> toErase;
+    for (llvm::BasicBlock &BB : F) {
+        for (llvm::Instruction &I : BB) {
+            if (!I.isLifetimeStartOrEnd())
+                continue;
+            auto *AI =
+                llvm::dyn_cast<llvm::AllocaInst>(llvm::cast<llvm::CallInst>(&I)->getArgOperand(0));
+            if (AI && shadowMap_.count(AI))
+                toErase.push_back(&I);
+        }
+    }
+    for (llvm::Instruction *I : toErase)
+        I->eraseFromParent();
+}
+
 llvm::BasicBlock *SchematicInstrumenter::splitEdge(llvm::BasicBlock *src, llvm::BasicBlock *dst) {
     return llvm::SplitEdge(src, dst);
 }
@@ -376,6 +392,10 @@ unsigned SchematicInstrumenter::instrumentFunction(llvm::Function &F, SchematicS
 
     // Create shadow globals.
     createShadowGlobals(F, solution, state);
+
+    // Checkpoint memcpys touch a shadowed alloca outside its scope, so its
+    // lifetime markers must go or the backend may reuse the slot.
+    dropLifetimeMarkersForShadowedAllocas(F);
 
     // Build per-block allocation map from blockAllocation.
     // Allocations were already extended during trace analysis
