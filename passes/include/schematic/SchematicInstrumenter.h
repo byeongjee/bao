@@ -45,6 +45,8 @@ class SchematicInstrumenter {
     void createShadowGlobals(llvm::Function &F, const SchematicSolution &solution,
                              const SchematicStateAnalysis &state);
 
+    void dropLifetimeMarkersForShadowedAllocas(llvm::Function &F);
+
     llvm::BasicBlock *splitEdge(llvm::BasicBlock *src, llvm::BasicBlock *dst);
 
     unsigned insertCheckpointSequence(llvm::BasicBlock *ckptBB, const RegionAllocation *endingAlloc,
