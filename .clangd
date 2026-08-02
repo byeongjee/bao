@@ -1,8 +1,7 @@
+# Include paths and -std come from passes/build/compile_commands.json, which
+# CMake generates from the LLVM_DIR and GUROBI_HOME used for the actual build.
+# Configure passes/build once (see AGENTS.md) and clangd picks it up from there.
 CompileFlags:
-  Add:
-    - "-I/Users/byeongjee/llvm-project/llvm/include"
-    - "-I/Users/byeongjee/llvm-project/build/include"
-    - "-std=c++17"
   Remove:
     # Remove flags that clangd doesn't understand
     - "-fno-lifetime-dse"
