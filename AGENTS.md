@@ -197,10 +197,10 @@ scripts/ckpt/
 uv run python scripts/run_benchmarks.py [BENCHMARKS...]   # e.g., test aes crc rsa
 
 # Visualize results from result/ directory
-Rscript scripts/plot_results.R [--output-dir DIR] [--normalize] [--benchmarks B,...] [--metrics M,...] [--log-scale]
+Rscript scripts/plot_results.R [--output-dir DIR] [--normalize] [--benchmarks B,...] [--metrics M,...] [--log-scale] [--config FILE]
 ```
 
-`scripts/run_benchmarks.py` runs each algorithm with and without `--device-debug`, plus uninstrumented, saving CSVs to `result/`. `scripts/plot_results.R` reads those CSVs and produces per-capacitor bar charts for 5 metrics: `region_boundaries`, `runtime_region_boundary_calls`, `execution_time`, `profiling_time`, `compilation_time`. Runtime region boundary data comes from `*-swbor.csv` (device-debug); timing data from `*-swbor-no-debug.csv`. `--normalize` normalizes to uninstrumented (when available) or MILP. `scripts/plot_results_uninstrumentedO0.R` is a variant that uses `uninstrumentedO0.csv` for the execution-time baseline.
+`scripts/run_benchmarks.py` runs each algorithm with and without `--device-debug`, plus uninstrumented, saving CSVs to `result/`. `scripts/plot_results.R` reads those CSVs and produces per-capacitor bar charts for 5 metrics: `region_boundaries`, `runtime_region_boundary_calls`, `execution_time`, `profiling_time`, `compilation_time`. Runtime region boundary data comes from `*-swbor.csv` (device-debug); timing data from `*-swbor-no-debug.csv`. `--normalize` normalizes to the baseline marked `normalize_ref` in the config (falling back to the first algorithm). Which CSVs are read, and their labels/colors/patterns, come from a JSON config — no filename is hardcoded in the R script. `scripts/plot_config.json` is the default; `scripts/plot_config_o0.json` additionally plots `uninstrumentedO0.csv` as a second execution-time baseline (`--config scripts/plot_config_o0.json`). Each config lists `algorithms` (per-capacitor series; CSV names default to `<algo>.csv` / `<algo>_debug.csv`, overridable with `csv` / `debug_csv`) and `baselines` (capacitor-independent series; `csv` required, optional `metrics` restricts which metrics they appear in).
 
 ## Architecture
 
