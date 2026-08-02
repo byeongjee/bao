@@ -9,7 +9,17 @@
 
 #define DIGIT_BITS 8
 #define DIGIT_MASK 0x00ff
+
+/* VERIFY_BUILD (defined by `ckpt verify`) shrinks the workload: BOR halt
+ * mode makes the full 256-bit workload impractically slow. The
+ * multiplication/reduction loops scale O(NUM_DIGITS^2), so a 128-bit key cuts
+ * the work ~4x while exercising the same code paths. (64-bit would cut more,
+ * but its MILP instance goes infeasible at 5-10uF.) */
+#ifdef VERIFY_BUILD
+#define KEY_SIZE_BITS 128
+#else
 #include "./data/keysize.h"
+#endif
 
 #define NUM_DIGITS (KEY_SIZE_BITS / DIGIT_BITS)
 #define PRINT_HEX_ASCII_COLS 8
@@ -26,9 +36,17 @@ static const uint8_t PAD_DIGITS[] = {0x01};
 #define NUM_PAD_DIGITS (sizeof(PAD_DIGITS) / sizeof(PAD_DIGITS[0]))
 
 // modulus: byte order: LSB to MSB, constraint MSB>=0x80
+#ifdef VERIFY_BUILD
+static const pubkey_t pubkey = {
+    .n = {0x77, 0x4a, 0x6e, 0x7d, 0x50, 0xde, 0x95, 0x10, 0x80, 0x0d, 0x50, 0x6d, 0x5a, 0x7e, 0x08,
+          0xc3},
+    .e = 0x3,
+};
+#else
 static const pubkey_t pubkey = {
 #include "./data/key.txt"
 };
+#endif
 
 static const unsigned char PLAINTEXT[] =
 #include "./data/plaintext.txt"
