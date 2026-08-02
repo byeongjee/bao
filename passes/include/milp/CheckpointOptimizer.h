@@ -26,6 +26,18 @@ enum class SolverStatus {
     Feasible, ///< Feasible but not proven optimal (e.g., time limit).
 };
 
+/// Why solve() returned false. Distinguishes proven infeasibility from
+/// solver limits so callers do not report a timeout as "infeasible".
+enum class SolveFailure {
+    None,                 ///< solve() has not failed.
+    BlocksExceedCapacity, ///< A block's base energy exceeds capacity (pre-check).
+    ProvenInfeasible,     ///< Gurobi proved the model infeasible.
+    TimeLimitNoSolution,  ///< Time limit expired before any feasible solution was found.
+    FeasibleNotAccepted,  ///< Feasible incumbent found, but optimality unproven and
+                          ///< accept-feasible is off.
+    SolverError,          ///< Gurobi error or unexpected solver status.
+};
+
 /// Solution from the MILP optimizer.
 struct MILPSolution {
     /// r_b: nodes where region start = 1.
@@ -107,6 +119,9 @@ class CheckpointOptimizer {
 
     const MILPSolution &getSolution() const { return solution_; }
 
+    /// Why the last solve() call failed (SolveFailure::None if it succeeded).
+    SolveFailure getSolveFailure() const { return solveFailure_; }
+
     std::set<NodeId> getCheckpoints() const { return solution_.r; }
 
     double getObjectiveValue() const { return solution_.objectiveValue; }
@@ -136,6 +151,7 @@ class CheckpointOptimizer {
     std::unique_ptr<GRBModel> model_;
     MILPSolution solution_;
     MILPProblemSizeStats problemSizeStats_;
+    SolveFailure solveFailure_ = SolveFailure::None;
     bool solved_ = false;
     bool modelBuilt_ = false;
     bool gurobiFailed_ = false;

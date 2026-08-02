@@ -263,13 +263,28 @@ class TestDetectInfeasibility:
         "pattern, expected_reason",
         [
             ("blocks exceed energy capacity", "blocks exceed energy capacity"),
-            ("Optimization failed", "solver found no feasible solution"),
+            ("Optimization infeasible", "solver proved model infeasible"),
+            (
+                "Optimization timed out",
+                "solver hit the time limit before finding any feasible solution",
+            ),
+            (
+                "feasible but unproven solution",
+                (
+                    "feasible solution found but optimality unproven "
+                    "(-milp-accept-feasible to use it)"
+                ),
+            ),
+            ("Optimization failed", "solver failed"),
             ("Region partitioning failed", "region partitioning failed"),
             ("blocks exceed E_safe", "blocks exceed E_safe"),
             ("SCHEMATIC infeasible", "energy capacity too small"),
         ],
         ids=[
             "energy-capacity",
+            "proven-infeasible",
+            "time-limit-no-solution",
+            "feasible-not-accepted",
             "optimization-failed",
             "region-partition",
             "e-safe",
@@ -340,11 +355,11 @@ class TestLoadStatsJson:
                     "abstract_edges": 9,
                 },
                 "feasible": False,
-                "infeasibility_reason": "solver found no feasible solution",
+                "infeasibility_reason": "solver proved model infeasible",
             }
         )
         assert feasible is False
-        assert infeasibility_reason == "solver found no feasible solution"
+        assert infeasibility_reason == "solver proved model infeasible"
         assert stats.abstract_cfg_blocks == 7
         assert stats.abstract_cfg_edges == 9
 

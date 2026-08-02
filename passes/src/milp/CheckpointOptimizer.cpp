@@ -173,14 +173,18 @@ std::vector<NodeId> CheckpointOptimizer::getInfeasibleBlocks() const {
 }
 
 bool CheckpointOptimizer::solve() {
+    solveFailure_ = SolveFailure::None;
     auto infeasible = getInfeasibleBlocks();
     if (!infeasible.empty()) {
         PLOGE << "Error: Blocks exceed capacity";
+        solveFailure_ = SolveFailure::BlocksExceedCapacity;
         return false;
     }
 
-    if (!ensureModelBuilt())
+    if (!ensureModelBuilt()) {
+        solveFailure_ = SolveFailure::SolverError;
         return false;
+    }
     computeProblemSizeStats();
 
     try {
@@ -255,6 +259,14 @@ bool CheckpointOptimizer::solve() {
             return true;
         }
 
+        if (status == GRB_INFEASIBLE)
+            solveFailure_ = SolveFailure::ProvenInfeasible;
+        else if (solCount > 0)
+            solveFailure_ = SolveFailure::FeasibleNotAccepted;
+        else if (status == GRB_TIME_LIMIT)
+            solveFailure_ = SolveFailure::TimeLimitNoSolution;
+        else
+            solveFailure_ = SolveFailure::SolverError;
         return false;
     } catch (const GRBException &e) {
         PLOGE << "Gurobi error during MILP solve: " << e.getMessage() << " (code "
@@ -262,6 +274,7 @@ bool CheckpointOptimizer::solve() {
     } catch (const std::exception &e) {
         PLOGE << "Error during MILP solve: " << e.what();
     }
+    solveFailure_ = SolveFailure::SolverError;
     return false;
 }
 

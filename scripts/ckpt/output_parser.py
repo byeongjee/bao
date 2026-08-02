@@ -194,7 +194,16 @@ def nvm_counters_to_labels(counters: NvmCounters) -> str:
 
 _INFEASIBLE_PATTERNS = [
     ("blocks exceed energy capacity", "blocks exceed energy capacity"),
-    ("Optimization failed", "solver found no feasible solution"),
+    ("Optimization infeasible", "solver proved model infeasible"),
+    (
+        "Optimization timed out",
+        "solver hit the time limit before finding any feasible solution",
+    ),
+    (
+        "feasible but unproven solution",
+        "feasible solution found but optimality unproven (-milp-accept-feasible to use it)",
+    ),
+    ("Optimization failed", "solver failed"),
     ("Region partitioning failed", "region partitioning failed"),
     ("blocks exceed E_safe", "blocks exceed E_safe"),
     ("SCHEMATIC infeasible", "energy capacity too small"),
