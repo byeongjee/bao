@@ -22,6 +22,12 @@ if [ -z "$LLVM_DIR" ]; then
     exit 1
 fi
 
+# Check MSP430_GCC_DIR
+if [ -z "$MSP430_GCC_DIR" ]; then
+    echo -e "${RED}Error: MSP430_GCC_DIR not set.${NC}"
+    exit 1
+fi
+
 # Set up tool paths
 CLANG="$LLVM_DIR/bin/clang"
 OPT="$LLVM_DIR/bin/opt"
@@ -30,8 +36,8 @@ LLC="$LLVM_DIR/bin/llc"
 PASS_PLUGIN="$PROJECT_ROOT/passes/build/bb-debuginfo/BBDebugInfoPass.so"
 BB_ANALYZER="$PROJECT_ROOT/passes/build/bb-energy-analyzer/bb-energy-analyzer"
 
-# MSP430 toolchain (defaults to TI's standard install location under $HOME)
-MSP430_OBJDUMP="${MSP430_GCC_DIR:-$HOME/ti/msp430-gcc}/bin/msp430-elf-objdump"
+# MSP430 toolchain
+MSP430_OBJDUMP="$MSP430_GCC_DIR/bin/msp430-elf-objdump"
 
 # Verify tools exist
 echo -e "${BLUE}Checking prerequisites...${NC}"
