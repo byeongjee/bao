@@ -8,6 +8,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -27,27 +28,17 @@ namespace {
 
 /// Find msp430-elf-objdump executable
 std::string findObjdump() {
-    std::vector<std::string> searchPaths = {
-        std::string(std::getenv("MSP430_GCC_DIR") ? std::getenv("MSP430_GCC_DIR") : "") +
-            "/bin/msp430-elf-objdump",
-        "/Users/byeongjee/ti/msp430-gcc/bin/msp430-elf-objdump",
-        "/opt/ti/msp430-gcc/bin/msp430-elf-objdump",
-        "/usr/local/bin/msp430-elf-objdump",
-        "msp430-elf-objdump",
-    };
-
-    for (const auto &path : searchPaths) {
-        if (path.empty())
-            continue;
-        if (path[0] == '/') {
-            if (sys::fs::exists(path))
-                return path;
-        } else {
-            ErrorOr<std::string> found = sys::findProgramByName(path);
-            if (found)
-                return *found;
-        }
+    // MSP430_GCC_DIR pins the toolchain; otherwise fall back to PATH.
+    if (const char *gccDir = std::getenv("MSP430_GCC_DIR"); gccDir && *gccDir) {
+        SmallString<128> candidate(gccDir);
+        sys::path::append(candidate, "bin", "msp430-elf-objdump");
+        if (sys::fs::exists(candidate))
+            return std::string(candidate);
     }
+
+    ErrorOr<std::string> found = sys::findProgramByName("msp430-elf-objdump");
+    if (found)
+        return *found;
     return "";
 }
 
