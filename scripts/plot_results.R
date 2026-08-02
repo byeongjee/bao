@@ -9,11 +9,16 @@
 #
 # Options:
 #   --result-dir DIR    Result directory (default: results/)
-#   --normalize         Normalize values (w.r.t. uninstrumented if available, else BAO)
+#   --normalize         Normalize values (w.r.t. the config's "normalize_ref" baseline
+#                       if available, else the first algorithm)
 #   --output-dir DIR    Save plots to directory instead of showing
 #   --benchmarks B,...  Comma-separated benchmark filter (default: all)
 #   --metrics M,...     Comma-separated metric filter (default: all)
 #   --log-scale         Force log scale for execution_time and runtime_region_boundary_calls
+#   --config FILE       Series definitions: which CSVs to read, plus their labels
+#                       and styles (default: plot_config.json next to this script).
+#                       Use plot_config_o0.json to add the -O0 execution-time
+#                       baseline (apples-to-apples, since the passes run on -O0 IR).
 
 script_args <- commandArgs(trailingOnly = FALSE)
 script_file_arg <- script_args[grepl("^--file=", script_args)]
@@ -22,12 +27,13 @@ script_path <- if (length(script_file_arg) > 0) {
 } else {
   NA_character_
 }
-local_r_lib <- if (!is.na(script_path)) {
-  file.path(dirname(dirname(normalizePath(script_path))), ".Rlib")
+script_dir <- if (!is.na(script_path)) {
+  dirname(normalizePath(script_path))
 } else {
-  NA_character_
+  "scripts"
 }
-if (!is.na(local_r_lib) && dir.exists(local_r_lib)) {
+local_r_lib <- file.path(dirname(script_dir), ".Rlib")
+if (dir.exists(local_r_lib)) {
   .libPaths(c(local_r_lib, .libPaths()))
 }
 
@@ -37,57 +43,141 @@ suppressPackageStartupMessages({
   library(grid)
 })
 
+if (!requireNamespace("jsonlite", quietly = TRUE)) {
+  stop("jsonlite is required to read the plot config. ",
+       "Install it with install.packages(\"jsonlite\").")
+}
+
 HAS_GGPATTERN <- requireNamespace("ggpattern", quietly = TRUE)
 PDF_DEVICE <- "pdf"
 
-# -- Algorithm definitions ----------------------------------------------------
+# -- Series definitions (from --config) ---------------------------------------
+#
+# No CSV name is hardcoded here. The config lists two kinds of series:
+#
+#   algorithms  per-capacitor results, one bar group per capacitor plot. Files
+#               default to "<algo>.csv" / "<algo>_debug.csv" (with the
+#               "-swbor-no-debug" / "-swbor" spellings as fallbacks); override
+#               with explicit "csv" / "debug_csv".
+#   baselines   capacitor-independent references (e.g. uninstrumented builds),
+#               replicated across benchmarks. "csv" is required. Optional
+#               "metrics" restricts the baseline to specific metric keys, and
+#               "normalize_ref" marks the series --normalize divides by.
+#
+# Entry order defines bar and legend order; algorithms come before baselines.
 
-ALGORITHMS <- c("milp", "schematic", "rockclimb", "schematicO3")
+DEFAULT_CONFIG_PATH <- file.path(script_dir, "plot_config.json")
+
 REQUIRED_ALGO_FOR_BENCHMARKS <- NULL
 
-ALG_STYLE <- tribble(
-  ~algo,             ~label,            ~color,     ~pattern,      ~pattern_angle,
-  "milp",            "BAO",             "#0072B2",  "stripe",      45,
-  "schematic",       "SCHEMATIC",       "#D55E00",  "stripe",     -45,
-  "rockclimb",       "ROCKCLIMB",       "#009E73",  "stripe",      90,
-  "schematicO3",     "SCHEMATIC-O3",    "#CC79A7",  "stripe",       0,
-  "uninstrumented",  "Uninstrumented",  "#595959",  "none",         0,
-)
+config_field <- function(entry, name, default) {
+  value <- entry[[name]]
+  if (is.null(value)) default else value
+}
+
+parse_series_style <- function(entry, kind) {
+  if (is.null(entry$algo) || is.null(entry$label)) {
+    stop("Each ", kind, " entry needs an \"algo\" id and a \"label\".")
+  }
+  tibble(
+    algo = as.character(entry$algo),
+    label = as.character(entry$label),
+    color = as.character(config_field(entry, "color", "#595959")),
+    pattern = as.character(config_field(entry, "pattern", "none")),
+    pattern_angle = as.numeric(config_field(entry, "pattern_angle", 0))
+  )
+}
+
+load_plot_config <- function(path) {
+  if (!file.exists(path)) {
+    stop("Plot config not found: ", path)
+  }
+  raw <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+
+  if (length(raw$algorithms) == 0) {
+    stop("Plot config has no \"algorithms\" entries: ", path)
+  }
+
+  algorithms <- map_dfr(raw$algorithms, function(entry) {
+    parse_series_style(entry, "algorithm") %>%
+      mutate(
+        csv = as.character(config_field(entry, "csv", NA_character_)),
+        debug_csv = as.character(config_field(entry, "debug_csv", NA_character_))
+      )
+  })
+
+  baselines <- map_dfr(raw$baselines, function(entry) {
+    if (is.null(entry$csv)) {
+      stop("Baseline \"", entry$algo, "\" needs a \"csv\" filename.")
+    }
+    parse_series_style(entry, "baseline") %>%
+      mutate(
+        csv = as.character(entry$csv),
+        metrics = list(as.character(config_field(entry, "metrics", character()))),
+        normalize_ref = isTRUE(config_field(entry, "normalize_ref", FALSE))
+      )
+  })
+
+  style <- bind_rows(
+    select(algorithms, algo, label, color, pattern, pattern_angle),
+    if (nrow(baselines) > 0) {
+      select(baselines, algo, label, color, pattern, pattern_angle)
+    }
+  )
+  duplicated_ids <- unique(style$algo[duplicated(style$algo)])
+  if (length(duplicated_ids) > 0) {
+    stop("Duplicate series ids in ", path, ": ",
+         paste(duplicated_ids, collapse = ", "))
+  }
+
+  norm_ref <- if (nrow(baselines) > 0) baselines$algo[baselines$normalize_ref] else character()
+  if (length(norm_ref) > 1) {
+    stop("More than one baseline is marked \"normalize_ref\" in ", path, ": ",
+         paste(norm_ref, collapse = ", "))
+  }
+
+  list(
+    algorithms = algorithms,
+    baselines = baselines,
+    style = style,
+    norm_ref = if (length(norm_ref) == 1) norm_ref else NA_character_
+  )
+}
 
 # -- Metric definitions -------------------------------------------------------
 
 METRICS <- list(
   region_boundaries = list(
     source = "debug", column = "region_boundaries",
-    include_uninstrumented = FALSE,
+    include_baselines = FALSE,
     ylabel = "# Region Boundaries (static)",
     relative_ylabel = "Relative Region Boundaries",
     title = "Region Boundaries"
   ),
   runtime_region_boundary_calls = list(
     source = "debug", column = "runtime_region_boundary_calls",
-    include_uninstrumented = FALSE,
+    include_baselines = FALSE,
     ylabel = "# Runtime Region Boundary Calls",
     relative_ylabel = "Relative Region Boundary Hits",
     title = "Region Boundary Calls at Run-time"
   ),
   execution_time = list(
     source = "no-debug", column = "execution_time_us",
-    include_uninstrumented = TRUE,
+    include_baselines = TRUE,
     ylabel = expression("Execution Time (" * mu * "s)"),
     relative_ylabel = "Relative Execution Time",
     title = "Execution Time"
   ),
   profiling_time = list(
     source = "no-debug", column = "profiling_time_ms",
-    include_uninstrumented = FALSE,
+    include_baselines = FALSE,
     ylabel = "Profiling Time (ms)",
     relative_ylabel = "Relative Profiling Time",
     title = "Profiling Time"
   ),
   compilation_time = list(
     source = "no-debug", column = "compilation_time_ms",
-    include_uninstrumented = TRUE,
+    include_baselines = TRUE,
     ylabel = "Compilation Time (ms)",
     relative_ylabel = "Relative Compilation Time",
     title = "Compilation Time"
@@ -141,13 +231,14 @@ parse_benchmark_cap <- function(benchmark) {
   tibble(name = parts[1, 2], cap = parts[1, 3])
 }
 
-resolve_csv_path <- function(result_dir, algo, source) {
-  candidates <- if (source == "debug") {
-    c(file.path(result_dir, paste0(algo, "_debug.csv")),
-      file.path(result_dir, paste0(algo, "-swbor.csv")))
+resolve_csv_path <- function(result_dir, spec, source) {
+  explicit <- if (source == "debug") spec$debug_csv else spec$csv
+  candidates <- if (!is.na(explicit)) {
+    file.path(result_dir, explicit)
+  } else if (source == "debug") {
+    file.path(result_dir, paste0(spec$algo, c("_debug.csv", "-swbor.csv")))
   } else {
-    c(file.path(result_dir, paste0(algo, ".csv")),
-      file.path(result_dir, paste0(algo, "-swbor-no-debug.csv")))
+    file.path(result_dir, paste0(spec$algo, c(".csv", "-swbor-no-debug.csv")))
   }
   found <- candidates[file.exists(candidates)]
   if (length(found) > 0) found[1] else NA_character_
@@ -166,8 +257,8 @@ read_result_csv <- function(path) {
   df
 }
 
-load_algorithm_data <- function(result_dir, algo, source, column) {
-  path <- resolve_csv_path(result_dir, algo, source)
+load_algorithm_data <- function(result_dir, spec, source, column) {
+  path <- resolve_csv_path(result_dir, spec, source)
   if (is.na(path)) return(tibble())
 
   df <- read_result_csv(path)
@@ -184,14 +275,14 @@ load_algorithm_data <- function(result_dir, algo, source, column) {
     transmute(
       benchmark = name,
       cap = cap,
-      algo = algo,
+      algo = spec$algo,
       value = as.numeric(.data[[column]])
     ) %>%
     filter(!is.na(value))
 }
 
-load_uninstrumented_data <- function(result_dir, column) {
-  path <- file.path(result_dir, "uninstrumented.csv")
+read_baseline_csv <- function(result_dir, filename, algo, column) {
+  path <- file.path(result_dir, filename)
   if (!file.exists(path)) return(tibble())
 
   df <- read_result_csv(path)
@@ -205,17 +296,32 @@ load_uninstrumented_data <- function(result_dir, column) {
     transmute(
       benchmark = benchmark,
       cap = NA_character_,
-      algo = "uninstrumented",
+      algo = algo,
       value = as.numeric(.data[[column]])
     ) %>%
     filter(!is.na(value))
 }
 
-discover_capacitors <- function(result_dir) {
+baseline_applies <- function(spec, metric_key) {
+  metrics <- spec$metrics[[1]]
+  length(metrics) == 0 || metric_key %in% metrics
+}
+
+load_baseline_data <- function(result_dir, baselines, metric_key, column) {
+  if (nrow(baselines) == 0) return(tibble())
+
+  map_dfr(seq_len(nrow(baselines)), function(i) {
+    spec <- baselines[i, ]
+    if (!baseline_applies(spec, metric_key)) return(tibble())
+    read_baseline_csv(result_dir, spec$csv, spec$algo, column)
+  })
+}
+
+discover_capacitors <- function(result_dir, algorithms) {
   caps <- character()
-  for (algo in ALGORITHMS) {
+  for (i in seq_len(nrow(algorithms))) {
     for (source in c("debug", "no-debug")) {
-      path <- resolve_csv_path(result_dir, algo, source)
+      path <- resolve_csv_path(result_dir, algorithms[i, ], source)
       if (is.na(path)) next
       df <- read_result_csv(path)
       if (nrow(df) == 0) next
@@ -474,8 +580,9 @@ compute_upper_limit <- function(max_value, max_label_tier, force_log, use_symlog
 }
 
 plot_metric_for_cap <- function(cap, metric_key, metric_info,
-                                algo_data, uninst_data, benchmarks, normalize,
-                                log_scale = FALSE) {
+                                algo_data, baseline_data, benchmarks, normalize,
+                                log_scale, config) {
+  alg_style <- config$style
   if (!is.null(REQUIRED_ALGO_FOR_BENCHMARKS)) {
     required_benchmarks <- algo_data %>%
       filter(
@@ -491,17 +598,17 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
 
   if (length(benchmarks) == 0) return(NULL)
 
-  include_uninst <- metric_info$include_uninstrumented && nrow(uninst_data) > 0
+  include_baselines <- metric_info$include_baselines && nrow(baseline_data) > 0
 
   # Filter to this capacitor
   df <- algo_data %>% filter(cap == !!cap)
 
-  if (include_uninst) {
-    # Replicate uninstrumented for each benchmark (cap-independent)
-    uninst_for_cap <- uninst_data %>%
+  if (include_baselines) {
+    # Replicate the baselines for each benchmark (cap-independent)
+    baselines_for_cap <- baseline_data %>%
       filter(benchmark %in% benchmarks) %>%
       mutate(cap = !!cap)
-    df <- bind_rows(df, uninst_for_cap)
+    df <- bind_rows(df, baselines_for_cap)
   }
 
   df <- df %>% filter(benchmark %in% benchmarks)
@@ -512,7 +619,11 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
   # Determine normalization (geomean is computed after this step)
   norm_algo <- NULL
   if (normalize) {
-    norm_algo <- if (include_uninst) "uninstrumented" else "milp"
+    norm_algo <- if (include_baselines && !is.na(config$norm_ref)) {
+      config$norm_ref
+    } else {
+      config$algorithms$algo[1]
+    }
     base <- df %>%
       filter(algo == norm_algo) %>%
       select(benchmark, base_value = value)
@@ -532,17 +643,14 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
   df <- bind_rows(df, geomean_df)
   benchmarks_with_geomean <- c(benchmarks, "geomean")
 
-  # Set factor levels for ordering
-  active_algos <- intersect(
-    c(ALGORITHMS, if (include_uninst) "uninstrumented"),
-    unique(df$algo)
-  )
+  # Set factor levels for ordering (config series order)
+  active_algos <- intersect(alg_style$algo, unique(df$algo))
   label_map <- setNames(
-    ALG_STYLE$label[match(active_algos, ALG_STYLE$algo)],
+    alg_style$label[match(active_algos, alg_style$algo)],
     active_algos
   )
   color_map <- setNames(
-    ALG_STYLE$color[match(active_algos, ALG_STYLE$algo)],
+    alg_style$color[match(active_algos, alg_style$algo)],
     label_map[active_algos]
   )
 
@@ -611,20 +719,16 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
                                   padding = 0.04)
   text_position <- position_dodge2(width = 0.8, preserve = "single",
                                    padding = 0.04)
-  color_map <- setNames(
-    ALG_STYLE$color[match(active_algos, ALG_STYLE$algo)],
-    label_map[active_algos]
-  )
 
   p <- ggplot(plot_df, aes(x = benchmark, y = display_value,
                            fill = algo_label, group = algo_label))
   if (HAS_GGPATTERN) {
     pattern_map <- setNames(
-      ALG_STYLE$pattern[match(active_algos, ALG_STYLE$algo)],
+      alg_style$pattern[match(active_algos, alg_style$algo)],
       label_map[active_algos]
     )
     pattern_angle_map <- setNames(
-      ALG_STYLE$pattern_angle[match(active_algos, ALG_STYLE$algo)],
+      alg_style$pattern_angle[match(active_algos, alg_style$algo)],
       label_map[active_algos]
     )
     p <- p + ggpattern::geom_col_pattern(
@@ -859,6 +963,7 @@ main <- function() {
   result_dir <- "results"
   normalize <- FALSE
   log_scale <- FALSE
+  config_path <- DEFAULT_CONFIG_PATH
   output_dir <- NULL
   filter_benchmarks <- NULL
   filter_metrics <- NULL
@@ -871,6 +976,8 @@ main <- function() {
       normalize <- TRUE; i <- i + 1
     } else if (args[i] == "--log-scale") {
       log_scale <- TRUE; i <- i + 1
+    } else if (args[i] == "--config" && i < length(args)) {
+      config_path <- args[i + 1]; i <- i + 2
     } else if (args[i] == "--output-dir" && i < length(args)) {
       output_dir <- args[i + 1]; i <- i + 2
     } else if (args[i] == "--benchmarks" && i < length(args)) {
@@ -891,6 +998,16 @@ main <- function() {
     cat("Note: ggpattern not installed; using color-only fills.\n")
   }
 
+  config <- load_plot_config(config_path)
+
+  missing_baselines <- config$baselines$csv[
+    !file.exists(file.path(result_dir, config$baselines$csv))
+  ]
+  if (length(missing_baselines) > 0) {
+    cat("Note: baseline CSV not found in", result_dir, "- skipping:",
+        paste(missing_baselines, collapse = ", "), "\n")
+  }
+
   if (!is.null(output_dir)) {
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   }
@@ -903,9 +1020,9 @@ main <- function() {
 
   # Discover benchmarks
   all_benchmarks <- character()
-  for (algo in ALGORITHMS) {
+  for (i in seq_len(nrow(config$algorithms))) {
     for (source in c("debug", "no-debug")) {
-      path <- resolve_csv_path(result_dir, algo, source)
+      path <- resolve_csv_path(result_dir, config$algorithms[i, ], source)
       if (is.na(path)) next
       df <- read_result_csv(path)
       if (nrow(df) == 0) next
@@ -914,12 +1031,12 @@ main <- function() {
       all_benchmarks <- c(all_benchmarks, parsed$name[!is.na(parsed$name)])
     }
   }
-  uninst_path <- file.path(result_dir, "uninstrumented.csv")
-  if (file.exists(uninst_path)) {
-    df <- read_result_csv(uninst_path)
-    if (nrow(df) > 0) {
+  for (baseline_csv in config$baselines$csv) {
+    path <- file.path(result_dir, baseline_csv)
+    if (!file.exists(path)) next
+    df <- read_result_csv(path)
+    if (nrow(df) == 0) next
     all_benchmarks <- c(all_benchmarks, df$benchmark[!is.na(df$benchmark)])
-    }
   }
   all_benchmarks <- unique(all_benchmarks)
 
@@ -932,7 +1049,7 @@ main <- function() {
 
   if (length(benchmarks) == 0) stop("No benchmarks found.")
 
-  capacitors <- discover_capacitors(result_dir)
+  capacitors <- discover_capacitors(result_dir, config$algorithms)
 
   cat("Benchmarks:", paste(benchmarks, collapse = ", "), "\n")
   cat("Metrics:", paste(metrics_to_plot, collapse = ", "), "\n")
@@ -943,12 +1060,12 @@ main <- function() {
     source <- metric_info$source
     column <- metric_info$column
 
-    algo_data <- map_dfr(ALGORITHMS, function(algo) {
-      load_algorithm_data(result_dir, algo, source, column)
+    algo_data <- map_dfr(seq_len(nrow(config$algorithms)), function(i) {
+      load_algorithm_data(result_dir, config$algorithms[i, ], source, column)
     })
 
-    uninst_data <- if (metric_info$include_uninstrumented) {
-      load_uninstrumented_data(result_dir, column)
+    baseline_data <- if (metric_info$include_baselines) {
+      load_baseline_data(result_dir, config$baselines, metric_key, column)
     } else {
       tibble()
     }
@@ -956,7 +1073,7 @@ main <- function() {
     for (cap in capacitors) {
       p <- plot_metric_for_cap(
         cap, metric_key, metric_info,
-        algo_data, uninst_data, benchmarks, normalize, log_scale
+        algo_data, baseline_data, benchmarks, normalize, log_scale, config
       )
       if (is.null(p)) next
 
