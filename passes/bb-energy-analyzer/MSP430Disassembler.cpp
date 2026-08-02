@@ -2,6 +2,7 @@
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -21,34 +22,18 @@ MSP430Disassembler::~MSP430Disassembler() = default;
 std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfPath) {
     std::vector<Instruction> result;
 
-    // Find msp430-elf-objdump in common locations
-    std::vector<std::string> searchPaths = {
-        // Environment variable takes precedence
-        std::string(std::getenv("MSP430_GCC_DIR") ? std::getenv("MSP430_GCC_DIR") : "") +
-            "/bin/msp430-elf-objdump",
-        // Common TI installation paths
-        "/Users/byeongjee/ti/msp430-gcc/bin/msp430-elf-objdump",
-        "/opt/ti/msp430-gcc/bin/msp430-elf-objdump",
-        "/usr/local/bin/msp430-elf-objdump",
-        "msp430-elf-objdump", // In PATH
-    };
-
+    // MSP430_GCC_DIR pins the toolchain; otherwise fall back to PATH.
     std::string objdumpPath;
-    for (const auto &path : searchPaths) {
-        if (path.empty() || path[0] == '/') {
-            // Absolute path - check if exists
-            if (!path.empty() && sys::fs::exists(path)) {
-                objdumpPath = path;
-                break;
-            }
-        } else {
-            // Search in PATH
-            ErrorOr<std::string> found = sys::findProgramByName(path);
-            if (found) {
-                objdumpPath = *found;
-                break;
-            }
-        }
+    if (const char *gccDir = std::getenv("MSP430_GCC_DIR"); gccDir && *gccDir) {
+        SmallString<128> candidate(gccDir);
+        sys::path::append(candidate, "bin", "msp430-elf-objdump");
+        if (sys::fs::exists(candidate))
+            objdumpPath = std::string(candidate);
+    }
+    if (objdumpPath.empty()) {
+        ErrorOr<std::string> found = sys::findProgramByName("msp430-elf-objdump");
+        if (found)
+            objdumpPath = *found;
     }
 
     if (objdumpPath.empty()) {
