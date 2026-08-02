@@ -30,12 +30,8 @@ LLC="$LLVM_DIR/bin/llc"
 PASS_PLUGIN="$PROJECT_ROOT/passes/build/bb-debuginfo/BBDebugInfoPass.so"
 BB_ANALYZER="$PROJECT_ROOT/passes/build/bb-energy-analyzer/bb-energy-analyzer"
 
-# MSP430 toolchain
-if [ -n "$MSP430_GCC_DIR" ]; then
-    MSP430_OBJDUMP="$MSP430_GCC_DIR/bin/msp430-elf-objdump"
-else
-    MSP430_OBJDUMP="/Users/byeongjee/ti/msp430-gcc/bin/msp430-elf-objdump"
-fi
+# MSP430 toolchain (defaults to TI's standard install location under $HOME)
+MSP430_OBJDUMP="${MSP430_GCC_DIR:-$HOME/ti/msp430-gcc}/bin/msp430-elf-objdump"
 
 # Verify tools exist
 echo -e "${BLUE}Checking prerequisites...${NC}"
