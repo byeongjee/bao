@@ -76,6 +76,7 @@ def compile_to_ir(
         "-O3",
         "-Xclang",
         "-disable-llvm-passes",
+        "-fno-math-errno",
         "-D__MSP430FR5994__",
         f"-I{env.project_dir / 'passes' / 'include'}",
         "-isystem",
