@@ -300,7 +300,34 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         double totalExecutionTimeMs =
             std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
-        PLOGE << "Optimization failed";
+        // Report why the solve failed. A timeout is not infeasibility: only
+        // ProvenInfeasible means the model has no solution.
+        const char *failureLog = "Optimization failed";
+        const char *optimalSolutionLine = "no (solver failed)";
+        const char *failureReason = "solver failed";
+        switch (optimizer.getSolveFailure()) {
+        case SolveFailure::ProvenInfeasible:
+            failureLog = "Optimization infeasible: solver proved the model infeasible";
+            optimalSolutionLine = "no (proven infeasible)";
+            failureReason = "solver proved model infeasible";
+            break;
+        case SolveFailure::TimeLimitNoSolution:
+            failureLog = "Optimization timed out: no feasible solution found within "
+                         "the time limit";
+            optimalSolutionLine = "no (time limit, no solution found)";
+            failureReason = "solver hit the time limit before finding any feasible solution";
+            break;
+        case SolveFailure::FeasibleNotAccepted:
+            failureLog = "Optimization stopped with a feasible but unproven solution; "
+                         "rerun with -milp-accept-feasible to use it";
+            optimalSolutionLine = "no (feasible, not proven optimal)";
+            failureReason = "feasible solution found but optimality unproven "
+                            "(-milp-accept-feasible to use it)";
+            break;
+        default:
+            break;
+        }
+        PLOGE << failureLog;
 
         {
             CommonStats common = makeCommonStats(totalExecutionTimeMs);
@@ -315,17 +342,17 @@ PreservedAnalyses MILPCheckpointPass::run(Function &F, FunctionAnalysisManager &
         printIneligibleStateStats(ineligGlobalCount, ineligAllocaCount, ineligSSACount);
         printMILPAllocationMode(coarseAllocation);
         printMILPProblemSizeStats(problemSizeStats);
-        PLOGI << "  Optimal solution:                no (solver failed)";
+        PLOGI << "  Optimal solution:                " << optimalSolutionLine;
         PLOGI << "  Solve time (ms):                 " << checkpoint::fmtDouble(solveTimeMs);
 
         if (!StatsJsonOpt.empty()) {
             CommonStats c = makeCommonStats(totalExecutionTimeMs);
             json::Object root = commonStatsToJSON(c);
             root["feasible"] = false;
-            root["infeasibility_reason"] = "solver found no feasible solution";
+            root["infeasibility_reason"] = failureReason;
             appendMILPAllocationModeToJSON(root, coarseAllocation);
             appendMILPProblemSizeStatsToJSON(root, problemSizeStats);
-            root["optimal_solution"] = "no (solver failed)";
+            root["optimal_solution"] = optimalSolutionLine;
             root["solve_time_ms"] = solveTimeMs;
             root["boundary_commits_enabled"] = int64_t{0};
             root["boundary_restores_enabled"] = int64_t{0};
