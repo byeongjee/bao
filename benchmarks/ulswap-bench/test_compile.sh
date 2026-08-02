@@ -8,7 +8,10 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$SCRIPT_DIR/src"
 
-LLVM_DIR="${LLVM_DIR:-/Users/byeongjee/llvm-project/build}"
+if [[ -z "$LLVM_DIR" ]]; then
+    echo "Error: LLVM_DIR not set." >&2
+    exit 1
+fi
 CLANG="$LLVM_DIR/bin/clang"
 LLC="$LLVM_DIR/bin/llc"
 
