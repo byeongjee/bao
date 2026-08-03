@@ -29,7 +29,7 @@ HALT_MODES = ("bor", "lpm4", "swbor")
 _saleae_timeout_option = click.option(
     "--timeout",
     type=click.FloatRange(min=0, min_open=True),
-    default=60.0,
+    default=200.0,
     show_default=True,
     help="Maximum wait in seconds for each Saleae capture.",
 )
