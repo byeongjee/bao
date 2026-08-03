@@ -3,7 +3,15 @@
 
 #include <stdint.h>
 
+/* VERIFY_BUILD (defined by `ckpt verify`) shrinks the workload: the insertion
+ * sort shifts O(ARRAY_SIZE^2) times and BOR halt mode pays a reset per region
+ * boundary, so the full array is impractically slow. The vertex table below is
+ * unsized, so only the loop bounds shrink. */
+#ifdef VERIFY_BUILD
+#define ARRAY_SIZE 96
+#else
 #define ARRAY_SIZE 640
+#endif
 
 typedef struct {
     int16_t x, y, z;
