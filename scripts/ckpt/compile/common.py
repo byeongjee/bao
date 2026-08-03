@@ -380,14 +380,14 @@ def canonicalize_ir_for_native_profiling(
 
     Native profiling recompiles MSP430-targeted IR for the host.  Some O0 traces
     keep aggregate copies and field accesses whose semantics depend on the MSP430
-    datalayout.  A small scalarization pipeline rewrites those accesses while the
-    original target datalayout is still present, which keeps later host execution
-    semantically aligned with the profiled target code.
+    datalayout.  SROA rewrites those accesses while the original target datalayout
+    is still present, which keeps later host execution semantically aligned with
+    the profiled target code.
     """
     return run(
         [
             tc.opt,
-            "-passes=sroa,instcombine,gvn",
+            "-passes=sroa",
             "-S",
             str(input_ll),
             "-o",
