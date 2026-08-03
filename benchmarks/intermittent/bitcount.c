@@ -18,7 +18,7 @@
  * crosses the same static region boundaries regardless of iteration count,
  * and BOR halt mode makes the full workload impractically slow. */
 #ifdef VERIFY_BUILD
-#define ITERATIONS 500U
+#define ITERATIONS 64U
 #else
 #define ITERATIONS 20000U
 #endif

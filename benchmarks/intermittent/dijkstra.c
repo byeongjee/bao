@@ -11,6 +11,16 @@
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
 #define NUM_NODES 32U
+
+/* VERIFY_BUILD (defined by `ckpt verify`) shrinks the workload: the relaxation
+ * loop runs once per queue entry per node and BOR halt mode pays a reset per
+ * region boundary, so all 32 queries are impractically slow. Shrinking the
+ * query count keeps the graph, and with it every loop trip count, unchanged. */
+#ifdef VERIFY_BUILD
+#define NUM_QUERIES 4U
+#else
+#define NUM_QUERIES NUM_NODES
+#endif
 #define NONE 255U
 /* Queue capacity: empirically the max queue usage is 148 for this adjacency
    matrix.  192 provides headroom while keeping total stack (900 B) within the
@@ -163,8 +173,8 @@ int main(void) {
     uint16_t dist;
     volatile uint32_t checksum = 0;
 
-    for (i = 0, j = (NUM_NODES / 2U); i < NUM_NODES; i++, j++) {
-        __loop_tripcount(NUM_NODES);
+    for (i = 0, j = (NUM_NODES / 2U); i < NUM_QUERIES; i++, j++) {
+        __loop_tripcount(NUM_QUERIES);
         j = (uint16_t)(j % NUM_NODES);
         dist = dijkstra(i, j);
         checksum = (checksum * 131U) + dist;
