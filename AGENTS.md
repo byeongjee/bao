@@ -6,6 +6,14 @@ This file provides guidance to coding agents (Claude Code reads it via the `.cla
 
 Lead with the answer, in a few sentences. A long answer cannot be reviewed, and an unreviewable answer is useless.
 
+## Never Explain by Analogy
+
+Explain the system in its own terms rather than metaphor.
+
+## Comment Only Why, Only When Necessary
+
+Comment only to explain why, and only when the code cannot show it.
+
 ## Never Preserve Backward Compatibility
 
 Backward compatibility is not important. Do not leave dead code for that reason. Care about clean code, and do not care about backward compatibility.
