@@ -6,6 +6,10 @@ This file provides guidance to coding agents (Claude Code reads it via the `.cla
 
 Lead with the answer, in a few sentences. A long answer cannot be reviewed, and an unreviewable answer is useless.
 
+## Never Preserve Backward Compatibility
+
+Backward compatibility is not important. Do not leave dead code for that reason. Care about clean code, and do not care about backward compatibility.
+
 ## Project Overview
 
 MILP-based checkpoint insertion tool for intermittent computing. Analyzes LLVM IR, builds control flow graphs with energy cost estimates, and uses Gurobi to solve an optimization problem that determines optimal checkpoint placements minimizing runtime overhead while satisfying energy constraints. Also includes a machine-level RockClimb (PFI) baseline that operates post-register-allocation.
