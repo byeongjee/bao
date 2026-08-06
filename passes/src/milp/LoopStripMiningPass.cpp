@@ -687,9 +687,8 @@ static bool supportsExitRewriteForm(Loop *L, uint64_t N) {
         return false;
     }
 
-    // The rewrite forwards loop-carried values out of either the header or the
-    // latch; any other exiting block leaves those definitions not dominating the
-    // forwarding PHI, which the verifier rejects.
+    // The rewrite only knows how to forward values out of the header or the
+    // latch. Exiting anywhere else builds a PHI the verifier rejects.
     if (ExitingBB != Header && ExitingBB != Latch) {
         return false;
     }
@@ -860,8 +859,8 @@ static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double ite
         return;
     }
 
-    // Without a known trip count nothing else bounds K, and the chunk counter is
-    // only pointer-wide; a truncated bound would disagree with the recorded K.
+    // With no known trip count nothing else limits K, and a K too wide for the
+    // counter would be truncated into a chunk size nobody asked for.
     const DataLayout &DL = Header->getModule()->getDataLayout();
     if (!isUIntN(DL.getIntPtrType(Header->getContext())->getIntegerBitWidth(), K)) {
         result.skipReason = "k-exceeds-counter-width";
@@ -1277,10 +1276,8 @@ static StripMineForm updateStripMinedLoopK(Loop *L, uint64_t currentK, uint64_t 
     return StripMineForm::None;
 }
 
-// AbstractCFG takes min(scev, marker) as the outer trip count, so a marker left
-// at ceil(N/currentK) understates the loop and lets the whole nest summarize.
-// The marker is an upper bound, so scaling by the K ratio is sound without
-// recovering N.
+// The recorded count assumed the old K. Left alone it says the outer loop runs
+// fewer times than it now does, and the energy model believes it.
 static void rescaleOuterTripCount(Loop *L, uint64_t currentK, uint64_t newK) {
     Loop *Parent = L->getParentLoop();
     if (!Parent) {
