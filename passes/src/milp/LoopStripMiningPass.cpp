@@ -1357,7 +1357,7 @@ static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvoluti
                         } else {
                             setLoopTripCountMetadata(L, newK);
                             rescaleOuterTripCount(L, *currentK, newK);
-                            SE.forgetLoop(L);
+                            SE.forgetTopmostLoop(L);
                             detail.decision = "reclamped";
                             detail.isChunking = form == StripMineForm::ChunkCounter;
                             detail.postChunkReclampApplied = true;
@@ -1686,7 +1686,8 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     setLoopTripCountMetadata(OuterLoop, outerTripCount);
     formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
 
-    SE.forgetLoop(L);
+    SE.forgetTopmostLoop(L);
+    SE.forgetBlockAndLoopDispositions();
 
     return true;
 }
@@ -1846,7 +1847,8 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
 
     // ── Phase 15: LCSSA repair, SCEV invalidation ──
     formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
-    SE.forgetLoop(L);
+    SE.forgetTopmostLoop(L);
+    SE.forgetBlockAndLoopDispositions();
 
     return true;
 }
@@ -2052,7 +2054,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
                 } else {
                     setLoopTripCountMetadata(L, newK);
                     rescaleOuterTripCount(L, item.plan.K, newK);
-                    SE.forgetLoop(L);
+                    SE.forgetTopmostLoop(L);
                     detail.postChunkReclampApplied = true;
                     PLOGD << "LoopStripMiningPass: chunk K re-clamped " << F.getName()
                           << "::" << headerName << " original-K=" << item.plan.K
