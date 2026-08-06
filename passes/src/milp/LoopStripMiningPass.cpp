@@ -799,7 +799,6 @@ static bool tryStripMiningPlan(Loop *L, uint64_t K, double iterEnergy,
 
     if (K >= *exactTripCount) {
         result.skipReason = "k-covers-entire-loop";
-        result.detail.skipReason = result.skipReason;
         return true;
     }
     LoopRewritePlan plan;
@@ -824,7 +823,6 @@ static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double ite
     Instruction *LatchBr = Latch->getTerminator();
     if (!isa<UncondBrInst>(LatchBr) && !isa<CondBrInst>(LatchBr)) {
         result.skipReason = "latch-not-branch-inst";
-        result.detail.skipReason = result.skipReason;
         return;
     }
 
@@ -837,7 +835,6 @@ static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double ite
     }
     if (!hasBackedge) {
         result.skipReason = "latch-no-backedge-to-header";
-        result.detail.skipReason = result.skipReason;
         return;
     }
 
@@ -851,7 +848,6 @@ static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double ite
     }
     if (knownTC && K >= *knownTC) {
         result.skipReason = "k-covers-entire-loop";
-        result.detail.skipReason = result.skipReason;
         return;
     }
 
@@ -859,7 +855,6 @@ static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double ite
     unsigned counterWidth = DL.getIntPtrType(Header->getContext())->getIntegerBitWidth();
     if (!isUIntN(counterWidth, K)) {
         result.skipReason = "k-exceeds-counter-width";
-        result.detail.skipReason = result.skipReason;
         return;
     }
 
@@ -889,28 +884,23 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     // ── Common checks (both strip mining and chunking) ──
     if (!L->isLoopSimplifyForm()) {
         result.skipReason = "not-loop-simplify-form";
-        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (!L->hasDedicatedExits()) {
         result.skipReason = "no-dedicated-exits";
-        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (!L->getLoopPreheader()) {
         result.skipReason = "missing-preheader";
-        result.detail.skipReason = result.skipReason;
         return result;
     }
     BasicBlock *Latch = L->getLoopLatch();
     if (!Latch) {
         result.skipReason = "missing-single-latch";
-        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (containsInvoke(L)) {
         result.skipReason = "contains-invoke";
-        result.detail.skipReason = result.skipReason;
         return result;
     }
 
@@ -923,20 +913,16 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
                             ", E_pro=" + std::to_string(params.E_pro) +
                             ", E_epi=" + std::to_string(params.E_epi) +
                             ", budget=" + std::to_string(budget);
-        result.detail.skipReason = result.skipReason;
-        result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
     WorstCasePathResult iterEnergy = computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
     if (!iterEnergy.ok) {
         result.skipReason = iterEnergy.error;
-        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (iterEnergy.energy <= 0.0) {
         result.skipReason = "nonpositive-iteration-energy";
-        result.detail.skipReason = result.skipReason;
         return result;
     }
     result.detail.iterEnergy = iterEnergy.energy;
@@ -964,8 +950,6 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
             ", commit-def-margin=" + std::to_string(commitDefMargin) +
             ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
             ", budget-after-boundary=" + std::to_string(budgetAfterBoundary);
-        result.detail.skipReason = result.skipReason;
-        result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
@@ -978,8 +962,6 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
             ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
             ", loop-strip-mining-cost=" + std::to_string(params.loopStripMiningCost) +
             ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
-        result.detail.skipReason = result.skipReason;
-        result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
@@ -998,8 +980,6 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
             ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
             ", loop-strip-mining-cost=" + std::to_string(params.loopStripMiningCost) +
             ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
-        result.detail.skipReason = result.skipReason;
-        result.detail.skipDetail = result.skipDetail;
         return result;
     }
 
@@ -1008,12 +988,10 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     result.detail.candidateK = K;
     if (K <= 1) {
         result.skipReason = "k-not-beneficial";
-        result.detail.skipReason = result.skipReason;
         return result;
     }
     if (K > std::numeric_limits<unsigned>::max()) {
         result.skipReason = "k-too-large";
-        result.detail.skipReason = result.skipReason;
         return result;
     }
 
