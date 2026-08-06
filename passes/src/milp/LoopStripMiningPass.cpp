@@ -68,7 +68,7 @@ struct LoopRewritePlan {
     uint64_t N = 0;
     uint64_t K = 0;
     double iterEnergy = 0.0;
-    bool isChunking = false;
+    StripMineForm form = StripMineForm::ExitRewrite;
 };
 
 struct LoopStripMiningDetail {
@@ -77,7 +77,7 @@ struct LoopStripMiningDetail {
     std::string decision;
     std::string skipReason;
     std::string skipDetail;
-    bool isChunking = false;
+    StripMineForm form = StripMineForm::ExitRewrite;
     bool tripCountKnown = false;
     uint64_t tripCount = 0;
     double budget = 0.0;
@@ -139,10 +139,6 @@ struct LoopStripMiningStats {
     std::vector<LoopStripMiningDetail> loopDetails;
 };
 
-/// Per-function copy of the stats, retained across functions for the
-/// module-level JSON dump.
-using LoopStripMiningFunctionSnapshot = LoopStripMiningStats;
-
 struct HeaderPhiInfo {
     PHINode *headerPhi;
     PHINode *outerPhi;
@@ -190,7 +186,7 @@ static json::Object loopDetailToJSON(const LoopStripMiningDetail &detail) {
     obj["decision"] = detail.decision;
     obj["skip_reason"] = detail.skipReason;
     obj["skip_detail"] = detail.skipDetail;
-    obj["is_chunking"] = detail.isChunking;
+    obj["is_chunking"] = detail.form == StripMineForm::ChunkCounter;
     obj["trip_count_known"] = detail.tripCountKnown;
     if (detail.tripCountKnown)
         obj["trip_count"] = static_cast<int64_t>(detail.tripCount);
@@ -228,7 +224,7 @@ static json::Object loopDetailToJSON(const LoopStripMiningDetail &detail) {
 }
 
 static json::Object functionSnapshotToJSON(const std::string &functionName,
-                                           const LoopStripMiningFunctionSnapshot &snapshot) {
+                                           const LoopStripMiningStats &snapshot) {
     json::Object summary;
     summary["loops_seen"] = static_cast<int64_t>(snapshot.loopsSeen);
     summary["loops_eligible"] = static_cast<int64_t>(snapshot.loopsEligible);
@@ -267,8 +263,8 @@ static json::Object functionSnapshotToJSON(const std::string &functionName,
     return obj;
 }
 
-static std::map<std::string, LoopStripMiningFunctionSnapshot> &getLoopStripMiningStatsStore() {
-    static std::map<std::string, LoopStripMiningFunctionSnapshot> store;
+static std::map<std::string, LoopStripMiningStats> &getLoopStripMiningStatsStore() {
+    static std::map<std::string, LoopStripMiningStats> store;
     return store;
 }
 
@@ -679,10 +675,10 @@ static bool tryStripMiningPlan(Loop *L, uint64_t K, double iterEnergy,
     plan.N = *exactTripCount;
     plan.K = K;
     plan.iterEnergy = iterEnergy;
-    plan.isChunking = false;
+    plan.form = StripMineForm::ExitRewrite;
     result.plan = plan;
     result.skipReason.clear();
-    result.detail.isChunking = false;
+    result.detail.form = StripMineForm::ExitRewrite;
     result.detail.chosenKValid = true;
     result.detail.chosenK = K;
     return true;
@@ -738,10 +734,10 @@ static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double ite
     plan.N = knownTC ? *knownTC : 0;
     plan.K = K;
     plan.iterEnergy = iterEnergy;
-    plan.isChunking = true;
+    plan.form = StripMineForm::ChunkCounter;
     result.plan = plan;
     result.skipReason.clear();
-    result.detail.isChunking = true;
+    result.detail.form = StripMineForm::ChunkCounter;
     result.detail.chosenKValid = true;
     result.detail.chosenK = K;
 }
@@ -1149,7 +1145,7 @@ static ReclampResult applyReclamp(Loop *L, uint64_t currentK, const ChunkBudgetR
     setLoopTripCountMetadata(L, result.newK);
     rescaleOuterTripCount(L, currentK, result.newK);
     SE.forgetTopmostLoop(L);
-    detail.isChunking = form == StripMineForm::ChunkCounter;
+    detail.form = form;
     detail.postChunkReclampApplied = true;
     result.outcome = ReclampOutcome::Applied;
     return result;
@@ -1203,7 +1199,7 @@ static void reclampLoop(Loop *L, Function &F, LoopInfo &LI, ScalarEvolution &SE,
         detail.decision = "reclamped";
         detail.chosenK = reclamp.newK;
         stats.loopsRewritten++;
-        if (detail.isChunking) {
+        if (detail.form == StripMineForm::ChunkCounter) {
             stats.loopsChunked++;
         }
         changed = true;
@@ -1230,11 +1226,11 @@ static void reclampNest(Loop *L, Function &F, LoopInfo &LI, ScalarEvolution &SE,
         reclampNest(SubL, F, LI, SE, params, blockEnergy, state, stats, changed);
 }
 
-static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
-                                        AAResults &AA, checkpoint::EnergyEstimator &estimator,
-                                        const checkpoint::MILPEnergyParams &params,
-                                        DenseMap<const BasicBlock *, double> &blockEnergy,
-                                        LoopStripMiningStats &stats) {
+static bool reclampStripMinedLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE, AAResults &AA,
+                                   checkpoint::EnergyEstimator &estimator,
+                                   const checkpoint::MILPEnergyParams &params,
+                                   DenseMap<const BasicBlock *, double> &blockEnergy,
+                                   LoopStripMiningStats &stats) {
     checkpoint::CFGAnalysis cfg(F, LI, estimator);
     checkpoint::StateAnalysis state(F, AA, cfg);
     if (state.hasAnalysisErrors()) {
@@ -1773,8 +1769,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     auto &AA = AM.getResult<AAManager>(F);
     LoopStripMiningStats stats;
     if (reclampOnly_) {
-        bool changed = reclampExistingChunkedLoops(F, LI, SE, AA, *estimator, *milpParamsOpt,
-                                                   blockEnergy, stats);
+        bool changed =
+            reclampStripMinedLoops(F, LI, SE, AA, *estimator, *milpParamsOpt, blockEnergy, stats);
         if (changed) {
             abortOnBrokenIR(F);
         }
@@ -1832,8 +1828,9 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         stats.loopsEligible++;
         detail.rewriteAttempted = true;
 
-        bool rewritten = item.plan.isChunking ? stripMineByChunkCounter(item.plan, LI, SE, DT)
-                                              : stripMineByExitRewrite(item.plan, LI, SE, DT);
+        bool rewritten = item.plan.form == StripMineForm::ChunkCounter
+                             ? stripMineByChunkCounter(item.plan, LI, SE, DT)
+                             : stripMineByExitRewrite(item.plan, LI, SE, DT);
         if (!rewritten) {
             stats.skippedReasons["rewrite-utility-failed"]++;
             detail.rewriteFailureReason = "rewrite-utility-failed";
@@ -1881,13 +1878,14 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
 
         changed = true;
         stats.loopsRewritten++;
-        if (item.plan.isChunking)
+        if (item.plan.form == StripMineForm::ChunkCounter)
             stats.loopsChunked++;
         detail.chosenKValid = true;
         detail.chosenK = item.plan.K;
         detail.rewriteSucceeded = true;
         stats.chosenKByHeader.emplace_back(headerName, item.plan.K);
-        PLOGD << "LoopStripMiningPass: " << (item.plan.isChunking ? "chunked " : "rewritten ")
+        PLOGD << "LoopStripMiningPass: "
+              << (item.plan.form == StripMineForm::ChunkCounter ? "chunked " : "rewritten ")
               << F.getName() << "::" << headerName << " N=" << item.plan.N << " K=" << item.plan.K
               << " E_iter_wc=" << item.plan.iterEnergy;
     }
