@@ -1249,6 +1249,24 @@ static bool updateStripMinedLoopK(Loop *L, uint64_t currentK, uint64_t newK) {
     return updateChunkLoopBound(L, newK) || updateExitRewriteLoopBound(L, currentK, newK);
 }
 
+// AbstractCFG takes min(scev, marker) as the outer trip count, so a marker left
+// at ceil(N/currentK) understates the loop and lets the whole nest summarize.
+// The marker is an upper bound, so scaling by the K ratio is sound without
+// recovering N.
+static void rescaleOuterTripCount(Loop *L, uint64_t currentK, uint64_t newK) {
+    Loop *Parent = L->getParentLoop();
+    if (!Parent) {
+        return;
+    }
+
+    auto outerTripCount = getMarkerTripCount(Parent);
+    if (!outerTripCount) {
+        return;
+    }
+
+    setLoopTripCountMetadata(Parent, (*outerTripCount * currentK + newK - 1) / newK);
+}
+
 static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
                                         AAResults &AA, checkpoint::EnergyEstimator &estimator,
                                         const checkpoint::MILPEnergyParams &params,
@@ -1312,6 +1330,7 @@ static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvoluti
                                   << " current-K=" << *currentK << " new-K=" << newK;
                         } else {
                             setLoopTripCountMetadata(L, newK);
+                            rescaleOuterTripCount(L, *currentK, newK);
                             SE.forgetLoop(L);
                             detail.decision = "reclamped";
                             detail.postChunkReclampApplied = true;
@@ -2003,6 +2022,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
                           << " new-K=" << newK;
                 } else {
                     setLoopTripCountMetadata(L, newK);
+                    rescaleOuterTripCount(L, item.plan.K, newK);
                     SE.forgetLoop(L);
                     detail.postChunkReclampApplied = true;
                     PLOGD << "LoopStripMiningPass: chunk K re-clamped " << F.getName()
