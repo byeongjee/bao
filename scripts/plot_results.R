@@ -13,10 +13,9 @@
 #
 # Options:
 #   --result-dir DIR    Result directory (default: results/)
-#   --absolute          Plot raw values instead of normalized ones
-#   --normalize         Accepted for backwards compatibility; normalization is
-#                       the default (w.r.t. the config's "normalize_ref" baseline
-#                       if available, else the first algorithm)
+#   --absolute          Plot raw values instead of values normalized w.r.t. the
+#                       config's "normalize_ref" baseline (or, if there is none,
+#                       the first algorithm)
 #   --all-metrics       Plot every metric, not just the two default ones
 #   --output-dir DIR    Save plots to directory instead of showing
 #   --benchmarks B,...  Comma-separated benchmark filter (default: all)
@@ -69,7 +68,7 @@ PDF_DEVICE <- "pdf"
 #   baselines   capacitor-independent references (e.g. uninstrumented builds),
 #               replicated across benchmarks. "csv" is required. Optional
 #               "metrics" restricts the baseline to specific metric keys, and
-#               "normalize_ref" marks the series --normalize divides by.
+#               "normalize_ref" marks the series normalization divides by.
 #
 # Entry order defines bar and legend order; algorithms come before baselines.
 
@@ -983,9 +982,6 @@ main <- function() {
   while (i <= length(args)) {
     if (args[i] == "--result-dir" && i < length(args)) {
       result_dir <- args[i + 1]; i <- i + 2
-    } else if (args[i] == "--normalize") {
-      # Normalization is the default; kept so existing invocations still work.
-      normalize <- TRUE; i <- i + 1
     } else if (args[i] == "--absolute") {
       normalize <- FALSE; i <- i + 1
     } else if (args[i] == "--all-metrics") {
