@@ -5,6 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from ckpt.bench.all import (
+    ALL_ALGORITHMS,
+    DEFAULT_ALGORITHMS,
+    StepOutcome,
+    all_ok,
+    plan_steps,
+)
 from ckpt.bench.runner import CompileResult, nvm_counter
 from ckpt.output_parser import NvmCounters
 from ckpt.runner import StepResult
@@ -84,3 +91,46 @@ class TestCompileResult:
             profiling_time_ms=0,
         )
         assert cr.stats_json == p
+
+
+# ---------------------------------------------------------------------------
+# bench all step planning
+# ---------------------------------------------------------------------------
+
+
+class TestPlanSteps:
+    def test_debug_variant_algorithm_runs_twice(self):
+        steps = plan_steps(["milp"])
+        assert [(s.csv_name, s.device_debug) for s in steps] == [
+            ("milp_debug.csv", True),
+            ("milp.csv", False),
+        ]
+
+    def test_single_run_algorithm_runs_once(self):
+        steps = plan_steps(["uninstrumented"])
+        assert [(s.csv_name, s.device_debug) for s in steps] == [
+            ("uninstrumented.csv", False)
+        ]
+
+    def test_default_matrix_order(self):
+        steps = plan_steps(list(DEFAULT_ALGORITHMS))
+        assert len(steps) == 9
+        assert steps[0].algorithm == "milp"
+        assert steps[-1].csv_name == "uninstrumented.csv"
+
+    def test_every_csv_name_is_unique(self):
+        names = [s.csv_name for s in plan_steps(list(ALL_ALGORITHMS))]
+        assert len(names) == len(set(names))
+
+
+class TestAllOk:
+    def test_failed_step_is_not_ok(self):
+        outcomes = [
+            StepOutcome("milp", Path("milp.csv"), "ok", ""),
+            StepOutcome("chunked", Path("chunked.csv"), "failed", "boom"),
+        ]
+        assert not all_ok(outcomes)
+
+    def test_skipped_step_is_ok(self):
+        outcomes = [StepOutcome("milp", Path("milp.csv"), "skipped", "")]
+        assert all_ok(outcomes)

@@ -122,6 +122,8 @@ ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimato
 ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--timeout SECONDS] [--accumulate-keys FILE] [--csv CSV]
 ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--trace-config] [--timeout SECONDS] [--accumulate-keys FILE] [--csv CSV]
 ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [--timeout SECONDS] [--csv CSV]
+# bench all runs the whole matrix (each algorithm with and without device-debug) and plots.
+ckpt bench all             [BENCHMARKS...] [-d RESULT_DIR] [--algorithms A,...] [--cap 1uF] [--skip-existing] [--no-plot]
 
 # Semantic verification defaults to --halt-mode bor, which destroys modeled volatile state
 # before checkpoint recovery. Compile and bench default to swbor for continuous-power measurement.
@@ -190,17 +192,26 @@ scripts/ckpt/
     └── plot.py          # Plot benchmark CSV results (requires `uv sync --extra plot`)
 ```
 
+### Full Matrix + Plots
+
+```bash
+# Run every algorithm with and without device-debug, then plot
+uv run ckpt bench all [BENCHMARKS...] [-d RESULT_DIR] [--algorithms A,...] [--cap 5,10,50]
+                      [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS]
+                      [--skip-existing] [--no-plot] [--plot-config FILE]
+```
+
+`bench all` runs `milp`, `schematic`, `rockclimb`, `schematicO3` twice each (with and without `--device-debug`) plus `uninstrumented`, writing `<algo>_debug.csv` / `<algo>.csv` into `RESULT_DIR` (default `result/<timestamp>`), then renders plots into `RESULT_DIR/plots/` so raw data and figures stay together. `--algorithms` trims the list or adds `uninstrumentedO0` / `chunked`. A failing step is logged and skipped rather than aborting the run; the command prints a per-step summary and exits non-zero if anything failed. `--skip-existing` resumes an interrupted run against the same `-d` directory.
+
 ### Standalone Scripts
 
 ```bash
-# Re-run all benchmarks (with/without device-debug + uninstrumented)
-uv run python scripts/run_benchmarks.py [BENCHMARKS...]   # e.g., test aes crc rsa
-
-# Visualize results from result/ directory
-Rscript scripts/plot_results.R [--output-dir DIR] [--normalize] [--benchmarks B,...] [--metrics M,...] [--log-scale] [--config FILE]
+# Visualize results from a result directory
+Rscript scripts/plot_results.R [--result-dir DIR] [--output-dir DIR] [--absolute] [--all-metrics]
+                               [--benchmarks B,...] [--metrics M,...] [--log-scale] [--config FILE]
 ```
 
-`scripts/run_benchmarks.py` runs each algorithm with and without `--device-debug`, plus uninstrumented, saving CSVs to `result/`. `scripts/plot_results.R` reads those CSVs and produces per-capacitor bar charts for 5 metrics: `region_boundaries`, `runtime_region_boundary_calls`, `execution_time`, `profiling_time`, `compilation_time`. Runtime region boundary data comes from `*-swbor.csv` (device-debug); timing data from `*-swbor-no-debug.csv`. `--normalize` normalizes to the baseline marked `normalize_ref` in the config (falling back to the first algorithm). Which CSVs are read, and their labels/colors/patterns, come from a JSON config — no filename is hardcoded in the R script. `scripts/plot_config.json` is the default; `scripts/plot_config_o0.json` additionally plots `uninstrumentedO0.csv` as a second execution-time baseline (`--config scripts/plot_config_o0.json`). Each config lists `algorithms` (per-capacitor series; CSV names default to `<algo>.csv` / `<algo>_debug.csv`, overridable with `csv` / `debug_csv`) and `baselines` (capacitor-independent series; `csv` required, optional `metrics` restricts which metrics they appear in).
+`scripts/plot_results.R` reads the benchmark CSVs and produces per-capacitor bar charts. By default it plots the two headline metrics — `execution_time` and `runtime_region_boundary_calls` — normalized against the baseline marked `normalize_ref` in the config (falling back to the first algorithm). `--all-metrics` adds `region_boundaries`, `profiling_time`, and `compilation_time`; `--absolute` turns normalization off; `--normalize` is still accepted as a no-op. Runtime region boundary data comes from the device-debug CSVs, timing data from the non-debug ones. Which CSVs are read, and their labels/colors/patterns, come from a JSON config — no filename is hardcoded in the R script. `scripts/plot_config.json` is the default; `scripts/plot_config_o0.json` additionally plots `uninstrumentedO0.csv` as a second execution-time baseline (`--config scripts/plot_config_o0.json`). Each config lists `algorithms` (per-capacitor series; CSV names default to `<algo>.csv` / `<algo>_debug.csv`, overridable with `csv` / `debug_csv`) and `baselines` (capacitor-independent series; `csv` required, optional `metrics` restricts which metrics they appear in).
 
 ## Architecture
 

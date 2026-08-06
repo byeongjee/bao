@@ -7,6 +7,7 @@ analysis, and device interaction.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import click
@@ -1263,6 +1264,107 @@ def bench_chunked_cmd(
         opt_level=3,
         pass_log_level=ctx.obj["pass_log_level"],
     )
+
+
+def _algorithms_callback(
+    ctx: click.Context, param: click.Parameter, value: str
+) -> list[str]:
+    """Parse and validate the comma-separated --algorithms list."""
+    from .bench.all import ALL_ALGORITHMS
+
+    algorithms = [name.strip() for name in value.split(",") if name.strip()]
+    unknown = [name for name in algorithms if name not in ALL_ALGORITHMS]
+    if unknown:
+        raise click.BadParameter(
+            f"unknown algorithm(s): {', '.join(unknown)}. "
+            f"Choose from: {', '.join(ALL_ALGORITHMS)}"
+        )
+    if not algorithms:
+        raise click.BadParameter("at least one algorithm is required")
+    return algorithms
+
+
+def _default_result_dir() -> str:
+    return str(Path("result") / time.strftime("%Y%m%d-%H%M%S"))
+
+
+@bench.command("all")
+@click.argument("benchmarks", nargs=-1)
+@_cap_multi_option
+@click.option(
+    "-d",
+    "--result-dir",
+    type=click.Path(),
+    default=None,
+    help="Directory for raw CSVs and plots/ (default: result/<timestamp>).",
+)
+@click.option(
+    "--algorithms",
+    callback=_algorithms_callback,
+    default="milp,schematic,rockclimb,schematicO3,uninstrumented",
+    show_default=True,
+    help="Comma-separated steps to run; also accepts uninstrumentedO0 and chunked.",
+)
+@_bench_halt_mode_option
+@_estimator_mode_option
+@_energy_override_option
+@_cpu_freq_option("16")
+@click.option(
+    "--skip-existing",
+    is_flag=True,
+    help="Skip steps whose CSV already exists (resume an interrupted run).",
+)
+@click.option(
+    "--plot/--no-plot", default=True, help="Plot after benchmarking (default: on)."
+)
+@click.option(
+    "--plot-config",
+    type=click.Path(exists=True),
+    help="Plot config for plot_results.R (default: scripts/plot_config.json).",
+)
+@_saleae_timeout_option
+@click.pass_context
+def bench_all_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    cap: tuple[str, ...],
+    result_dir: str | None,
+    algorithms: list[str],
+    halt_mode: str,
+    estimator_mode: str,
+    energy_config: str | None,
+    cpu_freq: str,
+    skip_existing: bool,
+    plot: bool,
+    plot_config: str | None,
+    timeout: float,
+) -> None:
+    """Run every algorithm with and without device-debug, then plot."""
+    from .bench.all import all_ok, format_summary, run_bench_all
+
+    out_dir = Path(result_dir) if result_dir else Path(_default_result_dir())
+
+    outcomes = run_bench_all(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap),
+        result_dir=out_dir,
+        algorithms=algorithms,
+        halt_mode=halt_mode,
+        estimator_mode=estimator_mode,
+        energy_config=_path_or_none(energy_config),
+        cpu_freq=_mhz_to_hz(cpu_freq),
+        capture_timeout_seconds=timeout,
+        pass_log_level=ctx.obj["pass_log_level"],
+        skip_existing=skip_existing,
+        plot=plot,
+        plot_config=_path_or_none(plot_config),
+    )
+
+    click.echo(format_summary(outcomes, out_dir))
+    if not all_ok(outcomes):
+        raise SystemExit(1)
 
 
 # =========================================================================
