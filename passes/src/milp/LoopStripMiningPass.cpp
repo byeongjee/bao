@@ -1845,6 +1845,14 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
     return true;
 }
 
+static void abortOnBrokenIR(Function &F) {
+    if (verifyFunction(F, &errs())) {
+        report_fatal_error(Twine("LoopStripMiningPass: verifier reported errors in ") +
+                               F.getName() + "; aborting instead of passing broken IR downstream",
+                           /*gen_crash_diag=*/false);
+    }
+}
+
 static void printSummary(const Function &F, const LoopStripMiningStats &stats) {
     PLOGI << "=== Loop Strip-Mining: " << F.getName() << " ===";
     PLOGI << "  Loops considered:                " << stats.loopsSeen;
@@ -1941,6 +1949,9 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
     if (reclampOnly_) {
         bool changed = reclampExistingChunkedLoops(F, LI, SE, AA, *estimator, *milpParamsOpt,
                                                    blockEnergy, stats);
+        if (changed) {
+            abortOnBrokenIR(F);
+        }
         writeLoopStripMiningStatsJSON(F, stats);
         return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
     }
@@ -2069,10 +2080,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
               << " E_iter_wc=" << item.plan.iterEnergy;
     }
 
-    if (changed && verifyFunction(F, &errs())) {
-        report_fatal_error(Twine("LoopStripMiningPass: verifier reported errors in ") +
-                               F.getName() + "; aborting instead of passing broken IR downstream",
-                           /*gen_crash_diag=*/false);
+    if (changed) {
+        abortOnBrokenIR(F);
     }
 
     printSummary(F, stats);
