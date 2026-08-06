@@ -65,112 +65,24 @@ FORCE_INLINE uint32_t pack4(const uint8_t *a) {
 
 FORCE_INLINE void ChaCha20_block_next(const uint32_t in[16], uint32_t out[16],
                                       uint8_t **keystream) {
-    int i;
+    int i, r;
     for (i = 0; i < 16; i++) {
         __loop_tripcount(16);
         out[i] = in[i];
     }
 
-    /* 10 rounds (unrolled, no loop) */
-    /* Round 1/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 2/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 3/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 4/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 5/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 6/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 7/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 8/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 9/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
-
-    /* Round 10/10 */
-    CHACHA20_QR(out[0], out[4], out[8], out[12]);
-    CHACHA20_QR(out[1], out[5], out[9], out[13]);
-    CHACHA20_QR(out[2], out[6], out[10], out[14]);
-    CHACHA20_QR(out[3], out[7], out[11], out[15]);
-    CHACHA20_QR(out[0], out[5], out[10], out[15]);
-    CHACHA20_QR(out[1], out[6], out[11], out[12]);
-    CHACHA20_QR(out[2], out[7], out[8], out[13]);
-    CHACHA20_QR(out[3], out[4], out[9], out[14]);
+    /* Kept rolled: unrolled, the block exceeds the 5uF checkpoint region budget. */
+    for (r = 0; r < 10; r++) {
+        __loop_tripcount(10);
+        CHACHA20_QR(out[0], out[4], out[8], out[12]);
+        CHACHA20_QR(out[1], out[5], out[9], out[13]);
+        CHACHA20_QR(out[2], out[6], out[10], out[14]);
+        CHACHA20_QR(out[3], out[7], out[11], out[15]);
+        CHACHA20_QR(out[0], out[5], out[10], out[15]);
+        CHACHA20_QR(out[1], out[6], out[11], out[12]);
+        CHACHA20_QR(out[2], out[7], out[8], out[13]);
+        CHACHA20_QR(out[3], out[4], out[9], out[14]);
+    }
 
     /* Add back input */
     for (i = 0; i < 16; i++) {
