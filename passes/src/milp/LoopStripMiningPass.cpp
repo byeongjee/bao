@@ -687,6 +687,13 @@ static bool supportsExitRewriteForm(Loop *L, uint64_t N) {
         return false;
     }
 
+    // The rewrite forwards loop-carried values out of either the header or the
+    // latch; any other exiting block leaves those definitions not dominating the
+    // forwarding PHI, which the verifier rejects.
+    if (ExitingBB != Header && ExitingBB != Latch) {
+        return false;
+    }
+
     PHINode *IV = L->getCanonicalInductionVariable();
     if (!IV) {
         return false;
