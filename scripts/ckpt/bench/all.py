@@ -44,6 +44,11 @@ class BenchAllOptions:
     estimator_mode: str
     energy_config: Path | None
     cpu_freq: int
+    coarse_allocation: bool
+    milp_gap: float
+    max_unroll: int
+    force_checkpoint_on_incompatible_loops: bool
+    recompute_energy_after_new_checkpoint: bool
     capture_timeout_seconds: float
     pass_log_level: str
 
@@ -63,7 +68,7 @@ class StepOutcome:
     """What happened to a single step."""
 
     label: str
-    csv_path: Path
+    output: Path  # CSV for a benchmark step, plots directory for the plot step
     status: str
     detail: str
 
@@ -129,8 +134,8 @@ def _run_step(
             estimator_mode=opts.estimator_mode,
             energy_config=opts.energy_config,
             cpu_freq=opts.cpu_freq,
-            coarse_allocation=False,
-            milp_gap=0.0,
+            coarse_allocation=opts.coarse_allocation,
+            milp_gap=opts.milp_gap,
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
         )
@@ -148,11 +153,12 @@ def _run_step(
             halt_mode=opts.halt_mode,
             energy_config=opts.energy_config,
             cpu_freq=opts.cpu_freq,
-            max_unroll=4,
+            max_unroll=opts.max_unroll,
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
         )
     elif step.algorithm in ("schematic", "schematicO3"):
+        from ..compile.schematic import CLANG_OPT_LEVEL_BY_LABEL
         from .schematic import run_schematic_benchmarks
 
         run_schematic_benchmarks(
@@ -168,16 +174,22 @@ def _run_step(
             trace_config=None,
             estimator_mode=opts.estimator_mode,
             cpu_freq=opts.cpu_freq,
-            clang_opt_level=3 if step.algorithm == "schematicO3" else 0,
+            clang_opt_level=CLANG_OPT_LEVEL_BY_LABEL[step.algorithm],
             pass_log_level=opts.pass_log_level,
             algorithm_label=step.algorithm,
             accumulate_keys_file=None,
-            force_checkpoint_on_incompatible_loops=False,
-            recompute_energy_after_new_checkpoint=False,
+            force_checkpoint_on_incompatible_loops=(
+                opts.force_checkpoint_on_incompatible_loops
+            ),
+            recompute_energy_after_new_checkpoint=(
+                opts.recompute_energy_after_new_checkpoint
+            ),
         )
     elif step.algorithm in ("uninstrumented", "uninstrumentedO0"):
+        from ..compile.uninstrumented import OPT_LEVELS_BY_LABEL
         from .uninstrumented import run_uninstrumented_benchmarks
 
+        clang_opt_level, opt_level = OPT_LEVELS_BY_LABEL[step.algorithm]
         run_uninstrumented_benchmarks(
             env,
             tc,
@@ -186,12 +198,14 @@ def _run_step(
             capture_timeout_seconds=opts.capture_timeout_seconds,
             cpu_freq=opts.cpu_freq,
             algorithm_label=step.algorithm,
-            clang_opt_level=0 if step.algorithm == "uninstrumentedO0" else 3,
-            opt_level=3,
+            clang_opt_level=clang_opt_level,
+            opt_level=opt_level,
         )
     elif step.algorithm == "chunked":
+        from ..compile.chunked import OPT_LEVELS
         from .chunked import run_chunked_benchmarks
 
+        clang_opt_level, opt_level = OPT_LEVELS
         run_chunked_benchmarks(
             env,
             tc,
@@ -202,8 +216,8 @@ def _run_step(
             capture_timeout_seconds=opts.capture_timeout_seconds,
             cpu_freq=opts.cpu_freq,
             pass_log_level=opts.pass_log_level,
-            clang_opt_level=3,
-            opt_level=3,
+            clang_opt_level=clang_opt_level,
+            opt_level=opt_level,
         )
     else:
         raise CkptError(f"Unknown benchmark algorithm: {step.algorithm}")
@@ -217,10 +231,11 @@ def run_plot(
     script = env.project_dir / "scripts" / "plot_results.R"
     rscript = shutil.which("Rscript")
     if rscript is None:
+        logger.warning("Rscript not found on PATH; skipping plots")
         return StepOutcome(
             label="plot",
-            csv_path=plots_dir,
-            status=STATUS_FAILED,
+            output=plots_dir,
+            status=STATUS_SKIPPED,
             detail="Rscript not found on PATH",
         )
 
@@ -240,11 +255,11 @@ def run_plot(
     if completed.returncode != 0:
         return StepOutcome(
             label="plot",
-            csv_path=plots_dir,
+            output=plots_dir,
             status=STATUS_FAILED,
             detail=f"plot_results.R exited with {completed.returncode}",
         )
-    return StepOutcome(label="plot", csv_path=plots_dir, status=STATUS_OK, detail="")
+    return StepOutcome(label="plot", output=plots_dir, status=STATUS_OK, detail="")
 
 
 def run_bench_all(
@@ -259,6 +274,11 @@ def run_bench_all(
     estimator_mode: str,
     energy_config: Path | None,
     cpu_freq: int,
+    coarse_allocation: bool,
+    milp_gap: float,
+    max_unroll: int,
+    force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
     capture_timeout_seconds: float,
     pass_log_level: str,
     skip_existing: bool,
@@ -267,8 +287,9 @@ def run_bench_all(
 ) -> list[StepOutcome]:
     """Run every step sequentially, then plot; returns one outcome per step.
 
-    A failing step is logged and does not abort the run: later steps and
-    the plotting stage still execute over whatever completed.
+    A step that fails with a toolchain, subprocess or OS error is logged and
+    recorded as failed: later steps and the plotting stage still run over
+    whatever completed. Any other exception aborts the whole matrix.
     """
     result_dir.mkdir(parents=True, exist_ok=True)
     opts = BenchAllOptions(
@@ -278,6 +299,11 @@ def run_bench_all(
         estimator_mode=estimator_mode,
         energy_config=energy_config,
         cpu_freq=cpu_freq,
+        coarse_allocation=coarse_allocation,
+        milp_gap=milp_gap,
+        max_unroll=max_unroll,
+        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
         capture_timeout_seconds=capture_timeout_seconds,
         pass_log_level=pass_log_level,
     )
@@ -323,7 +349,7 @@ def format_summary(outcomes: list[StepOutcome], result_dir: Path) -> str:
     for outcome in outcomes:
         lines.append(
             f"{outcome.label:<{label_width}}  {outcome.status:<{status_width}}  "
-            f"{outcome.csv_path}"
+            f"{outcome.output}"
         )
 
     failures = [o for o in outcomes if o.status == STATUS_FAILED]

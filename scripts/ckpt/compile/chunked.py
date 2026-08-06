@@ -26,6 +26,9 @@ from .common import (
     write_assembly_energy_config,
 )
 
+# (clang -O level, llc -O level) the chunked baseline is benchmarked at.
+OPT_LEVELS = (3, 3)
+
 
 @dataclass
 class ChunkedCompileOptions:

@@ -13,6 +13,7 @@ from pathlib import Path
 import click
 
 from .analysis.plot import ALGORITHMS, METRICS
+from .bench.all import ALL_ALGORITHMS, DEFAULT_ALGORITHMS
 from .errors import (
     CkptError,
     CompilationError,
@@ -1095,7 +1096,6 @@ def _bench_schematic_impl(
     ctx: click.Context,
     *,
     algorithm_label: str,
-    clang_opt_level: int,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
     device_debug: bool,
@@ -1111,6 +1111,7 @@ def _bench_schematic_impl(
     timeout: float,
 ) -> None:
     from .bench.schematic import run_schematic_benchmarks
+    from .compile.schematic import CLANG_OPT_LEVEL_BY_LABEL
 
     run_schematic_benchmarks(
         ctx.obj["env"],
@@ -1125,7 +1126,7 @@ def _bench_schematic_impl(
         trace_config=_path_or_none(trace_config),
         estimator_mode=estimator_mode,
         cpu_freq=_mhz_to_hz(cpu_freq),
-        clang_opt_level=clang_opt_level,
+        clang_opt_level=CLANG_OPT_LEVEL_BY_LABEL[algorithm_label],
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label=algorithm_label,
         accumulate_keys_file=_path_or_none(accumulate_keys),
@@ -1140,7 +1141,7 @@ def _bench_schematic_impl(
 @click.pass_context
 def bench_schematic_cmd(ctx: click.Context, **kwargs) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
-    _bench_schematic_impl(ctx, algorithm_label="schematic", clang_opt_level=0, **kwargs)
+    _bench_schematic_impl(ctx, algorithm_label="schematic", **kwargs)
 
 
 @bench.command("schematicO3")
@@ -1149,9 +1150,7 @@ def bench_schematic_cmd(ctx: click.Context, **kwargs) -> None:
 @click.pass_context
 def bench_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
     """Run SCHEMATIC-O3 benchmarks across programs and capacitor sizes."""
-    _bench_schematic_impl(
-        ctx, algorithm_label="schematicO3", clang_opt_level=3, **kwargs
-    )
+    _bench_schematic_impl(ctx, algorithm_label="schematicO3", **kwargs)
 
 
 @bench.command("uninstrumented")
@@ -1169,14 +1168,7 @@ def bench_uninstrumented_cmd(
 ) -> None:
     """Run uninstrumented baselines and measure execution time."""
     _bench_uninstrumented_impl(
-        ctx,
-        benchmarks,
-        output,
-        cpu_freq,
-        timeout,
-        algorithm_label="uninstrumented",
-        clang_opt_level=3,
-        opt_level=3,
+        ctx, benchmarks, output, cpu_freq, timeout, algorithm_label="uninstrumented"
     )
 
 
@@ -1187,11 +1179,11 @@ def _bench_uninstrumented_impl(
     cpu_freq: str,
     timeout: float,
     algorithm_label: str,
-    clang_opt_level: int,
-    opt_level: int,
 ) -> None:
     from .bench.uninstrumented import run_uninstrumented_benchmarks
+    from .compile.uninstrumented import OPT_LEVELS_BY_LABEL
 
+    clang_opt_level, opt_level = OPT_LEVELS_BY_LABEL[algorithm_label]
     run_uninstrumented_benchmarks(
         ctx.obj["env"],
         ctx.obj["tc"],
@@ -1220,14 +1212,7 @@ def bench_uninstrumented_o0_cmd(
 ) -> None:
     """Run uninstrumented baselines with O0 frontend IR and O3 backend."""
     _bench_uninstrumented_impl(
-        ctx,
-        benchmarks,
-        output,
-        cpu_freq,
-        timeout,
-        algorithm_label="uninstrumentedO0",
-        clang_opt_level=0,
-        opt_level=3,
+        ctx, benchmarks, output, cpu_freq, timeout, algorithm_label="uninstrumentedO0"
     )
 
 
@@ -1250,7 +1235,9 @@ def bench_chunked_cmd(
 ) -> None:
     """Run chunking-only baselines across programs and capacitor sizes."""
     from .bench.chunked import run_chunked_benchmarks
+    from .compile.chunked import OPT_LEVELS
 
+    clang_opt_level, opt_level = OPT_LEVELS
     run_chunked_benchmarks(
         ctx.obj["env"],
         ctx.obj["tc"],
@@ -1260,8 +1247,8 @@ def bench_chunked_cmd(
         energy_config=_path_or_none(energy_config),
         capture_timeout_seconds=timeout,
         cpu_freq=_mhz_to_hz(cpu_freq),
-        clang_opt_level=3,
-        opt_level=3,
+        clang_opt_level=clang_opt_level,
+        opt_level=opt_level,
         pass_log_level=ctx.obj["pass_log_level"],
     )
 
@@ -1270,8 +1257,6 @@ def _algorithms_callback(
     ctx: click.Context, param: click.Parameter, value: str
 ) -> list[str]:
     """Parse and validate the comma-separated --algorithms list."""
-    from .bench.all import ALL_ALGORITHMS
-
     algorithms = [name.strip() for name in value.split(",") if name.strip()]
     unknown = [name for name in algorithms if name not in ALL_ALGORITHMS]
     if unknown:
@@ -1301,7 +1286,7 @@ def _default_result_dir() -> str:
 @click.option(
     "--algorithms",
     callback=_algorithms_callback,
-    default="milp,schematic,rockclimb,schematicO3,uninstrumented",
+    default=",".join(DEFAULT_ALGORITHMS),
     show_default=True,
     help="Comma-separated steps to run; also accepts uninstrumentedO0 and chunked.",
 )
@@ -1309,6 +1294,10 @@ def _default_result_dir() -> str:
 @_estimator_mode_option
 @_energy_override_option
 @_cpu_freq_option("16")
+@_coarse_allocation_flag
+@_milp_gap_option
+@_max_unroll_option
+@_schematic_tuning_options
 @click.option(
     "--skip-existing",
     is_flag=True,
@@ -1334,6 +1323,11 @@ def bench_all_cmd(
     estimator_mode: str,
     energy_config: str | None,
     cpu_freq: str,
+    coarse_allocation: bool,
+    milp_gap: float,
+    max_unroll: int,
+    force_checkpoint_on_incompatible_loops: bool,
+    recompute_energy_after_new_checkpoint: bool,
     skip_existing: bool,
     plot: bool,
     plot_config: str | None,
@@ -1355,6 +1349,11 @@ def bench_all_cmd(
         estimator_mode=estimator_mode,
         energy_config=_path_or_none(energy_config),
         cpu_freq=_mhz_to_hz(cpu_freq),
+        coarse_allocation=coarse_allocation,
+        milp_gap=milp_gap,
+        max_unroll=max_unroll,
+        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
+        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
         capture_timeout_seconds=timeout,
         pass_log_level=ctx.obj["pass_log_level"],
         skip_existing=skip_existing,
