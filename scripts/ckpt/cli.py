@@ -192,18 +192,6 @@ _verify_halt_mode_option = click.option(
     help="Halt mode for linked binary (default: bor).",
 )
 _energy_override_option = _energy_config_option("Override default energy config.")
-_schematic_tuning_options = _add_options(
-    click.option(
-        "--force-checkpoint-on-incompatible-loops",
-        is_flag=True,
-        help="Force checkpoint at loop header when inner loop allocations conflict.",
-    ),
-    click.option(
-        "--recompute-energy-after-new-checkpoint",
-        is_flag=True,
-        help="Recompute local E_left/E_to_leave after inserting a new checkpoint (disabled by default; deviates from the reference implementation).",
-    ),
-)
 
 
 def _mhz_to_hz(cpu_freq: str) -> int:
@@ -662,8 +650,6 @@ def _compile_schematic_impl(
     cpu_freq: str,
     save_temps: bool,
     accumulate_keys: str | None,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
     csv_path: str | None,
 ) -> None:
     from .bench.config import default_energy_config
@@ -719,8 +705,6 @@ def _compile_schematic_impl(
             trace_file=_path_or_none(trace_file),
             save_temps=save_temps,
             linker_script=None,
-            force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-            recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
         ),
     )
 
@@ -780,7 +764,6 @@ def _compile_schematic_options(clang_opt_default: int):
         _cpu_freq_option("16"),
         _save_temps_flag,
         _accumulate_keys_option,
-        _schematic_tuning_options,
         _compile_csv_option,
     )
 
@@ -1087,7 +1070,6 @@ _bench_schematic_options = _add_options(
     _estimator_mode_option,
     _cpu_freq_option("16"),
     _accumulate_keys_option,
-    _schematic_tuning_options,
     _saleae_timeout_option,
 )
 
@@ -1106,8 +1088,6 @@ def _bench_schematic_impl(
     estimator_mode: str,
     cpu_freq: str,
     accumulate_keys: str | None,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
     timeout: float,
 ) -> None:
     from .bench.schematic import run_schematic_benchmarks
@@ -1130,8 +1110,6 @@ def _bench_schematic_impl(
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label=algorithm_label,
         accumulate_keys_file=_path_or_none(accumulate_keys),
-        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
 
 
@@ -1297,7 +1275,6 @@ def _default_result_dir() -> str:
 @_coarse_allocation_flag
 @_milp_gap_option
 @_max_unroll_option
-@_schematic_tuning_options
 @click.option(
     "--skip-existing",
     is_flag=True,
@@ -1326,8 +1303,6 @@ def bench_all_cmd(
     coarse_allocation: bool,
     milp_gap: float,
     max_unroll: int,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
     skip_existing: bool,
     plot: bool,
     plot_config: str | None,
@@ -1352,8 +1327,6 @@ def bench_all_cmd(
         coarse_allocation=coarse_allocation,
         milp_gap=milp_gap,
         max_unroll=max_unroll,
-        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
         capture_timeout_seconds=timeout,
         pass_log_level=ctx.obj["pass_log_level"],
         skip_existing=skip_existing,
@@ -1460,7 +1433,6 @@ _verify_schematic_options = _add_options(
     _verify_halt_mode_option,
     _estimator_mode_option,
     _cpu_freq_option("16"),
-    _schematic_tuning_options,
     _saleae_timeout_option,
 )
 
@@ -1475,8 +1447,6 @@ def _verify_schematic_impl(
     halt_mode: str,
     estimator_mode: str,
     cpu_freq: str,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
     timeout: float,
 ) -> None:
     from .verify.common import all_ok
@@ -1494,8 +1464,6 @@ def _verify_schematic_impl(
         cpu_freq=_mhz_to_hz(cpu_freq),
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label=algorithm_label,
-        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
     if not all_ok(results):
         raise SystemExit(1)

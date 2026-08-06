@@ -47,8 +47,6 @@ class BenchAllOptions:
     coarse_allocation: bool
     milp_gap: float
     max_unroll: int
-    force_checkpoint_on_incompatible_loops: bool
-    recompute_energy_after_new_checkpoint: bool
     capture_timeout_seconds: float
     pass_log_level: str
 
@@ -178,12 +176,6 @@ def _run_step(
             pass_log_level=opts.pass_log_level,
             algorithm_label=step.algorithm,
             accumulate_keys_file=None,
-            force_checkpoint_on_incompatible_loops=(
-                opts.force_checkpoint_on_incompatible_loops
-            ),
-            recompute_energy_after_new_checkpoint=(
-                opts.recompute_energy_after_new_checkpoint
-            ),
         )
     elif step.algorithm in ("uninstrumented", "uninstrumentedO0"):
         from ..compile.uninstrumented import OPT_LEVELS_BY_LABEL
@@ -277,8 +269,6 @@ def run_bench_all(
     coarse_allocation: bool,
     milp_gap: float,
     max_unroll: int,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
     capture_timeout_seconds: float,
     pass_log_level: str,
     skip_existing: bool,
@@ -302,8 +292,6 @@ def run_bench_all(
         coarse_allocation=coarse_allocation,
         milp_gap=milp_gap,
         max_unroll=max_unroll,
-        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
         capture_timeout_seconds=capture_timeout_seconds,
         pass_log_level=pass_log_level,
     )

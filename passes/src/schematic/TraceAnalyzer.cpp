@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <deque>
-#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -310,59 +309,6 @@ bool analyzeTrace(const std::vector<SchematicBlock *> &trace, SchematicSolution 
     auto subTraces = extractNotFixedBBPaths(trace, solution);
 
     for (auto &subPath : subTraces) {
-        // When forceCheckpointOnIncompatibleLoops is enabled, check if the
-        // start and end block allocations are incompatible.  If so, force a
-        // checkpoint at the boundary and truncate the sub-trace so the RCG
-        // does not attempt to merge the incompatible end allocation.
-        // This mirrors the paper's lines 2-3 (back-edge checkpoint on
-        // allocation mismatch) but applies it to inner-loop boundaries.
-        if (params.forceCheckpointOnIncompatibleLoops && subPath.size() >= 3) {
-            auto *startBlock = subPath.front();
-            auto *endBlock = subPath.back();
-            auto sIt = solution.blockAllocation.find(startBlock);
-            auto eIt = solution.blockAllocation.find(endBlock);
-            if (sIt != solution.blockAllocation.end() && sIt->second &&
-                eIt != solution.blockAllocation.end() && eIt->second &&
-                (!mergeAllocations({sIt->second.get(), eIt->second.get()}, state,
-                                   /*checkpointIncreaseAllowed=*/false) ||
-                 !mergeAllocations({eIt->second.get(), sIt->second.get()}, state,
-                                   /*checkpointIncreaseAllowed=*/false))) {
-                // Force checkpoint at the edge entering the end block.
-                CFGEdge forced{subPath[subPath.size() - 2], endBlock};
-                std::string origin =
-                    (loopScope ? "loop" : "function") + std::string("-forced-incompatible[") +
-                    startBlock->displayName() + " -> " + endBlock->displayName() + "]";
-                enableCheckpoint(solution, forced, origin);
-                // Reset E_left for all blocks in the current loop scope
-                // so that later sub-traces use a fresh energy budget
-                // (the forced checkpoint creates a new region boundary,
-                // invalidating energy accounting for downstream blocks).
-                for (auto &[block, meta] : solution.blockMeta) {
-                    if (llvm::BasicBlock *bb = block->getLLVMBlock()) {
-                        if (!loopScope || loopScope->contains(bb))
-                            meta.E_left = std::numeric_limits<double>::max();
-                    }
-                }
-                llvm::errs() << "[SCHEMATIC] Forced checkpoint at " << forced.src->displayName()
-                             << " -> " << forced.dst->displayName()
-                             << " due to incompatible loop allocations\n";
-                subPath.pop_back();
-
-                if (subPath.size() < 3) {
-                    // Only one unfixed block remains — assign start block's
-                    // allocation directly (no RCG needed).
-                    auto startAlloc = sIt->second;
-                    for (unsigned i = 1; i < subPath.size(); ++i) {
-                        solution.blockMeta[subPath[i]].analyzed = true;
-                        solution.blockAllocation[subPath[i]] = startAlloc;
-                        for (const auto &[gv, va] : startAlloc->vars)
-                            solution.decidedPlacements[subPath[i]][gv] = va.placement;
-                    }
-                    continue;
-                }
-            }
-        }
-
         RCGSolver solver(subPath, state, cfg, params, solution.blockMeta, solution.blockAllocation,
                          solution.functionCallBlocks, tracker);
         RCGResult result = solver.solve();

@@ -119,8 +119,6 @@ def _collect_trace(
         cpu_freq=cpu_freq,
         opt_level=3,
         clang_opt_level=clang_opt_level,
-        force_checkpoint_on_incompatible_loops=False,
-        recompute_energy_after_new_checkpoint=False,
         save_temps=False,
         trace_file=None,
         linker_script=None,
@@ -190,8 +188,6 @@ def run_schematic_benchmarks(
     pass_log_level: str,
     algorithm_label: str,
     accumulate_keys_file: Path | None,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -283,10 +279,6 @@ def run_schematic_benchmarks(
                 cpu_freq=cpu_freq,
                 opt_level=3,
                 clang_opt_level=clang_opt_level,
-                force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-                recompute_energy_after_new_checkpoint=(
-                    recompute_energy_after_new_checkpoint
-                ),
                 save_temps=False,
                 trace_file=trace_json,
                 linker_script=None,

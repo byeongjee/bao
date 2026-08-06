@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -150,8 +149,6 @@ def test_schematic_trace_compile_links_math_library(tmp_path, monkeypatch):
         cpu_freq=1,
         opt_level=3,
         clang_opt_level=3,
-        force_checkpoint_on_incompatible_loops=False,
-        recompute_energy_after_new_checkpoint=False,
         save_temps=False,
         trace_file=None,
         linker_script=None,
@@ -172,59 +169,3 @@ def test_schematic_trace_compile_links_math_library(tmp_path, monkeypatch):
     )
     assert "-lm" in compile_cmd
     assert compile_cmd[compile_cmd.index("-lm") + 1] == "-o"
-
-
-def test_schematic_pass_forwards_recompute_flag(tmp_path, monkeypatch):
-    calls: list[tuple[str, list[str], str | None]] = []
-
-    monkeypatch.setattr(schematic, "run", _make_fake_run(calls, None))
-
-    tc = SimpleNamespace(opt="opt")
-    env = SimpleNamespace(pass_lib=Path("/passes/CheckpointPass.so"))
-
-    schematic_config = tmp_path / "schematic.json"
-    schematic_config.write_text("{}")
-
-    opts = SchematicCompileOptions(
-        input_c=tmp_path / "fft.c",
-        energy_config=tmp_path / "energy.json",
-        schematic_config=schematic_config,
-        output=tmp_path / "fft",
-        estimator_mode="assembly",
-        pass_log_level="info",
-        debug=False,
-        trace_only=False,
-        link=False,
-        device_debug=False,
-        halt_mode=None,
-        cpu_freq=1,
-        opt_level=3,
-        clang_opt_level=3,
-        force_checkpoint_on_incompatible_loops=False,
-        recompute_energy_after_new_checkpoint=False,
-        save_temps=False,
-        trace_file=None,
-        linker_script=None,
-    )
-
-    schematic._run_schematic_pass(
-        tc,
-        env,
-        opts,
-        tmp_path,
-        tmp_path / "input.ll",
-        tmp_path / "trace.json",
-        energy_config=tmp_path / "energy.json",
-    )
-    assert "-recompute-energy-after-new-checkpoint" not in calls.pop()[1]
-
-    schematic._run_schematic_pass(
-        tc,
-        env,
-        replace(opts, recompute_energy_after_new_checkpoint=True),
-        tmp_path,
-        tmp_path / "input.ll",
-        tmp_path / "trace.json",
-        energy_config=tmp_path / "energy.json",
-    )
-    assert "-recompute-energy-after-new-checkpoint" in calls.pop()[1]

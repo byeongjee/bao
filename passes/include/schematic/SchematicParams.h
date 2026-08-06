@@ -24,12 +24,6 @@ struct SchematicParams {
     double callCost;                // Per-call overhead charged once at each function's entry
                                     // (reference self.call_cost, schematic.py:62,184-186).
     bool addDebugMarkers = false;   // Emit debug marker calls
-    bool forceCheckpointOnIncompatibleLoops = false; // Force checkpoint at loop header
-                                                     // when inner loop allocation conflicts
-                                                     // with previously fixed allocations
-    bool recomputeEnergyAfterNewCheckpoint = false;  // Recompute local E_left/E_to_leave
-                                                     // around new checkpoints. Disabled by
-                                                     // default to preserve reference behavior.
 };
 
 /// Parse SCHEMATIC parameters from a JSON config file.
