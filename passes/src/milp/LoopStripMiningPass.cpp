@@ -893,10 +893,10 @@ struct ChunkBudgetResult {
     std::string error;
 };
 
-static ChunkBudgetResult
-recomputeChunkKWithOverhead(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                            const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
-                            ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
+static ChunkBudgetResult maxKOnPath(const WorstCasePathResult &path, double perIterNvmPenalty,
+                                    double perIterOverhead,
+                                    const checkpoint::MILPEnergyParams &params,
+                                    const checkpoint::StateAnalysis &state) {
     ChunkBudgetResult out;
 
     double budget = params.capacity - params.E_pro - params.E_epi;
@@ -905,25 +905,17 @@ recomputeChunkKWithOverhead(Loop *L, const DenseMap<const BasicBlock *, double> 
         return out;
     }
 
-    WorstCasePathResult iterEnergy = computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
-    if (!iterEnergy.ok || iterEnergy.energy <= 0.0) {
-        out.error =
-            iterEnergy.error.empty() ? "post-chunk-iter-energy-unavailable" : iterEnergy.error;
-        return out;
-    }
-
-    double perIterNvmPenalty = computeNvmAccessMarginOnPath(iterEnergy.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
     double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-        iterEnergy.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
+        path.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
     double budgetAfterBoundary = budget - boundaryStateMargin;
     if (budgetAfterBoundary <= 0.0) {
         out.error = "nonpositive-effective-budget";
         return out;
     }
 
-    double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty + params.loopStripMiningCost;
+    double perIterTotalEnergy = path.energy + perIterNvmPenalty + perIterOverhead;
     if (perIterTotalEnergy <= 0.0) {
         out.error = "nonpositive-per-iter-total-energy";
         return out;
@@ -938,31 +930,37 @@ recomputeChunkKWithOverhead(Loop *L, const DenseMap<const BasicBlock *, double> 
         return out;
     }
 
-    auto maxK = static_cast<uint64_t>(rawK);
-    if (maxK > std::numeric_limits<unsigned>::max()) {
-        maxK = std::numeric_limits<unsigned>::max();
-    }
-
     out.ok = true;
-    out.maxK = maxK;
-    out.iterEnergy = iterEnergy.energy;
+    out.maxK =
+        std::min<uint64_t>(static_cast<uint64_t>(rawK), std::numeric_limits<unsigned>::max());
+    out.iterEnergy = path.energy;
     return out;
 }
 
 static ChunkBudgetResult
-recomputeChunkKForSummaryBudget(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                                const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
-                                ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
-    ChunkBudgetResult out;
-
-    double budget = params.capacity - params.E_pro - params.E_epi;
-    if (budget <= 0.0) {
-        out.error = "nonpositive-energy-budget";
+maxKWithStripMiningCost(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                        const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+                        ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
+    WorstCasePathResult path = computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
+    if (!path.ok || path.energy <= 0.0) {
+        ChunkBudgetResult out;
+        out.error = path.error.empty() ? "post-chunk-iter-energy-unavailable" : path.error;
         return out;
     }
 
+    double perIterNvmPenalty = computeNvmAccessMarginOnPath(path.blocksOnPath, state, params);
+    return maxKOnPath(path, perIterNvmPenalty, params.loopStripMiningCost, params, state);
+}
+
+/// Mirrors what AbstractCFG will charge when it decides whether to summarize the
+/// loop: only VM-placed objects, and no strip-mining cost.
+static ChunkBudgetResult
+maxKMatchingSummarizer(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                       const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+                       ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
     WorstCasePathResult path = computeWorstCaseSummaryPathResult(L, blockEnergy, LI, SE);
     if (!path.ok || path.energy <= 0.0) {
+        ChunkBudgetResult out;
         out.error = path.error.empty() ? "post-chunk-summary-path-unavailable" : path.error;
         return out;
     }
@@ -975,39 +973,7 @@ recomputeChunkKForSummaryBudget(Loop *L, const DenseMap<const BasicBlock *, doub
         }
     }
 
-    double restoreLiveInMargin = 0.0;
-    double commitDefMargin = 0.0;
-    double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-        path.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
-    double budgetAfterBoundary = budget - boundaryStateMargin;
-    if (budgetAfterBoundary <= 0.0) {
-        out.error = "nonpositive-effective-budget";
-        return out;
-    }
-
-    double perIterTotalEnergy = path.energy + perIterNvmPenalty;
-    if (perIterTotalEnergy <= 0.0) {
-        out.error = "nonpositive-per-iter-total-energy";
-        return out;
-    }
-
-    double strictBudget =
-        std::nextafter(budgetAfterBoundary, -std::numeric_limits<double>::infinity());
-    double rawK = std::floor(strictBudget / perIterTotalEnergy);
-    if (!std::isfinite(rawK) || rawK <= 0.0) {
-        out.error = "post-chunk-k-zero";
-        return out;
-    }
-
-    auto maxK = static_cast<uint64_t>(rawK);
-    if (maxK > std::numeric_limits<unsigned>::max()) {
-        maxK = std::numeric_limits<unsigned>::max();
-    }
-
-    out.ok = true;
-    out.maxK = maxK;
-    out.iterEnergy = path.energy;
-    return out;
+    return maxKOnPath(path, perIterNvmPenalty, 0.0, params, state);
 }
 
 static bool updateChunkLoopBound(Loop *L, uint64_t currentK, uint64_t newK) {
@@ -1170,7 +1136,7 @@ static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvoluti
                 detail.postChunkReclampAttempted = true;
 
                 ChunkBudgetResult reclamp =
-                    recomputeChunkKForSummaryBudget(L, blockEnergy, params, LI, SE, state);
+                    maxKMatchingSummarizer(L, blockEnergy, params, LI, SE, state);
                 if (!reclamp.ok) {
                     stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
                     detail.decision = "kept";
@@ -1840,7 +1806,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         }
         detail.postChunkReclampAttempted = true;
         ChunkBudgetResult reclamp =
-            recomputeChunkKWithOverhead(L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
+            maxKWithStripMiningCost(L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
         if (!reclamp.ok) {
             stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
             detail.postChunkReclampError = reclamp.error;
