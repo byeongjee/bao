@@ -744,7 +744,6 @@ static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double ite
         return;
     }
 
-    // If we can determine trip count and K covers it, skip
     std::optional<uint64_t> knownTC = exactTripCount;
     if (!knownTC)
         knownTC = getMarkerTripCount(L);
@@ -787,7 +786,6 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     result.skipReason = "unknown";
     result.detail = buildInitialLoopDetail(L);
 
-    // ── Common checks (both strip mining and chunking) ──
     if (!L->isLoopSimplifyForm()) {
         result.skipReason = "not-loop-simplify-form";
         return result;
@@ -810,7 +808,6 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         return result;
     }
 
-    // ── Common: compute energy budget and K ──
     double budget = params.capacity - params.E_pro - params.E_epi;
     result.detail.budget = budget;
     if (budget <= 0.0) {
@@ -901,7 +898,6 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         return result;
     }
 
-    // ── Tier 1: strip mining; Tier 2: chunking fallback ──
     std::optional<uint64_t> exactTripCount = computeExactTripCount(L, SE, result);
     if (tryStripMiningPlan(L, K, iterEnergy.energy, exactTripCount, result))
         return result;
@@ -1347,7 +1343,6 @@ selectLoopsToStripMine(LoopInfo &LI, ScalarEvolution &SE,
 
 static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
                                    DominatorTree &DT) {
-    // ── Phase 1: Extract and validate loop components ──
     Loop *L = plan.L;
     uint64_t N = plan.N, K = plan.K;
 
@@ -1371,20 +1366,16 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     LLVMContext &Ctx = F->getContext();
     Type *IVTy = IV->getType();
 
-    // Collect LCSSA PHIs in ExitBlock before any modifications
     SmallVector<PHINode *, 4> lcssaPhis;
     for (PHINode &PN : ExitBlock->phis())
         lcssaPhis.push_back(&PN);
 
-    // ── Phase 3: Create outer loop blocks ──
     BasicBlock *OuterHeader = BasicBlock::Create(Ctx, "outer.header", F, Header);
     BasicBlock *OuterLatch = BasicBlock::Create(Ctx, "outer.latch", F, ExitBlock);
 
-    // ── Phase 4: Build OuterHeader ──
     IRBuilder<> OHB(OuterHeader);
     PHINode *OuterIV = OHB.CreatePHI(IVTy, 2, "outer.iv");
 
-    // Forward non-IV Header PHIs through the outer loop
     SmallVector<HeaderPhiInfo, 4> headerPhiForwarding;
     for (PHINode &PN : Header->phis()) {
         if (&PN == IV)
@@ -1394,7 +1385,6 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
         headerPhiForwarding.push_back({&PN, OHP, InitVal});
     }
 
-    // Inner limit: min(outer.iv + K, N)
     Value *OuterIVPlusK = OHB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K), "outer.iv.plus.k");
     Value *NVal = ConstantInt::get(IVTy, N);
     Value *Cmp = OHB.CreateICmpULT(OuterIVPlusK, NVal, "min.cmp");
@@ -1409,7 +1399,6 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
 
     OHB.CreateBr(Header);
 
-    // ── Phase 5: Rewire Preheader → OuterHeader + update Header PHIs ──
     Preheader->getTerminator()->replaceSuccessorWith(Header, OuterHeader);
 
     for (PHINode &PN : Header->phis()) {
@@ -1429,14 +1418,11 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
         }
     }
 
-    // ── Phase 6: Modify inner loop exit ──
     ExitCmp->setOperand(boundOperandIdx, InnerExitBound);
     ExitBr->replaceSuccessorWith(ExitBlock, OuterLatch);
 
-    // ── Phase 7: Build OuterLatch ──
     IRBuilder<> OLB(OuterLatch);
 
-    // Forwarding PHIs for LCSSA values escaping to ExitBlock
     SmallVector<PHINode *, 4> outerLatchPhis;
     for (PHINode *LCPhi : lcssaPhis) {
         Value *IncomingVal = LCPhi->getIncomingValueForBlock(ExitingBB);
@@ -1445,7 +1431,6 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
         outerLatchPhis.push_back(OLP);
     }
 
-    // Forwarding PHIs for non-IV Header PHIs (loop-carried state)
     SmallVector<PHINode *, 4> headerForwardPhis;
     for (auto &info : headerPhiForwarding) {
         Value *ForwardVal;
@@ -1467,26 +1452,21 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
         headerForwardPhis.push_back(FP);
     }
 
-    // Next outer IV
     Value *NextOuterIV = OLB.CreateAdd(OuterIV, ConstantInt::get(IVTy, K), "outer.iv.next");
 
-    // Outer exit condition: outer runs ceil(N/K) times
     uint64_t outerTripCount = (N + K - 1) / K;
     Value *OuterContinue = OLB.CreateICmpULT(NextOuterIV, ConstantInt::get(IVTy, N), "outer.cmp");
     OLB.CreateCondBr(OuterContinue, OuterHeader, ExitBlock);
 
-    // Complete OuterIV PHI
     OuterIV->addIncoming(ConstantInt::get(IVTy, 0), Preheader);
     OuterIV->addIncoming(NextOuterIV, OuterLatch);
 
-    // Complete non-IV OuterHeader PHIs
     for (unsigned i = 0; i < headerPhiForwarding.size(); i++) {
         auto &info = headerPhiForwarding[i];
         info.outerPhi->addIncoming(info.initVal, Preheader);
         info.outerPhi->addIncoming(headerForwardPhis[i], OuterLatch);
     }
 
-    // ── Phase 8: Update ExitBlock PHIs ──
     for (unsigned i = 0; i < lcssaPhis.size(); i++) {
         int idx = lcssaPhis[i]->getBasicBlockIndex(ExitingBB);
         lcssaPhis[i]->setIncomingBlock(idx, OuterLatch);
@@ -1497,7 +1477,6 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
 
     DT.recalculate(*F);
 
-    // ── Phase 11: Tripcount markers, LCSSA repair, SCEV invalidation ──
     removeLoopTripCountMetadata(L);
     setLoopTripCountMetadata(L, K);
     // Mark the K-bounded inner loop as strip-mined; this is the loop that
@@ -1515,7 +1494,6 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
 
 static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
                                     DominatorTree &DT) {
-    // ── Phase 1: Extract loop components ──
     Loop *L = plan.L;
     uint64_t K = plan.K;
     uint64_t NUpper = plan.N;
@@ -1529,7 +1507,6 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
     if (!Preheader || !Header || !Latch)
         return false;
 
-    // ── Phase 2: Find latch backedge index (which successor == Header) ──
     Instruction *LatchBr = Latch->getTerminator();
     if (!isa<UncondBrInst>(LatchBr) && !isa<CondBrInst>(LatchBr))
         return false;
@@ -1544,12 +1521,10 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
     if (backedgeIdx == UINT_MAX)
         return false;
 
-    // ── Phase 3: Create outer.header, counter.check, outer.latch blocks ──
     BasicBlock *OuterHeader = BasicBlock::Create(Ctx, "outer.header", F, Header);
     BasicBlock *CounterCheck = BasicBlock::Create(Ctx, "counter.check", F);
     BasicBlock *OuterLatch = BasicBlock::Create(Ctx, "outer.latch", F);
 
-    // ── Phase 4: Build outer.header — forward all header PHIs through outer PHIs ──
     IRBuilder<> OHB(OuterHeader);
 
     SmallVector<HeaderPhiInfo, 8> headerPhiForwarding;
@@ -1560,7 +1535,6 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
     }
     OHB.CreateBr(Header);
 
-    // ── Phase 5: Rewire Preheader → OuterHeader, update header PHI incoming ──
     Preheader->getTerminator()->replaceSuccessorWith(Header, OuterHeader);
 
     for (auto &info : headerPhiForwarding) {
@@ -1571,7 +1545,6 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
         }
     }
 
-    // ── Phase 6: Add chunk.counter PHI to header ──
     // Use the target's pointer-sized integer for the counter.  Using i64 on
     // 16-bit targets (MSP430) generates broken multi-word arithmetic in the
     // LLVM backend, causing the counter comparison to never succeed.
@@ -1579,16 +1552,13 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
     Type *CtrTy = DL.getIntPtrType(Ctx);
     PHINode *ChunkCounter = PHINode::Create(CtrTy, 2, "chunk.counter", Header->getFirstNonPHIIt());
 
-    // ── Phase 7: Redirect latch backedge: Latch → CounterCheck ──
     LatchBr->setSuccessor(backedgeIdx, CounterCheck);
 
-    // ── Phase 8: Build counter.check — increment counter, branch ──
     IRBuilder<> CCB(CounterCheck);
     Value *CounterNext = CCB.CreateAdd(ChunkCounter, ConstantInt::get(CtrTy, 1), "counter.next");
     Value *CounterDone = CCB.CreateICmpEQ(CounterNext, ConstantInt::get(CtrTy, K), "counter.done");
     CCB.CreateCondBr(CounterDone, OuterLatch, Header);
 
-    // ── Phase 9: Update header PHIs — incoming block Latch → CounterCheck ──
     for (auto &info : headerPhiForwarding) {
         int idx = info.headerPhi->getBasicBlockIndex(Latch);
         if (idx >= 0) {
@@ -1596,14 +1566,11 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
         }
     }
 
-    // Complete chunk counter PHI
     ChunkCounter->addIncoming(ConstantInt::get(CtrTy, 0), OuterHeader);
     ChunkCounter->addIncoming(CounterNext, CounterCheck);
 
-    // ── Phase 10: Build outer.latch — forward loop-carried values ──
     IRBuilder<> OLB(OuterLatch);
 
-    // Capture loop-carried values (originally from Latch, now from CounterCheck)
     SmallVector<Value *, 8> forwardedValues;
     for (auto &info : headerPhiForwarding) {
         int idx = info.headerPhi->getBasicBlockIndex(CounterCheck);
@@ -1612,7 +1579,6 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
     }
     OLB.CreateBr(OuterHeader);
 
-    // ── Phase 11: Complete outer.header PHIs (init from Preheader, fwd from OuterLatch) ──
     for (unsigned i = 0; i < headerPhiForwarding.size(); i++) {
         auto &info = headerPhiForwarding[i];
         info.outerPhi->addIncoming(info.initVal, Preheader);
@@ -1623,19 +1589,16 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
 
     DT.recalculate(*F);
 
-    // ── Phase 14: Set metadata on generated loops ──
     removeLoopTripCountMetadata(L);
     setLoopTripCountMetadata(L, K);
     setStripMinedLoopMetadata(L);
     if (NUpper > 0) {
-        // Chunk outer loop executes at most ceil(NUpper / K) times.
         uint64_t outerTripCountUpper = 1 + ((NUpper - 1) / K);
         setLoopTripCountMetadata(OuterLoop, outerTripCountUpper);
     } else {
         removeLoopTripCountMetadata(OuterLoop);
     }
 
-    // ── Phase 15: LCSSA repair, SCEV invalidation ──
     formLCSSARecursively(*OuterLoop, DT, &LI, &SE);
     SE.forgetTopmostLoop(L);
     SE.forgetBlockAndLoopDispositions();
@@ -1765,7 +1728,6 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
 
     bool changed = false;
 
-    // Select loops to strip-mine (outermost-first within each nest).
     // Snapshot headers as WeakTrackingVH so we can detect invalidation
     // from prior rewrites that may restructure the CFG.
     auto selected = selectLoopsToStripMine(LI, SE, blockEnergy, *milpParamsOpt, state, stats);
