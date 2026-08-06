@@ -853,6 +853,15 @@ static void buildChunkingPlan(Loop *L, BasicBlock *Latch, uint64_t K, double ite
         return;
     }
 
+    // Without a known trip count nothing else bounds K, and the chunk counter is
+    // only pointer-wide; a truncated bound would disagree with the recorded K.
+    const DataLayout &DL = Header->getModule()->getDataLayout();
+    if (!isUIntN(DL.getIntPtrType(Header->getContext())->getIntegerBitWidth(), K)) {
+        result.skipReason = "k-exceeds-counter-width";
+        result.detail.skipReason = result.skipReason;
+        return;
+    }
+
     LoopRewritePlan plan;
     plan.L = L;
     // Carry known upper-bound trip count into chunking so the generated
@@ -1189,7 +1198,7 @@ static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
     }
 
     auto *IntTy = dyn_cast<IntegerType>(ChunkCounter->getType());
-    if (!IntTy) {
+    if (!IntTy || !isUIntN(IntTy->getBitWidth(), newK)) {
         return false;
     }
     ConstantInt *Bound = ConstantInt::get(IntTy, newK);
