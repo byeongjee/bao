@@ -31,6 +31,9 @@ from .common import (
     write_native_stubs,
 )
 
+# Frontend clang -O level that defines each SCHEMATIC variant.
+CLANG_OPT_LEVEL_BY_LABEL = {"schematic": 0, "schematicO3": 3}
+
 
 @dataclass
 class SchematicCompileOptions:

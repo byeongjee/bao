@@ -19,6 +19,9 @@ from .common import (
     raises_compilation_error,
 )
 
+# (clang -O level, llc -O level) that defines each uninstrumented variant.
+OPT_LEVELS_BY_LABEL = {"uninstrumented": (3, 3), "uninstrumentedO0": (0, 3)}
+
 
 @dataclass
 class UninstrumentedCompileOptions:
