@@ -45,13 +45,12 @@ def verify_all(
             pass_log_level=pass_log_level,
         ),
     ]
-    for algorithm_label, clang_opt_level in (("schematic", 0), ("schematicO3", 3)):
+    for algorithm_label in ("schematic", "schematicO3"):
         specs.append(
             schematic_spec(
                 env,
                 energy_config=energy_config,
                 estimator_mode=estimator_mode,
-                clang_opt_level=clang_opt_level,
                 pass_log_level=pass_log_level,
                 algorithm_label=algorithm_label,
                 force_checkpoint_on_incompatible_loops=False,
