@@ -524,6 +524,43 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE
     return backedgeValue;
 }
 
+static Loop *wrapInOuterLoop(Loop *L, LoopInfo &LI, BasicBlock *OuterHeader, BasicBlock *OuterLatch,
+                             BasicBlock *ExtraInnerBlock) {
+    Loop *ParentLoop = L->getParentLoop();
+    Loop *OuterLoop = LI.AllocateLoop();
+
+    if (ParentLoop) {
+        for (auto I = ParentLoop->begin(); I != ParentLoop->end(); ++I) {
+            if (*I == L) {
+                ParentLoop->removeChildLoop(I);
+                break;
+            }
+        }
+        ParentLoop->addChildLoop(OuterLoop);
+    } else {
+        for (auto I = LI.begin(); I != LI.end(); ++I) {
+            if (*I == L) {
+                LI.removeLoop(I);
+                break;
+            }
+        }
+        LI.addTopLevelLoop(OuterLoop);
+    }
+    OuterLoop->addChildLoop(L);
+
+    OuterLoop->addBasicBlockToLoop(OuterHeader, LI);
+    OuterLoop->addBasicBlockToLoop(OuterLatch, LI);
+    if (ExtraInnerBlock) {
+        L->addBasicBlockToLoop(ExtraInnerBlock, LI);
+    }
+
+    for (BasicBlock *BB : L->blocks())
+        OuterLoop->addBlockEntry(BB);
+
+    OuterLoop->moveToHeader(OuterHeader);
+    return OuterLoop;
+}
+
 struct ExitRewriteForm {
     BasicBlock *Preheader;
     BasicBlock *Header;
@@ -1456,38 +1493,8 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
         lcssaPhis[i]->setIncomingValue(idx, outerLatchPhis[i]);
     }
 
-    // ── Phase 9: Update LoopInfo ──
-    Loop *ParentLoop = L->getParentLoop();
-    Loop *OuterLoop = LI.AllocateLoop();
+    Loop *OuterLoop = wrapInOuterLoop(L, LI, OuterHeader, OuterLatch, nullptr);
 
-    if (ParentLoop) {
-        for (auto I = ParentLoop->begin(); I != ParentLoop->end(); ++I) {
-            if (*I == L) {
-                ParentLoop->removeChildLoop(I);
-                break;
-            }
-        }
-        ParentLoop->addChildLoop(OuterLoop);
-    } else {
-        for (auto I = LI.begin(); I != LI.end(); ++I) {
-            if (*I == L) {
-                LI.removeLoop(I);
-                break;
-            }
-        }
-        LI.addTopLevelLoop(OuterLoop);
-    }
-    OuterLoop->addChildLoop(L);
-
-    OuterLoop->addBasicBlockToLoop(OuterHeader, LI);
-    OuterLoop->addBasicBlockToLoop(OuterLatch, LI);
-
-    for (BasicBlock *BB : L->blocks())
-        OuterLoop->addBlockEntry(BB);
-
-    OuterLoop->moveToHeader(OuterHeader);
-
-    // ── Phase 10: Rebuild DominatorTree ──
     DT.recalculate(*F);
 
     // ── Phase 11: Tripcount markers, LCSSA repair, SCEV invalidation ──
@@ -1612,39 +1619,8 @@ static bool stripMineByChunkCounter(const LoopRewritePlan &plan, LoopInfo &LI, S
         info.outerPhi->addIncoming(forwardedValues[i], OuterLatch);
     }
 
-    // ── Phase 12: Update LoopInfo ──
-    Loop *ParentLoop = L->getParentLoop();
-    Loop *OuterLoop = LI.AllocateLoop();
+    Loop *OuterLoop = wrapInOuterLoop(L, LI, OuterHeader, OuterLatch, CounterCheck);
 
-    if (ParentLoop) {
-        for (auto I = ParentLoop->begin(); I != ParentLoop->end(); ++I) {
-            if (*I == L) {
-                ParentLoop->removeChildLoop(I);
-                break;
-            }
-        }
-        ParentLoop->addChildLoop(OuterLoop);
-    } else {
-        for (auto I = LI.begin(); I != LI.end(); ++I) {
-            if (*I == L) {
-                LI.removeLoop(I);
-                break;
-            }
-        }
-        LI.addTopLevelLoop(OuterLoop);
-    }
-    OuterLoop->addChildLoop(L);
-
-    OuterLoop->addBasicBlockToLoop(OuterHeader, LI);
-    OuterLoop->addBasicBlockToLoop(OuterLatch, LI);
-    L->addBasicBlockToLoop(CounterCheck, LI);
-
-    for (BasicBlock *BB : L->blocks())
-        OuterLoop->addBlockEntry(BB);
-
-    OuterLoop->moveToHeader(OuterHeader);
-
-    // ── Phase 13: Rebuild DomTree ──
     DT.recalculate(*F);
 
     // ── Phase 14: Set metadata on generated loops ──
