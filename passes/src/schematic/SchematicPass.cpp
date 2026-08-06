@@ -41,8 +41,6 @@ extern cl::opt<std::string> EnergyConfigOpt;
 extern cl::opt<std::string> SchematicConfigOpt;
 extern cl::opt<std::string> SchematicTraceOpt;
 extern cl::opt<bool> AddDebugMarkersOpt;
-extern cl::opt<bool> ForceCheckpointOnIncompatibleLoopsOpt;
-extern cl::opt<bool> RecomputeEnergyAfterNewCheckpointOpt;
 
 namespace checkpoint {
 
@@ -501,10 +499,6 @@ PreservedAnalyses SchematicPass::run(Module &M, ModuleAnalysisManager &MAM) {
     // Override flags from CLI.
     if (AddDebugMarkersOpt.getValue())
         params.addDebugMarkers = true;
-    if (ForceCheckpointOnIncompatibleLoopsOpt.getValue())
-        params.forceCheckpointOnIncompatibleLoops = true;
-    if (RecomputeEnergyAfterNewCheckpointOpt.getValue())
-        params.recomputeEnergyAfterNewCheckpoint = true;
 
     FunctionAnalysisManager &FAM =
         MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();

@@ -53,8 +53,6 @@ def verify_all(
                 estimator_mode=estimator_mode,
                 pass_log_level=pass_log_level,
                 algorithm_label=algorithm_label,
-                force_checkpoint_on_incompatible_loops=False,
-                recompute_energy_after_new_checkpoint=False,
             )
         )
 

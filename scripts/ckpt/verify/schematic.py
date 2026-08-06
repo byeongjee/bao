@@ -27,8 +27,6 @@ def schematic_spec(
     estimator_mode: str,
     pass_log_level: str,
     algorithm_label: str,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
 ) -> AlgorithmSpec:
     """Build the SCHEMATIC verification spec."""
     from ..bench.config import default_energy_config
@@ -65,8 +63,6 @@ def schematic_spec(
                 cpu_freq=cpu_freq,
                 opt_level=3,
                 clang_opt_level=clang_opt_level,
-                force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-                recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
                 save_temps=False,
                 trace_file=None,
                 linker_script=None,
@@ -98,8 +94,6 @@ def verify_schematic(
     capture_timeout_seconds: float,
     pass_log_level: str,
     algorithm_label: str,
-    force_checkpoint_on_incompatible_loops: bool,
-    recompute_energy_after_new_checkpoint: bool,
 ) -> list[BenchResult]:
     """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
     spec = schematic_spec(
@@ -108,8 +102,6 @@ def verify_schematic(
         estimator_mode=estimator_mode,
         pass_log_level=pass_log_level,
         algorithm_label=algorithm_label,
-        force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
-        recompute_energy_after_new_checkpoint=recompute_energy_after_new_checkpoint,
     )
     return verify_algorithms(
         env,
