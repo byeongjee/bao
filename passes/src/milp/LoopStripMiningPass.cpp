@@ -528,76 +528,92 @@ static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE
     return backedgeValue;
 }
 
-static bool supportsExitRewriteForm(Loop *L, uint64_t N) {
+struct ExitRewriteForm {
+    BasicBlock *Preheader;
+    BasicBlock *Header;
+    BasicBlock *Latch;
+    BasicBlock *ExitBlock;
+    BasicBlock *ExitingBB;
+    PHINode *IV;
+    CondBrInst *ExitBr;
+    ICmpInst *ExitCmp;
+    unsigned boundOperandIdx;
+    bool compareUsesCurrentIV;
+    bool exitAtLatch;
+};
+
+static std::optional<ExitRewriteForm> matchExitRewriteForm(Loop *L, uint64_t N) {
     if (!L) {
-        return false;
+        return std::nullopt;
     }
 
-    BasicBlock *Preheader = L->getLoopPreheader();
-    BasicBlock *Header = L->getHeader();
-    BasicBlock *Latch = L->getLoopLatch();
-    BasicBlock *ExitBlock = L->getExitBlock();
-    BasicBlock *ExitingBB = L->getExitingBlock();
-    if (!Preheader || !Header || !Latch || !ExitBlock || !ExitingBB) {
-        return false;
+    ExitRewriteForm form;
+    form.Preheader = L->getLoopPreheader();
+    form.Header = L->getHeader();
+    form.Latch = L->getLoopLatch();
+    form.ExitBlock = L->getExitBlock();
+    form.ExitingBB = L->getExitingBlock();
+    if (!form.Preheader || !form.Header || !form.Latch || !form.ExitBlock || !form.ExitingBB) {
+        return std::nullopt;
     }
 
-    if (ExitingBB != Header && ExitingBB != Latch) {
-        return false;
+    // Loop-carried values are forwarded out of the header or the latch only.
+    if (form.ExitingBB != form.Header && form.ExitingBB != form.Latch) {
+        return std::nullopt;
     }
 
-    PHINode *IV = L->getCanonicalInductionVariable();
-    if (!IV) {
-        return false;
+    form.IV = L->getCanonicalInductionVariable();
+    if (!form.IV) {
+        return std::nullopt;
     }
 
-    auto *ExitBr = dyn_cast<CondBrInst>(ExitingBB->getTerminator());
-    if (!ExitBr) {
-        return false;
+    form.ExitBr = dyn_cast<CondBrInst>(form.ExitingBB->getTerminator());
+    if (!form.ExitBr) {
+        return std::nullopt;
     }
 
-    auto *ExitCmp = dyn_cast<ICmpInst>(ExitBr->getCondition());
-    if (!ExitCmp) {
-        return false;
+    form.ExitCmp = dyn_cast<ICmpInst>(form.ExitBr->getCondition());
+    if (!form.ExitCmp) {
+        return std::nullopt;
     }
 
     BasicBlock *BackedgeBB = nullptr;
     BasicBlock *IncomingBB = nullptr;
     if (!L->getIncomingAndBackEdge(IncomingBB, BackedgeBB)) {
-        return false;
+        return std::nullopt;
     }
 
-    Value *IVNext = IV->getIncomingValueForBlock(BackedgeBB);
-    Value *CmpOp0 = ExitCmp->getOperand(0);
-    Value *CmpOp1 = ExitCmp->getOperand(1);
-
-    int boundOperandIdx = -1;
-    bool compareUsesCurrentIV = false;
-    if (CmpOp0 == IV || CmpOp0 == IVNext) {
-        boundOperandIdx = 1;
-        compareUsesCurrentIV = (CmpOp0 == IV);
-    } else if (CmpOp1 == IV || CmpOp1 == IVNext) {
-        boundOperandIdx = 0;
-        compareUsesCurrentIV = (CmpOp1 == IV);
+    Value *IVNext = form.IV->getIncomingValueForBlock(BackedgeBB);
+    Value *CmpOp0 = form.ExitCmp->getOperand(0);
+    Value *CmpOp1 = form.ExitCmp->getOperand(1);
+    if (CmpOp0 == form.IV || CmpOp0 == IVNext) {
+        form.boundOperandIdx = 1;
+        form.compareUsesCurrentIV = (CmpOp0 == form.IV);
+    } else if (CmpOp1 == form.IV || CmpOp1 == IVNext) {
+        form.boundOperandIdx = 0;
+        form.compareUsesCurrentIV = (CmpOp1 == form.IV);
     } else {
-        return false;
+        return std::nullopt;
     }
 
-    auto *OrigBound = dyn_cast<ConstantInt>(ExitCmp->getOperand(boundOperandIdx));
+    auto *OrigBound = dyn_cast<ConstantInt>(form.ExitCmp->getOperand(form.boundOperandIdx));
     if (!OrigBound) {
-        return false;
+        return std::nullopt;
     }
 
-    bool exitAtLatch = (ExitingBB == Latch);
+    form.exitAtLatch = (form.ExitingBB == form.Latch);
     uint64_t expectedBound = N;
-    if (compareUsesCurrentIV && exitAtLatch) {
+    if (form.compareUsesCurrentIV && form.exitAtLatch) {
         if (N == 0) {
-            return false;
+            return std::nullopt;
         }
         expectedBound = N - 1;
     }
+    if (OrigBound->getZExtValue() != expectedBound) {
+        return std::nullopt;
+    }
 
-    return OrigBound->getZExtValue() == expectedBound;
+    return form;
 }
 
 using checkpoint::computeBoundaryStateMarginOnPath;
@@ -651,7 +667,7 @@ static bool tryStripMiningPlan(Loop *L, uint64_t K, double iterEnergy,
     SmallVector<BasicBlock *, 8> exitingBlocks;
     L->getExitingBlocks(exitingBlocks);
     if (!IV || exitingBlocks.size() != 1 || !exactTripCount ||
-        !supportsExitRewriteForm(L, *exactTripCount) || *exactTripCount < 2)
+        !matchExitRewriteForm(L, *exactTripCount) || *exactTripCount < 2)
         return false;
 
     if (K >= *exactTripCount) {
@@ -1287,62 +1303,25 @@ static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, Sc
     Loop *L = plan.L;
     uint64_t N = plan.N, K = plan.K;
 
-    BasicBlock *Preheader = L->getLoopPreheader();
-    BasicBlock *Header = L->getHeader();
-    BasicBlock *Latch = L->getLoopLatch();
-    BasicBlock *ExitBlock = L->getExitBlock();
-    BasicBlock *ExitingBB = L->getExitingBlock();
+    auto matched = matchExitRewriteForm(L, N);
+    if (!matched)
+        return false;
+
+    BasicBlock *Preheader = matched->Preheader;
+    BasicBlock *Header = matched->Header;
+    BasicBlock *Latch = matched->Latch;
+    BasicBlock *ExitBlock = matched->ExitBlock;
+    BasicBlock *ExitingBB = matched->ExitingBB;
+    PHINode *IV = matched->IV;
+    CondBrInst *ExitBr = matched->ExitBr;
+    ICmpInst *ExitCmp = matched->ExitCmp;
+    unsigned boundOperandIdx = matched->boundOperandIdx;
+    bool compareUsesCurrentIV = matched->compareUsesCurrentIV;
+    bool exitAtLatch = matched->exitAtLatch;
+
     Function *F = Header->getParent();
     LLVMContext &Ctx = F->getContext();
-
-    if (!Preheader || !Header || !Latch || !ExitBlock || !ExitingBB)
-        return false;
-
-    PHINode *IV = L->getCanonicalInductionVariable();
-    if (!IV)
-        return false;
     Type *IVTy = IV->getType();
-
-    // ── Phase 2: Find exit condition ──
-    auto *ExitBr = dyn_cast<CondBrInst>(ExitingBB->getTerminator());
-    if (!ExitBr)
-        return false;
-
-    auto *ExitCmp = dyn_cast<ICmpInst>(ExitBr->getCondition());
-    if (!ExitCmp)
-        return false;
-
-    Value *CmpOp0 = ExitCmp->getOperand(0);
-    Value *CmpOp1 = ExitCmp->getOperand(1);
-    BasicBlock *BackedgeBB = nullptr, *IncomingBB = nullptr;
-    if (!L->getIncomingAndBackEdge(IncomingBB, BackedgeBB))
-        return false;
-    Value *IVNext = IV->getIncomingValueForBlock(BackedgeBB);
-
-    int boundOperandIdx = -1;
-    bool compareUsesCurrentIV = false;
-    if (CmpOp0 == IV || CmpOp0 == IVNext) {
-        boundOperandIdx = 1;
-        compareUsesCurrentIV = (CmpOp0 == IV);
-    } else if (CmpOp1 == IV || CmpOp1 == IVNext) {
-        boundOperandIdx = 0;
-        compareUsesCurrentIV = (CmpOp1 == IV);
-    } else {
-        return false;
-    }
-
-    auto *OrigBound = dyn_cast<ConstantInt>(ExitCmp->getOperand(boundOperandIdx));
-    if (!OrigBound)
-        return false;
-    bool exitAtLatch = (ExitingBB == Latch);
-    uint64_t expectedBound = N;
-    if (compareUsesCurrentIV && exitAtLatch) {
-        if (N == 0)
-            return false;
-        expectedBound = N - 1;
-    }
-    if (OrigBound->getZExtValue() != expectedBound)
-        return false;
 
     // Collect LCSSA PHIs in ExitBlock before any modifications
     SmallVector<PHINode *, 4> lcssaPhis;
