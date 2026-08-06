@@ -454,6 +454,11 @@ def _merge_strip_mining_stats(stats_json: Path, strip_mining_stats_json: Path) -
         json.dump(stats_data, f)
 
 
+RECLAMP_DECISION_FIELDS = frozenset(
+    {"decision", "skip_reason", "skip_detail", "chosen_k_valid", "chosen_k"}
+)
+
+
 def _merge_strip_mining_reclamp_stats(
     strip_mining_stats_json: Path,
     reclamp_stats_json: Path,
@@ -512,22 +517,6 @@ def _merge_strip_mining_reclamp_stats(
             if isinstance(header, str) and header:
                 base_detail_by_header[header] = item
 
-        detail_fields = [
-            "decision",
-            "skip_reason",
-            "skip_detail",
-            "chosen_k_valid",
-            "chosen_k",
-            "post_chunk_reclamp_attempted",
-            "post_chunk_reclamp_succeeded",
-            "post_chunk_reclamp_applied",
-            "post_chunk_max_k_valid",
-            "post_chunk_max_k",
-            "post_chunk_iter_energy_valid",
-            "post_chunk_iter_energy",
-            "post_chunk_reclamp_error",
-        ]
-
         for item in reclamp_entry.get("loop_details", []):
             if not isinstance(item, dict):
                 continue
@@ -539,9 +528,9 @@ def _merge_strip_mining_reclamp_stats(
                 base_details.append(item)
                 base_detail_by_header[header] = item
                 continue
-            for detail_field in detail_fields:
-                if detail_field in item:
-                    target[detail_field] = item[detail_field]
+            for key, value in item.items():
+                if key in RECLAMP_DECISION_FIELDS or key.startswith("post_chunk_"):
+                    target[key] = value
 
         chosen_k_by_header: dict[str, dict] = {}
         for item in base_entry.get("chosen_k_values", []):
