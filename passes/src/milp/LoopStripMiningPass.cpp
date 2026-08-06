@@ -1161,7 +1161,7 @@ recomputeChunkKForSummaryBudget(Loop *L, const DenseMap<const BasicBlock *, doub
     return out;
 }
 
-static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
+static bool updateChunkLoopBound(Loop *L, uint64_t currentK, uint64_t newK) {
     BasicBlock *Header = L->getHeader();
     if (!Header) {
         return false;
@@ -1204,15 +1204,12 @@ static bool updateChunkLoopBound(Loop *L, uint64_t newK) {
     if (!IntTy || !isUIntN(IntTy->getBitWidth(), newK)) {
         return false;
     }
-    ConstantInt *Bound = ConstantInt::get(IntTy, newK);
-
-    if (isa<ConstantInt>(Cmp->getOperand(0))) {
-        Cmp->setOperand(0, Bound);
-        return true;
-    }
-    if (isa<ConstantInt>(Cmp->getOperand(1))) {
-        Cmp->setOperand(1, Bound);
-        return true;
+    for (unsigned i = 0; i < 2; i++) {
+        auto *C = dyn_cast<ConstantInt>(Cmp->getOperand(i));
+        if (C && C->getZExtValue() == currentK) {
+            Cmp->setOperand(i, ConstantInt::get(IntTy, newK));
+            return true;
+        }
     }
 
     return false;
@@ -1264,7 +1261,7 @@ static bool updateExitRewriteLoopBound(Loop *L, uint64_t currentK, uint64_t newK
 }
 
 static StripMineForm updateStripMinedLoopK(Loop *L, uint64_t currentK, uint64_t newK) {
-    if (updateChunkLoopBound(L, newK)) {
+    if (updateChunkLoopBound(L, currentK, newK)) {
         return StripMineForm::ChunkCounter;
     }
     if (updateExitRewriteLoopBound(L, currentK, newK)) {
