@@ -14,11 +14,9 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
-#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -1449,8 +1447,7 @@ selectLoopsToStripMine(LoopInfo &LI, ScalarEvolution &SE,
 }
 
 static bool stripMineByExitRewrite(const LoopRewritePlan &plan, LoopInfo &LI, ScalarEvolution &SE,
-                                   DominatorTree &DT, AssumptionCache &AC, AAResults &AA,
-                                   const TargetTransformInfo &TTI) {
+                                   DominatorTree &DT) {
     // ── Phase 1: Extract and validate loop components ──
     Loop *L = plan.L;
     uint64_t N = plan.N, K = plan.K;
@@ -1956,8 +1953,6 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
     }
 
-    auto &AC = AM.getResult<AssumptionAnalysis>(F);
-    auto &TTI = AM.getResult<TargetIRAnalysis>(F);
     checkpoint::CFGAnalysis cfg(F, LI, *estimator);
     checkpoint::StateAnalysis state(F, AA, cfg);
     if (state.hasAnalysisErrors()) {
@@ -2008,9 +2003,8 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         stats.loopsEligible++;
         detail.rewriteAttempted = true;
 
-        bool rewritten = item.plan.isChunking
-                             ? stripMineByChunkCounter(item.plan, LI, SE, DT)
-                             : stripMineByExitRewrite(item.plan, LI, SE, DT, AC, AA, TTI);
+        bool rewritten = item.plan.isChunking ? stripMineByChunkCounter(item.plan, LI, SE, DT)
+                                              : stripMineByExitRewrite(item.plan, LI, SE, DT);
         if (!rewritten) {
             stats.skippedReasons["rewrite-utility-failed"]++;
             detail.rewriteFailureReason = "rewrite-utility-failed";
