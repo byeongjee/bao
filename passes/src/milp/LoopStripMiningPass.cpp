@@ -59,6 +59,12 @@ cl::opt<std::string>
                                 cl::desc("Path to write loop strip-mining diagnostics JSON"),
                                 cl::value_desc("filename"), cl::init(""));
 
+enum class StripMineForm {
+    None,
+    ExitRewrite,
+    ChunkCounter,
+};
+
 struct LoopRewritePlan {
     Loop *L = nullptr;
     uint64_t N = 0;
@@ -1245,8 +1251,14 @@ static bool updateExitRewriteLoopBound(Loop *L, uint64_t currentK, uint64_t newK
     return Updated > 0;
 }
 
-static bool updateStripMinedLoopK(Loop *L, uint64_t currentK, uint64_t newK) {
-    return updateChunkLoopBound(L, newK) || updateExitRewriteLoopBound(L, currentK, newK);
+static StripMineForm updateStripMinedLoopK(Loop *L, uint64_t currentK, uint64_t newK) {
+    if (updateChunkLoopBound(L, newK)) {
+        return StripMineForm::ChunkCounter;
+    }
+    if (updateExitRewriteLoopBound(L, currentK, newK)) {
+        return StripMineForm::ExitRewrite;
+    }
+    return StripMineForm::None;
 }
 
 // AbstractCFG takes min(scev, marker) as the outer trip count, so a marker left
@@ -1321,7 +1333,8 @@ static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvoluti
 
                     uint64_t newK = std::min<uint64_t>(*currentK, reclamp.maxK);
                     if (newK != *currentK) {
-                        if (!updateStripMinedLoopK(L, *currentK, newK)) {
+                        StripMineForm form = updateStripMinedLoopK(L, *currentK, newK);
+                        if (form == StripMineForm::None) {
                             stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
                             detail.decision = "kept";
                             detail.postChunkReclampError = "chunk-k-reclamp-update-failed";
@@ -1333,10 +1346,13 @@ static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvoluti
                             rescaleOuterTripCount(L, *currentK, newK);
                             SE.forgetLoop(L);
                             detail.decision = "reclamped";
+                            detail.isChunking = form == StripMineForm::ChunkCounter;
                             detail.postChunkReclampApplied = true;
                             detail.chosenK = newK;
                             stats.loopsRewritten++;
-                            stats.loopsChunked++;
+                            if (detail.isChunking) {
+                                stats.loopsChunked++;
+                            }
                             changed = true;
                             PLOGI << "LoopStripMiningPass: post-energy chunk K re-clamped "
                                   << F.getName() << "::" << detail.loopHeader
@@ -2014,7 +2030,7 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
             item.plan.iterEnergy = reclamp.iterEnergy;
             uint64_t newK = std::min<uint64_t>(item.plan.K, reclamp.maxK);
             if (newK != item.plan.K) {
-                if (!updateStripMinedLoopK(L, item.plan.K, newK)) {
+                if (updateStripMinedLoopK(L, item.plan.K, newK) == StripMineForm::None) {
                     stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
                     detail.postChunkReclampError = "chunk-k-reclamp-update-failed";
                     PLOGW << "LoopStripMiningPass: chunk K re-clamp update failed " << F.getName()
