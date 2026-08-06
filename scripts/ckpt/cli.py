@@ -1469,7 +1469,6 @@ def _verify_schematic_impl(
     ctx: click.Context,
     *,
     algorithm_label: str,
-    clang_opt_level: int,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
     energy_config: str | None,
@@ -1493,7 +1492,6 @@ def _verify_schematic_impl(
         energy_config=_path_or_none(energy_config),
         estimator_mode=estimator_mode,
         cpu_freq=_mhz_to_hz(cpu_freq),
-        clang_opt_level=clang_opt_level,
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label=algorithm_label,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
@@ -1509,9 +1507,7 @@ def _verify_schematic_impl(
 @click.pass_context
 def verify_schematic_cmd(ctx: click.Context, **kwargs) -> None:
     """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
-    _verify_schematic_impl(
-        ctx, algorithm_label="schematic", clang_opt_level=0, **kwargs
-    )
+    _verify_schematic_impl(ctx, algorithm_label="schematic", **kwargs)
 
 
 @verify.command("schematicO3")
@@ -1520,9 +1516,7 @@ def verify_schematic_cmd(ctx: click.Context, **kwargs) -> None:
 @click.pass_context
 def verify_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
     """Verify semantic correctness of SCHEMATIC-O3 checkpoint insertion."""
-    _verify_schematic_impl(
-        ctx, algorithm_label="schematicO3", clang_opt_level=3, **kwargs
-    )
+    _verify_schematic_impl(ctx, algorithm_label="schematicO3", **kwargs)
 
 
 @verify.command("all")

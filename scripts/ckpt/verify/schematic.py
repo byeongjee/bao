@@ -5,7 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..bench.schematic import NVM_SYMBOLS
-from ..compile.schematic import SchematicCompileOptions, compile_schematic
+from ..compile.schematic import (
+    CLANG_OPT_LEVEL_BY_LABEL,
+    SchematicCompileOptions,
+    compile_schematic,
+)
 from ..env import ProjectEnv
 from ..toolchain import Toolchain
 from .common import (
@@ -21,7 +25,6 @@ def schematic_spec(
     *,
     energy_config: Path | None,
     estimator_mode: str,
-    clang_opt_level: int,
     pass_log_level: str,
     algorithm_label: str,
     force_checkpoint_on_incompatible_loops: bool,
@@ -32,6 +35,7 @@ def schematic_spec(
 
     if energy_config is None:
         energy_config = default_energy_config(env, algorithm_label)
+    clang_opt_level = CLANG_OPT_LEVEL_BY_LABEL[algorithm_label]
 
     def compile_instrumented(
         tc: Toolchain,
@@ -92,7 +96,6 @@ def verify_schematic(
     estimator_mode: str,
     cpu_freq: int,
     capture_timeout_seconds: float,
-    clang_opt_level: int,
     pass_log_level: str,
     algorithm_label: str,
     force_checkpoint_on_incompatible_loops: bool,
@@ -103,7 +106,6 @@ def verify_schematic(
         env,
         energy_config=energy_config,
         estimator_mode=estimator_mode,
-        clang_opt_level=clang_opt_level,
         pass_log_level=pass_log_level,
         algorithm_label=algorithm_label,
         force_checkpoint_on_incompatible_loops=force_checkpoint_on_incompatible_loops,
