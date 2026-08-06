@@ -7,13 +7,20 @@
 # Usage:
 #   Rscript scripts/plot_results.R [OPTIONS]
 #
+# By default this plots the two headline metrics -- execution time and runtime
+# region boundary hits -- normalized against the config's "normalize_ref"
+# baseline, one plot per capacitor size.
+#
 # Options:
 #   --result-dir DIR    Result directory (default: results/)
-#   --normalize         Normalize values (w.r.t. the config's "normalize_ref" baseline
+#   --absolute          Plot raw values instead of normalized ones
+#   --normalize         Accepted for backwards compatibility; normalization is
+#                       the default (w.r.t. the config's "normalize_ref" baseline
 #                       if available, else the first algorithm)
+#   --all-metrics       Plot every metric, not just the two default ones
 #   --output-dir DIR    Save plots to directory instead of showing
 #   --benchmarks B,...  Comma-separated benchmark filter (default: all)
-#   --metrics M,...     Comma-separated metric filter (default: all)
+#   --metrics M,...     Comma-separated metric filter (overrides the default set)
 #   --log-scale         Force log scale for execution_time and runtime_region_boundary_calls
 #   --config FILE       Series definitions: which CSVs to read, plus their labels
 #                       and styles (default: plot_config.json next to this script).
@@ -337,6 +344,9 @@ discover_capacitors <- function(result_dir, algorithms) {
 }
 
 # -- Plotting -----------------------------------------------------------------
+
+# Plotted unless --all-metrics or an explicit --metrics list says otherwise.
+DEFAULT_METRICS <- c("execution_time", "runtime_region_boundary_calls")
 
 LOG_SCALE_METRICS <- c("execution_time", "runtime_region_boundary_calls")
 OUTLIER_RATIO_THRESHOLD <- 3.0
@@ -961,19 +971,25 @@ main <- function() {
 
   # Parse arguments
   result_dir <- "results"
-  normalize <- FALSE
+  normalize <- TRUE
   log_scale <- FALSE
   config_path <- DEFAULT_CONFIG_PATH
   output_dir <- NULL
   filter_benchmarks <- NULL
   filter_metrics <- NULL
+  all_metrics <- FALSE
 
   i <- 1
   while (i <= length(args)) {
     if (args[i] == "--result-dir" && i < length(args)) {
       result_dir <- args[i + 1]; i <- i + 2
     } else if (args[i] == "--normalize") {
+      # Normalization is the default; kept so existing invocations still work.
       normalize <- TRUE; i <- i + 1
+    } else if (args[i] == "--absolute") {
+      normalize <- FALSE; i <- i + 1
+    } else if (args[i] == "--all-metrics") {
+      all_metrics <- TRUE; i <- i + 1
     } else if (args[i] == "--log-scale") {
       log_scale <- TRUE; i <- i + 1
     } else if (args[i] == "--config" && i < length(args)) {
@@ -1014,8 +1030,10 @@ main <- function() {
 
   metrics_to_plot <- if (!is.null(filter_metrics)) {
     filter_metrics[filter_metrics %in% names(METRICS)]
-  } else {
+  } else if (all_metrics) {
     names(METRICS)
+  } else {
+    DEFAULT_METRICS
   }
 
   # Discover benchmarks
