@@ -1099,6 +1099,137 @@ static void rescaleOuterTripCount(Loop *L, uint64_t currentK, uint64_t newK) {
     setLoopTripCountMetadata(Parent, (*outerTripCount * currentK + newK - 1) / newK);
 }
 
+enum class ReclampOutcome {
+    Unavailable,
+    UpdateFailed,
+    Unchanged,
+    Applied,
+};
+
+struct ReclampResult {
+    ReclampOutcome outcome = ReclampOutcome::Unavailable;
+    uint64_t newK = 0;
+};
+
+static ReclampResult applyReclamp(Loop *L, uint64_t currentK, const ChunkBudgetResult &budget,
+                                  ScalarEvolution &SE, LoopStripMiningDetail &detail,
+                                  LoopStripMiningStats &stats) {
+    ReclampResult result;
+    result.newK = currentK;
+    detail.postChunkReclampAttempted = true;
+
+    if (!budget.ok) {
+        stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
+        detail.postChunkReclampError = budget.error;
+        result.outcome = ReclampOutcome::Unavailable;
+        return result;
+    }
+
+    detail.postChunkReclampSucceeded = true;
+    detail.postChunkMaxKValid = true;
+    detail.postChunkMaxK = budget.maxK;
+    detail.postChunkIterEnergyValid = true;
+    detail.postChunkIterEnergy = budget.iterEnergy;
+
+    result.newK = std::min<uint64_t>(currentK, budget.maxK);
+    if (result.newK == currentK) {
+        result.outcome = ReclampOutcome::Unchanged;
+        return result;
+    }
+
+    StripMineForm form = updateStripMinedLoopK(L, currentK, result.newK);
+    if (form == StripMineForm::None) {
+        stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
+        detail.postChunkReclampError = "chunk-k-reclamp-update-failed";
+        result.newK = currentK;
+        result.outcome = ReclampOutcome::UpdateFailed;
+        return result;
+    }
+
+    setLoopTripCountMetadata(L, result.newK);
+    rescaleOuterTripCount(L, currentK, result.newK);
+    SE.forgetTopmostLoop(L);
+    detail.isChunking = form == StripMineForm::ChunkCounter;
+    detail.postChunkReclampApplied = true;
+    result.outcome = ReclampOutcome::Applied;
+    return result;
+}
+
+static void reclampLoop(Loop *L, Function &F, LoopInfo &LI, ScalarEvolution &SE,
+                        const checkpoint::MILPEnergyParams &params,
+                        const DenseMap<const BasicBlock *, double> &blockEnergy,
+                        const checkpoint::StateAnalysis &state, LoopStripMiningStats &stats,
+                        bool &changed) {
+    stats.loopsSeen++;
+    LoopStripMiningDetail detail = buildInitialLoopDetail(L);
+
+    auto currentK = getMarkerTripCount(L);
+    if (!currentK) {
+        stats.skippedReasons["reclamp-missing-tripcount-metadata"]++;
+        detail.decision = "skipped";
+        detail.skipReason = "reclamp-missing-tripcount-metadata";
+        detail.skipDetail = "strip-mined loop missing llvm.loop.tripcount.upper metadata";
+        stats.loopDetails.push_back(detail);
+        return;
+    }
+
+    stats.loopsEligible++;
+    detail.chosenKValid = true;
+    detail.chosenK = *currentK;
+
+    ChunkBudgetResult budget = maxKMatchingSummarizer(L, blockEnergy, params, LI, SE, state);
+    ReclampResult reclamp = applyReclamp(L, *currentK, budget, SE, detail, stats);
+
+    switch (reclamp.outcome) {
+    case ReclampOutcome::Unavailable:
+        detail.decision = "kept";
+        PLOGW << "LoopStripMiningPass: post-energy chunk K re-clamp unavailable " << F.getName()
+              << "::" << detail.loopHeader << " reason=" << budget.error
+              << " current-K=" << *currentK;
+        break;
+    case ReclampOutcome::UpdateFailed:
+        detail.decision = "kept";
+        PLOGW << "LoopStripMiningPass: post-energy chunk K re-clamp update failed " << F.getName()
+              << "::" << detail.loopHeader << " current-K=" << *currentK
+              << " max-K=" << budget.maxK;
+        break;
+    case ReclampOutcome::Unchanged:
+        detail.decision = "kept";
+        PLOGD << "LoopStripMiningPass: post-energy chunk K unchanged " << F.getName()
+              << "::" << detail.loopHeader << " K=" << *currentK
+              << " E_iter_wc_post=" << budget.iterEnergy;
+        break;
+    case ReclampOutcome::Applied:
+        detail.decision = "reclamped";
+        detail.chosenK = reclamp.newK;
+        stats.loopsRewritten++;
+        if (detail.isChunking) {
+            stats.loopsChunked++;
+        }
+        changed = true;
+        PLOGI << "LoopStripMiningPass: post-energy chunk K re-clamped " << F.getName()
+              << "::" << detail.loopHeader << " current-K=" << *currentK
+              << " new-K=" << reclamp.newK << " E_iter_wc_post=" << budget.iterEnergy;
+        break;
+    }
+
+    stats.chosenKByHeader.emplace_back(detail.loopHeader, detail.chosenK);
+    stats.loopDetails.push_back(detail);
+}
+
+static void reclampNest(Loop *L, Function &F, LoopInfo &LI, ScalarEvolution &SE,
+                        const checkpoint::MILPEnergyParams &params,
+                        const DenseMap<const BasicBlock *, double> &blockEnergy,
+                        const checkpoint::StateAnalysis &state, LoopStripMiningStats &stats,
+                        bool &changed) {
+    if (hasStripMinedLoopMetadata(L)) {
+        reclampLoop(L, F, LI, SE, params, blockEnergy, state, stats, changed);
+    }
+
+    for (Loop *SubL : L->getSubLoops())
+        reclampNest(SubL, F, LI, SE, params, blockEnergy, state, stats, changed);
+}
+
 static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvolution &SE,
                                         AAResults &AA, checkpoint::EnergyEstimator &estimator,
                                         const checkpoint::MILPEnergyParams &params,
@@ -1114,90 +1245,8 @@ static bool reclampExistingChunkedLoops(Function &F, LoopInfo &LI, ScalarEvoluti
     }
 
     bool changed = false;
-    std::function<void(Loop *)> visitLoop = [&](Loop *L) {
-        if (!L)
-            return;
-
-        if (hasStripMinedLoopMetadata(L)) {
-            stats.loopsSeen++;
-            LoopStripMiningDetail detail = buildInitialLoopDetail(L);
-            auto currentK = getMarkerTripCount(L);
-            if (!currentK) {
-                stats.skippedReasons["reclamp-missing-tripcount-metadata"]++;
-                detail.decision = "skipped";
-                detail.skipReason = "reclamp-missing-tripcount-metadata";
-                detail.skipDetail = "strip-mined loop missing llvm.loop.tripcount.upper metadata";
-                stats.loopDetails.push_back(detail);
-            } else {
-                detail.chosenKValid = true;
-                detail.chosenK = *currentK;
-
-                stats.loopsEligible++;
-                detail.postChunkReclampAttempted = true;
-
-                ChunkBudgetResult reclamp =
-                    maxKMatchingSummarizer(L, blockEnergy, params, LI, SE, state);
-                if (!reclamp.ok) {
-                    stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
-                    detail.decision = "kept";
-                    detail.postChunkReclampError = reclamp.error;
-                    PLOGW << "LoopStripMiningPass: post-energy chunk K re-clamp unavailable "
-                          << F.getName() << "::" << detail.loopHeader << " reason=" << reclamp.error
-                          << " current-K=" << *currentK;
-                } else {
-                    detail.postChunkReclampSucceeded = true;
-                    detail.postChunkMaxKValid = true;
-                    detail.postChunkMaxK = reclamp.maxK;
-                    detail.postChunkIterEnergyValid = true;
-                    detail.postChunkIterEnergy = reclamp.iterEnergy;
-
-                    uint64_t newK = std::min<uint64_t>(*currentK, reclamp.maxK);
-                    if (newK != *currentK) {
-                        StripMineForm form = updateStripMinedLoopK(L, *currentK, newK);
-                        if (form == StripMineForm::None) {
-                            stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
-                            detail.decision = "kept";
-                            detail.postChunkReclampError = "chunk-k-reclamp-update-failed";
-                            PLOGW << "LoopStripMiningPass: post-energy chunk K re-clamp "
-                                  << "update failed " << F.getName() << "::" << detail.loopHeader
-                                  << " current-K=" << *currentK << " new-K=" << newK;
-                        } else {
-                            setLoopTripCountMetadata(L, newK);
-                            rescaleOuterTripCount(L, *currentK, newK);
-                            SE.forgetTopmostLoop(L);
-                            detail.decision = "reclamped";
-                            detail.isChunking = form == StripMineForm::ChunkCounter;
-                            detail.postChunkReclampApplied = true;
-                            detail.chosenK = newK;
-                            stats.loopsRewritten++;
-                            if (detail.isChunking) {
-                                stats.loopsChunked++;
-                            }
-                            changed = true;
-                            PLOGI << "LoopStripMiningPass: post-energy chunk K re-clamped "
-                                  << F.getName() << "::" << detail.loopHeader
-                                  << " current-K=" << *currentK << " new-K=" << newK
-                                  << " E_iter_wc_post=" << reclamp.iterEnergy;
-                        }
-                    } else {
-                        detail.decision = "kept";
-                        PLOGD << "LoopStripMiningPass: post-energy chunk K unchanged "
-                              << F.getName() << "::" << detail.loopHeader << " K=" << *currentK
-                              << " E_iter_wc_post=" << reclamp.iterEnergy;
-                    }
-                }
-
-                stats.chosenKByHeader.emplace_back(detail.loopHeader, detail.chosenK);
-                stats.loopDetails.push_back(detail);
-            }
-        }
-
-        for (Loop *SubL : L->getSubLoops())
-            visitLoop(SubL);
-    };
-
     for (Loop *L : LI)
-        visitLoop(L);
+        reclampNest(L, F, LI, SE, params, blockEnergy, state, stats, changed);
 
     return changed;
 }
@@ -1804,41 +1853,30 @@ PreservedAnalyses LoopStripMiningPass::run(Function &F, FunctionAnalysisManager 
         } else {
             reclampState = &postState;
         }
-        detail.postChunkReclampAttempted = true;
-        ChunkBudgetResult reclamp =
+        ChunkBudgetResult budget =
             maxKWithStripMiningCost(L, blockEnergy, *milpParamsOpt, LI, SE, *reclampState);
-        if (!reclamp.ok) {
-            stats.skippedReasons["chunk-k-reclamp-unavailable"]++;
-            detail.postChunkReclampError = reclamp.error;
+        ReclampResult reclamp = applyReclamp(L, item.plan.K, budget, SE, detail, stats);
+
+        switch (reclamp.outcome) {
+        case ReclampOutcome::Unavailable:
             PLOGW << "LoopStripMiningPass: chunk K re-clamp unavailable " << F.getName()
-                  << "::" << headerName << " reason=" << reclamp.error
+                  << "::" << headerName << " reason=" << budget.error
                   << " original-K=" << item.plan.K;
-        } else {
-            detail.postChunkReclampSucceeded = true;
-            detail.postChunkMaxKValid = true;
-            detail.postChunkMaxK = reclamp.maxK;
-            detail.postChunkIterEnergyValid = true;
-            detail.postChunkIterEnergy = reclamp.iterEnergy;
-            item.plan.iterEnergy = reclamp.iterEnergy;
-            uint64_t newK = std::min<uint64_t>(item.plan.K, reclamp.maxK);
-            if (newK != item.plan.K) {
-                if (updateStripMinedLoopK(L, item.plan.K, newK) == StripMineForm::None) {
-                    stats.skippedReasons["chunk-k-reclamp-update-failed"]++;
-                    detail.postChunkReclampError = "chunk-k-reclamp-update-failed";
-                    PLOGW << "LoopStripMiningPass: chunk K re-clamp update failed " << F.getName()
-                          << "::" << headerName << " original-K=" << item.plan.K
-                          << " new-K=" << newK;
-                } else {
-                    setLoopTripCountMetadata(L, newK);
-                    rescaleOuterTripCount(L, item.plan.K, newK);
-                    SE.forgetTopmostLoop(L);
-                    detail.postChunkReclampApplied = true;
-                    PLOGD << "LoopStripMiningPass: chunk K re-clamped " << F.getName()
-                          << "::" << headerName << " original-K=" << item.plan.K
-                          << " new-K=" << newK << " E_iter_wc_post=" << reclamp.iterEnergy;
-                    item.plan.K = newK;
-                }
-            }
+            break;
+        case ReclampOutcome::UpdateFailed:
+            PLOGW << "LoopStripMiningPass: chunk K re-clamp update failed " << F.getName()
+                  << "::" << headerName << " original-K=" << item.plan.K
+                  << " max-K=" << budget.maxK;
+            break;
+        case ReclampOutcome::Unchanged:
+            item.plan.iterEnergy = budget.iterEnergy;
+            break;
+        case ReclampOutcome::Applied:
+            item.plan.iterEnergy = budget.iterEnergy;
+            item.plan.K = reclamp.newK;
+            PLOGD << "LoopStripMiningPass: chunk K re-clamped " << F.getName() << "::" << headerName
+                  << " new-K=" << reclamp.newK << " E_iter_wc_post=" << budget.iterEnergy;
+            break;
         }
 
         changed = true;
