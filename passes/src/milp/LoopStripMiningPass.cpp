@@ -292,185 +292,36 @@ static void writeLoopStripMiningStatsJSON(const Function &F, const LoopStripMini
 static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE,
                                                     const BasicBlock *ExitingBlock);
 
-static WorstCasePathResult
-computeWorstCaseIterationEnergy(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                                LoopInfo &LI, ScalarEvolution &SE) {
-    WorstCasePathResult result;
+static std::optional<uint64_t> exactSubLoopTripCount(Loop *SubL, ScalarEvolution &SE) {
+    std::optional<uint64_t> scevTC;
+    SmallVector<BasicBlock *, 8> subExiting;
+    SubL->getExitingBlocks(subExiting);
+    if (subExiting.size() == 1)
+        scevTC = getConstantTripCount(SubL, SE, subExiting.front());
+    auto markerTC = getMarkerTripCount(SubL);
 
-    BasicBlock *Header = L->getHeader();
-    BasicBlock *Latch = L->getLoopLatch();
-    if (!Header || !Latch) {
-        result.error = "missing-header-or-latch";
-        return result;
-    }
+    if (scevTC && markerTC)
+        return std::min(*scevTC, *markerTC);
+    if (scevTC)
+        return scevTC;
+    return markerTC;
+}
 
-    // Step 1: Recursively compute total energy for each direct sub-loop.
-    DenseMap<const Loop *, double> subLoopTotal;
-    std::map<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
-    for (Loop *SubL : L->getSubLoops()) {
-        std::optional<uint64_t> scevTC;
-        SmallVector<BasicBlock *, 8> subExiting;
-        SubL->getExitingBlocks(subExiting);
-        if (subExiting.size() == 1)
-            scevTC = getConstantTripCount(SubL, SE, subExiting.front());
-        auto markerTC = getMarkerTripCount(SubL);
+static std::optional<uint64_t> summarySubLoopTripCount(Loop *SubL, ScalarEvolution &SE) {
+    unsigned scevTC = SE.getSmallConstantTripCount(SubL);
+    auto markerTC = getMarkerTripCount(SubL);
 
-        std::optional<uint64_t> subTC;
-        if (scevTC && markerTC)
-            subTC = std::min(*scevTC, *markerTC);
-        else if (scevTC)
-            subTC = scevTC;
-        else
-            subTC = markerTC;
-
-        if (!subTC) {
-            result.error = "sub-loop-unknown-trip-count";
-            return result;
-        }
-
-        auto subIter = computeWorstCaseIterationEnergy(SubL, blockEnergy, LI, SE);
-        if (!subIter.ok) {
-            result.error = "sub-loop-energy-unavailable";
-            return result;
-        }
-
-        subLoopTotal[SubL] = subIter.energy * static_cast<double>(*subTC);
-        for (const BasicBlock *BB : SubL->blocks())
-            subLoopBlocks[SubL].insert(BB);
-    }
-
-    // Step 2: Block energy with sub-loop collapsing.
-    auto getEnergy = [&](const BasicBlock *BB) -> double {
-        Loop *ChildL = getDirectChildLoop(L, BB, LI);
-        if (ChildL && ChildL->getHeader() == BB) {
-            auto it = subLoopTotal.find(ChildL);
-            return (it != subLoopTotal.end()) ? it->second : 0.0;
-        }
-        auto it = blockEnergy.find(BB);
-        return (it != blockEnergy.end()) ? it->second : 0.0;
-    };
-
-    // Step 3: Successor computation with sub-loop collapsing.
-    auto getSuccs = [&](const BasicBlock *BB) -> SmallVector<const BasicBlock *, 4> {
-        SmallVector<const BasicBlock *, 4> succs;
-        Loop *ChildL = getDirectChildLoop(L, BB, LI);
-        if (ChildL && ChildL->getHeader() == BB) {
-            SmallVector<BasicBlock *, 4> exits;
-            ChildL->getExitBlocks(exits);
-            for (BasicBlock *Exit : exits)
-                succs.push_back(Exit);
-        } else {
-            for (const BasicBlock *Succ : successors(BB))
-                succs.push_back(Succ);
-        }
-        return succs;
-    };
-
-    if (Header == Latch) {
-        result.ok = true;
-        result.energy = getEnergy(Header);
-        result.blocksOnPath.insert(Header);
-        return result;
-    }
-
-    DenseMap<const BasicBlock *, VisitState> visitState;
-    DenseMap<const BasicBlock *, double> memo;
-    DenseMap<const BasicBlock *, const BasicBlock *> bestSucc;
-    bool cycleDetected = false;
-
-    std::function<double(const BasicBlock *)> dfs = [&](const BasicBlock *BB) -> double {
-        if (BB == Latch) {
-            return getEnergy(BB);
-        }
-
-        VisitState state = visitState.lookup(BB);
-        if (state == VisitState::Visiting) {
-            cycleDetected = true;
-            return -1.0;
-        }
-        if (state == VisitState::Visited) {
-            return memo[BB];
-        }
-
-        visitState[BB] = VisitState::Visiting;
-        double bestSuccEnergy = -1.0;
-        const BasicBlock *best = nullptr;
-        for (const BasicBlock *Succ : getSuccs(BB)) {
-            if (!L->contains(Succ)) {
-                continue;
-            }
-            if (BB == Latch && Succ == Header) {
-                continue;
-            }
-            double succEnergy = dfs(Succ);
-            if (succEnergy < 0.0) {
-                continue;
-            }
-            if (succEnergy > bestSuccEnergy) {
-                bestSuccEnergy = succEnergy;
-                best = Succ;
-            }
-        }
-        visitState[BB] = VisitState::Visited;
-
-        if (!best || bestSuccEnergy < 0.0) {
-            memo[BB] = -1.0;
-            return -1.0;
-        }
-
-        bestSucc[BB] = best;
-        memo[BB] = getEnergy(BB) + bestSuccEnergy;
-        return memo[BB];
-    };
-
-    double energy = dfs(Header);
-    if (cycleDetected) {
-        result.error = "unsupported-intra-loop-cycle";
-        return result;
-    }
-    if (energy <= 0.0) {
-        result.error = "unable-to-compute-iteration-path";
-        return result;
-    }
-
-    SmallPtrSet<const BasicBlock *, 16> pathBlocks;
-    const BasicBlock *cur = Header;
-    while (cur) {
-        pathBlocks.insert(cur);
-        // If this block is an inner-loop header, expand with all sub-loop blocks
-        // so state margins are aggregated consistently with AbstractCFG.
-        Loop *ChildL = getDirectChildLoop(L, cur, LI);
-        if (ChildL && ChildL->getHeader() == cur) {
-            auto it = subLoopBlocks.find(ChildL);
-            if (it != subLoopBlocks.end()) {
-                pathBlocks.insert(it->second.begin(), it->second.end());
-            }
-        }
-        if (cur == Latch) {
-            break;
-        }
-        auto it = bestSucc.find(cur);
-        if (it == bestSucc.end()) {
-            result.error = "path-reconstruction-failed";
-            return result;
-        }
-        cur = it->second;
-    }
-
-    if (pathBlocks.empty() || !pathBlocks.count(Latch)) {
-        result.error = "path-reconstruction-failed";
-        return result;
-    }
-
-    result.ok = true;
-    result.energy = energy;
-    result.blocksOnPath = std::move(pathBlocks);
-    return result;
+    if (scevTC > 0 && markerTC)
+        return std::min<uint64_t>(scevTC, *markerTC);
+    if (scevTC > 0)
+        return scevTC;
+    return markerTC;
 }
 
 static WorstCasePathResult
-computeWorstCaseSummaryPathResult(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                                  LoopInfo &LI, ScalarEvolution &SE) {
+computeWorstCasePath(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy, LoopInfo &LI,
+                     ScalarEvolution &SE,
+                     function_ref<std::optional<uint64_t>(Loop *)> subLoopTripCount) {
     WorstCasePathResult result;
 
     BasicBlock *Header = L->getHeader();
@@ -483,27 +334,19 @@ computeWorstCaseSummaryPathResult(Loop *L, const DenseMap<const BasicBlock *, do
     DenseMap<const Loop *, double> subLoopTotal;
     DenseMap<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
     for (Loop *SubL : L->getSubLoops()) {
-        auto subPath = computeWorstCaseSummaryPathResult(SubL, blockEnergy, LI, SE);
+        std::optional<uint64_t> subTC = subLoopTripCount(SubL);
+        if (!subTC) {
+            result.error = "sub-loop-unknown-trip-count";
+            return result;
+        }
+
+        auto subPath = computeWorstCasePath(SubL, blockEnergy, LI, SE, subLoopTripCount);
         if (!subPath.ok) {
             result.error = "sub-loop-energy-unavailable";
             return result;
         }
 
-        unsigned scevTC = SE.getSmallConstantTripCount(SubL);
-        auto markerTC = getMarkerTripCount(SubL);
-        uint64_t tc;
-        if (scevTC > 0 && markerTC)
-            tc = std::min<uint64_t>(scevTC, *markerTC);
-        else if (scevTC > 0)
-            tc = scevTC;
-        else if (markerTC)
-            tc = *markerTC;
-        else {
-            result.error = "sub-loop-unknown-trip-count";
-            return result;
-        }
-
-        subLoopTotal[SubL] = subPath.energy * static_cast<double>(tc);
+        subLoopTotal[SubL] = subPath.energy * static_cast<double>(*subTC);
         for (const BasicBlock *BB : SubL->blocks())
             subLoopBlocks[SubL].insert(BB);
     }
@@ -631,6 +474,20 @@ computeWorstCaseSummaryPathResult(Loop *L, const DenseMap<const BasicBlock *, do
     result.energy = energy;
     result.blocksOnPath = std::move(pathBlocks);
     return result;
+}
+
+static WorstCasePathResult
+computeWorstCaseIterationEnergy(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                                LoopInfo &LI, ScalarEvolution &SE) {
+    return computeWorstCasePath(L, blockEnergy, LI, SE,
+                                [&](Loop *SubL) { return exactSubLoopTripCount(SubL, SE); });
+}
+
+static WorstCasePathResult
+computeWorstCaseSummaryPathResult(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                                  LoopInfo &LI, ScalarEvolution &SE) {
+    return computeWorstCasePath(L, blockEnergy, LI, SE,
+                                [&](Loop *SubL) { return summarySubLoopTripCount(SubL, SE); });
 }
 
 static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE,
