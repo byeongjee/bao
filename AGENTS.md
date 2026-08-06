@@ -122,8 +122,7 @@ ckpt bench milp            [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimato
 ckpt bench rockclimb       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--timeout SECONDS] [--accumulate-keys FILE] [--csv CSV]
 ckpt bench schematic       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--trace-config] [--timeout SECONDS] [--accumulate-keys FILE] [--csv CSV]
 ckpt bench uninstrumented  [BENCHMARKS...] [--cpu-freq] [--timeout SECONDS] [--csv CSV]
-# bench all runs the whole matrix (each algorithm with and without device-debug) and plots.
-ckpt bench all             [BENCHMARKS...] [-d RESULT_DIR] [--algorithms A,...] [--cap 1uF] [--skip-existing] [--no-plot]
+ckpt bench all             [BENCHMARKS...] [-d RESULT_DIR] [--algorithms A,...] [--cap 1uF] [--skip-existing] [--no-plot] [--plot-config FILE]
 
 # Semantic verification defaults to --halt-mode bor, which destroys modeled volatile state
 # before checkpoint recovery. Compile and bench default to swbor for continuous-power measurement.
@@ -145,6 +144,8 @@ ckpt device read-serial [--timeout N] [--end-marker M]
 ```
 
 Additional variants: `compile|bench|verify schematicO3`, `compile|bench chunked`, and `bench uninstrumentedO0`.
+
+`bench all` runs each algorithm with and without `--device-debug`, plus `uninstrumented`, writing `<algo>_debug.csv` / `<algo>.csv` into `RESULT_DIR` (default `result/<timestamp>`) and then plotting into `RESULT_DIR/plots/`. `--algorithms` trims the list or adds `uninstrumentedO0` / `chunked`; a failed step is reported and skipped rather than aborting; `--skip-existing` resumes an interrupted run.
 
 `--accumulate-keys FILE` writes required energy keys (identifiers the energy estimator uses to look up instruction costs) to a file as a sorted comma-separated list. The file is read-merge-written on each invocation, so keys accumulate across multiple runs. Not available on `uninstrumented` commands (no energy pass).
 
@@ -192,17 +193,6 @@ scripts/ckpt/
     └── plot.py          # Plot benchmark CSV results (requires `uv sync --extra plot`)
 ```
 
-### Full Matrix + Plots
-
-```bash
-# Run every algorithm with and without device-debug, then plot
-uv run ckpt bench all [BENCHMARKS...] [-d RESULT_DIR] [--algorithms A,...] [--cap 5,10,50]
-                      [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS]
-                      [--skip-existing] [--no-plot] [--plot-config FILE]
-```
-
-`bench all` runs `milp`, `schematic`, `rockclimb`, `schematicO3` twice each (with and without `--device-debug`) plus `uninstrumented`, writing `<algo>_debug.csv` / `<algo>.csv` into `RESULT_DIR` (default `result/<timestamp>`), then renders plots into `RESULT_DIR/plots/` so raw data and figures stay together. `--algorithms` trims the list or adds `uninstrumentedO0` / `chunked`. A failing step is logged and skipped rather than aborting the run; the command prints a per-step summary and exits non-zero if anything failed. `--skip-existing` resumes an interrupted run against the same `-d` directory.
-
 ### Standalone Scripts
 
 ```bash
@@ -211,7 +201,7 @@ Rscript scripts/plot_results.R [--result-dir DIR] [--output-dir DIR] [--absolute
                                [--benchmarks B,...] [--metrics M,...] [--log-scale] [--config FILE]
 ```
 
-`scripts/plot_results.R` reads the benchmark CSVs and produces per-capacitor bar charts. By default it plots the two headline metrics — `execution_time` and `runtime_region_boundary_calls` — normalized against the baseline marked `normalize_ref` in the config (falling back to the first algorithm). `--all-metrics` adds `region_boundaries`, `profiling_time`, and `compilation_time`; `--absolute` turns normalization off; `--normalize` is still accepted as a no-op. Runtime region boundary data comes from the device-debug CSVs, timing data from the non-debug ones. Which CSVs are read, and their labels/colors/patterns, come from a JSON config — no filename is hardcoded in the R script. `scripts/plot_config.json` is the default; `scripts/plot_config_o0.json` additionally plots `uninstrumentedO0.csv` as a second execution-time baseline (`--config scripts/plot_config_o0.json`). Each config lists `algorithms` (per-capacitor series; CSV names default to `<algo>.csv` / `<algo>_debug.csv`, overridable with `csv` / `debug_csv`) and `baselines` (capacitor-independent series; `csv` required, optional `metrics` restricts which metrics they appear in).
+`scripts/plot_results.R` produces per-capacitor bar charts, by default `execution_time` and `runtime_region_boundary_calls` normalized against the baseline marked `normalize_ref` in the config (falling back to the first algorithm). `--all-metrics` adds `region_boundaries`, `profiling_time`, and `compilation_time`; `--absolute` turns normalization off. Region boundary data comes from the device-debug CSVs, timing data from the non-debug ones. Which CSVs are read, and their labels/colors/patterns, come from a JSON config — no filename is hardcoded in the R script. `scripts/plot_config.json` is the default; `scripts/plot_config_o0.json` additionally plots `uninstrumentedO0.csv` as a second execution-time baseline (`--config scripts/plot_config_o0.json`). Each config lists `algorithms` (per-capacitor series; CSV names default to `<algo>.csv` / `<algo>_debug.csv`, overridable with `csv` / `debug_csv`) and `baselines` (capacitor-independent series; `csv` required, optional `metrics` restricts which metrics they appear in).
 
 ## Architecture
 
@@ -310,7 +300,7 @@ Sample configs are in `benchmarks/` and `tests/`.
 - C++17, compiled with `-fno-exceptions -fno-rtti` to match LLVM.
 - LLVM-style formatting, 4-space indentation.
 - `PascalCase` for C++ classes, `snake_case` for scripts/files, `test_*.c` for tests, `*_config.json` for configs.
-- Commit style: short imperative subjects (e.g., "Fix deprecated PHI insertion API in MILP instrumenter"). Scope commits to one logical change. **Default to a subject line only — no body.** Add a body only for high-level context that cannot be inferred from the diff, and keep it to a sentence or two. Never restate what the diff does or list the files touched.
+- Commit style: short imperative subjects (e.g., "Fix deprecated PHI insertion API in MILP instrumenter"). Scope commits to one logical change. **Default to a subject line only — no body.** Add a body only for context the diff cannot convey, and keep it to a sentence or two.
 - **Never commit design documents, specs, plans, or notes.** Write them as untracked files and leave them untracked. This applies even when a skill or workflow instructs otherwise. Only code, tests, configs, and files the user explicitly asks to commit belong in git.
 - All code lives in `namespace checkpoint { }`.
 - **Python internal functions must not have default parameter values.** Defaults belong only in the CLI layer (`cli.py`). Internal functions (compile pipelines, benchmark runners, helpers) and dataclass fields must require all values explicitly — no `= None`, no `= ""`, no `= 0`. The only exceptions are `field(default_factory=list)` for empty collections in dataclasses.
