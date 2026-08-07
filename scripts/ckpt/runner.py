@@ -39,7 +39,8 @@ def run(
 ) -> StepResult:
     """Run a subprocess, capturing output and timing.
 
-    Raises ToolError on non-zero exit if check=True. Compile pipelines
+    Raises ToolError on non-zero exit if check=True, and on timeout
+    regardless of check, so callers see one failure type. Compile pipelines
     convert it to CompilationError at their entry points (see
     compile.common.raises_compilation_error).
     """
@@ -47,15 +48,27 @@ def run(
         logger.info("Running %s...", step_name)
 
     start = time.monotonic()
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-        timeout=timeout,
-        input=input,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=timeout,
+            input=input,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        raise ToolError(
+            step_name or " ".join(cmd[:3]),
+            StepResult(
+                returncode=-1,
+                stdout="",
+                stderr=f"timed out after {timeout}s",
+                duration_ms=elapsed_ms,
+            ),
+        ) from exc
     elapsed_ms = int((time.monotonic() - start) * 1000)
 
     if result.stdout:
