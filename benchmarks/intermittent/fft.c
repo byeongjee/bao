@@ -28,6 +28,8 @@ static float imagout[MAXSIZE] __attribute__((section(".fram")));
 static float Coeff[MAXWAVES] __attribute__((section(".fram")));
 static float Amp[MAXWAVES] __attribute__((section(".fram")));
 
+static uint32_t g_checksum_sink __attribute__((used, section(".fram"))) = 0;
+
 /* --- Simple LCG RNG (from ulswap-bench common.c) --- */
 
 static uint32_t _myrand_seed __attribute__((section(".fram"))) = 1234;
@@ -180,6 +182,15 @@ int main(void) {
     /* Inverse FFT */
     fft_float(MAXSIZE, TRUE, realin, imagin, realout, imagout);
 
-    BENCH_EXIT(0);
-    return 0;
+    volatile uint32_t checksum = 0;
+    for (i = 0; i < MAXSIZE; i++) {
+        __loop_tripcount(MAXSIZE); /* 32 */
+        checksum = (checksum * 131U) + (uint32_t)(int32_t)realout[i];
+        checksum = (checksum * 131U) + (uint32_t)(int32_t)imagout[i];
+    }
+
+    g_checksum_sink = checksum;
+
+    BENCH_EXIT((int)(checksum & 0x7FFFFFFFu));
+    return (int)(checksum & 0x7FFFFFFFu);
 }
