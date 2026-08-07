@@ -878,14 +878,15 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         ~ScopeGuard() { fn(); }
     } guard{cleanup};
 
-    // Get max trip count.
+    // An unbounded trip count never satisfies "the whole loop fits in one
+    // charge", so the policy below always checkpoints the back edge. That is
+    // the conservative reading of not knowing, and it needs no special case.
     auto tcOpt = getMaxTripCount(L);
     if (!tcOpt) {
-        PLOGE << "SCHEMATIC: loop at " << blocks.header->getName()
-              << " has no trip count annotation — cannot analyze";
-        return false;
+        PLOGW << "SCHEMATIC: loop at " << blocks.header->getName()
+              << " has no trip count; treating it as unbounded";
     }
-    uint64_t maxTripCount = *tcOpt;
+    uint64_t maxTripCount = tcOpt.value_or(std::numeric_limits<unsigned>::max());
 
     // Get loop body paths (header-to-latch).
     const LoadedLoopTrace *matchedLoopTrace =
