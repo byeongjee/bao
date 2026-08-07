@@ -826,10 +826,15 @@ FORCE_INLINE float c6h6_model_predict(const int16_t *features, int32_t features_
 __attribute__((noinline)) int main(void) {
     BENCH_INIT();
     int i;
+    // Accumulate rather than overwrite: a loop that only keeps the last
+    // iteration's value is dead once unrolled, so the redundant stores and
+    // the float math feeding them get eliminated.
+    volatile float acc = 0;
     for (i = TESTCASES - 1; i >= 0; i--) {
         __loop_tripcount(TESTCASES);
-        g_output = c6h6_model_predict(testFeatures[i], 7);
+        acc = acc + c6h6_model_predict(testFeatures[i], 7);
     }
+    g_output = acc;
     BENCH_EXIT((int)g_output);
     return (int)g_output;
 }
