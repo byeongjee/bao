@@ -1340,6 +1340,71 @@ def bench_all_cmd(
 
 
 # =========================================================================
+# intermittent group
+# =========================================================================
+
+
+_trace_option = click.option(
+    "--trace",
+    required=True,
+    multiple=True,
+    type=click.Path(exists=True),
+    help="Harvesting trace CSV to replay; repeat for several traces.",
+)
+
+_intermittent_options = _add_options(
+    click.argument("benchmarks", nargs=-1),
+    _trace_option,
+    _cap_multi_option,
+    _output_csv_option,
+)
+
+
+def _run_intermittent(ctx: click.Context, algorithm: str, kwargs: dict) -> None:
+    from .intermittent.runner import run_intermittent_benchmarks
+
+    run_intermittent_benchmarks(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        algorithm=algorithm,
+        benchmarks=_list_or_none(kwargs["benchmarks"]),
+        caps=_list_or_none(kwargs["cap"]),
+        traces=[Path(value) for value in kwargs["trace"]],
+        output_csv=_path_or_none(kwargs["output"]),
+        pass_log_level=ctx.obj["pass_log_level"],
+    )
+
+
+@main.group()
+def intermittent() -> None:
+    """Run benchmarks powered by a replayed energy-harvesting trace."""
+
+
+@intermittent.command("milp")
+@_intermittent_options
+@click.pass_context
+def intermittent_milp_cmd(ctx: click.Context, **kwargs) -> None:
+    """Run MILP benchmarks under replayed intermittent power."""
+    _run_intermittent(ctx, "milp", kwargs)
+
+
+@intermittent.command("rockclimb")
+@_intermittent_options
+@click.pass_context
+def intermittent_rockclimb_cmd(ctx: click.Context, **kwargs) -> None:
+    """Run RockClimb benchmarks under replayed intermittent power."""
+    _run_intermittent(ctx, "rockclimb", kwargs)
+
+
+@intermittent.command("schematic")
+@_intermittent_options
+@click.pass_context
+def intermittent_schematic_cmd(ctx: click.Context, **kwargs) -> None:
+    """Run SCHEMATIC benchmarks under replayed intermittent power."""
+    _run_intermittent(ctx, "schematic", kwargs)
+
+
+# =========================================================================
 # verify group
 # =========================================================================
 
