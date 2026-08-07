@@ -1,5 +1,6 @@
 #include "common/BBFreqCollectorPass.h"
 #include "common/TripCountAnnotationPass.h"
+#include "milp/AllocaToGlobalPass.h"
 #include "milp/LoopStripMiningPass.h"
 #include "milp/MILPCheckpointPass.h"
 #include "rockclimb/RockClimbLoopUnrollPass.h"
@@ -80,6 +81,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                 PB.registerPipelineParsingCallback([](StringRef Name, FunctionPassManager &FPM,
                                                       ArrayRef<PassBuilder::PipelineElement>) {
                     if (Name == "checkpoint") {
+                        FPM.addPass(checkpoint::AllocaToGlobalPass());
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
@@ -93,6 +95,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         return true;
                     }
                     if (Name == "milp") {
+                        FPM.addPass(checkpoint::AllocaToGlobalPass());
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
@@ -108,6 +111,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         return true;
                     }
                     if (Name == "bb-freq-collect") {
+                        FPM.addPass(checkpoint::AllocaToGlobalPass());
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
@@ -117,6 +121,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         return true;
                     }
                     if (Name == "milp-preprocess") {
+                        FPM.addPass(checkpoint::AllocaToGlobalPass());
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
