@@ -12,6 +12,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+otii = [
+    { name = "otii-tcp-client" },
+]
 plot = [
     { name = "matplotlib" },
     { name = "numpy" },
@@ -35,11 +38,12 @@ requires-dist = [
     { name = "logic2-automation", marker = "extra == 'saleae'", specifier = ">=1.0.0" },
     { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.5" },
     { name = "numpy", marker = "extra == 'plot'", specifier = ">=1.20" },
+    { name = "otii-tcp-client", marker = "extra == 'otii'", specifier = ">=1.0.13" },
     { name = "pyserial", specifier = ">=3.5" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.0" },
 ]
-provides-extras = ["test", "plot", "saleae"]
+provides-extras = ["test", "plot", "saleae", "otii"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = "==0.16.1" }]
@@ -283,6 +287,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/07/12/8160bea39da3335737b10308df4f484235fd297f556745f13092aa039d3b/numpy-2.4.3-cp314-cp314t-win32.whl", hash = "sha256:5e10da9e93247e554bb1d22f8edc51847ddd7dde52d85ce31024c1b4312bfba0", size = 6154547, upload-time = "2026-03-09T07:58:28.289Z" },
     { url = "https://files.pythonhosted.org/packages/42/f3/76534f61f80d74cc9cdf2e570d3d4eeb92c2280a27c39b0aaf471eda7b48/numpy-2.4.3-cp314-cp314t-win_amd64.whl", hash = "sha256:45f003dbdffb997a03da2d1d0cb41fbd24a87507fb41605c0420a3db5bd4667b", size = 12633645, upload-time = "2026-03-09T07:58:30.384Z" },
     { url = "https://files.pythonhosted.org/packages/1f/b6/7c0d4334c15983cec7f92a69e8ce9b1e6f31857e5ee3a413ac424e6bd63d/numpy-2.4.3-cp314-cp314t-win_arm64.whl", hash = "sha256:4d382735cecd7bcf090172489a525cd7d4087bc331f7df9f60ddc9a296cf208e", size = 10565454, upload-time = "2026-03-09T07:58:33.031Z" },
+]
+
+[[package]]
+name = "otii-tcp-client"
+version = "1.0.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4f/6e/431053b79967be993ce68beb14ef71c057c98d341fcf1870e659a8d6915c/otii_tcp_client-1.0.13.tar.gz", hash = "sha256:e0b496aa670b7076ba11713c84a2d360d8269b73121fbe5466ace10e5e1ca0f1", size = 17529, upload-time = "2026-06-09T07:11:18.943Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/aa/32522bc98ef4eab5a8d30caa84f137201857fbad506304584b458e4ee5f2/otii_tcp_client-1.0.13-py3-none-any.whl", hash = "sha256:3a31c049ffd58cd1f3fd5a437fd59cf4b8fe0bd1aa07d663c1d9ab208ffe9972", size = 21583, upload-time = "2026-06-09T07:11:17.954Z" },
 ]
 
 [[package]]
