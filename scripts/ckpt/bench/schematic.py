@@ -307,5 +307,3 @@ def run_schematic_benchmarks(
             capture_timeout_seconds=capture_timeout_seconds,
             accumulate_keys_file=accumulate_keys_file,
         )
-        if saleae_manager is not None:
-            saleae_manager.close()
