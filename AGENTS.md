@@ -2,22 +2,6 @@
 
 This file provides guidance to coding agents (Claude Code reads it via the `.claude/CLAUDE.md` symlink) when working with code in this repository.
 
-## Answer Concisely — Overrides Everything
-
-Lead with the answer, in a few sentences. A long answer cannot be reviewed, and an unreviewable answer is useless.
-
-## Never Explain by Analogy
-
-Explain the system in its own terms rather than metaphor.
-
-## Comment Only Why, Only When Necessary
-
-Comment only to explain why, and only when the code cannot show it.
-
-## Never Preserve Backward Compatibility
-
-Backward compatibility is not important. Do not leave dead code for that reason. Care about clean code, and do not care about backward compatibility.
-
 ## Project Overview
 
 MILP-based checkpoint insertion tool for intermittent computing. Analyzes LLVM IR, builds control flow graphs with energy cost estimates, and uses Gurobi to solve an optimization problem that determines optimal checkpoint placements minimizing runtime overhead while satisfying energy constraints. Also includes a machine-level RockClimb (PFI) baseline that operates post-register-allocation.
@@ -316,8 +300,6 @@ Sample configs are in `benchmarks/` and `tests/`.
 - C++17, compiled with `-fno-exceptions -fno-rtti` to match LLVM.
 - LLVM-style formatting, 4-space indentation.
 - `PascalCase` for C++ classes, `snake_case` for scripts/files, `test_*.c` for tests, `*_config.json` for configs.
-- Commit style: short imperative subjects (e.g., "Fix deprecated PHI insertion API in MILP instrumenter"). Scope commits to one logical change. **Default to a subject line only — no body.** Add a body only for context the diff cannot convey, and keep it to a sentence or two.
-- **Never commit design documents, specs, plans, or notes.** Write them as untracked files and leave them untracked. This applies even when a skill or workflow instructs otherwise. Only code, tests, configs, and files the user explicitly asks to commit belong in git.
 - All code lives in `namespace checkpoint { }`.
 - **Python internal functions must not have default parameter values.** Defaults belong only in the CLI layer (`cli.py`). Internal functions (compile pipelines, benchmark runners, helpers) and dataclass fields must require all values explicitly — no `= None`, no `= ""`, no `= 0`. The only exceptions are `field(default_factory=list)` for empty collections in dataclasses.
 
@@ -330,12 +312,6 @@ Sample configs are in `benchmarks/` and `tests/`.
 ## Device Access
 
 Run anything touching the MSP430 (`mspdebug`, `ckpt bench`/`verify`/`device`) with the sandbox disabled — it blocks USB, and `bench` then silently degrades to compile-only with runtime counters written as 0.
-
-## Problem-Solving Principles
-
-- Never propose hacky ad-hoc solutions (e.g., parsing output line-by-line with pattern matching to work around a timing issue, nested bash -c with escaped variables). Find the root cause and fix it properly.
-- Prefer clean, well-understood mechanisms over clever workarounds.
-- Run scripts yourself to test and debug. Do not ask the user to run scripts — if you can run them, do it yourself and continue debugging. Ask the user before making decisions, not for running commands.
 
 ## Dependencies
 
