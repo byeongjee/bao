@@ -877,11 +877,17 @@ void CheckpointOptimizer::extractSolution() {
     solution_.s.clear();
     solution_.eAccum.clear();
 
+    double expectedHits = 0.0;
     for (const auto &[block, var] : r_) {
         if (var.get(GRB_DoubleAttr_X) > 0.5) {
             solution_.r.insert(block);
+            double f = energy_.getFBoundary(block);
+            expectedHits += f;
+            PLOGD << "  region start " << cfg_.getNodeName(block) << " fBoundary=" << f
+                  << " fEntry=" << energy_.getFEntry(block);
         }
     }
+    PLOGD << "  expected runtime boundary hits (Σ fBoundary over r=1): " << expectedHits;
 
     if (coarseAllocation_) {
         for (llvm::GlobalVariable *GV : orderedVmObjs_) {
