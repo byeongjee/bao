@@ -47,6 +47,9 @@ def main():
     parser.add_argument("traces", nargs="+", help="raw 1 kHz trace files (.txt)")
     parser.add_argument("-o", "--out-dir", required=True, help="output directory")
     parser.add_argument("--rate", type=float, default=50.0, help="target rate in Hz")
+    parser.add_argument(
+        "--vmax", type=float, default=None, help="clip output voltages to this maximum"
+    )
     args = parser.parse_args()
 
     factor = round(SAMPLE_RATE / args.rate)
@@ -57,6 +60,8 @@ def main():
     for path in args.traces:
         voltage = load_voltage(path)
         averaged = block_average(voltage, factor)
+        if args.vmax is not None:
+            averaged = np.minimum(averaged, args.vmax)
         name = os.path.splitext(os.path.basename(path))[0]
         out_path = os.path.join(args.out_dir, f"{name}.csv")
         write_csv(out_path, averaged, args.rate)
