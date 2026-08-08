@@ -348,13 +348,20 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                 "~{r4},~{r5},~{r6},~{r7},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},"
                 "~{memory}",
                 /*hasSideEffects=*/true);
-            auto *boundaryCall = builder.CreateCall(asmTy, boundaryAsm);
-            inserted++;
 
-            // --- Split block after boundary call ---
-            // BB_bottom receives all instructions that were after the split point
-            // (the original block's remaining code). Restores go into BB_bottom.
-            llvm::BasicBlock *BB_bottom = llvm::SplitBlock(&BB, boundaryCall->getNextNode());
+            // --- Split block and emit the boundary as a callbr terminator ---
+            // BB_bottom receives the rest of the block; restores go there.
+            // A boundary is a resume point: after power loss, execution
+            // restarts at BB_bottom with only FRAM intact, so everything
+            // from there on must be recomputable from FRAM alone. Emitting
+            // the boundary as a terminator makes that structural: no
+            // instruction can sit between it and the block end, so codegen
+            // can never place post-resume work ahead of the resume point.
+            llvm::BasicBlock *BB_bottom = llvm::SplitBlock(&BB, &*builder.GetInsertPoint());
+            BB.getTerminator()->eraseFromParent();
+            builder.SetInsertPoint(&BB);
+            builder.CreateCallBr(asmTy, boundaryAsm, BB_bottom, {}, {});
+            inserted++;
             builder.SetInsertPoint(&*BB_bottom->getFirstInsertionPt());
         }
         // Entry node: no boundary call, no split. Restores still emitted below.
