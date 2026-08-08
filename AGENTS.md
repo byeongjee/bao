@@ -327,6 +327,10 @@ Sample configs are in `benchmarks/` and `tests/`.
 - **Never manually install packages** with `uv pip install`. `uv run` auto-syncs dependencies. For optional extras use `uv run --extra test pytest ...`.
 - **Always use the built-in `--timeout` option for Saleae-capable `uv run ckpt bench ...` and `uv run ckpt verify ...` executions.** Never wrap these commands with `timeout`, `gtimeout`, or another external process killer; terminating the Python process externally can bypass Saleae capture cleanup and leave Logic 2 unable to start a new session.
 
+## Device Access
+
+Run anything touching the MSP430 (`mspdebug`, `ckpt bench`/`verify`/`device`) with the sandbox disabled — it blocks USB, and `bench` then silently degrades to compile-only with runtime counters written as 0.
+
 ## Problem-Solving Principles
 
 - Never propose hacky ad-hoc solutions (e.g., parsing output line-by-line with pattern matching to work around a timing issue, nested bash -c with escaped variables). Find the root cause and fix it properly.
