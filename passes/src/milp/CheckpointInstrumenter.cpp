@@ -308,6 +308,14 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     assert(addrIt != allocaAddrMap_.end() && "alloca commit requires an addr slot");
                     builder.CreateStore(AI, addrIt->second);
                 } else {
+                    // Invariant: the solver only orders saves of values that
+                    // are live-in at their node, and a node's entry is the
+                    // top of its representative block — the exact point where
+                    // this boundary is emitted. A violation means the model
+                    // accounted a different boundary point than the one being
+                    // materialized.
+                    assert(state.getIneligLiveIn(&BB).count(V) &&
+                           "solver-ordered save must be live-in at the boundary");
                     // SSA value: unified commit via GetValueInMiddleOfBlock.
                     auto backupIt = nvmBackupMap_.find(V);
                     assert(backupIt != nvmBackupMap_.end() && "SSA commit requires an NVM backup");
