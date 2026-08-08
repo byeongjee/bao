@@ -34,6 +34,7 @@ namespace {
 struct LoopAggregate {
     std::string nodeName;
     const BasicBlock *headerBB = nullptr;
+    const BasicBlock *entryBB = nullptr;
     SmallPtrSet<const BasicBlock *, 16> loopBlocks;
     SmallPtrSet<const BasicBlock *, 16> pathBlocks;
     double pathEnergy = 0.0;
@@ -508,14 +509,33 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
             }
         }
 
+        // The summary's entry is the top of its representative block, the
+        // preheader (where the instrumenter emits the boundary). The
+        // preheader therefore belongs to the summary: its energy and NVM
+        // accesses count once per entry, and its defs/live-ins are part of
+        // the summary's state.
+        BasicBlock *preheaderBB = L->getLoopPreheader();
+        double preheaderEnergy = 0.0;
+        double preheaderNvmPenalty = 0.0;
+        if (preheaderBB) {
+            preheaderEnergy = blockEnergyByBB.lookup(preheaderBB);
+            for (llvm::GlobalVariable *GV : model.vmObjs_)
+                preheaderNvmPenalty += energy.getENvm(preheaderBB, GV);
+        }
+
+        SmallPtrSet<const BasicBlock *, 16> marginBlocks(path.blocksOnPath.begin(),
+                                                         path.blocksOnPath.end());
+        if (preheaderBB)
+            marginBlocks.insert(preheaderBB);
         double restoreLiveInMargin = 0.0;
         double commitDefMargin = 0.0;
         double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-            path.blocksOnPath, state, model.params_, restoreLiveInMargin, commitDefMargin);
+            marginBlocks, state, model.params_, restoreLiveInMargin, commitDefMargin);
 
         const double budgetAfterBoundary = budget - boundaryStateMargin;
-        double totalBaseEnergy = path.energy * static_cast<double>(loopTC);
-        double totalNvmPenalty = perIterNvmPenalty * static_cast<double>(loopTC);
+        double totalBaseEnergy = path.energy * static_cast<double>(loopTC) + preheaderEnergy;
+        double totalNvmPenalty =
+            perIterNvmPenalty * static_cast<double>(loopTC) + preheaderNvmPenalty;
         double totalEnergyWithNvm = totalBaseEnergy + totalNvmPenalty;
         if (budgetAfterBoundary <= 0.0 || !(totalEnergyWithNvm < budgetAfterBoundary)) {
             skipLoop("loop-total-exceeds-budget",
@@ -542,6 +562,7 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
         LoopAggregate agg;
         agg.nodeName = nodeName;
         agg.headerBB = headerBB;
+        agg.entryBB = preheaderBB ? preheaderBB : headerBB;
         agg.pathBlocks = std::move(path.blocksOnPath);
         agg.pathEnergy = totalBaseEnergy;
         // Summary represents all iterations — entered once per loop invocation.
@@ -554,6 +575,15 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
         for (const BasicBlock *BB : L->blocks()) {
             agg.loopBlocks.insert(BB);
             summarizedConcreteBlocks.insert(BB);
+        }
+        if (preheaderBB) {
+            // Outermost-first summarization: if any enclosing loop were
+            // summarized, this loop would have been skipped, so its
+            // preheader cannot belong to another summary.
+            assert(!summarizedConcreteBlocks.count(preheaderBB) &&
+                   "preheader of a summarized loop already belongs to another summary");
+            agg.loopBlocks.insert(preheaderBB);
+            summarizedConcreteBlocks.insert(preheaderBB);
         }
 
         // Aggregate eligible globals across loop blocks.
@@ -570,8 +600,11 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
                 hasLiveIn |= state.getEligLiveIn(BB).count(GV) > 0;
             }
 
-            if (nvmSum != 0.0) {
-                agg.eNvmByGV[GV] = nvmSum * static_cast<double>(loopTC);
+            double totalNvm = nvmSum * static_cast<double>(loopTC);
+            if (preheaderBB)
+                totalNvm += energy.getENvm(preheaderBB, GV);
+            if (totalNvm != 0.0) {
+                agg.eNvmByGV[GV] = totalNvm;
             }
             if (hasDef) {
                 agg.eligDefGlobals.insert(GV);
@@ -630,6 +663,10 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
     for (const auto &[nodeName, agg] : summariesByNode) {
         (void)nodeName;
         for (const BasicBlock *BB : agg.loopBlocks) {
+            // Invariant: summaries never overlap — outermost-first
+            // summarization skips any loop that touches an existing summary.
+            assert(concreteToAbstract[BB] == cfg.getBlockInfo(BB).name &&
+                   "block belongs to more than one summary");
             concreteToAbstract[BB] = agg.nodeName;
         }
     }
@@ -659,6 +696,14 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
                                                  (aDst == cfg.getBlockInfo(dst).name);
             if (aSrc == aDst && !isUncollapsedConcreteSelfEdge) {
                 continue;
+            }
+            // Invariant: a summary's boundary is emitted at the top of its
+            // entry block, so all control flow into the summary must enter
+            // there.
+            if (auto sIt = summariesByNode.find(aDst); sIt != summariesByNode.end()) {
+                assert(dst == sIt->second.entryBB &&
+                       "edge into a summary must enter at its entry block");
+                (void)sIt;
             }
             if (edgeSet.insert(std::make_pair(aSrc, aDst)).second) {
                 abstractEdges.emplace_back(aSrc, aDst);
@@ -768,13 +813,12 @@ AbstractCFGBuildResult buildAbstractCFG(llvm::Function &F, llvm::LoopInfo &LI,
         auto summaryIt = summariesByNode.find(nodeName);
         if (summaryIt != summariesByNode.end()) {
             const LoopAggregate &agg = summaryIt->second;
-            auto *header = const_cast<llvm::BasicBlock *>(agg.headerBB);
-            // Use the preheader as the representative block.
-            llvm::BasicBlock *rep = header;
-            if (llvm::Loop *L = LI.getLoopFor(header)) {
-                if (llvm::BasicBlock *PH = L->getLoopPreheader())
-                    rep = PH;
-            }
+            // The representative block is where the instrumenter emits the
+            // summary's boundary (at its top), so it must be the summary's
+            // entry block — and in particular a member of the summary.
+            auto *rep = const_cast<llvm::BasicBlock *>(agg.entryBB);
+            assert(agg.loopBlocks.count(rep) &&
+                   "summary representative must be a member of the summary");
             model.nodeMap_.setSummaryRepresentative(nodeId, rep);
             // Register all loop-interior blocks → summary NodeId.
             for (const BasicBlock *loopBB : agg.loopBlocks) {
