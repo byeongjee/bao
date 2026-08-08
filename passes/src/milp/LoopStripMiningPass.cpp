@@ -674,6 +674,36 @@ static double computeNvmAccessMarginOnPath(const SmallPtrSetImpl<const BasicBloc
     return nvmAccessMargin;
 }
 
+static std::optional<double>
+enclosingResidual(Loop *L, ScalarEvolution &SE,
+                  const DenseMap<const BasicBlock *, double> &blockEnergy,
+                  const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+                  const checkpoint::StateAnalysis &state) {
+    Loop *P = L->getParentLoop();
+    if (!P)
+        return std::nullopt;
+
+    WorstCasePathResult path =
+        computeWorstCasePath(P, blockEnergy, LI, SE, [&](Loop *SubL) -> std::optional<uint64_t> {
+            if (SubL == L)
+                return uint64_t{0};
+            return exactSubLoopTripCount(SubL, SE);
+        });
+    if (!path.ok)
+        return std::nullopt;
+
+    SmallPtrSet<const BasicBlock *, 16> residualBlocks;
+    for (const BasicBlock *BB : path.blocksOnPath)
+        if (!L->contains(BB))
+            residualBlocks.insert(BB);
+
+    double restoreLiveInMargin = 0.0;
+    double commitDefMargin = 0.0;
+    double stateMargin = computeBoundaryStateMarginOnPath(residualBlocks, state, params,
+                                                          restoreLiveInMargin, commitDefMargin);
+    return path.energy + computeNvmAccessMarginOnPath(residualBlocks, state, params) + stateMargin;
+}
+
 /// Exact constant trip count for loops with a single exiting block; records
 /// it in the plan detail when known.
 static std::optional<uint64_t> computeExactTripCount(Loop *L, ScalarEvolution &SE,
@@ -809,6 +839,15 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     }
 
     double budget = params.capacity - params.E_pro - params.E_epi;
+    if (budget > 0.0 && !exactSubLoopTripCount(L, SE)) {
+        std::optional<double> residual = enclosingResidual(L, SE, blockEnergy, params, LI, state);
+        if (residual && *residual < budget) {
+            budget -= *residual;
+            PLOGD << "LoopStripMiningPass: enclosing-context budget cap " << getLoopFunctionName(L)
+                  << "::" << getLoopHeaderName(L) << " residual=" << *residual
+                  << " budget=" << budget;
+        }
+    }
     result.detail.budget = budget;
     if (budget <= 0.0) {
         result.skipReason = "nonpositive-energy-budget";
