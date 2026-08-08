@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Downsample 1 kHz Mementos voltage traces by block averaging.
 
-    uv run python scripts/otii/downsample_traces.py benchmarks/traces/[0-9]*.txt \
-        -o benchmarks/traces/50hz
+    uv run python scripts/otii/downsample_traces.py benchmarks/traces/original/[0-9]*.txt \
+        -o benchmarks/traces
 
 Each output sample is the mean of the corresponding block of input samples
 (e.g. 20 samples for 50 Hz), which acts as the anti-aliasing filter; picking
