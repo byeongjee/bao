@@ -193,17 +193,17 @@ class CheckpointOptimizer {
     void addConstraints();
     void extractSolution();
 
-    // Constraint helpers (paper constraint numbers)
+    // Constraint helpers (numbered as in the paper appendix)
     void constrainEntryAsRegionStart();       // C1
-    void constrainIneligiblePlacement();      // C2 (new)
-    void constrainNeedRestoreLinearization(); // C3
-    void constrainVMCapacity();               // VM capacity
-    void constrainPlacementPropagation();     // C12, C13
-    void constrainDirtyPropagation();         // C4, C5, C6
-    void constrainSaveAtRegionBoundary();     // C7, C8
-    void constrainEnergyInitAtRegionStart();  // C9
-    void constrainEnergyPropagation();        // C10
-    void constrainEnergyWithinCapacity();     // C11
+    void constrainIneligiblePlacement();      // C3
+    void constrainNeedRestoreLinearization(); // C4
+    void constrainVMCapacity();               // C2
+    void constrainPlacementPropagation();     // C14, C15
+    void constrainDirtyPropagation();         // C5, C6, C7
+    void constrainSaveAtRegionBoundary();     // C9 (C8's dHat eliminated)
+    void constrainEnergyInitAtRegionStart();  // C10
+    void constrainEnergyPropagation();        // C11
+    void constrainEnergyWithinCapacity();     // C12, C13
 
     // Expression builders (linear in decision variables)
     GRBLinExpr buildEBlk(NodeId block);

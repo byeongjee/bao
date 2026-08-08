@@ -485,15 +485,15 @@ void CheckpointOptimizer::addObjective() {
 
 void CheckpointOptimizer::addConstraints() {
     constrainEntryAsRegionStart();       // C1
-    constrainIneligiblePlacement();      // C2
-    constrainNeedRestoreLinearization(); // C3
-    constrainVMCapacity();               // VM capacity
-    constrainPlacementPropagation();     // C12, C13
-    constrainDirtyPropagation();         // C4, C5, C6
-    constrainSaveAtRegionBoundary();     // C8 (dHat eliminated)
-    constrainEnergyInitAtRegionStart();  // C9
-    constrainEnergyPropagation();        // C10
-    constrainEnergyWithinCapacity();     // C11
+    constrainIneligiblePlacement();      // C3
+    constrainNeedRestoreLinearization(); // C4
+    constrainVMCapacity();               // C2
+    constrainPlacementPropagation();     // C14, C15
+    constrainDirtyPropagation();         // C5, C6, C7
+    constrainSaveAtRegionBoundary();     // C9 (C8's dHat eliminated)
+    constrainEnergyInitAtRegionStart();  // C10
+    constrainEnergyPropagation();        // C11
+    constrainEnergyWithinCapacity();     // C12, C13
 }
 
 // C1: r[entry] = 1
@@ -504,14 +504,14 @@ void CheckpointOptimizer::constrainEntryAsRegionStart() {
     }
 }
 
-// C2: Ineligible variables have m=1 (not modeled as Gurobi variables).
+// C3: Ineligible variables have m=1 (not modeled as Gurobi variables).
 // No constraints needed — handled by not creating m[b,v] for ineligibles
 // and substituting constant 1 wherever m would appear.
 void CheckpointOptimizer::constrainIneligiblePlacement() {
     // Intentionally empty: m[b,v] for ineligibles is not a Gurobi variable.
 }
 
-// Σ size(v) * m[b,v] <= VM_capacity  (∀ b)
+// C2: Σ size(v) * m[b,v] <= VM_capacity  (∀ b)
 // Ineligible variables have m=1 (constant), moved to RHS as reduced capacity.
 void CheckpointOptimizer::constrainVMCapacity() {
     // Compute fixed VM usage from ineligible variables (m=1 always).
@@ -535,7 +535,7 @@ void CheckpointOptimizer::constrainVMCapacity() {
                 continue;
             vmUsage += static_cast<double>(sizeBytes) * mGlobal_.at(GV);
         }
-        model_->addConstr(vmUsage <= reducedCapacity, "vm_capacity_global");
+        model_->addConstr(vmUsage <= reducedCapacity, "C2_vm_capacity_global");
         return;
     }
 
@@ -548,11 +548,11 @@ void CheckpointOptimizer::constrainVMCapacity() {
             vmUsage += static_cast<double>(sizeBytes) *
                        m_.at(std::make_pair(block, static_cast<llvm::Value *>(GV)));
         }
-        model_->addConstr(vmUsage <= reducedCapacity, "vm_capacity_" + nodeToken(cfg_, block));
+        model_->addConstr(vmUsage <= reducedCapacity, "C2_vm_capacity_" + nodeToken(cfg_, block));
     }
 }
 
-// C3: rHat[b,v] = r[b] AND m[b,v]  (only for eligible + live-in pairs)
+// C4: rHat[b,v] = r[b] AND m[b,v]  (only for eligible + live-in pairs)
 // McCormick linearization (exact when r,m are binary):
 //   rHat <= r,  rHat <= m,  rHat >= r + m - 1
 void CheckpointOptimizer::constrainNeedRestoreLinearization() {
@@ -562,20 +562,20 @@ void CheckpointOptimizer::constrainNeedRestoreLinearization() {
         GRBVar rHatVar = rHat_.at(key);
         auto *GV = llvm::cast<llvm::GlobalVariable>(V);
         std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
-        model_->addConstr(rHatVar <= r_[block], "C3_rHat_le_r_" + suffix);
+        model_->addConstr(rHatVar <= r_[block], "C4_rHat_le_r_" + suffix);
         if (coarseAllocation_) {
-            model_->addConstr(rHatVar <= mGlobal_.at(GV), "C3_rHat_le_m_" + suffix);
+            model_->addConstr(rHatVar <= mGlobal_.at(GV), "C4_rHat_le_m_" + suffix);
             model_->addConstr(rHatVar >= r_[block] + mGlobal_.at(GV) - 1,
-                              "C3_rHat_ge_rm_" + suffix);
+                              "C4_rHat_ge_rm_" + suffix);
         } else {
-            model_->addConstr(rHatVar <= m_.at(key), "C3_rHat_le_m_" + suffix);
-            model_->addConstr(rHatVar >= r_[block] + m_.at(key) - 1, "C3_rHat_ge_rm_" + suffix);
+            model_->addConstr(rHatVar <= m_.at(key), "C4_rHat_le_m_" + suffix);
+            model_->addConstr(rHatVar >= r_[block] + m_.at(key) - 1, "C4_rHat_ge_rm_" + suffix);
         }
     }
 }
 
-// C12: m[succ,v] <= m[pred,v] + r[succ]  (∀ edge, v ∈ V_elig)
-// C13: m[succ,v] >= m[pred,v] - r[succ]  (∀ edge, v ∈ V_elig)
+// C14-1: m[succ,v] <= m[pred,v] + r[succ]  (∀ edge, v ∈ V_elig)
+// C14-2: m[succ,v] >= m[pred,v] - r[succ]  (∀ edge, v ∈ V_elig)
 void CheckpointOptimizer::constrainPlacementPropagation() {
     if (coarseAllocation_)
         return;
@@ -586,14 +586,14 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
             BlockVarKey predKey = std::make_pair(pred, static_cast<llvm::Value *>(GV));
             BlockVarKey succKey = std::make_pair(succ, static_cast<llvm::Value *>(GV));
             model_->addConstr(m_[succKey] <= m_[predKey] + r_[succ],
-                              "C12_placement_fwd_" + std::to_string(idx));
+                              "C14_placement_fwd_" + std::to_string(idx));
             model_->addConstr(m_[succKey] >= m_[predKey] - r_[succ],
-                              "C13_placement_bwd_" + std::to_string(idx));
+                              "C14_placement_bwd_" + std::to_string(idx));
             idx++;
         }
     }
 
-    // At merge points, force consistent placement across all predecessors:
+    // C15: at merge points, force consistent placement across all predecessors:
     // m[pred,v] = m[pred',v] for every pair of predecessors of a merge block.
     unsigned mergeIdx = 0;
     for (NodeId block : cfg_.getBlocks()) {
@@ -610,17 +610,18 @@ void CheckpointOptimizer::constrainPlacementPropagation() {
             for (size_t i = 1; i < preds.size(); ++i) {
                 BlockVarKey otherKey = std::make_pair(preds[i], V);
                 model_->addConstr(m_[firstKey] == m_[otherKey],
-                                  "merge_placement_eq_" + std::to_string(mergeIdx));
+                                  "C15_merge_placement_eq_" + std::to_string(mergeIdx));
                 mergeIdx++;
             }
         }
     }
 }
 
-// C4:  d[b,v] >= D_{b,v}                              (∀ b ∈ Reach(v), v)
-// C5:  d[succ,v] >= d[pred,v] - r[succ]               (∀ edge, v where both in Reach(v))
-// C5': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]           (∀ b ∈ Reach(v), v)  [LP tightening]
-// C6:  d[b,v] <= D_{b,v} - r[b] + 1                   (∀ b ∈ Reach(v), v)
+// C5:  d[b,v] >= D_{b,v}                              (∀ b ∈ Reach(v), v)
+// C6:  d[succ,v] >= d[pred,v] - r[succ]               (∀ edge, v where both in Reach(v))
+// C7:  d[b,v] <= D_{b,v} - r[b] + 1                   (∀ b ∈ Reach(v), v)
+//      (C7's lower half d >= D + r - 1 is subsumed by C5)
+// C7': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]           (∀ b ∈ Reach(v), v)  [LP tightening]
 // d[b,v] is not created for b ∉ Reach(v) (provably 0).
 void CheckpointOptimizer::constrainDirtyPropagation() {
     for (NodeId block : cfg_.getBlocks()) {
@@ -641,10 +642,10 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
 
             std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
 
-            // C4: d[b,v] >= D_{b,v}
-            model_->addConstr(dVar >= def, "C4_dirty_local_" + suffix);
+            // C5: d[b,v] >= D_{b,v}
+            model_->addConstr(dVar >= def, "C5_dirty_local_" + suffix);
 
-            // C5': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]  [LP tightening]
+            // C7': d[b,v] <= D_{b,v} + Σ_pred d[pred,v]  [LP tightening]
             // Predecessors outside Reach(v) contribute 0.
             GRBLinExpr predSum = 0;
             for (NodeId pred : predecessors_[block]) {
@@ -652,14 +653,14 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
                 if (predIt != d_.end())
                     predSum += predIt->second;
             }
-            model_->addConstr(dVar <= def + predSum, "C5p_dirty_upper_" + suffix);
+            model_->addConstr(dVar <= def + predSum, "C7p_dirty_upper_" + suffix);
 
-            // C6: d[b,v] <= D_{b,v} - r[b] + 1
-            model_->addConstr(dVar <= def + (1 - r_[block]), "C6_dirty_reset_" + suffix);
+            // C7: d[b,v] <= D_{b,v} - r[b] + 1
+            model_->addConstr(dVar <= def + (1 - r_[block]), "C7_dirty_reset_" + suffix);
         }
     }
 
-    // C5: d[succ,v] >= d[pred,v] - r[succ]  (∀ edge, v where both in Reach(v))
+    // C6: d[succ,v] >= d[pred,v] - r[succ]  (∀ edge, v where both in Reach(v))
     unsigned idx = 0;
     for (const auto &[pred, succ] : cfg_.getEdges()) {
         for (llvm::Value *V : orderedTrackedValues_) {
@@ -668,17 +669,17 @@ void CheckpointOptimizer::constrainDirtyPropagation() {
             if (predIt == d_.end() || succIt == d_.end())
                 continue; // One or both outside Reach(v), constraint is trivial.
             model_->addConstr(succIt->second >= predIt->second - r_[succ],
-                              "C5_dirty_edge_" + std::to_string(idx));
+                              "C6_dirty_edge_" + std::to_string(idx));
             idx++;
         }
     }
 }
 
-// C8:  s[succ,v] >= d[pred,v] + m[pred,v] + r[succ] - 2   (∀ edge, v)
-//      (eliminates dHat by substituting dHat >= d + m - 1)
-// C8': s[b,v] <= r[b]                                      (∀ b, v)  [LP tightening]
-// C8': s[b,v] <= Σ_pred d[pred,v]                           (∀ b, v)  [LP tightening]
-// C8': s[b,v] <= Σ_pred m[pred,v]                           (∀ b, v)  [LP tightening]
+// C9:  s[succ,v] >= d[pred,v] + m[pred,v] + r[succ] - 2   (∀ edge, v)
+//      (eliminates C8's dHat by substituting dHat >= d + m - 1)
+// C9': s[b,v] <= r[b]                                      (∀ b, v)  [LP tightening]
+// C9': s[b,v] <= Σ_pred d[pred,v]                           (∀ b, v)  [LP tightening]
+// C9': s[b,v] <= Σ_pred m[pred,v]                           (∀ b, v)  [LP tightening]
 void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
     // LP tightening for s variables.
     for (const BlockVarKey &key : sKeys_) {
@@ -687,10 +688,10 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
         GRBVar sVar = s_.at(key);
         std::string suffix = nodeToken(cfg_, block) + "_" + valueToken(V);
 
-        // C8': s[b,v] <= r[b]
-        model_->addConstr(sVar <= r_[block], "C8p_save_le_r_" + suffix);
+        // C9': s[b,v] <= r[b]
+        model_->addConstr(sVar <= r_[block], "C9p_save_le_r_" + suffix);
 
-        // C8': s[b,v] <= Σ_pred d[pred,v]  (replaces dHat upper bound)
+        // C9': s[b,v] <= Σ_pred d[pred,v]  (replaces dHat upper bound)
         // Predecessors outside Reach(v) contribute 0.
         GRBLinExpr predDirtySum = 0;
         for (NodeId pred : predecessors_[block]) {
@@ -698,25 +699,25 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
             if (predIt != d_.end())
                 predDirtySum += predIt->second;
         }
-        model_->addConstr(sVar <= predDirtySum, "C8p_save_le_dirty_" + suffix);
+        model_->addConstr(sVar <= predDirtySum, "C9p_save_le_dirty_" + suffix);
 
-        // C8': s[b,v] <= Σ_pred m[pred,v]  (replaces dHat upper bound)
+        // C9': s[b,v] <= Σ_pred m[pred,v]  (replaces dHat upper bound)
         // For ineligibles, m=1 so s <= |preds|, trivially satisfied — skip.
         if (!state_.isIneligible(V)) {
             auto *GV = llvm::cast<llvm::GlobalVariable>(V);
             if (coarseAllocation_) {
-                model_->addConstr(sVar <= mGlobal_.at(GV), "C8p_save_le_place_" + suffix);
+                model_->addConstr(sVar <= mGlobal_.at(GV), "C9p_save_le_place_" + suffix);
             } else {
                 GRBLinExpr predPlaceSum = 0;
                 for (NodeId pred : predecessors_[block]) {
                     predPlaceSum += m_.at(std::make_pair(pred, V));
                 }
-                model_->addConstr(sVar <= predPlaceSum, "C8p_save_le_place_" + suffix);
+                model_->addConstr(sVar <= predPlaceSum, "C9p_save_le_place_" + suffix);
             }
         }
     }
 
-    // C8: s[succ,v] >= d[pred,v] + m[pred,v] + r[succ] - 2  (∀ edge, v where s exists)
+    // C9: s[succ,v] >= d[pred,v] + m[pred,v] + r[succ] - 2  (∀ edge, v where s exists)
     // Build per-block save variable lookup for efficiency.
     std::map<NodeId, std::vector<std::pair<llvm::Value *, GRBVar>>> saveByBlock;
     for (const BlockVarKey &key : sKeys_) {
@@ -736,15 +737,15 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
             if (state_.isIneligible(V)) {
                 // m=1: s >= d + 1 + r - 2 = d + r - 1
                 model_->addConstr(sVar >= dIt->second + r_[succ] - 1,
-                                  "C8_save_edge_" + std::to_string(idx));
+                                  "C9_save_edge_" + std::to_string(idx));
             } else {
                 auto *GV = llvm::cast<llvm::GlobalVariable>(V);
                 if (coarseAllocation_) {
                     model_->addConstr(sVar >= dIt->second + mGlobal_.at(GV) + r_[succ] - 2,
-                                      "C8_save_edge_" + std::to_string(idx));
+                                      "C9_save_edge_" + std::to_string(idx));
                 } else {
                     model_->addConstr(sVar >= dIt->second + m_.at(predKey) + r_[succ] - 2,
-                                      "C8_save_edge_" + std::to_string(idx));
+                                      "C9_save_edge_" + std::to_string(idx));
                 }
             }
             idx++;
@@ -752,7 +753,7 @@ void CheckpointOptimizer::constrainSaveAtRegionBoundary() {
     }
 }
 
-// At region starts, accumulated energy equals the startup cost:
+// C10: at region starts, accumulated energy equals the startup cost:
 //   r[b]=1  →  eAccum[b] = E_start(b)
 // Big-M reformulation (M = capacity, tight since eAccum ∈ [0, capacity]):
 //   eAccum[b] >= E_start(b) - capacity * (1 - r[b])
@@ -763,13 +764,13 @@ void CheckpointOptimizer::constrainEnergyInitAtRegionStart() {
         GRBLinExpr eStart = buildEStart(block);
         std::string suffix = nodeToken(cfg_, block);
         model_->addConstr(eAccum_[block] >= eStart - M * (1 - r_[block]),
-                          "C9_energy_init_lb_" + suffix);
+                          "C10_energy_init_lb_" + suffix);
         model_->addConstr(eAccum_[block] <= eStart + M * (1 - r_[block]),
-                          "C9_energy_init_ub_" + suffix);
+                          "C10_energy_init_ub_" + suffix);
     }
 }
 
-// Energy propagation along edges when not starting a new region:
+// C11: energy propagation along edges when not starting a new region:
 //   r[dst]=0  →  eAccum[dst] >= eAccum[src] + E_blk(src)
 // Big-M reformulation (M = capacity, tight since eAccum ∈ [0, capacity]):
 //   eAccum[dst] >= eAccum[src] + E_blk(src) - capacity * r[dst]
@@ -779,13 +780,13 @@ void CheckpointOptimizer::constrainEnergyPropagation() {
     for (const auto &[src, dst] : cfg_.getEdges()) {
         GRBLinExpr eBlkSrc = buildEBlk(src);
         model_->addConstr(eAccum_[dst] >= eAccum_[src] + eBlkSrc - M * r_[dst],
-                          "C10_energy_prop_" + std::to_string(edgeIdx++));
+                          "C11_energy_prop_" + std::to_string(edgeIdx++));
     }
 }
 
 // Energy must not exceed buffer capacity on any path:
-//   eAccum_[src] + E_blk(src) + E_end(dst) <= capacity   (per edge)
-//   eAccum_[exit] + E_blk(exit) <= capacity               (at exits)
+//   C12: eAccum_[src] + E_blk(src) + E_end(dst) <= capacity   (per edge)
+//   C13: eAccum_[exit] + E_blk(exit) <= capacity               (at exits)
 // Ensures every region can complete before the energy buffer is exhausted.
 void CheckpointOptimizer::constrainEnergyWithinCapacity() {
     const double Ebuf = params_.capacity;
@@ -795,13 +796,13 @@ void CheckpointOptimizer::constrainEnergyWithinCapacity() {
         GRBLinExpr eBlkSrc = buildEBlk(src);
         GRBLinExpr eEndDst = buildEEnd(dst);
         model_->addConstr(eAccum_[src] + eBlkSrc + eEndDst <= Ebuf,
-                          "C11_energy_edge_" + std::to_string(edgeIdx++));
+                          "C12_energy_edge_" + std::to_string(edgeIdx++));
     }
 
     for (NodeId exitBlock : cfg_.getExitBlocks()) {
         GRBLinExpr eBlkExit = buildEBlk(exitBlock);
         model_->addConstr(eAccum_[exitBlock] + eBlkExit <= Ebuf,
-                          "C11_energy_exit_" + nodeToken(cfg_, exitBlock));
+                          "C13_energy_exit_" + nodeToken(cfg_, exitBlock));
     }
 }
 
