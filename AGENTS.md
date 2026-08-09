@@ -258,20 +258,13 @@ Function + LoopInfo
 
 ### MILP Formulation
 
-The optimizer uses binary and continuous decision variables:
-
-| Variable | Type | Meaning |
-|----------|------|---------|
-| `r[b]` | binary | 1 if block b starts a new checkpoint region |
-| `m[b,v]` | binary | 1 if eligible global v is placed in VM (SRAM) at block b; fixed to 1 for ineligible objects (coarse-allocation mode uses per-global `m[v]` instead) |
-| `rHat[b,v]` | continuous | need-restore indicator (`r[b] AND m[b,v]`), for eligible live-in pairs |
-| `d[b,v]` | continuous | dirty indicator: v modified since the last save |
-| `s[b,v]` | continuous | 1 if v is saved at region boundary b |
-| `eAccum[b]` | continuous | accumulated energy at block b |
-
-**Objective:** Minimize the frequency-weighted sum of NVM access penalties for eligible globals not placed in VM, region-start overhead (prologue + restore costs), and region-end overhead (epilogue + save costs).
-
-**Constraint groups:** C1 (entry region start), C2 (ineligible VM placement), C3 (need-restore linearization), VM capacity, C4–C6 (dirty propagation), C8 (save at region boundary), C9 (energy init at region start), C10 (energy propagation), C11 (energy within capacity), C12–C13 (placement propagation).
+The solver jointly decides region boundary placement and VM/NVM allocation,
+minimizing expected energy overhead subject to a per-region energy budget.
+The formulation is defined in the paper's appendix ("MILP Formulation");
+`passes/src/milp/CheckpointOptimizer.cpp` implements it, labeling each
+constraint with the appendix's numbering in comments and Gurobi constraint
+names. The code is the source of truth for implementation details
+(variable elision, LP tightening cuts, coarse-allocation mode).
 
 ### RockClimb (PFI Baseline — Machine-Level)
 
