@@ -9,8 +9,10 @@
  * VCC is measured with the ADC12_B battery monitor: ADC12BATMAP routes
  * AVCC/2 to input channel 31, converted against the internal 2.0 V
  * reference. Between samples the CPU sleeps in LPM3, woken every ~10 ms
- * by Timer_A0 clocked from VLO (~9.4 kHz), so waiting draws ~1 uA and
- * does not fight the capacitor's charging current.
+ * by Timer_A0 clocked from VLO (~9.4 kHz). The reference and ADC are
+ * powered up around each sample and shut off before sleeping (they draw
+ * ~150 uA combined, which would fight the capacitor's charging current),
+ * so the sleeping board draws only LPM3-level current (~1 uA).
  *
  * Called from the .crt_0010 boot path BEFORE data/BSS initialization,
  * so this file must not use any global variables.
@@ -28,31 +30,17 @@
 /* Sample period in VLO (~9.4 kHz) ticks: ~10 ms. */
 #define SAMPLE_PERIOD_TICKS 94
 
+/* Power up REF + ADC, take one battery-monitor sample, power both down.
+   The ~75 us reference settling cost per sample is negligible against
+   the 10 ms sample period. Long sample time (256 clocks) accommodates
+   the high-impedance internal AVCC/2 divider. */
 static uint16_t sample_avcc_half(void) {
-    ADC12CTL0 |= ADC12ENC | ADC12SC;
-    while (ADC12CTL1 & ADC12BUSY)
-        ;
-    ADC12CTL0 &= ~ADC12ENC;
-    return ADC12MEM0;
-}
+    uint16_t sample;
 
-void wait_until_vcc_full(void) {
-    /* ACLK <- VLO so Timer_A keeps running in LPM3 (no crystal needed).
-       SELS/SELM stay on DCO, matching timing_gpio_init in benchmark.h. */
-    CSCTL0_H = CSKEY_H;
-    CSCTL2 = SELA__VLOCLK | SELS__DCOCLK | SELM__DCOCLK;
-    CSCTL0_H = 0;
-
-    /* Internal 2.0 V reference. Below ~2.2 V supply the reference is out
-       of spec, but the resulting samples are far below the threshold and
-       VCC only rises while waiting, so early inaccuracy is harmless. */
     while (REFCTL0 & REFGENBUSY)
         ;
     REFCTL0 = REFVSEL_1 | REFON;
 
-    /* ADC12_B: battery monitor (AVCC/2) on channel 31 against VREF.
-       Long sample time (256 clocks) for the high-impedance internal
-       divider. */
     ADC12CTL0 = ADC12SHT0_8 | ADC12ON;
     ADC12CTL1 = ADC12SHP;
     ADC12CTL2 = ADC12RES_2;
@@ -62,6 +50,28 @@ void wait_until_vcc_full(void) {
     while (!(REFCTL0 & REFGENRDY))
         ;
 
+    ADC12CTL0 |= ADC12ENC | ADC12SC;
+    while (ADC12CTL1 & ADC12BUSY)
+        ;
+    sample = ADC12MEM0;
+
+    ADC12CTL0 &= ~ADC12ENC;
+    ADC12CTL0 &= ~ADC12ON;
+    REFCTL0 &= ~REFON;
+
+    return sample;
+}
+
+void wait_until_vcc_full(void) {
+    /* ACLK <- VLO so Timer_A keeps running in LPM3 (no crystal needed).
+       SELS/SELM stay on DCO, matching timing_gpio_init in benchmark.h. */
+    CSCTL0_H = CSKEY_H;
+    CSCTL2 = SELA__VLOCLK | SELS__DCOCLK | SELM__DCOCLK;
+    CSCTL0_H = 0;
+
+    /* Below ~2.2 V supply the 2.0 V reference is out of spec, but such
+       samples read far below the threshold and VCC only rises while
+       waiting, so early inaccuracy is harmless. */
     if (sample_avcc_half() < VCC_FULL_ADC_COUNTS) {
         TA0CCR0 = SAMPLE_PERIOD_TICKS;
         TA0CCTL0 = CCIE;
@@ -76,9 +86,6 @@ void wait_until_vcc_full(void) {
         TA0CCTL0 = 0;
         TA0CTL |= TACLR;
     }
-
-    ADC12CTL0 &= ~ADC12ON;
-    REFCTL0 &= ~REFON;
 }
 
 __attribute__((interrupt(TIMER0_A0_VECTOR))) void __vcc_wait_timer_isr(void) {
