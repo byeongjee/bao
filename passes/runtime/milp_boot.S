@@ -33,6 +33,8 @@
     .type   _milp_boot, @function
 
 _milp_boot:
+    park_if_done
+
     /* Check if this is a recovery boot: nvm_pc != 0 */
     mov.w   &__nvm_pc, R14
     tst.w   R14

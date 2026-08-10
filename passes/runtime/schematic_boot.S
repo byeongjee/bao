@@ -33,6 +33,8 @@
     .type   _schematic_boot, @function
 
 _schematic_boot:
+    park_if_done
+
     /* Check if this is a recovery boot: nvm_pc != 0 */
     mov.w   &__nvm_pc, R14
     tst.w   R14
