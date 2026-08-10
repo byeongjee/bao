@@ -28,10 +28,10 @@ from ..compile.uninstrumented import (
     UninstrumentedCompileOptions,
     compile_uninstrumented,
 )
-from ..device.flash import read_nvm
+from ..device.flash import check_region_violation, raise_if_region_violation, read_nvm
 from ..device.saleae import discover_saleae, saleae_run
 from ..env import ProjectEnv
-from ..errors import CompilationError, ConfigError, DeviceError
+from ..errors import CompilationError, ConfigError, DeviceError, RegionViolationError
 from ..output_parser import detect_infeasibility
 from ..runner import StepResult
 from ..tempdir import compilation_workdir
@@ -394,7 +394,36 @@ def _verify_instrumented(
         )
         time.sleep(POST_CAPTURE_SETTLE_SECONDS)
         inst_nvm = read_nvm(tc, inst_elf, FLASH_TIMEOUT, spec.nvm_symbols)
+        raise_if_region_violation(inst_nvm, inst_elf)
+    except RegionViolationError as exc:
+        msg = f"{algorithm} region energy violation: {exc}"
+        logger.error("  %s", msg)
+        return BenchResult(
+            bench_name,
+            cap_label,
+            Status.ERROR,
+            msg,
+            baseline_result=baseline_result,
+            algorithm_result=None,
+        )
     except (DeviceError, OSError) as exc:
+        # A mid-region reset parks the device blinking, so the capture
+        # times out — check the violation flag before blaming the device.
+        try:
+            check_region_violation(tc, inst_elf, FLASH_TIMEOUT)
+        except RegionViolationError as vexc:
+            msg = f"{algorithm} region energy violation: {vexc}"
+            logger.error("  %s", msg)
+            return BenchResult(
+                bench_name,
+                cap_label,
+                Status.ERROR,
+                msg,
+                baseline_result=baseline_result,
+                algorithm_result=None,
+            )
+        except DeviceError, OSError:
+            pass
         msg = f"{algorithm} flash/read failed: {exc}"
         logger.error("  %s", msg)
         return BenchResult(

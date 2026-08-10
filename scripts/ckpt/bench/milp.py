@@ -68,6 +68,7 @@ CSV_HEADER: list[str] = [
 NVM_SYMBOLS: list[str] = [
     "__nvm_done",
     "__nvm_result",
+    "__nvm_violation",
     "cnt_boundary",
     "cnt_store_mem",
     "cnt_restore_mem",

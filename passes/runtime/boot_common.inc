@@ -21,6 +21,9 @@
     .extern __nvm_done
 #endif
 
+    .extern __nvm_in_region
+    .extern __nvm_violation
+
 /*
  * park_if_done — Freeze completed runs (DEVICE_DEBUG only).
  *
@@ -47,6 +50,58 @@
     jmp     9b
 8:
 #endif
+.endm
+
+/*
+ * check_region_violation — Detect a reset that arrived mid-region.
+ *
+ * __nvm_in_region is 1 from the moment execution (re)enters a region
+ * until the next boundary's checkpoint is committed. Every region is
+ * sized so the capacitor can always finish it, so no reset should ever
+ * arrive while the flag is set. If one does, the energy estimate was
+ * wrong: record it in __nvm_violation (read by the host) and park
+ * blinking LED1 (P1.0). The flag is deliberately left set, so every
+ * subsequent reset re-enters this park and the NVM evidence survives
+ * until the next reflash (which zeroes .nvm).
+ *
+ * Invoked after park_if_done, before the recovery check.
+ */
+.macro check_region_violation
+    tst.w   &__nvm_in_region
+    jz      6f
+    hw_init
+    mov.w   #1, &__nvm_violation
+    bis.b   #0x01, &0x0204      /* P1DIR |= BIT0 (LED1) */
+5:
+    xor.b   #0x01, &0x0202      /* P1OUT ^= BIT0 */
+#if F_CPU == 16000000
+    mov.w   #13, R15
+#elif F_CPU == 8000000
+    mov.w   #7, R15
+#else
+    mov.w   #1, R15
+#endif
+4:
+    mov.w   #0xFFFF, R14        /* ~200k cycles per outer iteration */
+3:
+    dec.w   R14
+    jnz     3b
+    dec.w   R15
+    jnz     4b
+    jmp     5b
+6:
+.endm
+
+/*
+ * mark_in_region — Flag that execution is (re)entering a region.
+ *
+ * Placed immediately before control returns to instrumented code:
+ * at the end of recovery, at the end of a fresh boot, and after the
+ * wait-mode boundary continues. Cleared by save_pc_sp_and_halt once
+ * the next boundary's checkpoint is committed.
+ */
+.macro mark_in_region
+    mov.w   #1, &__nvm_in_region
 .endm
 
 /*
@@ -153,6 +208,11 @@
     mov.w   SP, &__nvm_sp
     add.w   #2, &__nvm_sp
 
+    /* Checkpoint is committed: the region completed within its energy
+       budget. A reset from here until mark_in_region is a legitimate
+       at-boundary death. */
+    mov.w   #0, &__nvm_in_region
+
 #if defined(HALT_BOR)
     /* Software BOR: PMMCTL0 = PMMPW (0xA500) | PMMSWBOR (0x0004).
        CPU resets immediately, FRAM survives. */
@@ -187,13 +247,17 @@
     pop     R11
     pop     SR
 
+    /* Full capacitor: continuing into the next region without a reboot. */
+    mark_in_region
+
 #endif /* BOR vs SWBOR vs WAIT */
 .endm
 
 /*
- * zero_nvm_state — Clear __nvm_pc and __nvm_sp for fresh boot.
+ * zero_nvm_state — Clear __nvm_pc, __nvm_sp, __nvm_in_region for fresh boot.
  */
 .macro zero_nvm_state
     mov.w   #0, &__nvm_pc
     mov.w   #0, &__nvm_sp
+    mov.w   #0, &__nvm_in_region
 .endm

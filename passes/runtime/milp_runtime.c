@@ -30,6 +30,15 @@ __attribute__((section(".nvm"))) uint16_t __nvm_pc = 0;
 /* Saved stack pointer */
 __attribute__((section(".nvm"))) uint16_t __nvm_sp = 0;
 
+/* 1 while a region is executing; cleared once a boundary's checkpoint
+   is committed. Boot code treats a reset with this flag set as an
+   energy-budget violation (see check_region_violation in boot_common.inc). */
+__attribute__((section(".nvm"))) volatile uint16_t __nvm_in_region = 0;
+
+/* Set by boot code when a reset arrived mid-region. Read by the host
+   after every run; only reflashing clears it. */
+__attribute__((section(".nvm"))) volatile uint16_t __nvm_violation = 0;
+
 /* __region_boundary is provided by milp_boot.S */
 
 /* Halt CPU after benchmark completes.
@@ -37,6 +46,9 @@ __attribute__((section(".nvm"))) uint16_t __nvm_sp = 0;
    that inflate Saleae timing measurements. */
 #include <msp430.h>
 void bench_halt(void) {
+    /* Run complete — a later reset (e.g. mspdebug attach) is not a
+       mid-region death. */
+    __nvm_in_region = 0;
     __bis_SR_register(LPM4_bits);
 }
 
@@ -60,6 +72,7 @@ __attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_done = 0;
 
 void debug_exit(int result) {
+    __nvm_in_region = 0;
     debug_exit_begin(result);
     uart_puts("  __region_boundary:    ");
     uart_put_u32(cnt_boundary);

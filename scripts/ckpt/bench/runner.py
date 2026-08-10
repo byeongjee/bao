@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from saleae.automation import Manager
 
 from ..env import ProjectEnv
-from ..errors import CkptError, CompilationError, DeviceError
+from ..errors import CkptError, CompilationError, DeviceError, RegionViolationError
 from ..output_parser import (
     NvmCounters,
     PassStatistics,
@@ -334,30 +334,48 @@ def run_benchmark_matrix(
                 # ----- Saleae timing + NVM read (only with a device) -----
                 nvm: NvmCounters | None = None
                 execution_time_us: float | None = None
+                region_violation = False
                 if output_dir is not None and saleae_manager is not None:
                     elf = output_dir / f"{bench_name}.elf"
                     if elf.is_file():
-                        try:
-                            from ..device.flash import read_nvm
+                        from ..device.flash import (
+                            check_region_violation,
+                            raise_if_region_violation,
+                            read_nvm,
+                        )
 
+                        try:
                             execution_time_us = measure_execution_time(
                                 elf,
                                 saleae_manager,
                                 capture_timeout_seconds,
                             )
+                        except DeviceError as exc:
+                            logger.error("  DEVICE ERROR: %s", exc)
 
+                        # Check the violation flag even when the capture
+                        # failed: a mid-region reset parks the device
+                        # blinking, so the stop pulse never fires and the
+                        # capture times out.
+                        try:
+                            time.sleep(POST_CAPTURE_SETTLE_SECONDS)
                             if device_debug and nvm_symbols:
-                                time.sleep(POST_CAPTURE_SETTLE_SECONDS)
                                 nvm_dict = read_nvm(
                                     tc,
                                     elf,
                                     FLASH_TIMEOUT,
                                     nvm_symbols,
                                 )
+                                raise_if_region_violation(nvm_dict, elf)
                                 nvm_text = "\n".join(
                                     f"{k}={v}" for k, v in nvm_dict.items()
                                 )
                                 nvm = parse_nvm_output(nvm_text)
+                            else:
+                                check_region_violation(tc, elf, FLASH_TIMEOUT)
+                        except RegionViolationError as exc:
+                            logger.error("  REGION ENERGY VIOLATION: %s", exc)
+                            region_violation = True
                         except DeviceError as exc:
                             logger.error("  DEVICE ERROR: %s", exc)
 
@@ -426,12 +444,14 @@ def run_benchmark_matrix(
                 if execution_time_us is not None:
                     row_fields["execution_time_us"] = str(round(execution_time_us, 2))
 
+                if had_compilation_error and row_status == "ok":
+                    row_status = "link_failed"
+                if region_violation:
+                    row_status = "region_violation"
                 row = BenchmarkRow(
                     benchmark=row_name,
                     capacitor=cap.label,
-                    status="link_failed"
-                    if had_compilation_error and row_status == "ok"
-                    else row_status,
+                    status=row_status,
                     fields=row_fields,
                 )
                 write_csv_row(writer, row, csv_header)

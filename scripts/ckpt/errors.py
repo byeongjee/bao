@@ -56,6 +56,15 @@ class DeviceError(CkptError):
     """A device interaction failed."""
 
 
+class RegionViolationError(CkptError):
+    """The device reset while a region was executing.
+
+    Regions are sized so the capacitor can always finish them, so a
+    mid-region reset means the energy estimate was violated. Reported
+    by boot code via the ``__nvm_violation`` NVM flag.
+    """
+
+
 class ConfigError(CkptError):
     """A configuration error."""
 

@@ -34,6 +34,7 @@
 
 _milp_boot:
     park_if_done
+    check_region_violation
 
     /* Check if this is a recovery boot: nvm_pc != 0 */
     mov.w   &__nvm_pc, R14
@@ -72,6 +73,8 @@ _do_recovery:
        at IR level. After regalloc, these become physical register
        saves/restores automatically. */
 
+    mark_in_region
+
     /* Jump to saved PC (pops from stack).
        After ret: PC = saved PC, SP = __nvm_sp (push -2, ret +2 cancel). */
     ret
@@ -90,6 +93,9 @@ _normal_boot:
        wait is simply another clean fresh boot. */
     call    #wait_until_vcc_full
 #endif
+
+    /* Entering the first region (CRT init + entry code count toward it). */
+    mark_in_region
 
     /* Fall through to next CRT section (do NOT use ret here) */
 
