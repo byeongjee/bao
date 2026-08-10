@@ -285,7 +285,7 @@ def write_commands(path, log, trace_start_s):
 # --------------------------------------------------------------------------- main
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -327,8 +327,10 @@ def main():
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=1905)
-    args = parser.parse_args()
+    return parser
 
+
+def run(args):
     rows = load_trace(args.trace)
     levels = resample(rows, args.rate)
     lo = min(levels)
@@ -458,6 +460,10 @@ def main():
             f"rms {rms * 1000:.1f} mV, max {max(errors) * 1000:.1f} mV"
         )
     print(f"\nwrote {args.output} ({len(times)} rows) and {commands_path}")
+
+
+def main():
+    run(build_parser().parse_args())
 
 
 if __name__ == "__main__":
