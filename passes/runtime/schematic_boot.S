@@ -126,8 +126,8 @@ _normal_boot:
  * Sequence:
  *   1. Save R4-R15 to __nvm_regs (12 MOV instructions)
  *   2. Save return address (PC) and caller SP to NVM
- *   3. If halt mode: enter LPM4 or trigger BOR
- *   4. Return (if woken by interrupt or halt disabled)
+ *   3. Trigger BOR, simulate one, or wait for a full capacitor
+ *      (per halt mode) — the wait mode returns and continues
  */
     .section .text
     .global __region_boundary

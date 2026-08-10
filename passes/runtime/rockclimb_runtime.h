@@ -58,7 +58,8 @@ extern uint32_t cnt_boundary NVM_SECTION;
  * depends on the compile-time mode:
  *   - swbor (HALT_SWBOR, default): jumps to _start without destroying state
  *   - bor   (HALT_BOR): triggers reset and destroys modeled volatile state
- *   - lpm4  (HALT_LPM4): enters LPM4 deep sleep (real deployment)
+ *   - wait  (HALT_WAIT): waits until the capacitor is full, then continues
+ *           (real intermittent power)
  *
  * On reboot, boot.S recovers from saved NVM state.
  *

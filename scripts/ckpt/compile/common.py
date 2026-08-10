@@ -24,7 +24,7 @@ MATH_LINK_FLAGS = ["-lm"]
 # Halt modes for instrumented binaries. "wait" is the real intermittent-power
 # mode: region boundaries block until the capacitor is recharged to 3.3 V
 # instead of halting (see passes/runtime/vcc_wait.c).
-HALT_MODES = ("bor", "lpm4", "swbor", "wait")
+HALT_MODES = ("bor", "swbor", "wait")
 
 
 def raises_compilation_error(fn):
@@ -548,8 +548,6 @@ def build_boot_defines(
     defines = [f"F_CPU={cpu_freq}"]
     if halt_mode == "bor":
         defines.append("HALT_BOR")
-    elif halt_mode == "lpm4":
-        defines.append("HALT_LPM4")
     elif halt_mode == "swbor":
         defines.append("HALT_SWBOR")
     elif halt_mode == "wait":
