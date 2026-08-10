@@ -1,14 +1,5 @@
 #!/usr/bin/env Rscript
 
-script_args <- commandArgs(trailingOnly = FALSE)
-script_file_arg <- script_args[grepl("^--file=", script_args)]
-script_path <- if (length(script_file_arg) > 0) {
-  sub("^--file=", "", script_file_arg[1])
-} else {
-  "."
-}
-trace_dir <- dirname(normalizePath(script_path))
-
 timestamp_to_seconds <- function(timestamp) {
   milliseconds <- timestamp %% 1000
   clock <- timestamp %/% 1000
@@ -40,11 +31,12 @@ load_trace <- function(path) {
 
 main <- function() {
   args <- commandArgs(trailingOnly = TRUE)
-  if (length(args) > 1) {
-    stop("Usage: Rscript plot_traces.R [OUTPUT.png]")
+  if (length(args) < 1 || length(args) > 2) {
+    stop("Usage: Rscript plot_power_traces.R TRACE_DIR [OUTPUT.png]")
   }
-  output_path <- if (length(args) == 1) {
-    args[1]
+  trace_dir <- args[1]
+  output_path <- if (length(args) == 2) {
+    args[2]
   } else {
     file.path(trace_dir, "traces_grid.png")
   }
