@@ -7,7 +7,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from ..errors import DeviceError
+from ..errors import DeviceError, RegionViolationError
 from ..runner import run
 from ..toolchain import Toolchain
 from . import nvm
@@ -183,3 +183,27 @@ def read_nvm(
         raise DeviceError(f"Expected {total_len} bytes from hex dump, got {len(data)}")
 
     return nvm.extract_symbol_values(data, sym_info, symbols, base_addr)
+
+
+def raise_if_region_violation(values: dict[str, int], elf_path: Path) -> None:
+    """Raise RegionViolationError if an NVM readback carries the violation flag."""
+    if values.get("__nvm_violation", 0) != 0:
+        raise RegionViolationError(
+            f"{elf_path.name}: device reset while a region was executing "
+            "(__nvm_violation set) — a region exceeded its energy budget"
+        )
+
+
+def check_region_violation(
+    tc: Toolchain,
+    elf_path: Path,
+    timeout: int,
+) -> None:
+    """Read the ``__nvm_violation`` flag and raise RegionViolationError if set.
+
+    Boot code sets the flag and parks the device blinking LED1 when a
+    reset arrives mid-region, so this works even when the run never
+    completed (e.g. the Saleae capture timed out).
+    """
+    values = read_nvm(tc, elf_path, timeout, ["__nvm_violation"])
+    raise_if_region_violation(values, elf_path)
