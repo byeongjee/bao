@@ -44,6 +44,7 @@ class ProjectEnv:
 
     bb_freq_runtime: Path = field(init=False)
     debug_common_c: Path = field(init=False)
+    vcc_wait_c: Path = field(init=False)
 
     sysroot_flags: list[str] = field(init=False)
 
@@ -83,6 +84,7 @@ class ProjectEnv:
         )
         object.__setattr__(self, "bb_freq_runtime", rt / "bb_freq_runtime.c")
         object.__setattr__(self, "debug_common_c", rt / "debug_common.c")
+        object.__setattr__(self, "vcc_wait_c", rt / "vcc_wait.c")
 
         # macOS SDK detection
         flags: list[str] = []

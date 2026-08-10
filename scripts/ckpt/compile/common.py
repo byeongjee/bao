@@ -21,6 +21,11 @@ from ..toolchain import Toolchain
 
 MATH_LINK_FLAGS = ["-lm"]
 
+# Halt modes for instrumented binaries. "wait" is the real intermittent-power
+# mode: region boundaries block until the capacitor is recharged to 3.3 V
+# instead of halting (see passes/runtime/vcc_wait.c).
+HALT_MODES = ("bor", "lpm4", "swbor", "wait")
+
 
 def raises_compilation_error(fn):
     """Convert ToolError from subprocess steps into CompilationError.
@@ -547,6 +552,8 @@ def build_boot_defines(
         defines.append("HALT_LPM4")
     elif halt_mode == "swbor":
         defines.append("HALT_SWBOR")
+    elif halt_mode == "wait":
+        defines.append("HALT_WAIT")
     if device_debug:
         defines.append("DEVICE_DEBUG")
     return defines
@@ -739,6 +746,18 @@ def link_algorithm(
     )
 
     link_objs = [main_object, boot_o, runtime_o]
+
+    if boot_defines and "HALT_WAIT" in boot_defines:
+        vcc_wait_o = stem.with_suffix(".vcc_wait.o")
+        compile_runtime_c(
+            tc,
+            env,
+            env.vcc_wait_c,
+            vcc_wait_o,
+            gcc_opt_level=gcc_opt_level,
+            extra_defines=runtime_defines + ["HALT_WAIT"],
+        )
+        link_objs.append(vcc_wait_o)
 
     if device_debug:
         debug_common_o = stem.with_suffix(".debug_common.o")

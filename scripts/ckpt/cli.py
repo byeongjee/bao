@@ -14,6 +14,7 @@ import click
 
 from .analysis.plot import ALGORITHMS, METRICS
 from .bench.all import ALL_ALGORITHMS, DEFAULT_ALGORITHMS
+from .compile.common import HALT_MODES
 from .errors import (
     CkptError,
     CompilationError,
@@ -25,8 +26,6 @@ from .errors import (
 from .log import python_to_cpp_log_level, setup_logging
 
 logger = logging.getLogger(__name__)
-
-HALT_MODES = ("bor", "lpm4", "swbor")
 
 _saleae_timeout_option = click.option(
     "--timeout",
