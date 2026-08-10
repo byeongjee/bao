@@ -59,11 +59,11 @@ extern uint32_t cnt_restore_mem NVM_SECTION;
  * ============================================================================ */
 
 /**
- * Region boundary: bulk-save registers, save state, and halt (deep sleep).
+ * Region boundary: bulk-save registers, save state, and halt.
  *
  * Saves R4-R15 to NVM, then saves return address (region body start) and SP,
- * then enters LPM4. System powers off. On reboot, boot.S recovers from
- * saved state.
+ * then triggers BOR, simulates one, or waits for a full capacitor (per halt
+ * mode). On reboot, boot.S recovers from saved state.
  *
  * Provided by schematic_boot.S (assembly).
  */

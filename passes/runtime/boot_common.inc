@@ -5,11 +5,11 @@
  * Requires F_CPU to be defined via -D at assembly time.
  */
 
-#if !defined(HALT_BOR) && !defined(HALT_LPM4) && !defined(HALT_SWBOR) && !defined(HALT_WAIT)
-#error "Define one of HALT_BOR, HALT_LPM4, HALT_SWBOR, or HALT_WAIT"
+#if !defined(HALT_BOR) && !defined(HALT_SWBOR) && !defined(HALT_WAIT)
+#error "Define one of HALT_BOR, HALT_SWBOR, or HALT_WAIT"
 #endif
 
-#if (defined(HALT_BOR) + defined(HALT_LPM4) + defined(HALT_SWBOR) + defined(HALT_WAIT)) > 1
+#if (defined(HALT_BOR) + defined(HALT_SWBOR) + defined(HALT_WAIT)) > 1
 #error "Define only one halt mode"
 #endif
 
@@ -109,7 +109,7 @@
  * save_pc_sp_and_halt — Save return address + caller SP to NVM, then halt.
  *
  * Expects __nvm_pc and __nvm_sp to be .extern'd by the caller.
- * Halt mode selected by HALT_BOR / HALT_LPM4 / HALT_SWBOR / HALT_WAIT.
+ * Halt mode selected by HALT_BOR / HALT_SWBOR / HALT_WAIT.
  * HALT_WAIT does not halt: it waits for a full capacitor and continues.
  */
 .macro save_pc_sp_and_halt
@@ -155,14 +155,7 @@
     pop     R11
     pop     SR
 
-#else /* HALT_LPM4 */
-    /* Enter LPM4 deep sleep (CPUOFF+OSCOFF+SCG0+SCG1 = bits 4-7 of SR).
-       System powers off. On energy harvest, reset vector fires. */
-    bis.w   #0xF0, SR
-    nop
-    /* If woken by interrupt (not full reboot), fall through to ret */
-
-#endif /* BOR vs SWBOR vs WAIT vs LPM4 */
+#endif /* BOR vs SWBOR vs WAIT */
 .endm
 
 /*

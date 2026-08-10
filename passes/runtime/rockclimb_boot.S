@@ -115,15 +115,13 @@ _normal_boot:
  * __region_boundary — Save state and halt at region boundaries
  *
  * Called at the start of each energy region (except the entry block).
- * Saves the return address (= region body start) and SP to NVM,
- * then enters deep sleep (LPM4). The system powers off.
- * On next power-on, the reset vector fires, CRT runs, and boot
- * recovery (above) resumes from saved state.
+ * Saves the return address (= region body start) and SP to NVM, then
+ * triggers BOR (or simulates one, or waits for a full capacitor —
+ * per halt mode). After a reboot, the reset vector fires, CRT runs,
+ * and boot recovery (above) resumes from saved state.
  *
  * RockClimb's machine pass inserts per-register saves distributed
  * at definition points — no bulk-save needed here.
- *
- * If woken from LPM4 by an interrupt (not a full reboot), just returns.
  */
     .section .text
     .global __region_boundary
@@ -131,7 +129,7 @@ _normal_boot:
 
 __region_boundary:
 #ifdef DEVICE_DEBUG
-    /* Preserve SR in case LPM4 wakes without a reset. */
+    /* Preserve SR flags for the wait-mode continue path. */
     push    SR
     add_u32_to_nvm_counter cnt_boundary, 1
     pop     SR

@@ -98,15 +98,13 @@ _normal_boot:
  * __region_boundary — Save PC + SP and halt at region boundaries
  *
  * Called at the start of each energy region (except the entry block).
- * Saves the return address (= region body start) and SP to NVM,
- * then enters deep sleep (LPM4) or triggers BOR. The system powers off.
- * On next power-on, the reset vector fires, CRT runs, and boot
- * recovery (above) resumes from saved state.
+ * Saves the return address (= region body start) and SP to NVM, then
+ * triggers BOR (or simulates one, or waits for a full capacitor —
+ * per halt mode). After a reboot, the reset vector fires, CRT runs,
+ * and boot recovery (above) resumes from saved state.
  *
  * Unlike RockClimb/SCHEMATIC, no register bulk-save is needed here.
  * MILP handles all live state at IR level.
- *
- * If woken from LPM4 by an interrupt (not a full reboot), just returns.
  */
     .section .text
     .global __region_boundary
