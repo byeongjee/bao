@@ -85,9 +85,9 @@ def compile_milp(
 
     Both modes optionally link with milp_boot.S + milp_runtime.c.
     """
-    # bor/lpm4/swbor halt modes and debug-counters imply linking
+    # Halt modes and debug-counters imply linking
     link = opts.link
-    if opts.halt_mode in ("bor", "lpm4", "swbor"):
+    if opts.halt_mode in common.HALT_MODES:
         link = True
     if opts.device_debug:
         link = True

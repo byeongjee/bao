@@ -5,12 +5,16 @@
  * Requires F_CPU to be defined via -D at assembly time.
  */
 
-#if !defined(HALT_BOR) && !defined(HALT_LPM4) && !defined(HALT_SWBOR)
-#error "Define one of HALT_BOR, HALT_LPM4, or HALT_SWBOR"
+#if !defined(HALT_BOR) && !defined(HALT_LPM4) && !defined(HALT_SWBOR) && !defined(HALT_WAIT)
+#error "Define one of HALT_BOR, HALT_LPM4, HALT_SWBOR, or HALT_WAIT"
 #endif
 
-#if (defined(HALT_BOR) + defined(HALT_LPM4) + defined(HALT_SWBOR)) > 1
+#if (defined(HALT_BOR) + defined(HALT_LPM4) + defined(HALT_SWBOR) + defined(HALT_WAIT)) > 1
 #error "Define only one halt mode"
+#endif
+
+#ifdef HALT_WAIT
+    .extern wait_until_vcc_full
 #endif
 
 /*
@@ -105,7 +109,8 @@
  * save_pc_sp_and_halt — Save return address + caller SP to NVM, then halt.
  *
  * Expects __nvm_pc and __nvm_sp to be .extern'd by the caller.
- * Halt mode selected by HALT_BOR / HALT_LPM4 / HALT_SWBOR defines.
+ * Halt mode selected by HALT_BOR / HALT_LPM4 / HALT_SWBOR / HALT_WAIT.
+ * HALT_WAIT does not halt: it waits for a full capacitor and continues.
  */
 .macro save_pc_sp_and_halt
     /* Save return address as recovery PC.
@@ -129,6 +134,27 @@
     br      #_start
     /* Unreachable — jump is unconditional */
 
+#elif defined(HALT_WAIT)
+    /* Real intermittent power: the checkpoint above is complete, so wait
+       until the capacitor is full and continue into the next region
+       without rebooting. A power failure during the wait recovers to
+       this boundary. RockClimb inserts this call post-regalloc, where
+       caller-saved registers and SR flags may be live — preserve them
+       around the C call. */
+    push    SR
+    push    R11
+    push    R12
+    push    R13
+    push    R14
+    push    R15
+    call    #wait_until_vcc_full
+    pop     R15
+    pop     R14
+    pop     R13
+    pop     R12
+    pop     R11
+    pop     SR
+
 #else /* HALT_LPM4 */
     /* Enter LPM4 deep sleep (CPUOFF+OSCOFF+SCG0+SCG1 = bits 4-7 of SR).
        System powers off. On energy harvest, reset vector fires. */
@@ -136,7 +162,7 @@
     nop
     /* If woken by interrupt (not full reboot), fall through to ret */
 
-#endif /* BOR vs SWBOR vs LPM4 */
+#endif /* BOR vs SWBOR vs WAIT vs LPM4 */
 .endm
 
 /*

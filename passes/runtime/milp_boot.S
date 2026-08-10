@@ -44,9 +44,19 @@ _do_recovery:
     hw_init
     poison_bor_sram
 
+#ifdef HALT_WAIT
+    /* Real power failure: the board woke as soon as VCC crossed the
+       brownout level. Wait for a full capacitor before resuming.
+       __nvm_pc stays set so a death during this wait re-enters
+       recovery on the next boot. SP is the CRT-initialized stack;
+       the call clobbers R11-R15, so reload the saved PC after. */
+    call    #wait_until_vcc_full
+    mov.w   &__nvm_pc, R14
+#else
     /* R14 holds saved PC. Clear recovery marker first to prevent
        infinite recovery loops on next reboot. */
     mov.w   #0, &__nvm_pc
+#endif
 
     /* Restore SP */
     mov.w   &__nvm_sp, SP
@@ -71,6 +81,13 @@ _normal_boot:
      */
     hw_init
     zero_nvm_state
+
+#ifdef HALT_WAIT
+    /* Fresh boot: wait for a full capacitor before the program starts.
+       Nothing persistent has been written yet, so a death during this
+       wait is simply another clean fresh boot. */
+    call    #wait_until_vcc_full
+#endif
 
     /* Fall through to next CRT section (do NOT use ret here) */
 
