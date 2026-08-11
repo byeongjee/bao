@@ -339,6 +339,7 @@ def run_assembly_energy(
 
 _NATIVE_STUBS_C = """\
 void debug_init(void) {}
+void debug_exit_commit(int result) { (void)result; }
 void debug_exit(int result) { (void)result; }
 void bench_halt(void) {}
 /* GPIO and clock register stubs for native profiling.

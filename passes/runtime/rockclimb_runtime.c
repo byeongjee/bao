@@ -66,7 +66,6 @@ __attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_done = 0;
 
 void debug_exit(int result) {
-    __nvm_in_region = 0;
     debug_exit_begin(result);
     uart_puts("  __region_boundary:    ");
     uart_put_u32(cnt_boundary);
