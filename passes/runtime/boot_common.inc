@@ -114,6 +114,21 @@
     /* Disable watchdog timer (WDTCTL = WDTPW | WDTHOLD) */
     mov.w   #0x5A80, &0x015C
 
+    /* Drive every GPIO output-low before unlocking LPM5: unconfigured
+       pins become floating inputs whose mid-rail buffers leak >100 uA
+       combined — enough to pin the supply capacitor below the wait-mode
+       release threshold on a current-limited harvester supply. */
+    mov.w   #0, &0x0202         /* PAOUT (P1/P2) */
+    mov.w   #0xFFFF, &0x0204    /* PADIR */
+    mov.w   #0, &0x0222         /* PBOUT (P3/P4) */
+    mov.w   #0xFFFF, &0x0224    /* PBDIR */
+    mov.w   #0, &0x0242         /* PCOUT (P5/P6) */
+    mov.w   #0xFFFF, &0x0244    /* PCDIR */
+    mov.w   #0, &0x0262         /* PDOUT (P7/P8) */
+    mov.w   #0xFFFF, &0x0264    /* PDDIR */
+    mov.w   #0, &0x0322         /* PJOUT */
+    mov.w   #0xFFFF, &0x0324    /* PJDIR */
+
     /* Unlock GPIO pins — LPM5 locks all I/O after every reset on FR5xx/6xx */
     bic.w   #0x0001, &0x0130
 
