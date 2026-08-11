@@ -15,6 +15,7 @@
 /* These symbols are defined in each variant's *_runtime.c */
 extern volatile uint16_t __nvm_result;
 extern volatile uint16_t __nvm_done;
+extern volatile uint16_t __nvm_in_region;
 
 /* ============================================================================
  * UART Setup for MSP430FR5994
@@ -117,11 +118,13 @@ void debug_init(void) {
     uart_puts("BOOT\r\n");
 }
 
-void debug_exit_begin(int result) {
-    /* Store result in NVM for host-side reading via mspdebug md */
+void debug_exit_commit(int result) {
+    __nvm_in_region = 0;
     __nvm_result = (uint16_t)result;
     __nvm_done = 1;
+}
 
+void debug_exit_begin(int result) {
     /* UART output kept for manual debugging */
     uart_init(); /* Re-init UART — may be uninitialized after BOR/LPM4 recovery */
     uart_puts("RESULT: ");

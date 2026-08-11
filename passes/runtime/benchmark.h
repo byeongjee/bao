@@ -106,6 +106,7 @@ static inline void timing_gpio_stop(void) {}
 #ifdef DEVICE_DEBUG
 
 void debug_init(void);
+void debug_exit_commit(int result);
 void debug_exit(int result);
 
 #define BENCH_INIT()                                                                               \
@@ -114,8 +115,12 @@ void debug_exit(int result);
         timing_gpio_init();                                                                        \
         timing_gpio_start();                                                                       \
     } while (0)
+/* Commit the result to NVM before the end pulse and UART report: both
+   cost more energy than a region budget, so under intermittent power
+   the CPU may die during them — the committed result survives. */
 #define BENCH_EXIT(result)                                                                         \
     do {                                                                                           \
+        debug_exit_commit((result));                                                               \
         timing_gpio_stop();                                                                        \
         debug_exit((result));                                                                      \
     } while (0)
