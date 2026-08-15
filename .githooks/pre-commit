@@ -41,8 +41,12 @@ if [ -n "$staged_py" ]; then
         echo "Running ruff check..."
         # shellcheck disable=SC2086
         uv run ruff check $staged_py
+        # Whole project, not just the staged files: a type error introduced in
+        # one file usually surfaces in its callers.
+        echo "Running pyright..."
+        uv run pyright
     else
-        echo "Warning: uv not found, skipping ruff."
+        echo "Warning: uv not found, skipping ruff and pyright."
     fi
 fi
 

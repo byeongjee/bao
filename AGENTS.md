@@ -23,7 +23,7 @@ Output: `passes/build/CheckpointPass.so` (main plugin), `passes/build/bb-debugin
 
 ### Git Hooks
 
-One-time setup per clone: `git config core.hooksPath .githooks`. The pre-commit hook auto-formats staged C/C++ files with clang-format and runs `ruff format` + `ruff check` on staged Python files.
+One-time setup per clone: `git config core.hooksPath .githooks`. The pre-commit hook auto-formats staged C/C++ files with clang-format and runs `ruff format` + `ruff check` on staged Python files, followed by `pyright` over the whole project.
 
 clang-tidy is not part of the hook (~5s per file). Run it manually with `scripts/run_clang_tidy.sh` (changed `.cpp` files vs HEAD; `--all` for every file, parallel). Requires `passes/build/compile_commands.json`; override the binary with `CLANG_TIDY=/path/to/clang-tidy`. Checks are configured in `.clang-tidy` (exception checks are disabled because the codebase builds with `-fno-exceptions`).
 
