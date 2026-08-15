@@ -94,6 +94,35 @@ TEST(MSP430Disassembler, IgnoresDataBytesThatFollowNoInstruction) {
     EXPECT_EQ(instructions[0].size, 2U);
 }
 
+// Data that starts exactly where the previous instruction ended is not a
+// wrapped tail: objdump wraps only after a full four-byte column, and a two-byte
+// instruction has none.
+TEST(MSP430Disassembler, DataAdjacentToAnInstructionDoesNotExtendIt) {
+    const auto instructions =
+        MSP430Disassembler::parseObjdumpOutput("   0:\t30 41       \tret\t\t\t\n"
+                                               "   2:\t11 34 \n");
+
+    ASSERT_EQ(instructions.size(), 1U);
+    EXPECT_EQ(instructions[0].size, 2U);
+}
+
+// Section headers, function labels, blank lines and objdump's zero-block
+// elision carry no instruction.
+TEST(MSP430Disassembler, IgnoresNonInstructionLines) {
+    const auto instructions =
+        MSP430Disassembler::parseObjdumpOutput("t.o:     file format elf32-msp430\n"
+                                               "\n"
+                                               "Disassembly of section .text:\n"
+                                               "\n"
+                                               "00000000 <sum>:\n"
+                                               "   0:\t30 41       \tret\t\t\t\n"
+                                               "\t...\n"
+                                               "   4:\t12 34       \t.word\t0x3412\n");
+
+    ASSERT_EQ(instructions.size(), 1U);
+    EXPECT_EQ(instructions[0].mnemonic, "ret");
+}
+
 // Relocation offsets point at the patched operand word, not at the start of the
 // instruction, and only calls carry a call target: a .rodata relocation that
 // follows a mov must not be attributed to the last call seen.

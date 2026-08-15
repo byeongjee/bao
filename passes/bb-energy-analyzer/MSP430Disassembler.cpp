@@ -13,12 +13,16 @@
 #include <cstdlib>
 #include <regex>
 #include <sstream>
+#include <utility>
 
 using namespace llvm;
 
 namespace bbanalyzer {
 
 namespace {
+
+/// Bytes objdump prints per byte column before wrapping onto the next line.
+constexpr unsigned WrapWidth = 4;
 
 /// Count whole bytes in an objdump byte column such as "82 5a 00 00 ".
 unsigned countBytes(const std::string &hexBytes) {
@@ -140,6 +144,11 @@ std::vector<Instruction> MSP430Disassembler::parseObjdumpOutput(const std::strin
     std::istringstream stream(objdumpOutput);
     std::string line;
 
+    // Bytes on the previous line, to tell a wrapped tail from undecoded data
+    // that happens to start where the previous instruction ended: objdump wraps
+    // only after a full column, so a shorter column cannot be continued.
+    unsigned prevColumnBytes = 0;
+
     while (std::getline(stream, line)) {
         std::smatch match;
 
@@ -155,6 +164,8 @@ std::vector<Instruction> MSP430Disassembler::parseObjdumpOutput(const std::strin
             continue;
         }
 
+        unsigned columnBytes = std::exchange(prevColumnBytes, 0);
+
         auto addrEnd = line.find('\t');
         if (addrEnd == std::string::npos)
             continue;
@@ -169,11 +180,15 @@ std::vector<Instruction> MSP430Disassembler::parseObjdumpOutput(const std::strin
         if (!std::regex_match(bytesField, bytesPattern))
             continue;
         unsigned byteCount = countBytes(bytesField);
+        prevColumnBytes = byteCount;
 
         if (bytesEnd == std::string::npos) {
             // Continuation of the previous instruction's wrapped byte listing.
-            // Bytes that do not continue the previous instruction are data.
-            if (!result.empty() && result.back().address + result.back().size == address)
+            // Anything else on a bytes-only line is data objdump could not
+            // decode, and belongs to no instruction.
+            bool continues = columnBytes == WrapWidth && !result.empty() &&
+                             result.back().address + result.back().size == address;
+            if (continues)
                 result.back().size += byteCount;
             continue;
         }
