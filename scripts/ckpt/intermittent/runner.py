@@ -515,7 +515,7 @@ def run_intermittent_benchmarks(
                     elif completed and done:
                         status = "ok"
                     elif completed:
-                        status = "suspect"
+                        status = "unconfirmed"
                     else:
                         status = "incomplete"
 
@@ -523,10 +523,10 @@ def run_intermittent_benchmarks(
                     if status == "ok" and execution_time_us is not None:
                         fields["execution_time_us"] = str(round(execution_time_us, 2))
                     # Counters are trustworthy only when the device parked at
-                    # readback: done committed (ok) or violation park. An
-                    # incomplete or suspect run instead resumes under debugger
-                    # power the moment the relays close, so its counters and
-                    # result no longer describe the replayed run — blank them.
+                    # readback: done committed (ok) or violation park. Any
+                    # other run resumes under debugger power the moment the
+                    # relays close, so its counters and result no longer
+                    # describe the replayed run — blank them.
                     if status in ("ok", "region_violation"):
                         fields["runtime_recovery_boots"] = values.get("cnt_recovery")
                         if device_debug:
