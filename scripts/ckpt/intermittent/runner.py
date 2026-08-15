@@ -9,9 +9,9 @@ the bench one rather than reusing it.
 Per (benchmark, capacitor) the program is compiled once with
 ``halt_mode="wait"`` (region boundaries wait for VCC to recover instead of
 emulating outages); per trace it is then flashed through the switchboard,
-isolated from the debugger, and run on the replayed supply. Completion is
-detected from the BENCH_EXIT stop pulse on GPI1; NVM counters are read back
-over the reconnected debugger afterwards.
+isolated from the debugger, and run on the replayed supply. The Saleae
+capture on P3.4 detects the BENCH_EXIT stop pulse (completion + execution
+time); NVM counters are read back over the reconnected debugger afterwards.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+from contextlib import closing
 from pathlib import Path
 
 from ..bench.config import (
@@ -28,6 +29,7 @@ from ..bench.config import (
     discover_capacitors,
 )
 from ..bench.runner import (
+    AFTER_TRIGGER_SECONDS,
     FLASH_TIMEOUT,
     BenchmarkRow,
     CompileResult,
@@ -37,11 +39,15 @@ from ..bench.schematic import collect_trace
 from ..device.flash import flash_and_hold, read_nvm
 from ..device.otii import (
     OtiiSession,
-    ReplayResult,
     connect_debugger,
     isolate_target,
     otii_session,
     replay_trace,
+)
+from ..device.saleae import (
+    discover_saleae,
+    finish_pulse_capture,
+    start_pulse_capture,
 )
 from ..env import ProjectEnv
 from ..errors import CompilationError, ConfigError, DeviceError
@@ -57,6 +63,11 @@ from ..toolchain import Toolchain
 logger = logging.getLogger(__name__)
 
 _HALT_MODE = "wait"
+
+# After the replay the target is unpowered, so the armed Saleae capture
+# either already triggered (and only its after-trigger tail remains) or
+# never will.
+_CAPTURE_FINISH_TIMEOUT_SECONDS = 5.0
 
 CSV_HEADER: list[str] = [
     "benchmark",
@@ -287,29 +298,46 @@ def _parse_compile_stats(
 def _run_on_trace(
     tc: Toolchain,
     otii: OtiiSession,
+    saleae_manager,
     elf: Path,
     samples: list[tuple[float, float]],
     nvm_symbols: list[str],
-) -> tuple[ReplayResult, dict[str, int]]:
-    """Flash, isolate, replay one trace, then reconnect and read NVM."""
+) -> tuple[float, bool, float | None, dict[str, int]]:
+    """Flash, isolate, replay one trace, then reconnect and read NVM.
+
+    Returns ``(replay_seconds, completed, execution_time_us, nvm_values)``.
+    """
     connect_debugger(otii)
     session = flash_and_hold(elf, FLASH_TIMEOUT)
-    # Open the relays while the target is still halted under JTAG: it loses
-    # power without ever running on the debugger's 3V3 rail, so the NVM
-    # state stays exactly as programmed. The mspdebug session dies with the
-    # cut SBW lines; abort() discards it — and must run even when
-    # isolate_target fails, or the leaked session keeps the ez-FET claimed
-    # for every following trace.
-    try:
-        isolate_target(otii)
-    finally:
-        session.abort()
 
-    replay = replay_trace(otii, samples)
+    # Arm the stop-pulse capture while the target is still halted, so the
+    # whole replayed run happens inside the capture window.
+    try:
+        capture_context = start_pulse_capture(saleae_manager, AFTER_TRIGGER_SECONDS)
+    except Exception:
+        session.abort()
+        raise
+
+    with capture_context as capture:
+        # Open the relays while the target is still halted under JTAG: it
+        # loses power without ever running on the debugger's 3V3 rail, so
+        # the NVM state stays exactly as programmed. The mspdebug session
+        # dies with the cut SBW lines; abort() discards it — and must run
+        # even when isolate_target fails, or the leaked session keeps the
+        # ez-FET claimed for every following trace.
+        try:
+            isolate_target(otii)
+        finally:
+            session.abort()
+
+        replay_seconds = replay_trace(otii, samples)
+        completed, execution_time_us = finish_pulse_capture(
+            capture, _CAPTURE_FINISH_TIMEOUT_SECONDS
+        )
 
     connect_debugger(otii)
     values = read_nvm(tc, elf, FLASH_TIMEOUT, nvm_symbols)
-    return replay, values
+    return replay_seconds, completed, execution_time_us, values
 
 
 def _build_row(
@@ -365,6 +393,7 @@ def run_intermittent_benchmarks(
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with (
+        closing(discover_saleae()) as saleae_manager,
         otii_session() as otii,
         compilation_workdir(prefix=f"intermittent_{algorithm}_") as workdir,
         open(output_csv, "w", newline="") as csvfile,
@@ -456,8 +485,10 @@ def run_intermittent_benchmarks(
                     )
                     fields = dict(static_fields)
                     try:
-                        replay, values = _run_on_trace(
-                            tc, otii, elf, samples, nvm_symbols
+                        replay_seconds, completed, execution_time_us, values = (
+                            _run_on_trace(
+                                tc, otii, saleae_manager, elf, samples, nvm_symbols
+                            )
                         )
                     except DeviceError as exc:
                         logger.error("  DEVICE ERROR: %s", exc)
@@ -478,18 +509,16 @@ def run_intermittent_benchmarks(
                     done = values.get("__nvm_done", 0) == 1
                     if values.get("__nvm_violation", 0) != 0:
                         status = "region_violation"
-                    elif replay.completed and done:
+                    elif completed and done:
                         status = "ok"
-                    elif replay.completed:
+                    elif completed:
                         status = "suspect"
                     else:
                         status = "incomplete"
 
-                    fields["replay_seconds"] = str(round(replay.replay_seconds, 2))
-                    if status == "ok" and replay.execution_time_us is not None:
-                        fields["execution_time_us"] = str(
-                            round(replay.execution_time_us, 2)
-                        )
+                    fields["replay_seconds"] = str(round(replay_seconds, 2))
+                    if status == "ok" and execution_time_us is not None:
+                        fields["execution_time_us"] = str(round(execution_time_us, 2))
                     # Counters are trustworthy only when the device parked at
                     # readback: done committed (ok) or violation park. An
                     # incomplete or suspect run instead resumes under debugger
