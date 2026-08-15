@@ -17,28 +17,24 @@
     .extern wait_until_vcc_full
 #endif
 
-#ifdef DEVICE_DEBUG
     .extern __nvm_done
-#endif
-
     .extern __nvm_in_region
     .extern __nvm_violation
 
 /*
- * park_if_done — Freeze completed runs (DEVICE_DEBUG only).
+ * park_if_done — Freeze completed runs.
  *
  * Invoked at the very top of each boot entry, before the recovery
  * check. Once __nvm_done is set, any later boot parks in LPM4 without
- * touching NVM, so results and counters stay exactly as the completed
- * run wrote them — resets from mspdebug readback attach, FET replug,
- * or power cycles cannot re-execute the program. Only reflashing
- * (which zeroes __nvm_done) starts a new run.
+ * touching NVM, so results and counters (cnt_recovery in particular)
+ * stay exactly as the completed run wrote them — resets from mspdebug
+ * readback attach, FET replug, or power cycles cannot re-execute the
+ * program. Only reflashing (which zeroes __nvm_done) starts a new run.
  *
  * debug_init() has the same guard for fresh boots, but recovery boots
  * bypass main, so the check must also live here.
  */
 .macro park_if_done
-#ifdef DEVICE_DEBUG
     cmp.w   #1, &__nvm_done
     jne     8f
     /* WDT is still running this early after reset — stop it so it
@@ -49,7 +45,6 @@
     nop
     jmp     9b
 8:
-#endif
 .endm
 
 /*

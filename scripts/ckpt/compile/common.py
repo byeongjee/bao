@@ -342,6 +342,7 @@ void debug_init(void) {}
 void debug_exit_commit(int result) { (void)result; }
 void debug_exit(int result) { (void)result; }
 void bench_halt(void) {}
+void bench_commit_done(void) {}
 /* GPIO and clock register stubs for native profiling.
    benchmark.h's timing_gpio_init() references MSP430 hardware registers
    that get baked into the LLVM IR when compiled with --target=msp430-elf. */

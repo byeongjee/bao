@@ -48,11 +48,9 @@ _do_recovery:
     hw_init
     poison_bor_sram
 
-#ifdef DEVICE_DEBUG
     /* Count recovery boots — one per power failure resumed from. */
     inc.w   &cnt_recovery
     adc.w   &cnt_recovery+2
-#endif
 
 #ifdef HALT_WAIT
     /* Real power failure: the board woke as soon as VCC crossed the
