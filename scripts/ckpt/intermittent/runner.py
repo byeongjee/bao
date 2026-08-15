@@ -73,11 +73,9 @@ CSV_HEADER: list[str] = [
 ]
 
 # __nvm_violation is defined unconditionally by every runtime; the done flag,
-# result, and counters exist only in DEVICE_DEBUG builds. cnt_recovery is
-# MILP-only (counted in milp_boot.S).
+# result, and counters exist only in DEVICE_DEBUG builds.
 _BASE_NVM_SYMBOLS = ["__nvm_violation"]
-_DEBUG_NVM_SYMBOLS = ["__nvm_done", "__nvm_result", "cnt_boundary"]
-_MILP_DEBUG_NVM_SYMBOLS = _DEBUG_NVM_SYMBOLS + ["cnt_recovery"]
+_DEBUG_NVM_SYMBOLS = ["__nvm_done", "__nvm_result", "cnt_boundary", "cnt_recovery"]
 
 
 def resolve_traces(env: ProjectEnv, trace_specs: list[str]) -> list[Path]:
@@ -357,9 +355,7 @@ def run_intermittent_benchmarks(
 
     nvm_symbols = list(_BASE_NVM_SYMBOLS)
     if device_debug:
-        nvm_symbols += (
-            _MILP_DEBUG_NVM_SYMBOLS if algorithm == "milp" else _DEBUG_NVM_SYMBOLS
-        )
+        nvm_symbols += _DEBUG_NVM_SYMBOLS
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with (
