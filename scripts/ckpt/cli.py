@@ -1367,11 +1367,19 @@ _trace_option = click.option(
     ),
 )
 
+# Off by default: the debug runtime's counter updates and UART cost energy,
+# which distorts behavior under replayed harvesting power.
+_intermittent_device_debug_toggle = click.option(
+    "--device-debug/--no-device-debug",
+    default=False,
+    help="Enable device debug (default: off).",
+)
+
 _intermittent_common_options = _add_options(
     click.argument("benchmarks", nargs=-1),
     _trace_option,
     _cap_multi_option,
-    _device_debug_toggle,
+    _intermittent_device_debug_toggle,
     _cpu_freq_option("16"),
     _output_csv_option,
 )
