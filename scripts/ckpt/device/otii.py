@@ -6,6 +6,9 @@ ez-FET debugger's SBW and 3V3 jumper lines. The target must be isolated
 from the debugger while it runs on replayed power. Benchmark completion and
 timing are measured by the Saleae (see device/saleae.py), not by the Otii.
 
+Continuous-power runs (``ckpt bench``, ``ckpt verify``) use the same wiring
+but need the opposite relay state; see :func:`debugger_connection`.
+
 Requires the ``otii-tcp-client`` package (``uv sync --extra otii``) and the
 ``otii_server`` binary (path via the ``OTII_SERVER_BIN`` environment
 variable).
@@ -20,7 +23,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -153,10 +156,11 @@ def _single_arc(otii: Any, arc_cls: Any) -> Any:
 
 
 @contextmanager
-def otii_session() -> Iterator[OtiiSession]:
-    """Start otii_server, connect, and configure the device for replay runs.
+def _otii_device() -> Iterator[OtiiSession]:
+    """Start otii_server, connect, and configure the device.
 
-    On exit: main power off, switchboard relays opened, server stopped.
+    On exit: main power off, client and server shut down. The switchboard
+    relays are left as the caller set them.
     """
     otii_client, arc_cls = _import_otii()
     server = _start_server()
@@ -189,20 +193,53 @@ def otii_session() -> Iterator[OtiiSession]:
                 arc.set_main(False)
             except Exception:
                 logger.exception("Error switching off Otii main power")
-            try:
-                arc.set_gpo(_RELAY_GPO, False)
-                logger.info(
-                    "Switchboard relays left open — the ez-FET is disconnected "
-                    "until the next intermittent run closes them"
-                )
-            except Exception:
-                logger.exception("Error opening switchboard relays")
         if otii is not None:
             try:
                 otii.shutdown()
             except Exception:
                 logger.exception("Error shutting down Otii client")
         _stop_server(server)
+
+
+@contextmanager
+def otii_session() -> Iterator[OtiiSession]:
+    """An Otii device session for replay runs; the relays are opened on exit."""
+    with _otii_device() as session:
+        try:
+            yield session
+        finally:
+            try:
+                session.arc.set_gpo(_RELAY_GPO, False)
+                logger.info(
+                    "Switchboard relays left open — the ez-FET is disconnected "
+                    "until the next intermittent run closes them"
+                )
+            except Exception:
+                logger.exception("Error opening switchboard relays")
+
+
+@contextmanager
+def debugger_connection() -> Iterator[None]:
+    """Hold the switchboard relays closed for a continuous-power run.
+
+    ``ckpt bench`` and ``ckpt verify`` power the target from the ez-FET's 3V3
+    rail, which reaches the board through the same relays an intermittent run
+    opens. Closing them here means neither command needs the board rewired.
+
+    A no-op when no Otii is reachable: the board is then wired directly to the
+    ez-FET. The relays stay closed on exit — only an intermittent run opens
+    them.
+    """
+    with ExitStack() as stack:
+        try:
+            connect_debugger(stack.enter_context(_otii_device()))
+        except DeviceError as exc:
+            logger.info(
+                "No Otii switchboard in the loop (%s); assuming a direct "
+                "ez-FET connection",
+                exc,
+            )
+        yield
 
 
 def connect_debugger(session: OtiiSession) -> None:
