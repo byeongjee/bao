@@ -67,6 +67,12 @@ __attribute__((section(".nvm"))) uint32_t cnt_restore_reg = 0;
 __attribute__((section(".nvm"))) uint32_t cnt_store_mem = 0;
 __attribute__((section(".nvm"))) uint32_t cnt_restore_mem = 0;
 
+/* cnt_recovery — incremented in assembly (recovery path in schematic_boot.S).
+   One per recovery boot, i.e. per power failure resumed from a
+   checkpoint (deaths during a boundary wait re-enter recovery and
+   count again). */
+__attribute__((section(".nvm"))) uint32_t cnt_recovery = 0;
+
 /* NVM result storage — read by host via mspdebug md (bypasses UART) */
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_done = 0;
@@ -87,6 +93,9 @@ void debug_exit(int result) {
     uart_puts("\r\n");
     uart_puts("  mem_restores:         ");
     uart_put_u32(cnt_restore_mem);
+    uart_puts("\r\n");
+    uart_puts("  recoveries:           ");
+    uart_put_u32(cnt_recovery);
     uart_puts("\r\n");
     debug_exit_end();
 }
