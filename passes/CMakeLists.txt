@@ -155,10 +155,10 @@ add_subdirectory(rockclimb-backend)
 # ---------------------------------------------------------------------------
 # C++ unit tests (GoogleTest). Off by default; enable with
 #   cmake -S passes -B passes/build -DSCHEMATIC_BUILD_TESTS=ON
-# Tests cover pure logic (e.g. SCHEMATIC folding arithmetic) that needs neither
-# LLVM nor Gurobi, so the test target links only GoogleTest.
+# Tests cover deterministic logic such as SCHEMATIC folding arithmetic and
+# MSP430 objdump parsing.
 # ---------------------------------------------------------------------------
-option(SCHEMATIC_BUILD_TESTS "Build SCHEMATIC C++ unit tests" OFF)
+option(SCHEMATIC_BUILD_TESTS "Build C++ unit tests" OFF)
 if(SCHEMATIC_BUILD_TESTS)
     FetchContent_Declare(googletest
         URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz)
@@ -179,4 +179,26 @@ if(SCHEMATIC_BUILD_TESTS)
 
     include(GoogleTest)
     gtest_discover_tests(schematic_unit_tests)
+
+    add_executable(bb_energy_analyzer_unit_tests
+        bb-energy-analyzer/MSP430Disassembler.cpp
+        tests/cpp/test_msp430_disassembler.cpp
+    )
+    set_target_properties(bb_energy_analyzer_unit_tests PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+    )
+    llvm_map_components_to_libnames(BB_ANALYZER_TEST_LLVM_LIBS support)
+    target_include_directories(bb_energy_analyzer_unit_tests PRIVATE
+        ${LLVM_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}/bb-energy-analyzer
+        ${CMAKE_SOURCE_DIR}/include
+    )
+    target_link_libraries(bb_energy_analyzer_unit_tests PRIVATE
+        ${BB_ANALYZER_TEST_LLVM_LIBS}
+        GTest::gtest_main
+        plog::plog
+    )
+    target_compile_options(bb_energy_analyzer_unit_tests PRIVATE -fno-rtti)
+    gtest_discover_tests(bb_energy_analyzer_unit_tests)
 endif()

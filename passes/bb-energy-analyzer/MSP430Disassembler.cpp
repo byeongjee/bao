@@ -8,6 +8,8 @@
 
 #include "common/Logger.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <regex>
 #include <sstream>
@@ -73,15 +75,31 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
     std::string output = (*bufOrErr)->getBuffer().str();
     (void)sys::fs::remove(tempPath);
 
-    // Parse objdump output
+    result = parseObjdumpOutput(output);
+
+    // Resolve section-relative call targets (.text+0xNN) to function names
+    auto funcLabels = parseFunctionLabels(output);
+    PLOGI << "Found " << funcLabels.size() << " function labels for relocation resolution";
+    resolveCallTargets(result, funcLabels);
+
+    PLOGI << "Disassembled " << result.size() << " instructions";
+    return result;
+}
+
+std::vector<Instruction> MSP430Disassembler::parseObjdumpOutput(const std::string &objdumpOutput) {
+    std::vector<Instruction> result;
+
     // Format:
     //    1234:       0f 4c           mov     r12, r15
+    //    1236:       4c 43           clr.b   r12
     //    1236:       12 c3           clrc
-    // Pattern: hex_addr: hex_bytes mnemonic operands
-    std::regex instrPattern(R"(^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F ]+)\s+(\w+)(.*)$)");
+    // Pattern: hex_addr: hex_bytes mnemonic[.width] operands
+    // Capture the optional width suffix separately so it cannot become part
+    // of the first operand and be misclassified as symbolic addressing.
+    std::regex instrPattern(R"(^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F ]+)\s+(\w+)(?:\.(\w+))?(.*)$)");
     std::regex relocPattern(R"(^\s*([0-9a-fA-F]+):\s+R_\S+\s+(\S+)\s*$)");
 
-    std::istringstream stream(output);
+    std::istringstream stream(objdumpOutput);
     std::string line;
 
     while (std::getline(stream, line)) {
@@ -128,7 +146,7 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
             }
 
             // Parse operands (strip trailing ';' comment, then trim whitespace)
-            instr.operands = match[4].str();
+            instr.operands = match[5].str();
             auto semi = instr.operands.find(';');
             if (semi != std::string::npos)
                 instr.operands.erase(semi);
@@ -146,12 +164,6 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
         }
     }
 
-    // Resolve section-relative call targets (.text+0xNN) to function names
-    auto funcLabels = parseFunctionLabels(output);
-    PLOGI << "Found " << funcLabels.size() << " function labels for relocation resolution";
-    resolveCallTargets(result, funcLabels);
-
-    PLOGI << "Disassembled " << result.size() << " instructions";
     return result;
 }
 
