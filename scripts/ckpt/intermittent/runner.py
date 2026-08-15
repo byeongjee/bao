@@ -33,7 +33,7 @@ from ..bench.runner import (
     CompileResult,
     write_csv_row,
 )
-from ..bench.schematic import _collect_trace
+from ..bench.schematic import collect_trace
 from ..device.flash import flash_and_hold, read_nvm
 from ..device.otii import (
     OtiiSession,
@@ -65,6 +65,7 @@ CSV_HEADER: list[str] = [
     "status",
     "region_boundaries",
     "compilation_time_ms",
+    "profiling_time_ms",
     "replay_seconds",
     "execution_time_us",
     "runtime_region_boundary_calls",
@@ -220,7 +221,7 @@ def _make_compile_fn(
         def compile_fn(bench_path: Path, cap: CapacitorConfig) -> CompileResult:
             bench_name = bench_path.stem
             if bench_name not in trace_cache:
-                trace_cache[bench_name] = _collect_trace(
+                trace_cache[bench_name] = collect_trace(
                     tc,
                     env,
                     bench_path,
@@ -296,9 +297,13 @@ def _run_on_trace(
     # Open the relays while the target is still halted under JTAG: it loses
     # power without ever running on the debugger's 3V3 rail, so the NVM
     # state stays exactly as programmed. The mspdebug session dies with the
-    # cut SBW lines; abort() discards it.
-    isolate_target(otii)
-    session.abort()
+    # cut SBW lines; abort() discards it — and must run even when
+    # isolate_target fails, or the leaked session keeps the ez-FET claimed
+    # for every following trace.
+    try:
+        isolate_target(otii)
+    finally:
+        session.abort()
 
     replay = replay_trace(otii, samples)
 
@@ -367,6 +372,12 @@ def run_intermittent_benchmarks(
         writer = csv.writer(csvfile)
         writer.writerow(CSV_HEADER)
 
+        def emit(row: BenchmarkRow) -> None:
+            # Flush per row: each one costs a compile and/or a full trace
+            # replay, so an interrupted run must not lose finished rows.
+            write_csv_row(writer, row, CSV_HEADER)
+            csvfile.flush()
+
         compile_fn = _make_compile_fn(
             algorithm,
             env,
@@ -392,10 +403,9 @@ def run_intermittent_benchmarks(
                     logger.error("  FAILED (compilation): %s", exc)
                     for trace_label, _ in traces:
                         count += 1
-                        row = _build_row(
-                            bench_name, cap.label, trace_label, "failed", {}
+                        emit(
+                            _build_row(bench_name, cap.label, trace_label, "failed", {})
                         )
-                        write_csv_row(writer, row, CSV_HEADER)
                     continue
 
                 stats, infeasible_reason = _parse_compile_stats(compile_result)
@@ -403,10 +413,11 @@ def run_intermittent_benchmarks(
                     logger.error("  INFEASIBLE (%s)", infeasible_reason)
                     for trace_label, _ in traces:
                         count += 1
-                        row = _build_row(
-                            bench_name, cap.label, trace_label, "infeasible", {}
+                        emit(
+                            _build_row(
+                                bench_name, cap.label, trace_label, "infeasible", {}
+                            )
                         )
-                        write_csv_row(writer, row, CSV_HEADER)
                     continue
 
                 static_fields: dict[str, str | int | None] = {
@@ -414,6 +425,7 @@ def run_intermittent_benchmarks(
                     "compilation_time_ms": (stats.compilation_time_ms or 0)
                     if stats
                     else 0,
+                    "profiling_time_ms": compile_result.profiling_time_ms,
                 }
 
                 elf = compile_result.out_dir / f"{bench_name}.elf"
@@ -421,14 +433,15 @@ def run_intermittent_benchmarks(
                     logger.error("  FAILED (no ELF produced)")
                     for trace_label, _ in traces:
                         count += 1
-                        row = _build_row(
-                            bench_name,
-                            cap.label,
-                            trace_label,
-                            "failed",
-                            dict(static_fields),
+                        emit(
+                            _build_row(
+                                bench_name,
+                                cap.label,
+                                trace_label,
+                                "failed",
+                                dict(static_fields),
+                            )
                         )
-                        write_csv_row(writer, row, CSV_HEADER)
                     continue
 
                 for trace_label, samples in traces:
@@ -448,39 +461,50 @@ def run_intermittent_benchmarks(
                         )
                     except DeviceError as exc:
                         logger.error("  DEVICE ERROR: %s", exc)
-                        row = _build_row(
-                            bench_name, cap.label, trace_label, "device_error", fields
+                        emit(
+                            _build_row(
+                                bench_name,
+                                cap.label,
+                                trace_label,
+                                "device_error",
+                                fields,
+                            )
                         )
-                        write_csv_row(writer, row, CSV_HEADER)
                         continue
 
+                    # The stop pulse alone can be spoofed by a marginal-VCC
+                    # boot stretching the start pulse past 1 ms, so a
+                    # completion also requires the committed done flag.
+                    done = values.get("__nvm_done", 0) == 1
                     if values.get("__nvm_violation", 0) != 0:
                         status = "region_violation"
-                    elif replay.completed:
+                    elif replay.completed and done:
                         status = "ok"
+                    elif replay.completed:
+                        status = "suspect"
                     else:
                         status = "incomplete"
 
                     fields["replay_seconds"] = str(round(replay.replay_seconds, 2))
-                    if replay.completed and replay.execution_time_us is not None:
+                    if status == "ok" and replay.execution_time_us is not None:
                         fields["execution_time_us"] = str(
                             round(replay.execution_time_us, 2)
                         )
-                    # An incomplete run resumes under debugger power as soon
-                    # as the relays close for readback, so its counters and
-                    # result no longer describe the replayed run — leave them
-                    # blank. Completed (and violated) runs park at boot.
-                    if status != "incomplete":
+                    # Counters are trustworthy only when the device parked at
+                    # readback: done committed (ok) or violation park. An
+                    # incomplete or suspect run instead resumes under debugger
+                    # power the moment the relays close, so its counters and
+                    # result no longer describe the replayed run — blank them.
+                    if status in ("ok", "region_violation"):
                         fields["runtime_recovery_boots"] = values.get("cnt_recovery")
                         if device_debug:
                             fields["runtime_region_boundary_calls"] = values.get(
                                 "cnt_boundary"
                             )
-                            if replay.completed:
+                            if status == "ok":
                                 fields["result"] = values.get("__nvm_result")
 
-                    row = _build_row(bench_name, cap.label, trace_label, status, fields)
-                    write_csv_row(writer, row, CSV_HEADER)
+                    emit(_build_row(bench_name, cap.label, trace_label, status, fields))
                     if status == "ok":
                         logger.info("  OK")
                     else:

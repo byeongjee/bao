@@ -81,7 +81,7 @@ NVM_SYMBOLS: list[str] = [
 ]
 
 
-def _collect_trace(
+def collect_trace(
     tc: Toolchain,
     env: ProjectEnv,
     bench_path: Path,
@@ -246,7 +246,7 @@ def run_schematic_benchmarks(
 
             # Collect trace on first capacitor for this benchmark
             if bench_name not in trace_cache:
-                trace_cache[bench_name] = _collect_trace(
+                trace_cache[bench_name] = collect_trace(
                     tc,
                     env,
                     bench_path,
