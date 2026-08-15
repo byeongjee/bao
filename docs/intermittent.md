@@ -9,9 +9,13 @@ of truth for this measurement setup's wiring and software.
 
 - **Otii Ace Pro** — replays the voltage trace on its main output and drives
   the switchboard.
-- **Qoitech Switchboard** — relays that connect/disconnect the ez-FET
-  debugger's `3V3`, `SBW TEST`, and `SBW RST` jumper lines. The target must be
-  fully isolated from the debugger while it runs on replayed power.
+- **Qoitech Switchboard** — its *programmer interface* (a pair of 10-pin
+  headers whose relays switch pins 1/VCC, 2/SWDIO, 4/SWDCLK, 10/nRESET)
+  connects/disconnects the ez-FET debugger's `3V3`, `SBW RST`, and `SBW TEST`
+  lines. The target must be fully isolated from the debugger while it runs on
+  replayed power. The switchboard's USB interface is **not** used: cutting
+  host USB would only de-power the ez-FET while its pins stay on the target
+  rails, and the target would drain through their ESD protection diodes.
 - **MSP430FR5994 LaunchPad** — the board's supply capacitance is 11.5 µF
   (`benchmarks/config_board.json`). The on-board ez-FET stays on host USB the
   whole time; only its jumper lines to the target side are switched.
@@ -42,7 +46,7 @@ flowchart LR
     end
 
     subgraph SB[Qoitech Switchboard]
-        relay[/"relays: 3V3 · SBW TEST · SBW RST"/]
+        relay[/"programmer-interface relays:<br/>3V3 · RST · TEST"/]
     end
 
     subgraph LP[MSP430FR5994 LaunchPad]
@@ -59,8 +63,8 @@ flowchart LR
     main -->|5.6 kOhm resistor + schottky diode| mcu
     p5v -->|relay power| SB
     gpo2 -->|relay control| SB
-    ezfet <-->|3V3, TEST, RST| relay
-    relay <-->|3V3, TEST, RST| mcu
+    ezfet <-->|"J101 ez-FET side: 3V3, RST, TEST"| relay
+    relay <-->|"J101 target side: 3V3, RST, TEST"| mcu
     mcu -->|P3.4 pulse| saleae
 ```
 
@@ -70,17 +74,23 @@ flowchart LR
 |------|----|-------|
 | Otii main output `+` | Board supply rail | Through the 5.6 kΩ resistor, then the schottky diode (anode toward the Otii, cathode → board) |
 | Otii main output `−` | Board GND | Common ground with everything below |
-| Otii `+5V` pin | Switchboard relay power | Relays are unpowered (open) when the Otii is off |
-| Otii `GPO2` (expansion port) | Switchboard control input | High = relays closed (debugger connected) |
-| ez-FET `3V3` jumper | Switchboard channel 1 → target `3V3` | Switched |
-| ez-FET `SBW TEST` jumper | Switchboard channel 2 → target `TEST` | Switched |
-| ez-FET `SBW RST` jumper | Switchboard channel 3 → target `RST` | Switched |
+| Otii `+5V` pin | Switchboard relay power | Via the 14-pin expansion-port connector; relays are unpowered (open) when the Otii is off |
+| Otii `GPO2` (expansion port) | Switchboard relay control | Jumper on the switchboard's 3-pin header set to the GPO2 side; high = relays closed |
+| ez-FET `3V3` (J101 ez-FET side) | Programmer-interface IN pin 1 → OUT pin 1 → target `3V3` (J101 target side) | Switched (VCC relay) |
+| ez-FET `RST`/SBWTDIO (J101 ez-FET side) | Programmer-interface IN pin 2 → OUT pin 2 → target `RST` | Switched (SWDIO relay) |
+| ez-FET `TEST`/SBWTCK (J101 ez-FET side) | Programmer-interface IN pin 4 → OUT pin 4 → target `TEST` | Switched (SWDCLK relay) |
+| LaunchPad `GND` jumper (J101) | — | Left mounted: ground stays common at all times, not routed through the switchboard |
+| Host USB | ez-FET USB connector | Direct — the switchboard's USB interface is not used |
 | Saleae digital channel 0 | MSP430 `P3.4` | Start/stop pulses: completion detection + execution time |
 | Saleae GND | Board GND | |
 
-Remove all remaining ez-FET↔target jumpers (RXD, TXD, ...) — any line left
-connected can back-power or leak current into the isolated target through pin
-protection diodes and distort the measurement.
+On the LaunchPad's J101 isolation block, only the `GND` jumper stays mounted.
+`3V3`, `RST`, and `TEST` are rerouted through the switchboard's 2.54 mm
+programmer-interface header pair with jumper wires (pin numbers must match on
+the IN and OUT headers; the pin-10 nRESET relay is unused here). All other
+jumpers (`5V`, `RXD`, `TXD`) stay off — any line left connected can
+back-power or leak current into the isolated target through pin protection
+diodes and distort the measurement.
 
 The target must never see both supplies at once: the runner keeps the Otii
 main output off whenever the relays are closed, and the schottky diode blocks
