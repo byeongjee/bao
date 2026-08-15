@@ -1508,6 +1508,35 @@ def intermittent_schematic_cmd(
     )
 
 
+@intermittent.command("schematicO3")
+@_intermittent_common_options
+@_estimator_mode_option
+@click.pass_context
+def intermittent_schematic_o3_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    trace: tuple[str, ...],
+    cap: tuple[str, ...],
+    device_debug: bool,
+    cpu_freq: str,
+    output: str | None,
+    estimator_mode: str,
+) -> None:
+    """Run SCHEMATIC-O3 benchmarks under replayed intermittent power."""
+    _run_intermittent(
+        ctx,
+        "schematicO3",
+        benchmarks=benchmarks,
+        trace=trace,
+        cap=cap,
+        device_debug=device_debug,
+        estimator_mode=estimator_mode,
+        cpu_freq=cpu_freq,
+        output=output,
+        max_unroll=None,
+    )
+
+
 # =========================================================================
 # verify group
 # =========================================================================

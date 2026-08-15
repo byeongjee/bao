@@ -144,6 +144,7 @@ ckpt verify all        [BENCHMARKS...] [--cap 5,10,50] [--halt-mode] [--estimato
 ckpt intermittent milp      [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
 ckpt intermittent rockclimb [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--max-unroll N] [--cpu-freq] [--csv CSV]
 ckpt intermittent schematic [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
+ckpt intermittent schematicO3 [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
 
 # Analysis
 ckpt analyze strip-mining LOG_FILE [-o CSV]
