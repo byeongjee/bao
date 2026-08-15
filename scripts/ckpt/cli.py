@@ -1343,33 +1343,67 @@ def bench_all_cmd(
 # =========================================================================
 
 
+def _trace_callback(
+    ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Split comma-separated --trace values."""
+    specs: list[str] = []
+    for entry in value:
+        for token in entry.split(","):
+            token = token.strip()
+            if token:
+                specs.append(token)
+    return tuple(specs)
+
+
 _trace_option = click.option(
     "--trace",
     required=True,
     multiple=True,
-    type=click.Path(exists=True),
-    help="Harvesting trace CSV to replay; repeat for several traces.",
+    callback=_trace_callback,
+    help=(
+        "Power trace to replay: a CSV path or a name in benchmarks/traces/ "
+        "(e.g. 1); repeat or comma-separate."
+    ),
 )
 
-_intermittent_options = _add_options(
+_intermittent_common_options = _add_options(
     click.argument("benchmarks", nargs=-1),
     _trace_option,
     _cap_multi_option,
+    _device_debug_toggle,
+    _cpu_freq_option("16"),
     _output_csv_option,
 )
 
 
-def _run_intermittent(ctx: click.Context, algorithm: str, kwargs: dict) -> None:
+def _run_intermittent(
+    ctx: click.Context,
+    algorithm: str,
+    *,
+    benchmarks: tuple[str, ...],
+    trace: tuple[str, ...],
+    cap: tuple[str, ...],
+    device_debug: bool,
+    estimator_mode: str,
+    cpu_freq: str,
+    output: str | None,
+    max_unroll: int | None,
+) -> None:
     from .intermittent.runner import run_intermittent_benchmarks
 
     run_intermittent_benchmarks(
         ctx.obj["env"],
         ctx.obj["tc"],
         algorithm=algorithm,
-        benchmarks=_list_or_none(kwargs["benchmarks"]),
-        caps=_list_or_none(kwargs["cap"]),
-        traces=[Path(value) for value in kwargs["trace"]],
-        output_csv=_path_or_none(kwargs["output"]),
+        benchmarks=_list_or_none(benchmarks),
+        caps=_list_or_none(cap) or ["board"],
+        trace_specs=list(trace),
+        output_csv=_path_or_none(output),
+        device_debug=device_debug,
+        estimator_mode=estimator_mode,
+        cpu_freq=_mhz_to_hz(cpu_freq),
+        max_unroll=max_unroll,
         pass_log_level=ctx.obj["pass_log_level"],
     )
 
@@ -1380,27 +1414,90 @@ def intermittent() -> None:
 
 
 @intermittent.command("milp")
-@_intermittent_options
+@_intermittent_common_options
+@_estimator_mode_option
 @click.pass_context
-def intermittent_milp_cmd(ctx: click.Context, **kwargs) -> None:
+def intermittent_milp_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    trace: tuple[str, ...],
+    cap: tuple[str, ...],
+    device_debug: bool,
+    cpu_freq: str,
+    output: str | None,
+    estimator_mode: str,
+) -> None:
     """Run MILP benchmarks under replayed intermittent power."""
-    _run_intermittent(ctx, "milp", kwargs)
+    _run_intermittent(
+        ctx,
+        "milp",
+        benchmarks=benchmarks,
+        trace=trace,
+        cap=cap,
+        device_debug=device_debug,
+        estimator_mode=estimator_mode,
+        cpu_freq=cpu_freq,
+        output=output,
+        max_unroll=None,
+    )
 
 
 @intermittent.command("rockclimb")
-@_intermittent_options
+@_intermittent_common_options
+@_max_unroll_option
 @click.pass_context
-def intermittent_rockclimb_cmd(ctx: click.Context, **kwargs) -> None:
+def intermittent_rockclimb_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    trace: tuple[str, ...],
+    cap: tuple[str, ...],
+    device_debug: bool,
+    cpu_freq: str,
+    output: str | None,
+    max_unroll: int,
+) -> None:
     """Run RockClimb benchmarks under replayed intermittent power."""
-    _run_intermittent(ctx, "rockclimb", kwargs)
+    _run_intermittent(
+        ctx,
+        "rockclimb",
+        benchmarks=benchmarks,
+        trace=trace,
+        cap=cap,
+        device_debug=device_debug,
+        estimator_mode="assembly",
+        cpu_freq=cpu_freq,
+        output=output,
+        max_unroll=max_unroll,
+    )
 
 
 @intermittent.command("schematic")
-@_intermittent_options
+@_intermittent_common_options
+@_estimator_mode_option
 @click.pass_context
-def intermittent_schematic_cmd(ctx: click.Context, **kwargs) -> None:
+def intermittent_schematic_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    trace: tuple[str, ...],
+    cap: tuple[str, ...],
+    device_debug: bool,
+    cpu_freq: str,
+    output: str | None,
+    estimator_mode: str,
+) -> None:
     """Run SCHEMATIC benchmarks under replayed intermittent power."""
-    _run_intermittent(ctx, "schematic", kwargs)
+    _run_intermittent(
+        ctx,
+        "schematic",
+        benchmarks=benchmarks,
+        trace=trace,
+        cap=cap,
+        device_debug=device_debug,
+        estimator_mode=estimator_mode,
+        cpu_freq=cpu_freq,
+        output=output,
+        max_unroll=None,
+    )
 
 
 # =========================================================================
