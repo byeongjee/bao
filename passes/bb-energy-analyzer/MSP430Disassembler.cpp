@@ -18,6 +18,20 @@ using namespace llvm;
 
 namespace bbanalyzer {
 
+namespace {
+
+/// Count whole bytes in an objdump byte column such as "82 5a 00 00 ".
+unsigned countBytes(const std::string &hexBytes) {
+    unsigned digits = 0;
+    for (unsigned char c : hexBytes) {
+        if (std::isxdigit(c))
+            digits++;
+    }
+    return digits / 2;
+}
+
+} // namespace
+
 MSP430Disassembler::MSP430Disassembler() = default;
 MSP430Disassembler::~MSP430Disassembler() = default;
 
@@ -89,79 +103,94 @@ std::vector<Instruction> MSP430Disassembler::disassemble(const std::string &elfP
 std::vector<Instruction> MSP430Disassembler::parseObjdumpOutput(const std::string &objdumpOutput) {
     std::vector<Instruction> result;
 
-    // Format:
-    //    1234:       0f 4c           mov     r12, r15
-    //    1236:       4c 43           clr.b   r12
-    //    1236:       12 c3           clrc
-    // Pattern: hex_addr: hex_bytes mnemonic[.width] operands
+    // objdump writes tab-delimited fields:
+    //    "   0:\t0f 4c       \tmov\tr12,\tr15\t;"
+    //    "   2:\t4c 43       \tclr.b\tr12\t\t;"
+    //     ^address ^byte column ^instruction text (contains further tabs)
+    // The fields are split on tabs instead of by one regex over the whole line
+    // because a regex cannot tell where the byte column ends: mnemonics spelled
+    // with hex digits only (add, addc, adc, dadd, dec, decd) are also valid byte
+    // columns, so the greedy match swallowed them and dropped the instruction.
+    //
+    // Byte listings wrap after four bytes, putting the tail of a longer
+    // instruction on a line that carries an address and bytes but no text:
+    //    "   4:\t80 18 5c 4a \tmovx.a\t74565(r10),r12\t;0x12345"
+    //    "   8:\t45 23 "
+    // Those bytes belong to the preceding instruction's size.
+    std::regex addrPattern(R"(^\s*([0-9a-fA-F]+):$)");
+    std::regex bytesPattern(R"(^[0-9a-fA-F ]*$)");
     // Capture the optional width suffix separately so it cannot become part
     // of the first operand and be misclassified as symbolic addressing.
-    std::regex instrPattern(R"(^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F ]+)\s+(\w+)(?:\.(\w+))?(.*)$)");
+    std::regex mnemonicPattern(R"(^(\w+)(?:\.(\w+))?(.*)$)");
     std::regex relocPattern(R"(^\s*([0-9a-fA-F]+):\s+R_\S+\s+(\S+)\s*$)");
 
     std::istringstream stream(objdumpOutput);
     std::string line;
 
     while (std::getline(stream, line)) {
+        std::smatch match;
+
         // Try relocation line first
-        std::smatch relocMatch;
-        if (!result.empty() && std::regex_match(line, relocMatch, relocPattern)) {
+        if (!result.empty() && std::regex_match(line, match, relocPattern)) {
             auto &lastInstr = result.back();
             if (lastInstr.mnemonic == "call") {
-                lastInstr.callTarget = relocMatch[2].str();
+                lastInstr.callTarget = match[2].str();
             }
             continue;
         }
 
-        std::smatch match;
-        if (std::regex_match(line, match, instrPattern)) {
-            Instruction instr;
+        auto addrEnd = line.find('\t');
+        if (addrEnd == std::string::npos)
+            continue;
+        std::string addrField = line.substr(0, addrEnd);
+        if (!std::regex_match(addrField, match, addrPattern))
+            continue;
+        uint64_t address = std::stoull(match[1].str(), nullptr, 16);
 
-            // Parse address
-            instr.address = std::stoull(match[1].str(), nullptr, 16);
+        std::string rest = line.substr(addrEnd + 1);
+        auto bytesEnd = rest.find('\t');
+        std::string bytesField = rest.substr(0, bytesEnd);
+        if (!std::regex_match(bytesField, bytesPattern))
+            continue;
+        unsigned byteCount = countBytes(bytesField);
 
-            // Parse byte count from hex bytes string
-            std::string hexBytes = match[2].str();
-            // Count hex byte pairs (each pair is one byte)
-            size_t byteCount = 0;
-            for (size_t i = 0; i < hexBytes.size(); ++i) {
-                if (std::isxdigit(hexBytes[i])) {
-                    byteCount++;
-                }
-            }
-            instr.size = byteCount / 2;
-
-            // Parse mnemonic (convert to lowercase)
-            instr.mnemonic = match[3].str();
-            std::transform(instr.mnemonic.begin(), instr.mnemonic.end(), instr.mnemonic.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
-
-            // Skip padding/data bytes that objdump displays as hex values
-            // (e.g., "00", "ff", etc. are not valid MSP430 mnemonics)
-            bool isHexOnly =
-                !instr.mnemonic.empty() && std::all_of(instr.mnemonic.begin(), instr.mnemonic.end(),
-                                                       [](char c) { return std::isxdigit(c); });
-            if (isHexOnly) {
-                continue;
-            }
-
-            // Parse operands (strip trailing ';' comment, then trim whitespace)
-            instr.operands = match[5].str();
-            auto semi = instr.operands.find(';');
-            if (semi != std::string::npos)
-                instr.operands.erase(semi);
-            if (!instr.operands.empty()) {
-                instr.operands.erase(0, instr.operands.find_first_not_of(" \t"));
-                if (!instr.operands.empty()) {
-                    instr.operands.erase(instr.operands.find_last_not_of(" \t") + 1);
-                }
-            }
-
-            // Determine addressing mode
-            instr.addrMode = determineAddressingMode(instr.mnemonic, instr.operands);
-
-            result.push_back(instr);
+        if (bytesEnd == std::string::npos) {
+            // Continuation of the previous instruction's wrapped byte listing.
+            // Bytes that do not continue the previous instruction are data.
+            if (!result.empty() && result.back().address + result.back().size == address)
+                result.back().size += byteCount;
+            continue;
         }
+
+        std::string text = rest.substr(bytesEnd + 1);
+        if (!std::regex_match(text, match, mnemonicPattern))
+            continue;
+
+        Instruction instr;
+        instr.address = address;
+        instr.size = byteCount;
+
+        // Parse mnemonic (convert to lowercase)
+        instr.mnemonic = match[1].str();
+        std::transform(instr.mnemonic.begin(), instr.mnemonic.end(), instr.mnemonic.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+
+        // Parse operands (strip trailing ';' comment, then trim whitespace)
+        instr.operands = match[3].str();
+        auto semi = instr.operands.find(';');
+        if (semi != std::string::npos)
+            instr.operands.erase(semi);
+        if (!instr.operands.empty()) {
+            instr.operands.erase(0, instr.operands.find_first_not_of(" \t"));
+            if (!instr.operands.empty()) {
+                instr.operands.erase(instr.operands.find_last_not_of(" \t") + 1);
+            }
+        }
+
+        // Determine addressing mode
+        instr.addrMode = determineAddressingMode(instr.mnemonic, instr.operands);
+
+        result.push_back(instr);
     }
 
     return result;
