@@ -3,7 +3,7 @@
 `ckpt intermittent` runs benchmarks on an MSP430FR5994 powered by an Otii Ace
 Pro that replays a recorded energy-harvesting trace, so the program really
 loses power and recovers from checkpoints. This document is the single source
-of truth for the hardware wiring and software setup.
+of truth for this measurement setup's wiring and software.
 
 ## Hardware
 
@@ -103,12 +103,14 @@ For each (benchmark, capacitor, trace):
    the rest of the trace is harmless.
 4. **Readback** — main off, relays closed again, NVM read via `mspdebug`
    (`__nvm_done`, `__nvm_violation`, `cnt_recovery`, and with
-   `--device-debug` also `cnt_boundary` and the result). Completed and
-   violated runs park at boot, so their NVM state survives the reconnect.
+   `--device-debug` — off by default, its counter updates and UART cost
+   energy — also `cnt_boundary` and the result). Completed and violated
+   runs park at boot, so their NVM state survives the reconnect.
 
-Binaries are always linked with `--halt-mode wait`: region boundaries wait
-for the capacitor to recharge instead of emulating outages, and real power
-failures recover through the checkpoint path.
+Binaries are always linked in the `wait` halt mode (there is no `--halt-mode`
+option here): region boundaries wait for the capacitor to recharge instead of
+emulating outages, and real power failures recover through the checkpoint
+path.
 
 After the run the relays are left open, so the ez-FET stays disconnected
 from the target: `ckpt bench`/`verify` will not find a device until a later
