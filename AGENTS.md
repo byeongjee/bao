@@ -134,6 +134,15 @@ ckpt verify schematic  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mo
 # benchmark, shared across caps and algorithms) and prints a combined report (-o also writes it to a file).
 ckpt verify all        [BENCHMARKS...] [--cap 5,10,50] [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS] [-o REPORT]
 
+# Intermittent-power runs (Otii Ace Pro replays a harvesting trace; Qoitech Switchboard
+# relays disconnect the ez-FET's SBW/3V3 lines after flashing so the target runs isolated).
+# Always compiles with halt-mode wait; --cap defaults to the 11.5uF board config (config_board.json).
+# --trace takes a CSV path or a name in benchmarks/traces/ (repeat or comma-separate: --trace 1,2).
+# Requires `uv sync --extra otii` and the otii_server binary (OTII_SERVER_BIN).
+ckpt intermittent milp      [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
+ckpt intermittent rockclimb [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--max-unroll N] [--cpu-freq] [--csv CSV]
+ckpt intermittent schematic [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
+
 # Analysis
 ckpt analyze strip-mining LOG_FILE [-o CSV]
 ckpt analyze milp-coarse  ...    # coarse-allocation MILP analysis
@@ -173,7 +182,8 @@ scripts/ckpt/
 │   ├── nvm.py           # Symbol resolution, hex dump parsing
 │   ├── serial.py        # UART reading
 │   ├── flash.py         # flash(), read_nvm()
-│   └── saleae.py        # Saleae Logic 2 automation for execution timing
+│   ├── saleae.py        # Saleae Logic 2 automation for execution timing
+│   └── otii.py          # Otii Ace Pro trace replay + switchboard relay control
 ├── bench/
 │   ├── config.py        # Benchmark/capacitor discovery and filtering
 │   ├── runner.py        # Shared benchmark matrix loop + CSV output
@@ -182,6 +192,8 @@ scripts/ckpt/
 │   ├── schematic.py     # SCHEMATIC benchmark runner (two-phase: trace once, then per-cap)
 │   ├── chunked.py       # Chunked-loop benchmark runner
 │   └── uninstrumented.py # Baseline execution time measurement (no checkpoints)
+├── intermittent/
+│   └── runner.py        # (benchmark x capacitor x trace) loop under replayed power
 ├── verify/
 │   ├── common.py        # Shared verification infrastructure (verify_algorithm callback pattern)
 │   ├── milp.py          # MILP semantic verification
