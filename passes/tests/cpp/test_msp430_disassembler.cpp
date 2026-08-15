@@ -94,6 +94,46 @@ TEST(MSP430Disassembler, IgnoresDataBytesThatFollowNoInstruction) {
     EXPECT_EQ(instructions[0].size, 2U);
 }
 
+// Relocation offsets point at the patched operand word, not at the start of the
+// instruction, and only calls carry a call target: a .rodata relocation that
+// follows a mov must not be attributed to the last call seen.
+TEST(MSP430Disassembler, AttachesRelocationToTheInstructionItPatches) {
+    const auto instructions = MSP430Disassembler::parseObjdumpOutput(
+        "   0:\t0a 15       \tpushm\t#1,\tr10\t;16-bit words\n"
+        "   2:\t0a 4c       \tmov\tr12,\tr10\t;\n"
+        "   4:\tb0 12 00 00 \tcall\t#0\t\t;\n"
+        "\t\t\t6: R_MSP430X_ABS16\text\n"
+        "   8:\t1c 42 00 00 \tmov\t&0x0000,r12\t;0x0000\n"
+        "\t\t\ta: R_MSP430X_ABS16\tg\n"
+        "   c:\t0c 5a       \tadd\tr10,\tr12\t;\n"
+        "   e:\t82 4c 00 00 \tmov\tr12,\t&0x0000\t;\n"
+        "\t\t\t10: R_MSP430X_ABS16\tg\n");
+
+    ASSERT_EQ(instructions.size(), 6U);
+    EXPECT_EQ(instructions[2].mnemonic, "call");
+    EXPECT_EQ(instructions[2].callTarget, "ext");
+    for (size_t i = 0; i < instructions.size(); ++i) {
+        if (i != 2)
+            EXPECT_EQ(instructions[i].callTarget, "") << "instruction " << i;
+    }
+}
+
+// A relocation for an instruction whose byte listing wrapped is printed after
+// the continuation line, so the covering search must span the full instruction.
+TEST(MSP430Disassembler, AttachesRelocationPrintedAfterAContinuationLine) {
+    const auto instructions =
+        MSP430Disassembler::parseObjdumpOutput("   0:\tb0 12 00 00 \tcall\t#0\t\t;\n"
+                                               "\t\t\t2: R_MSP430X_ABS16\text2\n"
+                                               "   4:\t00 18 fa 40 \tmovx.a\t#0,\t4(r10)\t;\n"
+                                               "   8:\t00 00 04 00 \n"
+                                               "\t\t\t8: R_MSP430X_ABS20_EXT_SRC\tsym\n");
+
+    ASSERT_EQ(instructions.size(), 2U);
+    EXPECT_EQ(instructions[0].callTarget, "ext2");
+    EXPECT_EQ(instructions[1].size, 8U);
+    EXPECT_EQ(instructions[1].callTarget, "");
+}
+
 TEST(MSP430Disassembler, PreservesGenuineSymbolicOperands) {
     const auto instructions = MSP430Disassembler::parseObjdumpOutput(
         "   0:\t1d 40 00 00\tmov\t0x0000,\tr13\t;PC rel. 0x0002\n"
