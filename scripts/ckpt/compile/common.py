@@ -72,6 +72,11 @@ def compile_to_ir(
     The -O3 here selects what IRGen emits, not an optimization level — all
     optimization happens later in optimize_ir, whose level is the only
     optimization knob.
+
+    ``-fno-builtin-strlen`` stamps a ``no-builtin-strlen`` function attribute
+    into the IR, which the later opt run honors: LoopIdiomRecognize then leaves
+    byte-scan loops alone instead of collapsing them into a ``strlen`` libcall
+    that carries no BB energy and cannot hold a region boundary.
     """
     cmd: list[str] = [
         tc.clang,
@@ -82,6 +87,7 @@ def compile_to_ir(
         "-Xclang",
         "-disable-llvm-passes",
         "-fno-math-errno",
+        "-fno-builtin-strlen",
         "-D__MSP430FR5994__",
         f"-I{env.project_dir / 'passes' / 'include'}",
         "-isystem",
