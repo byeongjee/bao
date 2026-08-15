@@ -44,6 +44,12 @@ _VOLTAGE_CLAMP_V = 3.6  # MSP430FR5994 maximum operating voltage
 # threshold in device/saleae.py.
 _STOP_PULSE_MIN_SECONDS = 0.001
 
+# Poll GPI1 only every Nth sample: each poll costs 1-2 TCP round-trips,
+# and polling every 20 ms sample can push the voltage schedule behind.
+_GPI_POLL_EVERY_N_SAMPLES = 5
+# Warn when the replay schedule slipped further than this behind a sample.
+_PACING_LAG_WARN_SECONDS = 0.005
+
 _SERVER_READY_TIMEOUT_SECONDS = 10.0
 _GPI_CHANNEL = "i1"
 
@@ -76,6 +82,28 @@ def _import_otii():
             "otii-tcp-client package not installed. Install with: uv sync --extra otii"
         ) from exc
     return otii_client, Arc
+
+
+@contextmanager
+def _otii_errors(step: str) -> Iterator[None]:
+    """Translate otii-tcp-client errors into DeviceError.
+
+    Every client call raises Otii_Exception (or a socket error) on failure;
+    without translation those unwind past the runner's per-trace DeviceError
+    handler and abort the whole benchmark matrix.
+    """
+    try:
+        from otii_tcp_client import (
+            otii_exception,  # pyright: ignore[reportMissingImports]
+        )
+
+        errors: tuple[type[Exception], ...] = (otii_exception.Otii_Exception, OSError)
+    except ImportError:
+        errors = (OSError,)
+    try:
+        yield
+    except errors as exc:
+        raise DeviceError(f"Otii {step} failed: {exc}") from exc
 
 
 def _wait_for_port(host: str, port: int, timeout: float) -> bool:
@@ -158,30 +186,48 @@ def otii_session() -> Iterator[OtiiSession]:
     otii = None
     arc = None
     try:
-        otii = otii_client.OtiiClient().connect()
-        logger.info("Connected to Otii server")
+        with _otii_errors("session setup"):
+            otii = otii_client.OtiiClient().connect()
+            logger.info("Connected to Otii server")
 
-        project = otii.create_project()
-        arc, device_id = _single_arc(otii, arc_cls)
-        arc.add_to_project()
+            project = otii.create_project()
+            arc, device_id = _single_arc(otii, arc_cls)
+            arc.add_to_project()
 
-        arc.enable_5v(True)  # powers the switchboard relays
-        arc.enable_exp_port(True)
-        arc.set_exp_voltage(_EXP_VOLTAGE)
-        for channel in ("mc", "mp", _GPI_CHANNEL):
-            arc.enable_channel(channel, True)
-        arc.set_max_current(_MAX_CURRENT_A)
-        arc.set_main(False)
+            arc.set_main(False)
+            arc.enable_exp_port(True)
+            arc.set_exp_voltage(_EXP_VOLTAGE)
+            # Force the relays open before powering their coils: a crashed
+            # previous session may have left the GPO latched high.
+            arc.set_gpo(_RELAY_GPO, False)
+            arc.enable_5v(True)  # powers the switchboard relays
+            # Only GPI1 is analyzed; leave the analog channels off so
+            # recordings stay small.
+            arc.enable_channel(_GPI_CHANNEL, True)
+            for channel in ("mc", "mp"):
+                arc.enable_channel(channel, False)
+            arc.set_max_current(_MAX_CURRENT_A)
 
         yield OtiiSession(otii=otii, project=project, arc=arc, device_id=device_id)
     finally:
+        # Each cleanup step runs even if the previous one failed, and none
+        # may mask the original error — hence the broad excepts.
+        if arc is not None:
+            try:
+                arc.set_main(False)
+            except Exception:
+                logger.exception("Error switching off Otii main power")
+            try:
+                arc.set_gpo(_RELAY_GPO, False)
+                logger.info(
+                    "Switchboard relays left open — the ez-FET is disconnected "
+                    "until the next intermittent run closes them"
+                )
+            except Exception:
+                logger.exception("Error opening switchboard relays")
         if otii is not None:
             try:
-                if arc is not None:
-                    arc.set_main(False)
-                    arc.set_gpo(_RELAY_GPO, False)
                 otii.shutdown()
-            # Deliberately broad: cleanup must not mask the original error.
             except Exception:
                 logger.exception("Error shutting down Otii client")
         _stop_server(server)
@@ -193,16 +239,18 @@ def connect_debugger(session: OtiiSession) -> None:
     Main power is forced off first — the target must never see the Otii
     supply and the debugger's 3V3 rail at the same time.
     """
-    session.arc.set_main(False)
-    logger.info("Closing switchboard relays (debugger connected)")
-    session.arc.set_gpo(_RELAY_GPO, True)
+    with _otii_errors("relay close"):
+        session.arc.set_main(False)
+        logger.info("Closing switchboard relays (debugger connected)")
+        session.arc.set_gpo(_RELAY_GPO, True)
     time.sleep(_DEBUGGER_SETTLE_SECONDS)
 
 
 def isolate_target(session: OtiiSession) -> None:
     """Open the switchboard relays, cutting SBW and 3V3 to the target."""
-    logger.info("Opening switchboard relays (target isolated)")
-    session.arc.set_gpo(_RELAY_GPO, False)
+    with _otii_errors("relay open"):
+        logger.info("Opening switchboard relays (target isolated)")
+        session.arc.set_gpo(_RELAY_GPO, False)
     time.sleep(_ISOLATION_SETTLE_SECONDS)
 
 
@@ -272,30 +320,59 @@ def replay_trace(
 
     arc = session.arc
     detector = _PulseDetector()
+    clamped = 0
+    max_lag = 0.0
 
-    arc.set_main_voltage(_clamp_voltage(samples[0][1]))
-    session.project.start_recording()
-    recording = session.project.get_last_recording()
+    with _otii_errors("replay setup"):
+        arc.set_main_voltage(_clamp_voltage(samples[0][1]))
+        session.project.start_recording()
+        recording = session.project.get_last_recording()
     read_idx = 0
 
-    arc.set_main(True)
-    t0 = time.monotonic()
+    with _otii_errors("replay"):
+        arc.set_main(True)
+        t0 = time.monotonic()
+        try:
+            for index, (time_s, voltage_v) in enumerate(samples):
+                delay = t0 + time_s - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)
+                elif -delay > max_lag:
+                    max_lag = -delay
+                voltage = _clamp_voltage(voltage_v)
+                if voltage != voltage_v:
+                    clamped += 1
+                arc.set_main_voltage(voltage)
+                if index % _GPI_POLL_EVERY_N_SAMPLES == 0:
+                    read_idx = _poll_gpi(
+                        recording, session.device_id, detector, read_idx
+                    )
+                    if detector.stop_rise_ts is not None:
+                        break
+        finally:
+            replay_seconds = time.monotonic() - t0
+            arc.set_main(False)
+            session.project.stop_recording()
+
+        # Final poll after the recording stopped: its data stays readable,
+        # and this catches a pulse from the last unpolled samples.
+        read_idx = _poll_gpi(recording, session.device_id, detector, read_idx)
+
     try:
-        for time_s, voltage_v in samples:
-            delay = t0 + time_s - time.monotonic()
-            if delay > 0:
-                time.sleep(delay)
-            arc.set_main_voltage(_clamp_voltage(voltage_v))
-            read_idx = _poll_gpi(recording, session.device_id, detector, read_idx)
-            if detector.stop_rise_ts is not None:
-                break
-        else:
-            # Trace exhausted: one last poll for a pulse in the final interval.
-            read_idx = _poll_gpi(recording, session.device_id, detector, read_idx)
-    finally:
-        replay_seconds = time.monotonic() - t0
-        arc.set_main(False)
-        session.project.stop_recording()
+        recording.delete()
+    # Deliberately broad: a leaked recording only wastes server memory.
+    except Exception:
+        logger.exception("Error deleting Otii recording")
+
+    if max_lag > _PACING_LAG_WARN_SECONDS:
+        logger.warning(
+            "Replay pacing fell behind the trace schedule by up to %.0f ms",
+            max_lag * 1000.0,
+        )
+    if clamped:
+        logger.warning(
+            "Clamped %d trace sample(s) to [0, %.1f] V", clamped, _VOLTAGE_CLAMP_V
+        )
 
     stop_rise_ts = detector.stop_rise_ts
     completed = stop_rise_ts is not None
