@@ -5,12 +5,15 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Any, Self, cast
 from unittest.mock import MagicMock
 
 import pytest
 from ckpt.device.saleae import _extract_timing, _wait_for_capture, saleae_run
 from ckpt.errors import DeviceError
+
+if TYPE_CHECKING:
+    from saleae.automation import Manager
 
 pytestmark = pytest.mark.unit
 
@@ -168,7 +171,7 @@ def install_fake_flash_and_hold(
 
 def install_fake_saleae_automation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Install a stub ``saleae.automation`` module for pure unit tests."""
-    fake_automation = types.ModuleType("saleae.automation")
+    fake_automation: Any = types.ModuleType("saleae.automation")
 
     class CaptureConfiguration:
         def __init__(self, capture_mode: object):
@@ -204,7 +207,7 @@ def install_fake_saleae_automation(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_automation.DigitalTriggerType = DigitalTriggerType
     fake_automation.LogicDeviceConfiguration = LogicDeviceConfiguration
 
-    fake_saleae = types.ModuleType("saleae")
+    fake_saleae: Any = types.ModuleType("saleae")
     fake_saleae.__path__ = []
     fake_saleae.automation = fake_automation
 
@@ -245,7 +248,9 @@ class TestSaleaeRun:
             ]
         )
 
-        result = saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0, 60.0)
+        result = saleae_run(
+            Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0
+        )
 
         assert result == pytest.approx(378115.72)
         assert flash_calls == [
@@ -280,7 +285,9 @@ class TestSaleaeRun:
             error_message="No physical devices found",
         )
 
-        result = saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0, 60.0)
+        result = saleae_run(
+            Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0
+        )
 
         assert result == pytest.approx(378115.72)
         # One flash per attempt: the first attempt's session is aborted when
@@ -321,7 +328,7 @@ class TestSaleaeRun:
         with pytest.raises(
             DeviceError, match="Saleae capture did not complete after 3 attempts"
         ):
-            saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0, 60.0)
+            saleae_run(Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0)
 
         assert sleep_calls == [0.5, 0.5]
         assert manager.calls == 3
@@ -341,13 +348,13 @@ class TestSaleaeRun:
             def code(self) -> object:
                 return deadline_exceeded
 
-        fake_grpc = types.ModuleType("grpc")
+        fake_grpc: Any = types.ModuleType("grpc")
         fake_grpc.RpcError = RpcError
         fake_grpc.StatusCode = types.SimpleNamespace(
             DEADLINE_EXCEEDED=deadline_exceeded
         )
         request = object()
-        fake_saleae_grpc = types.ModuleType("saleae.grpc")
+        fake_saleae_grpc: Any = types.ModuleType("saleae.grpc")
         fake_saleae_grpc.saleae_pb2 = MagicMock()
         fake_saleae_grpc.saleae_pb2.WaitCaptureRequest.return_value = request
         monkeypatch.setitem(sys.modules, "grpc", fake_grpc)
@@ -362,7 +369,7 @@ class TestSaleaeRun:
         manager.start_capture.return_value = capture
 
         with pytest.raises(DeviceError, match=r"timed out after 0\.01 seconds"):
-            saleae_run(Path("/tmp/app.elf"), manager, 30, 1.0, 0.01)
+            saleae_run(Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 0.01)
 
         capture.manager.stub.WaitCapture.assert_called_once_with(request, timeout=0.01)
         capture.stop.assert_called_once_with()

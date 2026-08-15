@@ -172,7 +172,8 @@ class VoltageSender:
         while CLOCK() - self._last_recv < quiet:
             time.sleep(0.05)
         self._stop.set()
-        self._thread.join(timeout=2.0)
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
         self._sock.settimeout(None)
         self._connection.recv_msg = ""
 
@@ -198,7 +199,7 @@ def sleep_until(deadline_ns, spin_ns):
 def replay(sender, schedule, rate, delta_threshold, spin_ns, mode):
     """Drive the schedule and return one (scheduled_s, actual_s, voltage, sent) row per step."""
     period_ns = round(1e9 / rate)
-    payloads = None
+    payloads = []
     if mode == "async":
         payloads = [sender.encode(v) for v in schedule]
 
@@ -230,17 +231,15 @@ def read_channel(recording, device_id, channel):
     count = recording.get_channel_data_count(device_id, channel)
     if count == 0:
         raise SystemExit(f"no samples recorded on channel '{channel}'")
-    values = []
-    t0 = None
-    interval = None
-    index = 0
+    first = recording.get_channel_data(device_id, channel, 0, min(40000, count))
+    t0 = first["timestamp"]
+    interval = first["interval"]
+    values = list(first["values"])
+    index = len(values)
     while index < count:
         chunk = recording.get_channel_data(
             device_id, channel, index, min(40000, count - index)
         )
-        if t0 is None:
-            t0 = chunk["timestamp"]
-            interval = chunk["interval"]
         values.extend(chunk["values"])
         index += len(chunk["values"])
     return t0, interval, values
