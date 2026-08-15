@@ -4,7 +4,8 @@
     "timing_gpio_start",
     "timing_gpio_stop",
     "_timing_delay_cycles",
-    "bench_halt"
+    "bench_halt",
+    "bench_commit_done"
   ],
   "parameters": {
     "inv_register": 1.6202057055790864,
