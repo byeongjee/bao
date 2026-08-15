@@ -17,6 +17,7 @@ import logging
 import os
 import socket
 import subprocess
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -236,12 +237,14 @@ def _clamp_voltage(voltage: float) -> float:
 def replay_trace(
     session: OtiiSession,
     samples: list[tuple[float, float]],
+    stop_event: threading.Event,
 ) -> float:
     """Replay *samples* ``(time_s, voltage_v)`` on the main output.
 
-    Plays the whole trace — completion and timing are captured externally
-    by the Saleae on P3.4, and a completed run parks at every later boot
-    (park_if_done), so the remaining trace is harmless. Main power is
+    Traces are recorded as several repetitions of the same harvesting
+    window, so most runs finish long before the last sample. *stop_event*
+    is set by the Saleae capture watcher once the benchmark signalled its
+    stop pulse; the remaining samples are then skipped. Main power is
     switched off before returning.
 
     Returns the wall-clock replay duration in seconds.
@@ -252,6 +255,7 @@ def replay_trace(
     arc = session.arc
     clamped = 0
     max_lag = 0.0
+    stopped_early = False
 
     with _otii_errors("replay"):
         arc.set_main_voltage(_clamp_voltage(samples[0][1]))
@@ -261,9 +265,12 @@ def replay_trace(
             for time_s, voltage_v in samples:
                 delay = t0 + time_s - time.monotonic()
                 if delay > 0:
-                    time.sleep(delay)
+                    stop_event.wait(delay)
                 elif -delay > max_lag:
                     max_lag = -delay
+                if stop_event.is_set():
+                    stopped_early = True
+                    break
                 voltage = _clamp_voltage(voltage_v)
                 if voltage != voltage_v:
                     clamped += 1
@@ -282,5 +289,10 @@ def replay_trace(
             "Clamped %d trace sample(s) to [0, %.1f] V", clamped, _VOLTAGE_CLAMP_V
         )
 
-    logger.info("Replay finished after %.1fs", replay_seconds)
+    logger.info(
+        "Replay %s after %.1fs of a %.1fs trace",
+        "stopped early" if stopped_early else "finished",
+        replay_seconds,
+        samples[-1][0],
+    )
     return replay_seconds

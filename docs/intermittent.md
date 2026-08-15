@@ -107,13 +107,12 @@ For each (benchmark, capacitor, trace):
 2. **Isolate** — relays open while the target is still halted, so it loses
    power without ever running on the debugger's 3V3 rail. NVM stays exactly
    as programmed.
-3. **Replay** — the Otii main output replays the whole trace
+3. **Replay** — the Otii main output replays the trace
    (`benchmarks/traces/*.csv`, 20 ms samples). The BENCH_EXIT stop pulse
-   (~5 ms high on P3.4) fires the Saleae trigger; no trigger by the end of
-   the trace means `status=incomplete`. Execution time is the first
-   start-pulse falling edge to the stop-pulse rising edge, outages included.
-   A completed run parks at every later boot (`park_if_done`), so replaying
-   the rest of the trace is harmless.
+   (~5 ms high on P3.4) fires the Saleae trigger, which ends the replay
+   early; no trigger by the end of the trace means `status=incomplete`.
+   Execution time is the first start-pulse falling edge to the stop-pulse
+   rising edge, outages included.
 4. **Readback** — main off, relays closed again, NVM read via `mspdebug`
    (`__nvm_done`, `__nvm_violation`, `cnt_recovery`, and with
    `--device-debug` — off by default, its counter updates and UART cost
