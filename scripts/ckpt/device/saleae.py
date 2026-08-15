@@ -246,25 +246,11 @@ def _is_ambiguous_capture(exc: DeviceError) -> bool:
     return str(exc).startswith(_AMBIGUOUS_CAPTURE_PREFIX)
 
 
-def _extract_timing(csv_path: Path) -> float:
-    """Parse Saleae digital CSV export to find execution time.
+def _collect_pulses(csv_path: Path) -> list[tuple[float, float]]:
+    """Parse a Saleae digital CSV export into (rising_time, falling_time) pairs.
 
     The CSV has columns like ``Time [s], Channel 0``.
-    GPIO uses pulse-based signalling:
-    - Start pulse: ~10 us HIGH (short, below 1 ms threshold)
-    - Stop pulse:  ~5 ms HIGH (long, above 1 ms threshold)
-
-    Execution time is measured as:
-        the short pulse falling edge immediately before the first
-        long pulse rising edge.
-
-    Multiple short pulses before the stop pulse are treated as ambiguous:
-    they indicate the target likely restarted during capture, so the
-    extractor refuses to guess which partial run is "correct".
-
-    Raises DeviceError if edges are missing.
     """
-    # Collect all pulses as (rising_time, falling_time) pairs.
     pulses: list[tuple[float, float]] = []
     prev_val: int | None = None
     rising_time: float | None = None
@@ -286,6 +272,28 @@ def _extract_timing(csv_path: Path) -> float:
                     rising_time = None
 
             prev_val = value
+
+    return pulses
+
+
+def _extract_timing(csv_path: Path) -> float:
+    """Parse Saleae digital CSV export to find execution time.
+
+    GPIO uses pulse-based signalling:
+    - Start pulse: ~10 us HIGH (short, below 1 ms threshold)
+    - Stop pulse:  ~5 ms HIGH (long, above 1 ms threshold)
+
+    Execution time is measured as:
+        the short pulse falling edge immediately before the first
+        long pulse rising edge.
+
+    Multiple short pulses before the stop pulse are treated as ambiguous:
+    they indicate the target likely restarted during capture, so the
+    extractor refuses to guess which partial run is "correct".
+
+    Raises DeviceError if edges are missing.
+    """
+    pulses = _collect_pulses(csv_path)
 
     if not pulses:
         raise DeviceError(
@@ -333,3 +341,92 @@ def _extract_timing(csv_path: Path) -> float:
     start_time = start_pulses[0][1]
 
     return (stop_time - start_time) * 1_000_000  # seconds -> us
+
+
+# ---------------------------------------------------------------------------
+# Intermittent-power replay captures (used by ckpt intermittent)
+# ---------------------------------------------------------------------------
+
+
+def start_pulse_capture(manager: Manager, after_trigger_seconds: float):
+    """Arm a capture that triggers on the >=1 ms stop pulse on channel 0.
+
+    Returns the capture context manager from ``manager.start_capture``;
+    the caller enters it and later calls :func:`finish_pulse_capture`.
+    """
+    from saleae.automation import (
+        CaptureConfiguration,
+        DigitalTriggerCaptureMode,
+        DigitalTriggerType,
+        LogicDeviceConfiguration,
+    )
+
+    device_config = LogicDeviceConfiguration(
+        enabled_digital_channels=[_SALEAE_CHANNEL],
+        digital_sample_rate=_SALEAE_SAMPLE_RATE,
+    )
+    capture_config = CaptureConfiguration(
+        capture_mode=DigitalTriggerCaptureMode(
+            trigger_type=DigitalTriggerType.PULSE_HIGH,
+            trigger_channel_index=_SALEAE_CHANNEL,
+            min_pulse_width_seconds=0.001,  # 1 ms — ignores 10 us start pulses
+            max_pulse_width_seconds=2,
+            after_trigger_seconds=after_trigger_seconds,
+        ),
+    )
+    return manager.start_capture(
+        device_configuration=device_config,
+        capture_configuration=capture_config,
+    )
+
+
+def finish_pulse_capture(capture, wait_seconds: float) -> tuple[bool, float | None]:
+    """Resolve an armed pulse capture after the trace replay ended.
+
+    By this point the target is unpowered, so the stop pulse either already
+    fired the trigger or never will — *wait_seconds* only needs to cover the
+    capture's after-trigger tail.
+
+    Returns ``(completed, execution_time_us)``:
+    - ``(False, None)`` — the trigger never fired (run incomplete); the
+      capture is stopped.
+    - ``(True, None)`` — the trigger fired but no timing could be extracted.
+    - ``(True, us)`` — execution time from the first start-pulse falling
+      edge to the stop-pulse rising edge. Unlike :func:`saleae_run`, several
+      start pulses are expected: a run that dies before its first checkpoint
+      boots fresh and pulses again, and the wall-clock time (outages
+      included) starts at the first attempt.
+    """
+    try:
+        _wait_for_capture(capture, wait_seconds)
+    except DeviceError:
+        _stop_capture_quietly(capture)
+        return False, None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "digital.csv"
+        capture.export_raw_data_csv(
+            directory=tmpdir,
+            digital_channels=[_SALEAE_CHANNEL],
+        )
+        pulses = _collect_pulses(csv_path)
+
+    return True, _replay_timing_from_pulses(pulses)
+
+
+def _replay_timing_from_pulses(pulses: list[tuple[float, float]]) -> float | None:
+    """First start-pulse falling edge -> first stop-pulse rising edge, in us."""
+    long_pulses = [(r, f) for r, f in pulses if (f - r) >= _SHORT_PULSE_THRESHOLD]
+    if not long_pulses:
+        logger.warning("Capture triggered but no stop pulse found in the export")
+        return None
+    stop_time = long_pulses[0][0]
+
+    start_falls = [
+        f for r, f in pulses if (f - r) < _SHORT_PULSE_THRESHOLD and f < stop_time
+    ]
+    if not start_falls:
+        logger.warning("Stop pulse captured but no start pulse precedes it")
+        return None
+
+    return (stop_time - start_falls[0]) * 1_000_000  # seconds -> us

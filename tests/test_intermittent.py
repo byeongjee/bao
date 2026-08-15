@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from ckpt.device.otii import _PulseDetector
+from ckpt.device.saleae import _collect_pulses, _replay_timing_from_pulses
 from ckpt.env import ProjectEnv
 from ckpt.errors import ConfigError
 from ckpt.intermittent.runner import load_trace, resolve_traces
@@ -11,58 +11,58 @@ from ckpt.intermittent.runner import load_trace, resolve_traces
 pytestmark = pytest.mark.unit
 
 
-def _edges(*pairs):
-    """Build GPI event dicts from (timestamp, value) pairs."""
-    return [{"timestamp": ts, "value": val} for ts, val in pairs]
-
-
-class TestPulseDetector:
+class TestReplayTimingFromPulses:
     def test_start_then_stop(self):
-        d = _PulseDetector()
         # 10 us start pulse, then 5 ms stop pulse.
-        d.feed(_edges((1.0, True), (1.00001, False), (2.0, True), (2.005, False)))
-        assert d.start_fall_ts == 1.00001
-        assert d.stop_rise_ts == 2.0
+        us = _replay_timing_from_pulses([(1.0, 1.00001), (2.0, 2.005)])
+        assert us == pytest.approx((2.0 - 1.00001) * 1e6)
+
+    def test_multiple_start_pulses_uses_first(self):
+        # A run that dies before its first checkpoint boots fresh and emits
+        # another start pulse; timing spans from the first attempt.
+        us = _replay_timing_from_pulses([(1.0, 1.00001), (3.0, 3.00001), (5.0, 5.005)])
+        assert us == pytest.approx((5.0 - 1.00001) * 1e6)
 
     def test_no_stop_pulse(self):
-        d = _PulseDetector()
-        d.feed(_edges((1.0, True), (1.00001, False)))
-        assert d.stop_rise_ts is None
-        assert d.start_fall_ts == 1.00001
+        assert _replay_timing_from_pulses([(1.0, 1.00001)]) is None
 
-    def test_multiple_start_pulses_keeps_first(self):
-        # A run that dies before its first checkpoint boots fresh again and
-        # emits another start pulse; timing spans from the first one.
-        d = _PulseDetector()
-        d.feed(_edges((1.0, True), (1.00001, False), (3.0, True), (3.00001, False)))
-        d.feed(_edges((5.0, True), (5.005, False)))
-        assert d.start_fall_ts == 1.00001
-        assert d.stop_rise_ts == 5.0
+    def test_no_start_pulse(self):
+        assert _replay_timing_from_pulses([(2.0, 2.005)]) is None
 
-    def test_incremental_feed_across_pulse(self):
-        d = _PulseDetector()
-        d.feed(_edges((1.0, True), (1.00001, False), (2.0, True)))
-        assert d.stop_rise_ts is None
-        d.feed(_edges((2.005, False)))
-        assert d.stop_rise_ts == 2.0
+    def test_start_pulses_after_stop_ignored(self):
+        us = _replay_timing_from_pulses([(1.0, 1.00001), (2.0, 2.005), (9.0, 9.00001)])
+        assert us == pytest.approx((2.0 - 1.00001) * 1e6)
 
-    def test_events_after_stop_ignored(self):
-        d = _PulseDetector()
-        d.feed(_edges((2.0, True), (2.005, False), (9.0, True), (9.005, False)))
-        assert d.stop_rise_ts == 2.0
 
-    def test_classification_around_1ms_threshold(self):
-        # A stretched 1.2 ms high window counts as a stop-pulse candidate
-        # (e.g. a marginal-VCC boot letting the start pulse decay slowly);
-        # the runner cross-checks it against __nvm_done before trusting it.
-        d = _PulseDetector()
-        d.feed(_edges((1.0, True), (1.0012, False)))
-        assert d.stop_rise_ts == 1.0
+class TestCollectPulses:
+    def test_pairs_edges(self, tmp_path):
+        p = tmp_path / "digital.csv"
+        p.write_text("Time [s],Channel 0\n0.0,0\n1.0,1\n1.00001,0\n2.0,1\n2.005,0\n")
+        assert _collect_pulses(p) == [(1.0, 1.00001), (2.0, 2.005)]
 
-        d = _PulseDetector()
-        d.feed(_edges((1.0, True), (1.0009, False)))
-        assert d.stop_rise_ts is None
-        assert d.start_fall_ts == 1.0009
+    def test_trailing_high_ignored(self, tmp_path):
+        p = tmp_path / "digital.csv"
+        p.write_text("Time [s],Channel 0\n0.0,0\n1.0,1\n")
+        assert _collect_pulses(p) == []
+
+
+class TestLoadTrace:
+    def test_loads_samples(self, tmp_path):
+        p = tmp_path / "t.csv"
+        p.write_text("time_s,voltage_v\n0.0,0.5\n0.02,2.5\n")
+        assert load_trace(p) == [(0.0, 0.5), (0.02, 2.5)]
+
+    def test_rejects_wrong_header(self, tmp_path):
+        p = tmp_path / "t.csv"
+        p.write_text("t,v\n0.0,0.5\n")
+        with pytest.raises(ConfigError):
+            load_trace(p)
+
+    def test_rejects_empty(self, tmp_path):
+        p = tmp_path / "t.csv"
+        p.write_text("time_s,voltage_v\n")
+        with pytest.raises(ConfigError):
+            load_trace(p)
 
 
 class TestResolveTraces:
@@ -91,22 +91,3 @@ class TestResolveTraces:
     def test_missing_raises(self, env):
         with pytest.raises(ConfigError):
             resolve_traces(env, ["nope"])
-
-
-class TestLoadTrace:
-    def test_loads_samples(self, tmp_path):
-        p = tmp_path / "t.csv"
-        p.write_text("time_s,voltage_v\n0.0,0.5\n0.02,2.5\n")
-        assert load_trace(p) == [(0.0, 0.5), (0.02, 2.5)]
-
-    def test_rejects_wrong_header(self, tmp_path):
-        p = tmp_path / "t.csv"
-        p.write_text("t,v\n0.0,0.5\n")
-        with pytest.raises(ConfigError):
-            load_trace(p)
-
-    def test_rejects_empty(self, tmp_path):
-        p = tmp_path / "t.csv"
-        p.write_text("time_s,voltage_v\n")
-        with pytest.raises(ConfigError):
-            load_trace(p)
