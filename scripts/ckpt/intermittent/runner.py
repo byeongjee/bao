@@ -11,7 +11,8 @@ Per (benchmark, capacitor) the program is compiled once with
 emulating outages); per trace it is then flashed through the switchboard,
 isolated from the debugger, and run on the replayed supply. The Saleae
 capture on P3.4 detects the BENCH_EXIT stop pulse (completion + execution
-time); NVM counters are read back over the reconnected debugger afterwards.
+time) and ends the replay early once it fires; NVM counters are read back
+over the reconnected debugger afterwards.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from ..device.otii import (
     replay_trace,
 )
 from ..device.saleae import (
+    capture_completion_watcher,
     discover_saleae,
     finish_pulse_capture,
     start_pulse_capture,
@@ -330,7 +332,8 @@ def _run_on_trace(
         finally:
             session.abort()
 
-        replay_seconds = replay_trace(otii, samples)
+        with capture_completion_watcher(capture) as benchmark_done:
+            replay_seconds = replay_trace(otii, samples, benchmark_done)
         completed, execution_time_us = finish_pulse_capture(
             capture, _CAPTURE_FINISH_TIMEOUT_SECONDS
         )

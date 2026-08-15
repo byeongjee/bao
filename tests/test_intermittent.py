@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
+from ckpt.device.otii import OtiiSession, replay_trace
 from ckpt.device.saleae import _collect_pulses, _replay_timing_from_pulses
 from ckpt.env import ProjectEnv
 from ckpt.errors import ConfigError
@@ -63,6 +66,44 @@ class TestLoadTrace:
         p.write_text("time_s,voltage_v\n")
         with pytest.raises(ConfigError):
             load_trace(p)
+
+
+class FakeArc:
+    """Records the main-output calls replay_trace makes."""
+
+    def __init__(self, stop_event, stop_after_calls):
+        self.stop_event = stop_event
+        self.stop_after_calls = stop_after_calls
+        self.voltages = []
+        self.main = []
+
+    def set_main_voltage(self, voltage):
+        self.voltages.append(voltage)
+        if len(self.voltages) == self.stop_after_calls:
+            self.stop_event.set()
+
+    def set_main(self, on):
+        self.main.append(on)
+
+
+class TestReplayTrace:
+    def test_plays_whole_trace(self):
+        event = threading.Event()
+        arc = FakeArc(event, stop_after_calls=None)
+        samples = [(0.0, 1.0), (0.02, 2.0), (0.04, 3.0)]
+        replay_trace(OtiiSession(otii=None, arc=arc), samples, event)
+        assert arc.voltages == [1.0, 1.0, 2.0, 3.0]
+        assert arc.main == [True, False]
+
+    def test_stops_early_when_event_set(self):
+        event = threading.Event()
+        # Fires on the third call: the pre-loop voltage plus two samples.
+        arc = FakeArc(event, stop_after_calls=3)
+        samples = [(i * 0.02, 1.0 + i) for i in range(200)]  # 4 s if played whole
+        seconds = replay_trace(OtiiSession(otii=None, arc=arc), samples, event)
+        assert arc.voltages == [1.0, 1.0, 2.0]
+        assert arc.main == [True, False]
+        assert seconds < 1.0
 
 
 class TestResolveTraces:

@@ -11,7 +11,10 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -213,6 +216,10 @@ def saleae_run(
 
 _SHORT_PULSE_THRESHOLD = 0.001  # 1 ms — start pulse is ~10 us, stop pulse is ~5 ms
 
+# Deadline of a single completion poll: bounds how long the watcher thread
+# keeps running after it was told to stop.
+_WATCH_POLL_SECONDS = 0.5
+
 
 def _wait_for_capture(capture: object, timeout_seconds: float) -> None:
     """Wait for capture completion with a client-side gRPC deadline."""
@@ -378,6 +385,42 @@ def start_pulse_capture(manager: Manager, after_trigger_seconds: float):
         device_configuration=device_config,
         capture_configuration=capture_config,
     )
+
+
+def _capture_ended(capture, timeout_seconds: float) -> bool:
+    """Return whether the capture finished within *timeout_seconds*."""
+    try:
+        _wait_for_capture(capture, timeout_seconds)
+    except DeviceError:
+        return False
+    return True
+
+
+@contextmanager
+def capture_completion_watcher(capture) -> Iterator[threading.Event]:
+    """Set an event as soon as the armed capture completes.
+
+    Lets the caller stop replaying a power trace the moment the benchmark
+    signalled its stop pulse, instead of playing the remaining minutes of
+    trace into an already-finished program. The returned event stays clear
+    if the capture never triggers.
+    """
+    completed = threading.Event()
+    stop_watching = threading.Event()
+
+    def watch() -> None:
+        while not stop_watching.is_set():
+            if _capture_ended(capture, _WATCH_POLL_SECONDS):
+                completed.set()
+                return
+
+    thread = threading.Thread(target=watch, name="saleae-capture-watch", daemon=True)
+    thread.start()
+    try:
+        yield completed
+    finally:
+        stop_watching.set()
+        thread.join()
 
 
 def finish_pulse_capture(capture, wait_seconds: float) -> tuple[bool, float | None]:
