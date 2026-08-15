@@ -28,18 +28,25 @@ class MSP430Disassembler {
     /// @return List of instructions with addresses
     std::vector<Instruction> disassemble(const std::string &elfPath);
 
+    /// Parse instruction and relocation lines from msp430-elf-objdump -d -r output.
+    /// Exposed separately so parsing can be tested without invoking the external tool.
+    /// Mnemonic width suffixes (e.g., .b/.w) are normalized away because the
+    /// energy model is keyed by the base mnemonic and addressing mode.
+    static std::vector<Instruction> parseObjdumpOutput(const std::string &objdumpOutput);
+
   private:
     /// Determine addressing mode from operands
     /// @param mnemonic Instruction mnemonic
     /// @param operands Operand string
     /// @return Addressing mode string for energy lookup
-    std::string determineAddressingMode(const std::string &mnemonic, const std::string &operands);
+    static std::string determineAddressingMode(const std::string &mnemonic,
+                                               const std::string &operands);
 
     /// Parse a single operand to determine its addressing mode component
     /// @param operand Single operand string (trimmed)
     /// @return Mode string: "register", "immediate", "indexed", "indirect",
     ///         "autoincrement", "absolute", "symbolic"
-    std::string parseOperandMode(const std::string &operand);
+    static std::string parseOperandMode(const std::string &operand);
 
     /// Parse function labels from objdump output into offset->name map.
     /// Matches lines like: 00000000 <timing_gpio_init>:

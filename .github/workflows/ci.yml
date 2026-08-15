@@ -139,9 +139,13 @@ jobs:
           cmake -S passes -B passes/build \
             -DCMAKE_C_COMPILER="$LLVM_ROOT/build/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM_ROOT/build/bin/clang++" \
-            -DLLVM_DIR="$LLVM_ROOT/build/lib/cmake/llvm"
+            -DLLVM_DIR="$LLVM_ROOT/build/lib/cmake/llvm" \
+            -DSCHEMATIC_BUILD_TESTS=ON
           cmake --build passes/build -j "$(nproc)" \
-            --target CheckpointPass RockClimbMachinePass BBDebugInfoPass bb-energy-analyzer
+            --target CheckpointPass RockClimbMachinePass BBDebugInfoPass bb-energy-analyzer \
+              schematic_unit_tests bb_energy_analyzer_unit_tests
+      - name: Run C++ unit tests
+        run: ctest --test-dir passes/build --output-on-failure
       - uses: astral-sh/setup-uv@v9.0.0
       # MILP tests are excluded because they run the Gurobi solver, which
       # needs a license. Unit tests already run in the python-unit job.
