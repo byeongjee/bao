@@ -138,19 +138,26 @@ def optional_saleae(compile_only_warning: str) -> Iterator[Manager | None]:
 
     Logs *compile_only_warning* and yields None when no device is detected.
     The manager is closed on exit.
-    """
-    manager: Manager | None = None
-    if check_device_available():
-        from ..device.saleae import discover_saleae
 
-        manager = discover_saleae()
-    else:
-        logger.warning(compile_only_warning)
-    try:
-        yield manager
-    finally:
-        if manager is not None:
-            manager.close()
+    The Otii switchboard relays are closed first: with the intermittent-power
+    rig wired up they carry the ez-FET's SBW and 3V3 lines, and probing for
+    the device before closing them would find nothing.
+    """
+    from ..device.otii import debugger_connection
+
+    with debugger_connection():
+        manager: Manager | None = None
+        if check_device_available():
+            from ..device.saleae import discover_saleae
+
+            manager = discover_saleae()
+        else:
+            logger.warning(compile_only_warning)
+        try:
+            yield manager
+        finally:
+            if manager is not None:
+                manager.close()
 
 
 def measure_execution_time(

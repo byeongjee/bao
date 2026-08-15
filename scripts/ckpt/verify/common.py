@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -29,6 +30,7 @@ from ..compile.uninstrumented import (
     compile_uninstrumented,
 )
 from ..device.flash import check_region_violation, raise_if_region_violation, read_nvm
+from ..device.otii import debugger_connection
 from ..device.saleae import discover_saleae, saleae_run
 from ..env import ProjectEnv
 from ..errors import CompilationError, ConfigError, DeviceError, RegionViolationError
@@ -123,8 +125,10 @@ def verify_algorithms(
     if not bench_files:
         raise ConfigError("No benchmarks to verify")
 
-    saleae_manager = discover_saleae()
-    try:
+    # The relays must close before the Saleae/device probing below: with the
+    # intermittent-power rig wired up they carry the ez-FET's SBW and 3V3
+    # lines to the target.
+    with debugger_connection(), closing(discover_saleae()) as saleae_manager:
         capacitors = discover_capacitors(env, algorithms[0].name, caps)
 
         results: dict[str, list[BenchResult]] = {spec.name: [] for spec in algorithms}
@@ -191,8 +195,6 @@ def verify_algorithms(
             _print_summary(results[spec.name], spec.name, halt_mode)
 
         return results
-    finally:
-        saleae_manager.close()
 
 
 def all_ok(results: list[BenchResult]) -> bool:
