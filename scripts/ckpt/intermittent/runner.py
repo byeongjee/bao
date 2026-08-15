@@ -218,14 +218,14 @@ def _make_compile_fn(
 
         return compile_fn
 
-    if algorithm == "schematic":
+    if algorithm in ("schematic", "schematicO3"):
         from ..compile.schematic import (
             CLANG_OPT_LEVEL_BY_LABEL,
             SchematicCompileOptions,
             compile_schematic,
         )
 
-        clang_opt_level = CLANG_OPT_LEVEL_BY_LABEL["schematic"]
+        clang_opt_level = CLANG_OPT_LEVEL_BY_LABEL[algorithm]
         trace_config = env.project_dir / "benchmarks" / "config_10uF.json"
         trace_cache: dict[str, tuple[Path, int]] = {}
 
