@@ -140,8 +140,11 @@ void StateAnalysis::identifyVMObjs() {
             else
                 continue;
 
-            const llvm::Value *Obj = llvm::getUnderlyingObject(Ptr->stripPointerCasts());
-            auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(const_cast<llvm::Value *>(Obj));
+            // Same resolution the strict-mode check and the instrumenter use:
+            // it looks through phi/select, so a global reached only through a
+            // pointer induction variable still enters the candidate set instead
+            // of being silently pinned to NVM.
+            llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(Ptr);
             if (!GV)
                 continue;
 
