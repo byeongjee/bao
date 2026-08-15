@@ -131,15 +131,18 @@
 #if F_CPU > 8000000
     mov.w   #0xA510, &0x0140    /* FRCTL0: 1 FRAM wait state (required >8 MHz) */
 #endif
-#if F_CPU == 16000000
     mov.b   #0xA5, &0x0161      /* CSCTL0_H = CSKEY_H */
+#if F_CPU == 16000000
     mov.w   #0x0048, &0x0162    /* CSCTL1 = DCORSEL | DCOFSEL_4 = 16 MHz */
-    mov.b   #0x00, &0x0161      /* CSCTL0_H = 0 (lock) */
 #elif F_CPU == 8000000
-    mov.b   #0xA5, &0x0161
     mov.w   #0x000C, &0x0162    /* CSCTL1 = DCOFSEL_6 = 8 MHz */
-    mov.b   #0x00, &0x0161
+#else
+    mov.w   #0x0000, &0x0162    /* CSCTL1 = DCOFSEL_0 = 1 MHz */
 #endif
+    /* A reset returns CSCTL3 to 33h (MCLK and SMCLK divided by 8), and the
+       recovery path never reaches timing_gpio_init, so undivide here. */
+    mov.w   #0x0000, &0x0166    /* CSCTL3 = DIVA__1 | DIVS__1 | DIVM__1 */
+    mov.b   #0x00, &0x0161      /* CSCTL0_H = 0 (lock) */
 .endm
 
 /*
