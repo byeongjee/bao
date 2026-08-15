@@ -577,6 +577,13 @@ def get_metric(stderr: str, label: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def require_metric(stderr: str, label: str) -> str:
+    """Like get_metric, but fail the test when the metric is missing."""
+    value = get_metric(stderr, label)
+    assert value is not None, f"Missing metric {label!r} in stderr:\n{stderr[:1000]}"
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Assertion driver
 # ---------------------------------------------------------------------------

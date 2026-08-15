@@ -27,7 +27,7 @@ from ..errors import DeviceError
 from .flash import flash_and_hold
 
 if TYPE_CHECKING:
-    from saleae.automation import Manager
+    from saleae.automation import Capture, Manager
 
 _SALEAE_CHANNEL = 0
 _SALEAE_SAMPLE_RATE = 100_000_000  # 100 MHz
@@ -221,12 +221,12 @@ _SHORT_PULSE_THRESHOLD = 0.001  # 1 ms — start pulse is ~10 us, stop pulse is 
 _WATCH_POLL_SECONDS = 0.5
 
 
-def _wait_for_capture(capture: object, timeout_seconds: float) -> None:
+def _wait_for_capture(capture: Capture, timeout_seconds: float) -> None:
     """Wait for capture completion with a client-side gRPC deadline."""
     import grpc
     from saleae.grpc import saleae_pb2
 
-    request = saleae_pb2.WaitCaptureRequest(capture_id=capture.capture_id)
+    request = saleae_pb2.WaitCaptureRequest(capture_id=capture.capture_id)  # pyright: ignore[reportAttributeAccessIssue]
     try:
         capture.manager.stub.WaitCapture(request, timeout=timeout_seconds)
     except grpc.RpcError as exc:
@@ -238,7 +238,7 @@ def _wait_for_capture(capture: object, timeout_seconds: float) -> None:
         raise
 
 
-def _stop_capture_quietly(capture: object) -> None:
+def _stop_capture_quietly(capture: Capture) -> None:
     """Best-effort stop for captures that failed before normal completion."""
     try:
         capture.stop()

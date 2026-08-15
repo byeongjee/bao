@@ -9,6 +9,7 @@ from conftest import (
     TESTS_DIR,
     check_assertions,
     get_metric,
+    require_metric,
 )
 
 # ---------------------------------------------------------------------------
@@ -169,13 +170,13 @@ def test_coarse_allocation_reduces_problem_size(run_milp, tmp_path_factory):
     assert get_metric(fine.stderr, "MILP allocation mode") == "regional"
     assert get_metric(coarse.stderr, "MILP allocation mode") == "coarse"
 
-    fine_vars = int(get_metric(fine.stderr, "MILP variables (before presolve)"))
+    fine_vars = int(require_metric(fine.stderr, "MILP variables (before presolve)"))
     fine_constraints = int(
-        get_metric(fine.stderr, "MILP constraints (before presolve)")
+        require_metric(fine.stderr, "MILP constraints (before presolve)")
     )
-    coarse_vars = int(get_metric(coarse.stderr, "MILP variables (before presolve)"))
+    coarse_vars = int(require_metric(coarse.stderr, "MILP variables (before presolve)"))
     coarse_constraints = int(
-        get_metric(coarse.stderr, "MILP constraints (before presolve)")
+        require_metric(coarse.stderr, "MILP constraints (before presolve)")
     )
 
     assert coarse_vars < fine_vars

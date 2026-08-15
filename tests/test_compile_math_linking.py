@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from ckpt.compile import common, schematic
 from ckpt.compile.schematic import SchematicCompileOptions
+from ckpt.env import ProjectEnv
 from ckpt.runner import StepResult
+from ckpt.toolchain import Toolchain
 
 pytestmark = pytest.mark.unit
 
@@ -61,10 +64,13 @@ def test_collect_bb_freq_links_math_library(tmp_path, monkeypatch):
         lambda stubs_c: stubs_c.write_text("void stub(void) {}\n"),
     )
 
-    tc = SimpleNamespace(clang="clang")
-    env = SimpleNamespace(
-        sysroot_flags=["-isysroot", "/sdk"],
-        bb_freq_runtime=Path("/runtime/bb_freq_runtime.c"),
+    tc = cast(Toolchain, SimpleNamespace(clang="clang"))
+    env = cast(
+        ProjectEnv,
+        SimpleNamespace(
+            sysroot_flags=["-isysroot", "/sdk"],
+            bb_freq_runtime=Path("/runtime/bb_freq_runtime.c"),
+        ),
     )
 
     bb_freq_json = common.collect_bb_freq(tc, env, input_ll, tmp_path)
@@ -83,10 +89,13 @@ def test_assemble_and_link_links_math_library(tmp_path, monkeypatch):
 
     monkeypatch.setattr(common, "run", _make_fake_run(calls, None))
 
-    tc = SimpleNamespace(gcc="msp430-elf-gcc")
-    env = SimpleNamespace(
-        device="MSP430FR5994",
-        msp430gcc_support_path=Path("/toolchain"),
+    tc = cast(Toolchain, SimpleNamespace(gcc="msp430-elf-gcc"))
+    env = cast(
+        ProjectEnv,
+        SimpleNamespace(
+            device="MSP430FR5994",
+            msp430gcc_support_path=Path("/toolchain"),
+        ),
     )
     objects = [tmp_path / "main.o", tmp_path / "boot.o"]
     output_elf = tmp_path / "out.elf"
@@ -128,11 +137,14 @@ def test_schematic_trace_compile_links_math_library(tmp_path, monkeypatch):
         lambda stubs_c: stubs_c.write_text("void stub(void) {}\n"),
     )
 
-    tc = SimpleNamespace(clang="clang", opt="opt")
-    env = SimpleNamespace(
-        pass_lib=Path("/passes/CheckpointPass.so"),
-        sysroot_flags=["-isysroot", "/sdk"],
-        schematic_trace_runtime=Path("/runtime/schematic_trace_runtime.c"),
+    tc = cast(Toolchain, SimpleNamespace(clang="clang", opt="opt"))
+    env = cast(
+        ProjectEnv,
+        SimpleNamespace(
+            pass_lib=Path("/passes/CheckpointPass.so"),
+            sysroot_flags=["-isysroot", "/sdk"],
+            schematic_trace_runtime=Path("/runtime/schematic_trace_runtime.c"),
+        ),
     )
     opts = SchematicCompileOptions(
         input_c=tmp_path / "fft.c",
