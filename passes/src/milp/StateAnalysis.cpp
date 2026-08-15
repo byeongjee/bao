@@ -339,16 +339,16 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
     }
 
     // Accesses resolve via resolveUniqueUnderlyingGlobal, which looks through
-    // phi/select: a pointer whose every possible base is the same candidate
-    // global (e.g. a pointer induction variable over a global array) is
-    // statically redirectable by the instrumenter, so it is not an error.
-    // Multi-base pointers (e.g. a select between two globals) stay unresolved
-    // and fall through to the mayTouchCandidate error below.
+    // phi/select: a pointer whose every possible base is the same global (e.g.
+    // a pointer induction variable over a global array) touches that global and
+    // nothing else. If it is a candidate the instrumenter redirects it
+    // statically; if it is not (a constant, a declaration, an NVM-resident
+    // runtime global), no candidate can be reached. Either way the access is
+    // resolved. Multi-base pointers (e.g. a select between two globals) stay
+    // unresolved and fall through to the mayTouchCandidate error below.
     if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
-        if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(LI->getPointerOperand())) {
-            if (isCandidateGlobal(GV))
-                return true;
-        }
+        if (resolveUniqueUnderlyingGlobal(LI->getPointerOperand()))
+            return true;
         if (mayTouchCandidate(/*ref*/ true, /*mod*/ false)) {
             reportStrictError(I, "load may alias candidate globals but target is unresolved");
             return false;
@@ -357,10 +357,8 @@ bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I)
     }
 
     if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-        if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(SI->getPointerOperand())) {
-            if (isCandidateGlobal(GV))
-                return true;
-        }
+        if (resolveUniqueUnderlyingGlobal(SI->getPointerOperand()))
+            return true;
         if (mayTouchCandidate(/*ref*/ false, /*mod*/ true)) {
             reportStrictError(I, "store may alias candidate globals but target is unresolved");
             return false;
