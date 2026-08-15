@@ -15,10 +15,13 @@ of truth for this measurement setup's wiring and software.
 - **MSP430FR5994 LaunchPad** — the board's supply capacitance is 11.5 µF
   (`benchmarks/config_board.json`). The on-board ez-FET stays on host USB the
   whole time; only its jumper lines to the target side are switched.
-- **Schottky diode** — in series between the Otii main output and the board
-  supply rail (anode at the Otii, cathode at the board). It blocks back-feed
-  into the Otii output while the ez-FET's 3V3 powers the board for flashing
-  and readback.
+- **5.6 kΩ series resistor** — between the Otii main output and the schottky
+  diode. It limits the charging current to a realistic harvester level; the
+  Otii itself is a stiff voltage source.
+- **Schottky diode** — in series after the resistor, in front of the board
+  supply rail (anode toward the Otii, cathode at the board). It blocks
+  back-feed into the Otii output while the ez-FET's 3V3 powers the board for
+  flashing and readback.
 - **Saleae Logic** — wired to P3.4 as in [saleae.md](saleae.md). It captures
   the benchmark start/stop pulses during the replay: completion detection
   and execution time both come from this capture.
@@ -53,7 +56,7 @@ flowchart LR
     ckpt -->|TCP :1905 via otii_server| OTII
     logic2 -->|USB| saleae
 
-    main -->|schottky diode| mcu
+    main -->|5.6 kOhm resistor + schottky diode| mcu
     p5v -->|relay power| SB
     gpo2 -->|relay control| SB
     ezfet <-->|3V3, TEST, RST| relay
@@ -65,7 +68,7 @@ flowchart LR
 
 | From | To | Notes |
 |------|----|-------|
-| Otii main output `+` | Board supply rail | Through the schottky diode: anode → Otii, cathode → board |
+| Otii main output `+` | Board supply rail | Through the 5.6 kΩ resistor, then the schottky diode (anode toward the Otii, cathode → board) |
 | Otii main output `−` | Board GND | Common ground with everything below |
 | Otii `+5V` pin | Switchboard relay power | Relays are unpowered (open) when the Otii is off |
 | Otii `GPO2` (expansion port) | Switchboard control input | High = relays closed (debugger connected) |
