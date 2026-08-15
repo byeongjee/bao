@@ -282,7 +282,7 @@ bool StateAnalysis::isAllowedDirectCall(const llvm::CallBase &CB) const {
     if (Name == "__loop_tripcount")
         return true;
     if (Name == "debug_init" || Name == "debug_exit" || Name == "debug_exit_commit" ||
-        Name == "bench_halt")
+        Name == "bench_halt" || Name == "bench_commit_done")
         return true;
     if (Name.starts_with("timing_gpio_"))
         return true;

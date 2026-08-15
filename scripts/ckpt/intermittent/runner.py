@@ -72,10 +72,11 @@ CSV_HEADER: list[str] = [
     "result",
 ]
 
-# __nvm_violation is defined unconditionally by every runtime; the done flag,
-# result, and counters exist only in DEVICE_DEBUG builds.
-_BASE_NVM_SYMBOLS = ["__nvm_violation"]
-_DEBUG_NVM_SYMBOLS = ["__nvm_done", "__nvm_result", "cnt_boundary", "cnt_recovery"]
+# __nvm_violation, __nvm_done, and cnt_recovery are defined unconditionally
+# by every runtime; the result and the remaining counters exist only in
+# DEVICE_DEBUG builds.
+_BASE_NVM_SYMBOLS = ["__nvm_violation", "__nvm_done", "cnt_recovery"]
+_DEBUG_NVM_SYMBOLS = ["__nvm_result", "cnt_boundary"]
 
 
 def resolve_traces(env: ProjectEnv, trace_specs: list[str]) -> list[Path]:
@@ -469,13 +470,14 @@ def run_intermittent_benchmarks(
                     # as the relays close for readback, so its counters and
                     # result no longer describe the replayed run — leave them
                     # blank. Completed (and violated) runs park at boot.
-                    if device_debug and status != "incomplete":
-                        fields["runtime_region_boundary_calls"] = values.get(
-                            "cnt_boundary"
-                        )
+                    if status != "incomplete":
                         fields["runtime_recovery_boots"] = values.get("cnt_recovery")
-                        if replay.completed:
-                            fields["result"] = values.get("__nvm_result")
+                        if device_debug:
+                            fields["runtime_region_boundary_calls"] = values.get(
+                                "cnt_boundary"
+                            )
+                            if replay.completed:
+                                fields["result"] = values.get("__nvm_result")
 
                     row = _build_row(bench_name, cap.label, trace_label, status, fields)
                     write_csv_row(writer, row, CSV_HEADER)

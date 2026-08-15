@@ -146,7 +146,7 @@ bool SchematicStateAnalysis::isAllowedDirectCall(const llvm::CallBase &CB) const
     llvm::StringRef Name = Callee->getName();
     if (Name == "__loop_tripcount")
         return true;
-    if (Name == "bench_halt")
+    if (Name == "bench_halt" || Name == "bench_commit_done")
         return true;
     // Benchmark-infrastructure functions (timing/IO/debug) are treated as helpers
     // everywhere: not isolated, skipped by the driver, and allowed here as
