@@ -139,6 +139,7 @@ ckpt verify all        [BENCHMARKS...] [--cap 5,10,50] [--halt-mode] [--estimato
 # Always compiles with halt-mode wait; --cap defaults to the 11.5uF board config (config_board.json).
 # --trace takes a CSV path or a name in benchmarks/traces/ (repeat or comma-separate: --trace 1,2).
 # Requires `uv sync --extra otii` and the otii_server binary (OTII_SERVER_BIN).
+# Hardware wiring (Otii, switchboard, schottky diode, Saleae) is documented in docs/intermittent.md.
 ckpt intermittent milp      [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
 ckpt intermittent rockclimb [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--max-unroll N] [--cpu-freq] [--csv CSV]
 ckpt intermittent schematic [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
