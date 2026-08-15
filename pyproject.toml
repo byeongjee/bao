@@ -25,10 +25,6 @@ ckpt = "ckpt.cli:main"
 [tool.setuptools.packages.find]
 where = ["scripts"]
 
-[tool.pyright]
-reportUnusedImport = "warning"
-reportUnusedVariable = "warning"
-
 [tool.pytest.ini_options]
 addopts = "-v -n auto"
 markers = [
