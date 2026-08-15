@@ -29,6 +29,7 @@ test = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "checkpoint-insertion", extra = ["otii", "plot", "saleae", "test"] },
     { name = "ruff" },
 ]
 
@@ -46,7 +47,10 @@ requires-dist = [
 provides-extras = ["test", "plot", "saleae", "otii"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = "==0.16.1" }]
+dev = [
+    { name = "checkpoint-insertion", extras = ["test", "plot", "saleae", "otii"] },
+    { name = "ruff", specifier = "==0.16.1" },
+]
 
 [[package]]
 name = "click"
