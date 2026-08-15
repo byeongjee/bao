@@ -30,6 +30,19 @@ unsigned countBytes(const std::string &hexBytes) {
     return digits / 2;
 }
 
+/// Find the instruction whose bytes contain `offset`, or nullptr if none does.
+/// The search runs backwards because objdump prints a relocation right after
+/// the instruction it patches, and because every section of an object file
+/// restarts addresses at zero: the nearest preceding match is the one in the
+/// section currently being printed.
+Instruction *findInstructionCovering(std::vector<Instruction> &instructions, uint64_t offset) {
+    for (auto it = instructions.rbegin(); it != instructions.rend(); ++it) {
+        if (it->address <= offset)
+            return offset < it->address + it->size ? &*it : nullptr;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 MSP430Disassembler::MSP430Disassembler() = default;
@@ -130,11 +143,14 @@ std::vector<Instruction> MSP430Disassembler::parseObjdumpOutput(const std::strin
     while (std::getline(stream, line)) {
         std::smatch match;
 
-        // Try relocation line first
-        if (!result.empty() && std::regex_match(line, match, relocPattern)) {
-            auto &lastInstr = result.back();
-            if (lastInstr.mnemonic == "call") {
-                lastInstr.callTarget = match[2].str();
+        // Try relocation line first. Its offset points at the operand word the
+        // linker patches, which is inside the instruction rather than at its
+        // first byte: "16: R_MSP430X_ABS16 g" belongs to the instruction at 14.
+        if (std::regex_match(line, match, relocPattern)) {
+            uint64_t offset = std::stoull(match[1].str(), nullptr, 16);
+            Instruction *target = findInstructionCovering(result, offset);
+            if (target && target->mnemonic == "call") {
+                target->callTarget = match[2].str();
             }
             continue;
         }
