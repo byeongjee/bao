@@ -18,8 +18,8 @@ IR_ENERGY_CONFIG = TESTS_DIR / "estimator_ir_weighted.json"
 ASSEMBLY_ENERGY_CONFIG = TESTS_DIR / "assembly_params.json"
 # Cost of one CONSTANT_LOOP iteration under IR_ENERGY_CONFIG.
 CONSTANT_LOOP_ITER_ENERGY = 12.0
-CRC_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "crc.c"
-AES_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "aes.c"
+CRC_BENCHMARK = TESTS_DIR / "programs" / "crc.c"
+AES_BENCHMARK = TESTS_DIR / "programs" / "aes.c"
 SMALL_CAP_CAPACITY = 3640.0
 LARGE_CAP_CAPACITY = 18200.0
 
