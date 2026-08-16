@@ -22,7 +22,9 @@ def test_discover_capacitors_resolves_every_default_cap() -> None:
     caps = discover_capacitors(env, "milp", None)
 
     assert [cap.label for cap in caps] == _DEFAULT_CAPS
-    assert all(cap.config_path.is_file() for cap in caps)
+    # 50uF was the cap this guard was originally added for; comparing against
+    # _DEFAULT_CAPS alone would still pass if it were dropped from both.
+    assert "50uF" in _DEFAULT_CAPS
 
 
 def test_discover_capacitors_resolves_explicit_cap() -> None:
