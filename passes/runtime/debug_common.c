@@ -12,10 +12,8 @@
 #include "benchmark.h"
 #include <msp430.h>
 
-/* These symbols are defined in each variant's *_runtime.c */
-extern volatile uint16_t __nvm_result;
+/* Defined in each variant's *_runtime.c */
 extern volatile uint16_t __nvm_done;
-extern volatile uint16_t __nvm_in_region;
 
 /* ============================================================================
  * UART Setup for MSP430FR5994
@@ -116,12 +114,6 @@ void debug_init(void) {
     timing_gpio_init();
     uart_init();
     uart_puts("BOOT\r\n");
-}
-
-void debug_exit_commit(int result) {
-    __nvm_in_region = 0;
-    __nvm_result = (uint16_t)result;
-    __nvm_done = 1;
 }
 
 void debug_exit_begin(int result) {

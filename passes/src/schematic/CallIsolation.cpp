@@ -24,7 +24,7 @@ bool isSchematicHelperCallee(const Function &F) {
     StringRef N = F.getName();
     if (N == "__loop_tripcount")
         return true;
-    if (N == "bench_halt" || N == "bench_commit_done")
+    if (N == "bench_halt" || N == "bench_commit_result")
         return true;
     // Benchmark-infrastructure functions (timing/IO/debug) are skipped by the
     // module driver, so they must not be isolated either — otherwise their calls

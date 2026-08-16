@@ -17,27 +17,24 @@ void bench_halt(void) {
     __bis_SR_register(LPM4_bits);
 }
 
-/* Completion flag (unconditional — set by non-debug BENCH_EXIT via
-   bench_commit_done). No checkpointing here, so it is informational only.
+/* Completion flag (unconditional — set by BENCH_EXIT via
+   bench_commit_result). No checkpointing here, so it is informational only.
    Explicit zero initializer forces PROGBITS so the flash programmer
    writes zero on first flash. */
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_done = 0;
 
-/* No regions in the baseline; defined because the shared exit code
-   (debug_exit_commit in debug_common.c) clears it. */
-__attribute__((section(".nvm"))) volatile uint16_t __nvm_in_region = 0;
+/* The run's return value, read by the host via mspdebug md. */
+__attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
 
-/* Called by non-debug BENCH_EXIT before the end pulse (see benchmark.h). */
-void bench_commit_done(void) {
+/* Called by BENCH_EXIT before the end pulse (see benchmark.h). */
+void bench_commit_result(int result) {
+    __nvm_result = (uint16_t)result;
     __nvm_done = 1;
 }
 
 #ifdef DEVICE_DEBUG
 
 #include "debug_common.h"
-
-/* NVM result storage for benchmark result readback. */
-__attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
 
 void debug_exit(int result) {
     debug_exit_begin(result);
