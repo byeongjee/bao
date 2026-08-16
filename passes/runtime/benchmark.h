@@ -103,10 +103,14 @@ static inline void timing_gpio_stop(void) {}
 #endif
 
 /* --- Benchmark entry/exit macros --- */
+
+/* Called first in BENCH_EXIT: the end pulse after it can outlast the
+   remaining charge, so the outcome must already be in FRAM. */
+void bench_commit_result(int result);
+
 #ifdef DEVICE_DEBUG
 
 void debug_init(void);
-void debug_exit_commit(int result);
 void debug_exit(int result);
 
 #define BENCH_INIT()                                                                               \
@@ -115,12 +119,9 @@ void debug_exit(int result);
         timing_gpio_init();                                                                        \
         timing_gpio_start();                                                                       \
     } while (0)
-/* Commit the result to NVM before the end pulse and UART report: both
-   cost more energy than a region budget, so under intermittent power
-   the CPU may die during them — the committed result survives. */
 #define BENCH_EXIT(result)                                                                         \
     do {                                                                                           \
-        debug_exit_commit((result));                                                               \
+        bench_commit_result((result));                                                             \
         timing_gpio_stop();                                                                        \
         debug_exit((result));                                                                      \
     } while (0)
@@ -128,21 +129,16 @@ void debug_exit(int result);
 #else
 
 void bench_halt(void);
-void bench_commit_done(void);
 
 #define BENCH_INIT()                                                                               \
     do {                                                                                           \
         timing_gpio_init();                                                                        \
         timing_gpio_start();                                                                       \
     } while (0)
-/* Commit __nvm_done before the end pulse: the pulse costs more energy
-   than a region budget, so under intermittent power the CPU may die
-   during it — after this commit the next boot parks via park_if_done. */
 #define BENCH_EXIT(result)                                                                         \
     do {                                                                                           \
-        bench_commit_done();                                                                       \
+        bench_commit_result((result));                                                             \
         timing_gpio_stop();                                                                        \
-        (void)(result);                                                                            \
         bench_halt();                                                                              \
     } while (0)
 

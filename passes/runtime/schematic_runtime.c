@@ -9,7 +9,6 @@
  *
  * When compiled with -DDEVICE_DEBUG, also provides:
  *   - NVM debug counters (cnt_boundary, cnt_save_reg, etc.)
- *   - NVM result storage (__nvm_result, __nvm_done)
  *   - UART output for profiling
  *   - debug_init() / debug_exit() API
  */
@@ -41,9 +40,14 @@ __attribute__((section(".nvm"))) volatile uint16_t __nvm_in_region = 0;
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_violation = 0;
 
 /* Set once the run completes; park_if_done in boot code then freezes
-   every later boot so NVM state survives readback. Non-debug builds
-   set it via bench_commit_done(), debug builds via debug_exit_commit(). */
+   every later boot so NVM state survives readback. Committed together
+   with __nvm_result by bench_commit_result(). */
 __attribute__((section(".nvm"))) volatile uint16_t __nvm_done = 0;
+
+/* The run's return value, read back over the debugger. Unconditional so
+   non-debug builds — the ones run under intermittent power — can be
+   checked for correctness. */
+__attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
 
 /* cnt_recovery — incremented in assembly (recovery path in schematic_boot.S).
    One per recovery boot, i.e. per power failure resumed from a
@@ -62,9 +66,10 @@ void bench_halt(void) {
     __bis_SR_register(LPM4_bits);
 }
 
-/* Called by non-debug BENCH_EXIT before the end pulse (see benchmark.h). */
-void bench_commit_done(void) {
+/* Called by BENCH_EXIT before the end pulse (see benchmark.h). */
+void bench_commit_result(int result) {
     __nvm_in_region = 0;
+    __nvm_result = (uint16_t)result;
     __nvm_done = 1;
 }
 
@@ -84,9 +89,6 @@ __attribute__((section(".nvm"))) uint32_t cnt_save_reg = 0;
 __attribute__((section(".nvm"))) uint32_t cnt_restore_reg = 0;
 __attribute__((section(".nvm"))) uint32_t cnt_store_mem = 0;
 __attribute__((section(".nvm"))) uint32_t cnt_restore_mem = 0;
-
-/* NVM result storage — read by host via mspdebug md (bypasses UART) */
-__attribute__((section(".nvm"))) volatile uint16_t __nvm_result = 0;
 
 void debug_exit(int result) {
     debug_exit_begin(result);

@@ -34,20 +34,6 @@ void uart_put_u32(uint32_t val);
 void debug_init(void);
 
 /*
- * debug_exit_commit — Persist the run's outcome to NVM.
- *
- * Clears __nvm_in_region and stores __nvm_result/__nvm_done. Called
- * FIRST in BENCH_EXIT, before the end pulse and UART report: those
- * cost far more energy than a region budget, so under intermittent
- * power the CPU may die during them — after this commit that death
- * is harmless (next boot parks via park_if_done).
- *
- * Requires __nvm_result, __nvm_done and __nvm_in_region to be
- * defined by the variant's runtime.c.
- */
-void debug_exit_commit(int result);
-
-/*
  * debug_exit_begin — Start the UART exit report.
  *
  * Re-inits UART, prints "RESULT: <val>" and the counter summary
