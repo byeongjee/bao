@@ -243,6 +243,7 @@ def _make_compile_fn(
                     trace_config=trace_config,
                     estimator_mode=estimator_mode,
                     halt_mode=_HALT_MODE,
+                    device_debug=device_debug,
                     cpu_freq=cpu_freq,
                     clang_opt_level=clang_opt_level,
                     pass_log_level=pass_log_level,
