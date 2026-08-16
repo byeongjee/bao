@@ -772,7 +772,7 @@ class TestCallHandling:
     ):
         """An external library call with no entry/exit boundaries of its own is
         costed as a single expensive instruction. tests/assembly_params.json
-        prices __mspabi_divi at 750, above the E_safe of ~476 that
+        prices __mspabi_divi at 750, above the E_safe of 471.87 that
         tests/rockclimb_params.json yields, so a block containing an integer
         division cannot fit one charge."""
         src = write_src(tmp_path, "int divfn(int a, int b) { return a / b; }")
