@@ -288,7 +288,7 @@ static void captureCallSummary(CallSummary &out, const SchematicSolution &soluti
 bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
                                   const SchematicParams &params, VMAddressTracker &sharedVMTracker,
                                   const std::map<Function *, CallSummary> &summaries,
-                                  CallSummary &out, bool &mutatedIR) {
+                                  CallSummary &out) {
     const auto totalStart = std::chrono::steady_clock::now();
 
     // Obtain LLVM analyses.
@@ -306,10 +306,8 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
             continue;
         for (auto it = BB.begin(); it != BB.end();) {
             auto *AI = dyn_cast<AllocaInst>(&*it++);
-            if (AI && isa<ConstantInt>(AI->getArraySize())) {
+            if (AI && isa<ConstantInt>(AI->getArraySize()))
                 AI->moveBefore(entryBB, entryBB.getFirstInsertionPt());
-                mutatedIR = true;
-            }
         }
     }
 
@@ -515,7 +513,6 @@ PreservedAnalyses SchematicPass::run(Module &M, ModuleAnalysisManager &MAM) {
     // schematic.py:676-695). Recursion is rejected by the schematic-isolate pass.
     CallGraph CG(M);
     std::map<Function *, CallSummary> summaries;
-    bool changed = false;
     for (scc_iterator<CallGraph *> I = scc_begin(&CG); !I.isAtEnd(); ++I) {
         for (CallGraphNode *node : *I) {
             Function *F = node->getFunction();
@@ -526,19 +523,14 @@ PreservedAnalyses SchematicPass::run(Module &M, ModuleAnalysisManager &MAM) {
                 continue;
             }
             CallSummary summary;
-            // Track IR mutation separately from solve success: a failed solve may
-            // still have hoisted allocas, and reporting PreservedAnalyses::all()
-            // after mutating IR would leave stale analyses behind.
-            bool mutatedIR = false;
-            if (solveFunction(*F, FAM, params, vmTracker, summaries, summary, mutatedIR)) {
+            if (solveFunction(*F, FAM, params, vmTracker, summaries, summary))
                 summaries[F] = std::move(summary);
-                changed = true;
-            }
-            changed |= mutatedIR;
         }
     }
 
-    return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+    // solveFunction hoists allocas before it can fail, so any function may have
+    // mutated the IR whatever its outcome.
+    return PreservedAnalyses::none();
 }
 
 } // namespace checkpoint
