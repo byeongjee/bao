@@ -72,12 +72,13 @@ class TestMain:
     def test_scaled_trace_is_scaled_before_clipping(
         self, raw_trace, tmp_path, monkeypatch
     ):
-        monkeypatch.setitem(dt.SCALE_TO_MAX, raw_trace.stem, 3.6)
+        monkeypatch.setitem(dt.SCALE_TO_LEVEL, raw_trace.stem, 3.6)
         out = self._run(raw_trace, tmp_path / "out", ["--vmax", "3.6"])
         _, volts = _read_csv(out)
-        # Peak 2.0 scaled to 3.6, so the 1.0 sample follows to 1.8; a clip
-        # applied first would have left both untouched.
-        assert list(volts) == pytest.approx([1.8, 3.6])
+        # The 1.0 sample follows the scaling; a clip applied first would have
+        # left both untouched.
+        factor = 3.6 / np.percentile([1.0, 2.0], dt.SCALE_PERCENTILE)
+        assert list(volts) == pytest.approx([factor, 3.6])
 
     def test_rejects_zero_repeat(self, raw_trace, tmp_path):
         with pytest.raises(SystemExit):
