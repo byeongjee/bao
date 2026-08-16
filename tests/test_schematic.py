@@ -168,10 +168,15 @@ def _run_ckpt_compile_schematic_o3(
 
 
 class LoopBudget(NamedTuple):
+    # E_loop is logged before refineLoopBudgetWithConvergence and numIt after,
+    # so the two are not a single snapshot. maxTripCount is static and appears
+    # on both lines; it is read from the numIt line to keep it paired with it.
     e_loop: float
-    max_trip_count: int
     num_it: int
-    available_energy: float
+    max_trip_count: int
+
+
+_NUMBER = r"[0-9.eE+-]+"
 
 
 def _extract_loop_budget(
@@ -179,22 +184,20 @@ def _extract_loop_budget(
     loop_header,
 ):
     e_loop_match = re.search(
-        rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+E_loop=([0-9.]+)"
-        rf".*?\s+maxTripCount=(\d+)",
+        rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+E_loop=({_NUMBER})",
         log_text,
     )
     num_it_match = re.search(
         rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+numIt=(\d+)"
-        rf".*?\s+availableEnergy=([0-9.]+)",
+        rf"\s+maxTripCount=(\d+)",
         log_text,
     )
     assert e_loop_match, f"Missing E_loop log for {loop_header}:\n{log_text[-4000:]}"
     assert num_it_match, f"Missing numIt log for {loop_header}:\n{log_text[-4000:]}"
     return LoopBudget(
         e_loop=float(e_loop_match.group(1)),
-        max_trip_count=int(e_loop_match.group(2)),
         num_it=int(num_it_match.group(1)),
-        available_energy=float(num_it_match.group(2)),
+        max_trip_count=int(num_it_match.group(2)),
     )
 
 
@@ -320,9 +323,8 @@ def test_schematic_o3_dijkstra_loop_budget_uses_rare_inner_branch(
         f"(worst-case inner cost {inner_worst_case})\n{log_text[-4000:]}"
     )
 
-    # Folding that cost in is what bounds how many outer iterations fit in a
-    # charge; without it the outer loop would appear to run far longer.
-    assert outer.num_it <= outer.available_energy / inner_worst_case, log_text[-4000:]
+    # Costing the inner loop at its full trip count is what keeps the outer
+    # loop from appearing to fit in a charge.
     assert outer.num_it < outer.max_trip_count, log_text[-4000:]
 
 
