@@ -6,33 +6,37 @@ from pathlib import Path
 
 import pytest
 from ckpt.analysis.plot import _sort_key
-from ckpt.analysis.strip_mining import parse_strip_mining_log
-from ckpt.bench.config import discover_capacitors
+from ckpt.analysis.strip_mining import CAPACITY_MAP, parse_strip_mining_log
+from ckpt.bench.config import _DEFAULT_CAPS, discover_capacitors
 from ckpt.env import ProjectEnv
 from conftest import PROJECT_DIR
 
 pytestmark = pytest.mark.unit
 
 
-def test_discover_capacitors_includes_50uf_by_default() -> None:
+def test_discover_capacitors_resolves_every_default_cap() -> None:
+    """Discovery silently drops a default cap whose config file is missing, so
+    assert the shipped list resolves in full rather than pinning the labels."""
     env = ProjectEnv.from_environ(PROJECT_DIR)
 
     caps = discover_capacitors(env, "milp", None)
 
-    assert [cap.label for cap in caps] == ["1uF", "5uF", "10uF", "50uF", "100uF"]
+    assert [cap.label for cap in caps] == _DEFAULT_CAPS
+    assert all(cap.config_path.is_file() for cap in caps)
 
 
-def test_discover_capacitors_resolves_50uf_explicitly() -> None:
+def test_discover_capacitors_resolves_explicit_cap() -> None:
     env = ProjectEnv.from_environ(PROJECT_DIR)
+    label = _DEFAULT_CAPS[-1]
 
-    caps = discover_capacitors(env, "milp", ["50uF"])
+    caps = discover_capacitors(env, "milp", [label])
 
     assert len(caps) == 1
-    assert caps[0].label == "50uF"
-    assert caps[0].config_path == PROJECT_DIR / "benchmarks" / "config_50uF.json"
+    assert caps[0].label == label
+    assert caps[0].config_path == PROJECT_DIR / "benchmarks" / f"config_{label}.json"
 
 
-def test_parse_strip_mining_log_uses_50uf_capacity(tmp_path: Path) -> None:
+def test_parse_strip_mining_log_resolves_capacitor_capacity(tmp_path: Path) -> None:
     log_path = tmp_path / "strip_mining.log"
     log_path.write_text("[1/1] Running crc-50uF ...\n")
 
@@ -40,7 +44,7 @@ def test_parse_strip_mining_log_uses_50uf_capacity(tmp_path: Path) -> None:
 
     assert len(runs) == 1
     assert runs[0]["capacitor"] == "50uF"
-    assert runs[0]["capacity"] == 243000.0
+    assert runs[0]["capacity"] == CAPACITY_MAP["50uF"]
 
 
 def test_plot_sort_key_orders_capacitors_numerically() -> None:

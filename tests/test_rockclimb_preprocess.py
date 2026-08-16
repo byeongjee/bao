@@ -13,14 +13,23 @@ from ckpt.compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 from ckpt.env import ProjectEnv
 from ckpt.runner import StepResult
 from ckpt.toolchain import Toolchain
-from conftest import PROJECT_DIR, _run, write_src
+from conftest import PROJECT_DIR, TESTS_DIR, _run, write_src
 
-IR_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "sample_energy_config_ir.json"
-ASSEMBLY_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "assembly_params.json"
+# Both energy configs are owned by the test suite. Their counterparts under
+# benchmarks/ are regenerated from board measurements, which would silently move
+# every capacity threshold below.
+IR_ENERGY_CONFIG = TESTS_DIR / "estimator_ir_weighted.json"
+ASSEMBLY_ENERGY_CONFIG = TESTS_DIR / "assembly_params.json"
+# One iteration of CONSTANT_LOOP under IR_ENERGY_CONFIG; its 8 iterations
+# therefore cost 8x this.
+CONSTANT_LOOP_ITER_ENERGY = 12.0
 CRC_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "crc.c"
-CRC_5UF_CONFIG = PROJECT_DIR / "benchmarks" / "config_5uF.json"
 AES_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "aes.c"
-AES_1UF_CONFIG = PROJECT_DIR / "benchmarks" / "config_1uF.json"
+# Capacitor energies matching the 1uF and 5uF board configs, rounded and owned
+# by the test suite: benchmarks/config_*.json carries measured E_pro/E_epi and
+# register costs that are re-derived whenever the board is re-characterized.
+SMALL_CAP_CAPACITY = 3640.0
+LARGE_CAP_CAPACITY = 18200.0
 
 pytestmark = pytest.mark.rockclimb
 
@@ -82,6 +91,27 @@ def _write_rockclimb_config(tmp_path: Path, *, capacity: float) -> Path:
                 "N_reg": 2,
                 "reg_store_energy": 0.0,
                 "reg_restore_energy": 0.0,
+                "rockclimb": {"distributed_checkpointing": True},
+            }
+        )
+    )
+    return config_path
+
+
+def _write_board_like_config(tmp_path: Path, *, capacity: float) -> Path:
+    """Config in the regime a real capacitor puts the pass in: 16 registers to
+    checkpoint and non-trivial prologue/epilogue costs, so E_safe sits just
+    below capacity rather than at it."""
+    config_path = tmp_path / "rockclimb_board.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "capacity": capacity,
+                "E_pro": 45.0,
+                "E_epi": 35.0,
+                "N_reg": 16,
+                "reg_store_energy": 0.0,
+                "reg_restore_energy": 2.0,
                 "rockclimb": {"distributed_checkpointing": True},
             }
         )
@@ -174,7 +204,11 @@ def test_preprocess_partially_unrolls_constant_trip_loop(
     src = write_src(tmp_path, CONSTANT_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
-    config_path = _write_rockclimb_config(tmp_path, capacity=20.0)
+    # Room for a few iterations but not all 8, so the budget picks K, not the
+    # max-unroll cap.
+    config_path = _write_rockclimb_config(
+        tmp_path, capacity=3 * CONSTANT_LOOP_ITER_ENERGY + 4.0
+    )
 
     before_ir = optimized_ll.read_text()
     result = _run_rockclimb_preprocess(
@@ -199,7 +233,10 @@ def test_preprocess_caps_unroll_for_loop_that_fits_budget(
     src = write_src(tmp_path, CONSTANT_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
-    config_path = _write_rockclimb_config(tmp_path, capacity=200.0)
+    # Room for the whole loop twice over, so only the max-unroll cap can limit K.
+    config_path = _write_rockclimb_config(
+        tmp_path, capacity=16 * CONSTANT_LOOP_ITER_ENERGY
+    )
 
     before_ir = optimized_ll.read_text()
     result = _run_rockclimb_preprocess(
@@ -223,7 +260,10 @@ def test_preprocess_honors_cli_max_unroll_factor(tools, compile_to_ir, tmp_path)
     src = write_src(tmp_path, CONSTANT_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
-    config_path = _write_rockclimb_config(tmp_path, capacity=200.0)
+    # Ample budget, so the CLI flag is the only thing that can pick K.
+    config_path = _write_rockclimb_config(
+        tmp_path, capacity=16 * CONSTANT_LOOP_ITER_ENERGY
+    )
 
     result = _run_rockclimb_preprocess(
         tools,
@@ -478,6 +518,7 @@ def test_run_rockclimb_preprocess_passes_max_unroll_flag(tmp_path, monkeypatch):
 def test_crc_unroll_does_not_explode_distributed_checkpoints(tmp_path):
     env = ProjectEnv.from_environ(PROJECT_DIR)
     tc = Toolchain.resolve(env)
+    crc_config = _write_board_like_config(tmp_path, capacity=LARGE_CAP_CAPACITY)
 
     out4 = compile_rockclimb(
         tc,
@@ -485,7 +526,7 @@ def test_crc_unroll_does_not_explode_distributed_checkpoints(tmp_path):
         RockClimbCompileOptions(
             input_c=CRC_BENCHMARK,
             energy_config=ASSEMBLY_ENERGY_CONFIG,
-            rockclimb_config=CRC_5UF_CONFIG,
+            rockclimb_config=crc_config,
             output=tmp_path / "crc_u4",
             pass_log_level="info",
             precomputed_energy=True,
@@ -506,7 +547,7 @@ def test_crc_unroll_does_not_explode_distributed_checkpoints(tmp_path):
         RockClimbCompileOptions(
             input_c=CRC_BENCHMARK,
             energy_config=ASSEMBLY_ENERGY_CONFIG,
-            rockclimb_config=CRC_5UF_CONFIG,
+            rockclimb_config=crc_config,
             output=tmp_path / "crc_u16",
             pass_log_level="info",
             precomputed_energy=True,
@@ -534,6 +575,7 @@ def test_crc_unroll_does_not_explode_distributed_checkpoints(tmp_path):
 def test_compile_rockclimb_handles_full_unroll_in_nested_loops(tmp_path):
     env = ProjectEnv.from_environ(PROJECT_DIR)
     tc = Toolchain.resolve(env)
+    aes_config = _write_board_like_config(tmp_path, capacity=SMALL_CAP_CAPACITY)
 
     result = compile_rockclimb(
         tc,
@@ -541,7 +583,7 @@ def test_compile_rockclimb_handles_full_unroll_in_nested_loops(tmp_path):
         RockClimbCompileOptions(
             input_c=AES_BENCHMARK,
             energy_config=ASSEMBLY_ENERGY_CONFIG,
-            rockclimb_config=AES_1UF_CONFIG,
+            rockclimb_config=aes_config,
             output=tmp_path / "aes_u5",
             pass_log_level="info",
             precomputed_energy=True,
@@ -557,7 +599,13 @@ def test_compile_rockclimb_handles_full_unroll_in_nested_loops(tmp_path):
         ),
     )
 
+    # A nested loop whose whole trip count fits the budget is unrolled away
+    # entirely; doing that used to crash the pass, which then walked a loop it
+    # had just deleted.
     assert "Stack dump:" not in result.pass_output
-    assert re.search(
-        r"RockClimbLoopUnrollPass: fully unrolled main::.* N=4 K=4", result.pass_output
+    fully_unrolled = re.findall(
+        r"RockClimbLoopUnrollPass: fully unrolled main::\S+ N=(\d+) K=(\d+)",
+        result.pass_output,
     )
+    assert fully_unrolled, result.pass_output
+    assert all(n == k for n, k in fully_unrolled), fully_unrolled

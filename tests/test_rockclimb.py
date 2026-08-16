@@ -20,7 +20,9 @@ MACHINE_PASS_LIB = (
     PROJECT_DIR / "passes" / "build" / "rockclimb-backend" / "RockClimbMachinePass.so"
 )
 ROCKCLIMB_PARAMS = TESTS_DIR / "rockclimb_params.json"
-ASSEMBLY_ENERGY_CONFIG = PROJECT_DIR / "benchmarks" / "assembly_params.json"
+# Synthetic costs owned by the test suite. benchmarks/assembly_params.json is
+# regenerated from board measurements and would move every threshold here.
+ASSEMBLY_ENERGY_CONFIG = TESTS_DIR / "assembly_params.json"
 
 # ---------------------------------------------------------------------------
 # Module-wide mark
@@ -763,9 +765,10 @@ class TestCallHandling:
         self, run_rockclimb_machine, tmp_path
     ):
         """An external library call with no entry/exit boundaries of its own is
-        costed as a single expensive instruction. Integer division
-        (__mspabi_divi ~752) exceeds E_safe (~472) for the default config, so a
-        block containing it cannot fit one charge."""
+        costed as a single expensive instruction. tests/assembly_params.json
+        prices __mspabi_divi at 750, above the E_safe of ~476 that
+        tests/rockclimb_params.json yields, so a block containing an integer
+        division cannot fit one charge."""
         src = write_src(tmp_path, "int divfn(int a, int b) { return a / b; }")
         result = run_rockclimb_machine(
             src,
