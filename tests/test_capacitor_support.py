@@ -15,15 +15,14 @@ pytestmark = pytest.mark.unit
 
 
 def test_discover_capacitors_resolves_every_default_cap() -> None:
-    """Discovery silently drops a default cap whose config file is missing, so
-    assert the shipped list resolves in full rather than pinning the labels."""
+    """Discovery silently drops a default cap whose config file is missing."""
     env = ProjectEnv.from_environ(PROJECT_DIR)
 
     caps = discover_capacitors(env, "milp", None)
 
     assert [cap.label for cap in caps] == _DEFAULT_CAPS
-    # 50uF was the cap this guard was originally added for; comparing against
-    # _DEFAULT_CAPS alone would still pass if it were dropped from both.
+    # Comparing against _DEFAULT_CAPS alone still passes if 50uF is dropped
+    # from both.
     assert "50uF" in _DEFAULT_CAPS
 
 

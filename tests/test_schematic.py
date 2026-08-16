@@ -169,8 +169,7 @@ def _run_ckpt_compile_schematic_o3(
 
 class LoopBudget(NamedTuple):
     # E_loop is logged before refineLoopBudgetWithConvergence and numIt after,
-    # so the two are not a single snapshot. maxTripCount is static and appears
-    # on both lines; it is read from the numIt line to keep it paired with it.
+    # so the two are not a single snapshot.
     e_loop: float
     num_it: int
     max_trip_count: int
@@ -323,8 +322,6 @@ def test_schematic_o3_dijkstra_loop_budget_uses_rare_inner_branch(
         f"(worst-case inner cost {inner_worst_case})\n{log_text[-4000:]}"
     )
 
-    # Costing the inner loop at its full trip count is what keeps the outer
-    # loop from appearing to fit in a charge.
     assert outer.num_it < outer.max_trip_count, log_text[-4000:]
 
 
