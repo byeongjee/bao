@@ -5,7 +5,7 @@
         -o benchmarks/traces --vmax 3.6 --repeat 8
 
 Per trace, in order: block-average to --rate, scale the traces listed in
-SCALE_TO_MAX, clip to --vmax, repeat --repeat times back to back.
+SCALE_TO_LEVEL, clip to --vmax, repeat --repeat times back to back.
 
 Each output sample is the mean of the corresponding block of input samples
 (e.g. 20 samples for 50 Hz), which acts as the anti-aliasing filter; picking
@@ -22,9 +22,10 @@ import numpy as np
 
 SAMPLE_RATE = 1000.0
 
-# Traces whose harvested voltage never reaches the target's operating range
-# are scaled up so their peak lands here; without it the target never boots.
-SCALE_TO_MAX = {"3": 3.6}
+# Traces whose harvested voltage never reaches the target's operating range are
+# scaled up so this percentile lands on the target level.
+SCALE_PERCENTILE = 99
+SCALE_TO_LEVEL = {"3": 3.6}
 
 
 def load_voltage(path):
@@ -38,12 +39,12 @@ def block_average(voltage, factor):
     return voltage[:usable].reshape(-1, factor).mean(axis=1)
 
 
-def scale_to_max(voltage, target_max):
-    """Scale `voltage` so its peak becomes `target_max`."""
-    peak = voltage.max()
-    if peak <= 0:
-        raise SystemExit("cannot scale a trace whose peak is not positive")
-    return voltage * (target_max / peak)
+def scale_percentile_to(voltage, percentile, target):
+    """Scale `voltage` so its `percentile`-th percentile becomes `target`."""
+    reference = np.percentile(voltage, percentile)
+    if reference <= 0:
+        raise SystemExit("cannot scale a trace whose reference level is not positive")
+    return voltage * (target / reference)
 
 
 def write_csv(path, voltage, rate):
@@ -84,8 +85,10 @@ def main():
         voltage = load_voltage(path)
         name = os.path.splitext(os.path.basename(path))[0]
         averaged = block_average(voltage, factor)
-        if name in SCALE_TO_MAX:
-            averaged = scale_to_max(averaged, SCALE_TO_MAX[name])
+        if name in SCALE_TO_LEVEL:
+            averaged = scale_percentile_to(
+                averaged, SCALE_PERCENTILE, SCALE_TO_LEVEL[name]
+            )
         if args.vmax is not None:
             averaged = np.minimum(averaged, args.vmax)
         repeated = np.tile(averaged, args.repeat)
