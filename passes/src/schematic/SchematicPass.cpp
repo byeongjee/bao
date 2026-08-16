@@ -29,6 +29,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <chrono>
 #include <map>
@@ -348,21 +349,21 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
     if (!foldCalleeSummaries(F, graph, *ctx.cfg, params, summaries, solution))
         return false;
 
-    // Load traces (required).
-    if (SchematicTraceOpt.getValue().empty()) {
-        PLOGE << "SCHEMATIC: no trace file given for " << F.getName() << " — traces are required";
-        return false;
-    }
+    // Load traces (required). Unlike an infeasible solve, which the driver
+    // reports and the toolchain surfaces as an infeasible result, a missing or
+    // mismatched trace means the pipeline itself is wrong: skipping the
+    // function here would link an uninstrumented binary that dies at the first
+    // outage, with every stage up to the flashed target reporting success.
+    if (SchematicTraceOpt.getValue().empty())
+        report_fatal_error(Twine("SCHEMATIC: no trace file given for '") + F.getName() +
+                           "' — traces are required");
     TraceLoader loader(F, LI, graph);
     std::optional<LoadedTraces> loadedTraces = loader.load(SchematicTraceOpt.getValue());
-    if (!loadedTraces) {
-        PLOGE << "SCHEMATIC: failed to load traces for " << F.getName();
-        return false;
-    }
-    if (loadedTraces->functionPaths.empty()) {
-        PLOGE << "SCHEMATIC: no function traces for " << F.getName() << " — traces are required";
-        return false;
-    }
+    if (!loadedTraces)
+        report_fatal_error(Twine("SCHEMATIC: failed to load traces for '") + F.getName() + "'");
+    if (loadedTraces->functionPaths.empty())
+        report_fatal_error(Twine("SCHEMATIC: no function traces for '") + F.getName() +
+                           "' — the trace does not match this IR");
     PLOGI << "SCHEMATIC: loaded traces for " << F.getName();
 
     // Loop analysis.
