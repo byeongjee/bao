@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from typing import NamedTuple
 
 import pytest
 from conftest import (
@@ -166,21 +167,35 @@ def _run_ckpt_compile_schematic_o3(
     return result, result.stdout + result.stderr
 
 
+class LoopBudget(NamedTuple):
+    e_loop: float
+    max_trip_count: int
+    num_it: int
+    available_energy: float
+
+
 def _extract_loop_budget(
     log_text,
     loop_header,
 ):
     e_loop_match = re.search(
-        rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+E_loop=([0-9.]+)",
+        rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+E_loop=([0-9.]+)"
+        rf".*?\s+maxTripCount=(\d+)",
         log_text,
     )
     num_it_match = re.search(
-        rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+numIt=(\d+)",
+        rf"\[LoopAnalyzer\]\s+loop={re.escape(loop_header)}\s+numIt=(\d+)"
+        rf".*?\s+availableEnergy=([0-9.]+)",
         log_text,
     )
     assert e_loop_match, f"Missing E_loop log for {loop_header}:\n{log_text[-4000:]}"
     assert num_it_match, f"Missing numIt log for {loop_header}:\n{log_text[-4000:]}"
-    return float(e_loop_match.group(1)), int(num_it_match.group(1))
+    return LoopBudget(
+        e_loop=float(e_loop_match.group(1)),
+        max_trip_count=int(e_loop_match.group(2)),
+        num_it=int(num_it_match.group(1)),
+        available_energy=float(num_it_match.group(2)),
+    )
 
 
 def _write_trace(trace, trace_json):
@@ -293,12 +308,22 @@ def test_schematic_o3_dijkstra_loop_budget_uses_rare_inner_branch(
 
     assert result.returncode == 0, log_text[-4000:]
 
-    inner_e_loop, _inner_num_it = _extract_loop_budget(log_text, "for.body18.i")
-    outer_e_loop, outer_num_it = _extract_loop_budget(log_text, "while.body.i")
+    inner = _extract_loop_budget(log_text, "for.body18.i")
+    outer = _extract_loop_budget(log_text, "while.body.i")
 
-    assert inner_e_loop > 70.0, log_text
-    assert outer_e_loop > 2400.0, log_text
-    assert outer_num_it < 25, log_text
+    # The inner loop is entered rarely in the trace, but a single outer
+    # iteration may still run it to its full trip count. The outer budget must
+    # therefore cover the whole inner loop, not just the hot path through it.
+    inner_worst_case = inner.e_loop * inner.max_trip_count
+    assert outer.e_loop >= inner_worst_case, (
+        f"outer E_loop {outer.e_loop} ignores the rare inner branch "
+        f"(worst-case inner cost {inner_worst_case})\n{log_text[-4000:]}"
+    )
+
+    # Folding that cost in is what bounds how many outer iterations fit in a
+    # charge; without it the outer loop would appear to run far longer.
+    assert outer.num_it <= outer.available_energy / inner_worst_case, log_text[-4000:]
+    assert outer.num_it < outer.max_trip_count, log_text[-4000:]
 
 
 def test_schematic_synthesizes_missing_top_level_loop_trace(
