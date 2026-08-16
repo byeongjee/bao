@@ -143,6 +143,12 @@ def run_rockclimb_machine(machine_tools):
             check=False,
         )
 
+        if "Missing  (" in result.stderr:
+            assert "Missing  (0 keys):" in result.stderr, (
+                f"{energy_config} does not price every instruction reached by "
+                f"this snippet, so the pass fell back to 1.0:\n{result.stderr}"
+            )
+
         output_mir = out_mir.read_text() if out_mir.exists() else ""
         output_asm = ""
 
