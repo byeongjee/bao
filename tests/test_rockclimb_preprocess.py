@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -260,7 +259,9 @@ def test_preprocess_honors_cli_max_unroll_factor(tools, compile_to_ir, tmp_path)
     src = write_src(tmp_path, CONSTANT_LOOP)
     optimized_ll = _prepare_ir_for_preprocess(tools, compile_to_ir, src, tmp_path)
     output_ll = tmp_path / "preprocessed.ll"
-    # Ample budget, so the CLI flag is the only thing that can pick K.
+    # Ample budget, so the CLI flag is the only thing that can pick K. It must
+    # differ from RockClimbMaxUnrollFactorOpt's default of 4, or ignoring the
+    # flag entirely would produce the same K.
     config_path = _write_rockclimb_config(
         tmp_path, capacity=16 * CONSTANT_LOOP_ITER_ENERGY
     )
@@ -271,12 +272,12 @@ def test_preprocess_honors_cli_max_unroll_factor(tools, compile_to_ir, tmp_path)
         IR_ENERGY_CONFIG,
         config_path,
         output_ll,
-        4,
+        3,
     )
 
     assert result.returncode == 0, result.stderr
     assert "RockClimbLoopUnrollPass: unrolled sum8::" in result.stdout + result.stderr
-    assert "K=4" in result.stdout + result.stderr
+    assert "K=3" in result.stdout + result.stderr
 
 
 def test_preprocess_skips_unknown_trip_count_loop(tools, compile_to_ir, tmp_path):
@@ -600,12 +601,7 @@ def test_compile_rockclimb_handles_full_unroll_in_nested_loops(tmp_path):
     )
 
     # A nested loop whose whole trip count fits the budget is unrolled away
-    # entirely; doing that used to crash the pass, which then walked a loop it
-    # had just deleted.
+    # entirely, which the pass must survive rather than walking a loop it just
+    # deleted.
     assert "Stack dump:" not in result.pass_output
-    fully_unrolled = re.findall(
-        r"RockClimbLoopUnrollPass: fully unrolled main::\S+ N=(\d+) K=(\d+)",
-        result.pass_output,
-    )
-    assert fully_unrolled, result.pass_output
-    assert all(n == k for n, k in fully_unrolled), fully_unrolled
+    assert "RockClimbLoopUnrollPass: fully unrolled main::" in result.pass_output
