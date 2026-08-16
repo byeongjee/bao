@@ -1,7 +1,7 @@
 {
-  "_comment": "Synthetic instruction costs owned by the test suite. Values come from the tier model in the sibling comment, NOT from board measurements: tests assert on outcomes these numbers were chosen to produce, so this file must never be regenerated from benchmarks/assembly_params.json.",
+  "_comment": "Synthetic MSP430 instruction costs. Every value is derived from the cost model below and chosen to produce the outcomes the tests assert on, so treat them as fixed inputs rather than as an estimate of any real device.",
   "_cost_model": "cost = 1.5 * units. A register-only instruction is 1 unit. An immediate source adds 1, an indirect/autoincrement source adds 1, and an indexed/symbolic/absolute source adds 2. A memory destination adds the same, plus 1 more when the instruction reads it back (everything except mov/cmp/bit). Jumps are 2 units. Outside that model: push/pop/br are 3, 2 and 3 units; nop/dint/clrc/ret/reti are 1 unit; adjcallstackdown/adjcallstackup are 0 because they expand to no code when every argument is register-passed, which holds for the snippets in tests/. Library calls are listed individually, scaled so __mspabi_divi and the other division helpers exceed any E_safe a test config can produce and a block containing one cannot fit a single charge.",
-  "_adding_a_key": "Derive the value from the model above rather than copying benchmarks/assembly_params.json. A key absent here costs defaultEnergy_ (1.0) and only warns, so tests/test_rockclimb.py asserts the pass reports zero missing keys.",
+  "_adding_a_key": "Derive the value from the model above. A key absent here costs defaultEnergy_ (1.0) and only warns, so tests/test_rockclimb.py asserts the pass reports zero missing keys.",
   "ignored_call_targets": [
     "_timing_delay_cycles",
     "bench_commit_done",

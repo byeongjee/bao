@@ -20,8 +20,6 @@ MACHINE_PASS_LIB = (
     PROJECT_DIR / "passes" / "build" / "rockclimb-backend" / "RockClimbMachinePass.so"
 )
 ROCKCLIMB_PARAMS = TESTS_DIR / "rockclimb_params.json"
-# Synthetic costs owned by the test suite. benchmarks/assembly_params.json is
-# regenerated from board measurements and would move every threshold here.
 ASSEMBLY_ENERGY_CONFIG = TESTS_DIR / "assembly_params.json"
 
 # ---------------------------------------------------------------------------

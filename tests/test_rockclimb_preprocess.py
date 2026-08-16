@@ -14,16 +14,12 @@ from ckpt.runner import StepResult
 from ckpt.toolchain import Toolchain
 from conftest import PROJECT_DIR, TESTS_DIR, _run, write_src
 
-# The counterparts under benchmarks/ are regenerated from board measurements,
-# which would move every capacity threshold below.
 IR_ENERGY_CONFIG = TESTS_DIR / "estimator_ir_weighted.json"
 ASSEMBLY_ENERGY_CONFIG = TESTS_DIR / "assembly_params.json"
 # Cost of one CONSTANT_LOOP iteration under IR_ENERGY_CONFIG.
 CONSTANT_LOOP_ITER_ENERGY = 12.0
 CRC_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "crc.c"
 AES_BENCHMARK = PROJECT_DIR / "benchmarks" / "intermittent" / "aes.c"
-# The 1uF and 5uF board capacities. The rest of benchmarks/config_*.json is
-# re-derived whenever the board is characterized.
 SMALL_CAP_CAPACITY = 3640.0
 LARGE_CAP_CAPACITY = 18200.0
 
