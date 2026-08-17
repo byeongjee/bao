@@ -67,6 +67,7 @@ CSV_HEADER: list[str] = [
     "loop_decisions",
     "paths_analyzed",
     "runtime_calls_inserted",
+    "run_attempts",
 ]
 
 NVM_SYMBOLS: list[str] = [

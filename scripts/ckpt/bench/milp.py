@@ -63,6 +63,7 @@ CSV_HEADER: list[str] = [
     "vm_placed_global_names",
     "milp_solve_time_ms",
     "result",
+    "run_attempts",
 ]
 
 NVM_SYMBOLS: list[str] = [
