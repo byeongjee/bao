@@ -66,6 +66,10 @@ logger = logging.getLogger(__name__)
 
 _HALT_MODE = "wait"
 
+# dijkstra, qsort, and bitcount at their full sizes outlast every trace, so no
+# run completes. Their sources shrink under this define.
+_SHRINK_DEFINES = ("INTERMITTENT_BUILD",)
+
 # After the replay the target is unpowered, so the armed Saleae capture
 # either already triggered (and only its after-trigger tail remains) or
 # never will.
@@ -174,6 +178,7 @@ def _make_compile_fn(
                 milp_log_file="",
                 coarse_allocation=False,
                 save_temps=False,
+                extra_defines=list(_SHRINK_DEFINES),
             )
             result = compile_milp(tc, env, opts)
             return CompileResult(
@@ -208,6 +213,7 @@ def _make_compile_fn(
                 max_unroll=max_unroll,
                 save_temps=False,
                 linker_script=None,
+                extra_defines=list(_SHRINK_DEFINES),
             )
             result = compile_rockclimb(tc, env, opts)
             return CompileResult(
@@ -246,6 +252,7 @@ def _make_compile_fn(
                     cpu_freq=cpu_freq,
                     clang_opt_level=clang_opt_level,
                     pass_log_level=pass_log_level,
+                    extra_defines=list(_SHRINK_DEFINES),
                 )
             trace_json, profiling_ms = trace_cache[bench_name]
 
@@ -270,6 +277,7 @@ def _make_compile_fn(
                 trace_file=trace_json,
                 linker_script=None,
                 extra_includes=[str(env.project_dir / "passes" / "runtime")],
+                extra_defines=list(_SHRINK_DEFINES),
             )
             result = compile_schematic(tc, env, opts)
             return CompileResult(

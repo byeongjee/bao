@@ -96,11 +96,13 @@ def collect_trace(
     cpu_freq: int,
     clang_opt_level: int,
     pass_log_level: str,
+    extra_defines: list[str],
 ) -> tuple[Path, int]:
     """Collect a SCHEMATIC execution trace for one benchmark.
 
-    *device_debug* must match the build the trace is applied to: it renames
-    blocks in ``main``, and TraceLoader drops traces naming unknown blocks.
+    *device_debug* and *extra_defines* must match the build the trace is
+    applied to: they rename blocks in ``main``, and TraceLoader drops traces
+    naming unknown blocks.
 
     Returns (trace_json_path, profiling_time_ms).
     Raises CompilationError if trace collection fails.
@@ -129,6 +131,7 @@ def collect_trace(
         trace_file=None,
         linker_script=None,
         extra_includes=[str(env.project_dir / "passes" / "runtime")],
+        extra_defines=list(extra_defines),
     )
     trace_result: SchematicCompileResult = compile_schematic(tc, env, trace_opts)
 
@@ -264,6 +267,7 @@ def run_schematic_benchmarks(
                     cpu_freq=cpu_freq,
                     clang_opt_level=clang_opt_level,
                     pass_log_level=pass_log_level,
+                    extra_defines=[],
                 )
 
             trace_json, profiling_ms = trace_cache[bench_name]
