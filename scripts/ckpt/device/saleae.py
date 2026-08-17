@@ -108,7 +108,8 @@ def saleae_run(
            mspdebug session so it resets and free-runs exactly once, or —
            with an Otii in the loop — isolate it from the ez-FET and power
            it from the Otii main output
-        4. Start pulse (~10 us) is captured but does not trigger
+        4. Start pulse (~10 us) is captured but does not trigger; a cold
+           power-up first emits a sub-us glitch, which is filtered out
         5. Program runs (GPIO LOW — BOR resets are invisible)
         6. Stop pulse (~5 ms) fires the trigger
         7. Record *after_trigger_seconds* more, then capture ends
@@ -243,6 +244,12 @@ def saleae_run(
 
 _SHORT_PULSE_THRESHOLD = 0.001  # 1 ms — start pulse is ~10 us, stop pulse is ~5 ms
 
+# Narrower than this is a cold power-up glitch, not a start pulse: while VCC
+# ramps, P3.4 is high-impedance — the code cannot clear LOCKLPM5 and drive the
+# pin low until the CPU runs, milliseconds later — so the line follows the rail
+# across the analyzer threshold for ~0.4 us. Every Otii-powered run sees it.
+_GLITCH_PULSE_THRESHOLD = 0.000002  # 2 us
+
 # Deadline of a single completion poll: bounds how long the watcher thread
 # keeps running after it was told to stop.
 _WATCH_POLL_SECONDS = 0.5
@@ -310,6 +317,20 @@ def _collect_pulses(csv_path: Path) -> list[tuple[float, float]]:
     return pulses
 
 
+def _start_pulses(pulses: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Short pulses wide enough to be a start pulse, not a power-up glitch."""
+    return [
+        (r, f)
+        for r, f in pulses
+        if _GLITCH_PULSE_THRESHOLD <= (f - r) < _SHORT_PULSE_THRESHOLD
+    ]
+
+
+def _stop_pulses(pulses: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Long pulses — the ones that fire the capture trigger."""
+    return [(r, f) for r, f in pulses if (f - r) >= _SHORT_PULSE_THRESHOLD]
+
+
 def _extract_timing(csv_path: Path) -> float:
     """Parse Saleae digital CSV export to find execution time.
 
@@ -321,9 +342,10 @@ def _extract_timing(csv_path: Path) -> float:
         the short pulse falling edge immediately before the first
         long pulse rising edge.
 
-    Multiple short pulses before the stop pulse are treated as ambiguous:
-    they indicate the target likely restarted during capture, so the
-    extractor refuses to guess which partial run is "correct".
+    Pulses below _GLITCH_PULSE_THRESHOLD are power-up glitches and do not
+    count as start pulses. Multiple start pulses before the stop pulse are
+    treated as ambiguous: they indicate the target likely restarted during
+    capture, so the extractor refuses to guess which partial run is "correct".
 
     Raises DeviceError if edges are missing.
     """
@@ -337,13 +359,13 @@ def _extract_timing(csv_path: Path) -> float:
         )
 
     # Classify pulses by duration.
-    short_pulses = [(r, f) for r, f in pulses if (f - r) < _SHORT_PULSE_THRESHOLD]
-    long_pulses = [(r, f) for r, f in pulses if (f - r) >= _SHORT_PULSE_THRESHOLD]
+    short_pulses = _start_pulses(pulses)
+    long_pulses = _stop_pulses(pulses)
 
     if not short_pulses:
         raise DeviceError(
-            "No start pulse (short HIGH < 1 ms) detected on Saleae channel "
-            f"{_SALEAE_CHANNEL}. Check benchmark GPIO signalling."
+            "No start pulse (short HIGH between 2 us and 1 ms) detected on "
+            f"Saleae channel {_SALEAE_CHANNEL}. Check benchmark GPIO signalling."
         )
     if not long_pulses:
         raise DeviceError(
@@ -486,15 +508,13 @@ def finish_pulse_capture(capture, wait_seconds: float) -> tuple[bool, float | No
 
 def _replay_timing_from_pulses(pulses: list[tuple[float, float]]) -> float | None:
     """First start-pulse falling edge -> first stop-pulse rising edge, in us."""
-    long_pulses = [(r, f) for r, f in pulses if (f - r) >= _SHORT_PULSE_THRESHOLD]
+    long_pulses = _stop_pulses(pulses)
     if not long_pulses:
         logger.warning("Capture triggered but no stop pulse found in the export")
         return None
     stop_time = long_pulses[0][0]
 
-    start_falls = [
-        f for r, f in pulses if (f - r) < _SHORT_PULSE_THRESHOLD and f < stop_time
-    ]
+    start_falls = [f for _, f in _start_pulses(pulses) if f < stop_time]
     if not start_falls:
         logger.warning("Stop pulse captured but no start pulse precedes it")
         return None

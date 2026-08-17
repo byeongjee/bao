@@ -26,6 +26,13 @@ class TestReplayTimingFromPulses:
         us = _replay_timing_from_pulses([(1.0, 1.00001), (3.0, 3.00001), (5.0, 5.005)])
         assert us == pytest.approx((5.0 - 1.00001) * 1e6)
 
+    def test_power_up_glitch_is_not_a_start_pulse(self):
+        # Each cold power-up glitches P3.4 for ~0.4 us before the real pulse.
+        us = _replay_timing_from_pulses(
+            [(0.9, 0.90000038), (1.0, 1.00001), (2.0, 2.005)]
+        )
+        assert us == pytest.approx((2.0 - 1.00001) * 1e6)
+
     def test_no_stop_pulse(self):
         assert _replay_timing_from_pulses([(1.0, 1.00001)]) is None
 

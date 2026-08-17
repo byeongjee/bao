@@ -27,8 +27,13 @@ pulses on P3.4:
 
 | Event | Pulse width | Role |
 |-------|-------------|------|
-| Start | ~10 µs | Marks execution start; below the trigger threshold |
-| Stop  | ~5 ms  | Marks execution end; fires the capture trigger |
+| Start | ~10 µs (nominal) | Marks execution start; below the trigger threshold |
+| Stop  | ~5 ms (nominal)  | Marks execution end; fires the capture trigger |
+
+The widths are nominal: `_timing_delay_cycles` counts iterations, not cycles,
+so the pulses come out several times wider (~70 µs and ~34 ms at 16 MHz).
+Only their classification matters — well apart on both sides of the 1 ms
+trigger threshold.
 
 The capture triggers on `PULSE_HIGH` with a 1 ms minimum pulse width, so only
 the stop pulse ends the capture. Execution time is extracted in
@@ -38,6 +43,13 @@ stop-pulse rising edge.
 The GPIO stays LOW during execution, so brown-out resets — which reset port
 registers to LOW — are invisible to the capture (pulse-based, BOR-safe
 signalling).
+
+A run that starts from a cold supply — every run powered from the Otii main
+output, see [intermittent.md](intermittent.md) — emits one more pulse: while
+VCC ramps, P3.4 is high-impedance (the firmware cannot clear `LOCKLPM5` and
+drive it low until the CPU runs), so the line follows the rail across the
+analyzer threshold for ~0.4 µs. Pulses narrower than 2 µs are therefore not
+counted as start pulses.
 
 Per measurement, the runner arms a capture, flashes the ELF via mspdebug,
 lets the target free-run, waits for the stop-pulse trigger, and exports the

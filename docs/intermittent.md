@@ -109,6 +109,10 @@ board supply rail, without the 5.6 kΩ resistor and the schottky diode: at
 cannot hold the rail. Without an Otii both commands fall back to running on
 the ez-FET's 3V3 rail.
 
+Every such run starts from a cold supply, so the Saleae sees a sub-microsecond
+glitch on P3.4 while VCC ramps, ahead of the real start pulse (see
+[saleae.md](saleae.md)); the extractor ignores pulses narrower than 2 µs.
+
 ## How a Run Works
 
 For each (benchmark, capacitor, trace):
