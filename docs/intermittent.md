@@ -96,6 +96,19 @@ The target must never see both supplies at once: the runner keeps the Otii
 main output off whenever the relays are closed, and the schottky diode blocks
 back-feed into the Otii output while the ez-FET's 3V3 powers the board.
 
+## Continuous-Power Runs (`ckpt bench`, `ckpt verify`)
+
+With an Otii in the loop, `bench` and `verify` use the same relays: the
+target is flashed through them, then isolated and powered from the Otii main
+output at a constant 3.3 V for the run, and reconnected for the NVM readback.
+Running the target on the ez-FET's 3V3 rail instead is not reliable — the
+ez-FET resets the target over SBW a few seconds after `mspdebug` releases it
+(see issue #72). For these runs wire the Otii main output **directly** to the
+board supply rail, without the 5.6 kΩ resistor and the schottky diode: at
+3.3 V the target draws milliamps, and the current-limited harvester path
+cannot hold the rail. Without an Otii both commands fall back to running on
+the ez-FET's 3V3 rail.
+
 ## How a Run Works
 
 For each (benchmark, capacitor, trace):

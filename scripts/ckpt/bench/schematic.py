@@ -245,7 +245,7 @@ def run_schematic_benchmarks(
     ] = {}  # bench_name -> (trace_path, profiling_ms)
 
     with (
-        optional_saleae(MATRIX_COMPILE_ONLY_WARNING) as saleae_manager,
+        optional_saleae(MATRIX_COMPILE_ONLY_WARNING) as (saleae_manager, otii),
         compilation_workdir(prefix="schematic_bench_") as workdir,
     ):
 
@@ -315,6 +315,7 @@ def run_schematic_benchmarks(
             csv_header=CSV_HEADER,
             row_builder=build_row,
             saleae_manager=saleae_manager,
+            otii=otii,
             capture_timeout_seconds=capture_timeout_seconds,
             accumulate_keys_file=accumulate_keys_file,
         )

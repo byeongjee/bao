@@ -30,7 +30,7 @@ from ..compile.uninstrumented import (
     compile_uninstrumented,
 )
 from ..device.flash import check_region_violation, raise_if_region_violation, read_nvm
-from ..device.otii import debugger_connection
+from ..device.otii import OtiiSession, debugger_connection
 from ..device.saleae import discover_saleae, saleae_run
 from ..env import ProjectEnv
 from ..errors import CompilationError, ConfigError, DeviceError, RegionViolationError
@@ -128,7 +128,7 @@ def verify_algorithms(
     # The relays must close before the Saleae/device probing below: with the
     # intermittent-power rig wired up they carry the ez-FET's SBW and 3V3
     # lines to the target.
-    with debugger_connection(), closing(discover_saleae()) as saleae_manager:
+    with debugger_connection() as otii, closing(discover_saleae()) as saleae_manager:
         capacitors = discover_capacitors(env, algorithms[0].name, caps)
 
         results: dict[str, list[BenchResult]] = {spec.name: [] for spec in algorithms}
@@ -146,6 +146,7 @@ def verify_algorithms(
                     workdir=tmp,
                     cpu_freq=cpu_freq,
                     saleae_manager=saleae_manager,
+                    otii=otii,
                     capture_timeout_seconds=capture_timeout_seconds,
                 )
 
@@ -184,6 +185,7 @@ def verify_algorithms(
                                 cap_label=cap.label,
                                 workdir=workdir,
                                 saleae_manager=saleae_manager,
+                                otii=otii,
                                 halt_mode=halt_mode,
                                 cpu_freq=cpu_freq,
                                 capture_timeout_seconds=capture_timeout_seconds,
@@ -247,6 +249,7 @@ def _run_baseline(
     workdir: Path,
     cpu_freq: int,
     saleae_manager: Manager,
+    otii: OtiiSession | None,
     capture_timeout_seconds: float,
 ) -> tuple[str | None, str | None]:
     """Compile, flash, and run the uninstrumented baseline for one benchmark.
@@ -273,6 +276,7 @@ def _run_baseline(
             FLASH_TIMEOUT,
             AFTER_TRIGGER_SECONDS,
             capture_timeout_seconds,
+            otii,
         )
         # The stop pulse fires before debug_exit() stores the result and halts.
         # Reconnecting with mspdebug too early resets the target and can restart
@@ -312,6 +316,7 @@ def _verify_instrumented(
     cap_label: str,
     workdir: Path,
     saleae_manager: Manager,
+    otii: OtiiSession | None,
     halt_mode: str,
     cpu_freq: int,
     capture_timeout_seconds: float,
@@ -393,6 +398,7 @@ def _verify_instrumented(
             FLASH_TIMEOUT,
             AFTER_TRIGGER_SECONDS,
             capture_timeout_seconds,
+            otii,
         )
         time.sleep(POST_CAPTURE_SETTLE_SECONDS)
         inst_nvm = read_nvm(tc, inst_elf, FLASH_TIMEOUT, spec.nvm_symbols)

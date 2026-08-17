@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from saleae.automation import Manager
 
+from ..device.otii import OtiiSession, debugger_connection
 from ..env import ProjectEnv
 from ..errors import CkptError, CompilationError, DeviceError, RegionViolationError
 from ..output_parser import (
@@ -139,19 +140,20 @@ def check_device_available() -> bool:
 
 
 @contextmanager
-def optional_saleae(compile_only_warning: str) -> Iterator[Manager | None]:
-    """Yield a Saleae manager when an MSP430 device is present, else None.
+def optional_saleae(
+    compile_only_warning: str,
+) -> Iterator[tuple[Manager | None, OtiiSession | None]]:
+    """Yield the Saleae manager and Otii session for a bench run.
 
-    Logs *compile_only_warning* and yields None when no device is detected.
+    The manager is None (after logging *compile_only_warning*) when no MSP430
+    device is detected; the Otii session is None when no Otii is reachable.
     The manager is closed on exit.
 
     The Otii switchboard relays are closed first: with the intermittent-power
     rig wired up they carry the ez-FET's SBW and 3V3 lines, and probing for
     the device before closing them would find nothing.
     """
-    from ..device.otii import debugger_connection
-
-    with debugger_connection():
+    with debugger_connection() as otii:
         manager: Manager | None = None
         if check_device_available():
             from ..device.saleae import discover_saleae
@@ -160,7 +162,7 @@ def optional_saleae(compile_only_warning: str) -> Iterator[Manager | None]:
         else:
             logger.warning(compile_only_warning)
         try:
-            yield manager
+            yield manager, otii
         finally:
             if manager is not None:
                 manager.close()
@@ -169,6 +171,7 @@ def optional_saleae(compile_only_warning: str) -> Iterator[Manager | None]:
 def measure_execution_time(
     elf: Path,
     saleae_manager: Manager,
+    otii: OtiiSession | None,
     capture_timeout_seconds: float,
 ) -> float:
     """Flash *elf* and measure execution time (us) via Saleae GPIO capture."""
@@ -180,6 +183,7 @@ def measure_execution_time(
         FLASH_TIMEOUT,
         AFTER_TRIGGER_SECONDS,
         capture_timeout_seconds,
+        otii,
     )
 
 
@@ -187,6 +191,7 @@ def measure_run(
     tc: Toolchain,
     elf: Path,
     saleae_manager: Manager,
+    otii: OtiiSession | None,
     capture_timeout_seconds: float,
     nvm_symbols: list[str] | None,
 ) -> tuple[float | None, NvmCounters | None, bool]:
@@ -206,7 +211,7 @@ def measure_run(
     nvm: NvmCounters | None = None
     try:
         execution_time_us = measure_execution_time(
-            elf, saleae_manager, capture_timeout_seconds
+            elf, saleae_manager, otii, capture_timeout_seconds
         )
     except DeviceError as exc:
         logger.error("  DEVICE ERROR: %s", exc)
@@ -319,6 +324,7 @@ def run_benchmark_matrix(
     csv_header: list[str],
     row_builder: RowBuilder,
     saleae_manager: Manager | None,
+    otii: OtiiSession | None,
     capture_timeout_seconds: float,
     accumulate_keys_file: Path | None,
 ) -> None:
@@ -404,6 +410,7 @@ def run_benchmark_matrix(
                                 tc,
                                 elf,
                                 saleae_manager,
+                                otii,
                                 capture_timeout_seconds,
                                 nvm_symbols if device_debug else None,
                             )
@@ -537,6 +544,7 @@ def run_timing_matrix(
     output_csv: Path,
     csv_header: list[str],
     saleae_manager: Manager | None,
+    otii: OtiiSession | None,
     capture_timeout_seconds: float,
 ) -> None:
     """Compile + flash + time benchmarks without pass statistics or NVM readback.
@@ -597,7 +605,7 @@ def run_timing_matrix(
             for attempt in range(1, MEASURE_ATTEMPTS + 1):
                 try:
                     execution_time_us = measure_execution_time(
-                        elf, saleae_manager, capture_timeout_seconds
+                        elf, saleae_manager, otii, capture_timeout_seconds
                     )
                 except DeviceError as exc:
                     logger.error("  DEVICE ERROR: %s", exc)

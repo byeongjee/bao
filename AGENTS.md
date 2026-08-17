@@ -126,6 +126,8 @@ ckpt bench all             [BENCHMARKS...] [-d RESULT_DIR] [--algorithms A,...] 
 
 # Semantic verification defaults to --halt-mode bor, which destroys modeled volatile state
 # before checkpoint recovery. Compile and bench default to swbor for continuous-power measurement.
+# With an Otii switchboard in the loop, bench and verify isolate the target from the ez-FET
+# after flashing and power it from the Otii main output at 3.3 V (see docs/intermittent.md).
 # Multi-value --cap accepts repeats or comma lists; bare numbers get a uF suffix (--cap 5,10,50).
 ckpt verify milp       [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--estimator-mode] [--cpu-freq] [--timeout SECONDS]
 ckpt verify rockclimb  [BENCHMARKS...] [--cap 1uF] [--halt-mode] [--cpu-freq] [--timeout SECONDS]

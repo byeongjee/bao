@@ -65,7 +65,7 @@ def run_uninstrumented_benchmarks(
         )
 
     with (
-        optional_saleae(TIMING_COMPILE_ONLY_WARNING) as saleae_manager,
+        optional_saleae(TIMING_COMPILE_ONLY_WARNING) as (saleae_manager, otii),
         compilation_workdir(prefix=f"{algorithm_label}_bench_") as workdir,
     ):
 
@@ -96,5 +96,6 @@ def run_uninstrumented_benchmarks(
             output_csv=output_csv,
             csv_header=CSV_HEADER,
             saleae_manager=saleae_manager,
+            otii=otii,
             capture_timeout_seconds=capture_timeout_seconds,
         )

@@ -176,7 +176,7 @@ def run_milp_benchmarks(
 
     # Shared workdir for all compilations (cleaned up on exit)
     with (
-        optional_saleae(MATRIX_COMPILE_ONLY_WARNING) as saleae_manager,
+        optional_saleae(MATRIX_COMPILE_ONLY_WARNING) as (saleae_manager, otii),
         compilation_workdir(prefix="milp_bench_") as workdir,
     ):
 
@@ -225,6 +225,7 @@ def run_milp_benchmarks(
             csv_header=CSV_HEADER,
             row_builder=build_row,
             saleae_manager=saleae_manager,
+            otii=otii,
             capture_timeout_seconds=capture_timeout_seconds,
             accumulate_keys_file=accumulate_keys_file,
         )
