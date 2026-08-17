@@ -179,7 +179,12 @@ def saleae_run(
                     raise
                 finally:
                     if otii is not None:
-                        connect_debugger(otii)
+                        try:
+                            connect_debugger(otii)
+                        except DeviceError:
+                            logger.exception(
+                                "Failed to reconnect debugger after capture"
+                            )
 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     csv_path = Path(tmpdir) / "digital.csv"

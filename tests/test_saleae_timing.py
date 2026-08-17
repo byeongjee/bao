@@ -379,3 +379,77 @@ class TestSaleaeRun:
         capture.stop.assert_called_once_with()
         capture.__exit__.assert_called_once()
         capture.export_raw_data_csv.assert_not_called()
+
+    def _install_otii_recorders(
+        self, monkeypatch: pytest.MonkeyPatch, events: list[str]
+    ) -> object:
+        for name in ("isolate_target", "power_target", "connect_debugger"):
+            monkeypatch.setattr(
+                f"ckpt.device.saleae.{name}",
+                lambda otii, _n=name: events.append(_n),
+            )
+        return object()
+
+    def test_otii_path_isolates_powers_then_reconnects(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        install_fake_saleae_automation(monkeypatch)
+        _, session_calls = install_fake_flash_and_hold(monkeypatch)
+
+        events: list[str] = []
+        otii = self._install_otii_recorders(monkeypatch, events)
+
+        manager = FakeManager(
+            [
+                [
+                    (0.000000000, 0),
+                    (0.001000000, 1),
+                    (0.001010000, 0),
+                    (0.379125720, 1),
+                    (0.384125720, 0),
+                ]
+            ]
+        )
+
+        result = saleae_run(
+            Path("/tmp/app.elf"),
+            cast("Manager", manager),
+            30,
+            1.0,
+            60.0,
+            cast("Any", otii),
+        )
+
+        assert result == pytest.approx(378115.72)
+        assert events == ["isolate_target", "power_target", "connect_debugger"]
+        assert session_calls == [("abort", None)]
+
+    def test_otii_reconnects_after_capture_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        install_fake_saleae_automation(monkeypatch)
+        install_fake_flash_and_hold(monkeypatch)
+
+        events: list[str] = []
+        otii = self._install_otii_recorders(monkeypatch, events)
+
+        def boom(capture: object, timeout_seconds: float) -> None:
+            raise DeviceError("capture timed out")
+
+        monkeypatch.setattr("ckpt.device.saleae._wait_for_capture", boom)
+
+        manager = FakeManager([[(0.0, 0)]])
+
+        with pytest.raises(DeviceError, match="capture timed out"):
+            saleae_run(
+                Path("/tmp/app.elf"),
+                cast("Manager", manager),
+                30,
+                1.0,
+                60.0,
+                cast("Any", otii),
+            )
+
+        assert events == ["isolate_target", "power_target", "connect_debugger"]
