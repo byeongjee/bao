@@ -15,8 +15,13 @@
 #define RNG_SEED 0x0C728394u
 
 /* The same static region boundaries are crossed regardless of iteration
- * count, and 20000 iterations outlast a harvesting trace. */
+ * count, and 20000 iterations outlast a harvesting trace and are
+ * impractically slow under BOR halt mode. */
+#if defined(VERIFY_BUILD) || defined(INTERMITTENT_BUILD)
 #define ITERATIONS 128U
+#else
+#define ITERATIONS 20000U
+#endif
 
 static uint32_t g_seed __attribute__((section(".fram"))) = RNG_SEED;
 static uint32_t g_totals[NUM_FUNCS] __attribute__((used, section(".fram")));

@@ -4,9 +4,13 @@
 #include <stdint.h>
 
 /* The insertion sort shifts O(ARRAY_SIZE^2) times, so the full 640-vertex
- * array outlasts a harvesting trace. The vertex table below is unsized, so
- * only the loop bounds shrink. */
+ * array outlasts a harvesting trace and is impractically slow under BOR halt
+ * mode. The vertex table below is unsized, so only the loop bounds shrink. */
+#if defined(VERIFY_BUILD) || defined(INTERMITTENT_BUILD)
 #define ARRAY_SIZE 96
+#else
+#define ARRAY_SIZE 640
+#endif
 
 typedef struct {
     int16_t x, y, z;

@@ -13,9 +13,14 @@
 #define NUM_NODES 32U
 
 /* The relaxation loop runs once per queue entry per node, so all 32 queries
- * outlast a harvesting trace. The query count keeps the graph, and with it
- * every loop trip count, unchanged. */
+ * outlast a harvesting trace and are impractically slow under BOR halt mode.
+ * The query count keeps the graph, and with it every loop trip count,
+ * unchanged. */
+#if defined(VERIFY_BUILD) || defined(INTERMITTENT_BUILD)
 #define NUM_QUERIES 4U
+#else
+#define NUM_QUERIES NUM_NODES
+#endif
 #define NONE 255U
 /* Queue capacity: empirically the max queue usage is 148 for this adjacency
    matrix.  192 provides headroom while keeping total stack (900 B) within the
