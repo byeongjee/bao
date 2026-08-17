@@ -5,10 +5,9 @@
     "timing_gpio_stop",
     "_timing_delay_cycles",
     "bench_halt",
-    "bench_commit_done",
     "debug_init",
     "debug_exit",
-    "debug_exit_commit"
+    "bench_commit_result"
   ],
   "parameters": {
     "add_autoincrement_register": 0.8291945408090596,
