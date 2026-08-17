@@ -36,6 +36,7 @@ CSV_HEADER: list[str] = [
     "status",
     "compilation_time_ms",
     "execution_time_us",
+    "run_attempts",
 ]
 
 

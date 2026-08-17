@@ -52,6 +52,7 @@ CSV_HEADER: list[str] = [
     "execution_time_us",
     "runtime_region_boundary_calls",
     "result",
+    "run_attempts",
 ]
 
 NVM_SYMBOLS: list[str] = [

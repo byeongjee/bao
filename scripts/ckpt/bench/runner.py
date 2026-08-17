@@ -45,6 +45,11 @@ FLASH_TIMEOUT = 30  # seconds
 AFTER_TRIGGER_SECONDS = 1.0  # seconds to record after falling edge
 POST_CAPTURE_SETTLE_SECONDS = 2.0
 
+# A failed capture or a region violation is retried on a freshly flashed
+# device. A supply glitch hits one attempt; a region that really exceeds its
+# budget, or a capture the Saleae cannot make, fails every attempt.
+MEASURE_ATTEMPTS = 3
+
 # CSV columns that can only be filled by running the linked ELF on a device
 # (Saleae timing + NVM counter readback). Compile-only CSVs omit these, and
 # device-less bench runs leave them blank.
@@ -59,6 +64,7 @@ RUNTIME_CSV_FIELDS: frozenset[str] = frozenset(
         "runtime_debug_restore_vreg_calls",
         "runtime_debug_store_mem_calls",
         "runtime_debug_restore_mem_calls",
+        "run_attempts",
     }
 )
 
@@ -175,6 +181,53 @@ def measure_execution_time(
         AFTER_TRIGGER_SECONDS,
         capture_timeout_seconds,
     )
+
+
+def measure_run(
+    tc: Toolchain,
+    elf: Path,
+    saleae_manager: Manager,
+    capture_timeout_seconds: float,
+    nvm_symbols: list[str] | None,
+) -> tuple[float | None, NvmCounters | None, bool]:
+    """Flash *elf*, time it, and read back its NVM state.
+
+    Returns ``(execution_time_us, nvm, region_violation)``; the time is None
+    when the capture failed. *nvm_symbols* is None outside device-debug
+    builds, where only the violation flag is read.
+    """
+    from ..device.flash import (
+        check_region_violation,
+        raise_if_region_violation,
+        read_nvm,
+    )
+
+    execution_time_us: float | None = None
+    nvm: NvmCounters | None = None
+    try:
+        execution_time_us = measure_execution_time(
+            elf, saleae_manager, capture_timeout_seconds
+        )
+    except DeviceError as exc:
+        logger.error("  DEVICE ERROR: %s", exc)
+
+    # Check the violation flag even when the capture failed: a mid-region
+    # reset parks the device blinking, so the stop pulse never fires and the
+    # capture times out.
+    try:
+        time.sleep(POST_CAPTURE_SETTLE_SECONDS)
+        if nvm_symbols:
+            nvm_dict = read_nvm(tc, elf, FLASH_TIMEOUT, nvm_symbols)
+            raise_if_region_violation(nvm_dict, elf)
+            nvm = parse_nvm_output("\n".join(f"{k}={v}" for k, v in nvm_dict.items()))
+        else:
+            check_region_violation(tc, elf, FLASH_TIMEOUT)
+    except RegionViolationError as exc:
+        logger.error("  REGION ENERGY VIOLATION: %s", exc)
+        return execution_time_us, nvm, True
+    except DeviceError as exc:
+        logger.error("  DEVICE ERROR: %s", exc)
+    return execution_time_us, nvm, False
 
 
 MATRIX_COMPILE_ONLY_WARNING = (
@@ -342,49 +395,24 @@ def run_benchmark_matrix(
                 nvm: NvmCounters | None = None
                 execution_time_us: float | None = None
                 region_violation = False
+                attempts = 0
                 if output_dir is not None and saleae_manager is not None:
                     elf = output_dir / f"{bench_name}.elf"
                     if elf.is_file():
-                        from ..device.flash import (
-                            check_region_violation,
-                            raise_if_region_violation,
-                            read_nvm,
-                        )
-
-                        try:
-                            execution_time_us = measure_execution_time(
+                        for attempts in range(1, MEASURE_ATTEMPTS + 1):
+                            execution_time_us, nvm, region_violation = measure_run(
+                                tc,
                                 elf,
                                 saleae_manager,
                                 capture_timeout_seconds,
+                                nvm_symbols if device_debug else None,
                             )
-                        except DeviceError as exc:
-                            logger.error("  DEVICE ERROR: %s", exc)
-
-                        # Check the violation flag even when the capture
-                        # failed: a mid-region reset parks the device
-                        # blinking, so the stop pulse never fires and the
-                        # capture times out.
-                        try:
-                            time.sleep(POST_CAPTURE_SETTLE_SECONDS)
-                            if device_debug and nvm_symbols:
-                                nvm_dict = read_nvm(
-                                    tc,
-                                    elf,
-                                    FLASH_TIMEOUT,
-                                    nvm_symbols,
+                            if execution_time_us is not None and not region_violation:
+                                break
+                            if attempts < MEASURE_ATTEMPTS:
+                                logger.warning(
+                                    "  retrying (%d/%d)", attempts + 1, MEASURE_ATTEMPTS
                                 )
-                                raise_if_region_violation(nvm_dict, elf)
-                                nvm_text = "\n".join(
-                                    f"{k}={v}" for k, v in nvm_dict.items()
-                                )
-                                nvm = parse_nvm_output(nvm_text)
-                            else:
-                                check_region_violation(tc, elf, FLASH_TIMEOUT)
-                        except RegionViolationError as exc:
-                            logger.error("  REGION ENERGY VIOLATION: %s", exc)
-                            region_violation = True
-                        except DeviceError as exc:
-                            logger.error("  DEVICE ERROR: %s", exc)
 
                 # ----- Merge compile output + NVM labels -----
                 full_output = compile_output
@@ -450,6 +478,8 @@ def run_benchmark_matrix(
                 )
                 if execution_time_us is not None:
                     row_fields["execution_time_us"] = str(round(execution_time_us, 2))
+                if attempts:
+                    row_fields["run_attempts"] = attempts
 
                 if had_compilation_error and row_status == "ok":
                     row_status = "link_failed"
@@ -564,10 +594,20 @@ def run_timing_matrix(
                 emit("ok", {"compilation_time_ms": compilation_time_ms})
                 continue
 
-            try:
-                execution_time_us = measure_execution_time(
-                    elf, saleae_manager, capture_timeout_seconds
-                )
+            for attempt in range(1, MEASURE_ATTEMPTS + 1):
+                try:
+                    execution_time_us = measure_execution_time(
+                        elf, saleae_manager, capture_timeout_seconds
+                    )
+                except DeviceError as exc:
+                    logger.error("  DEVICE ERROR: %s", exc)
+                    if attempt < MEASURE_ATTEMPTS:
+                        logger.warning(
+                            "  retrying (%d/%d)", attempt + 1, MEASURE_ATTEMPTS
+                        )
+                        continue
+                    emit("device_error", {"compilation_time_ms": compilation_time_ms})
+                    break
                 logger.info(
                     "  OK  compilation_time=%dms execution_time=%.2fus",
                     compilation_time_ms,
@@ -578,11 +618,10 @@ def run_timing_matrix(
                     {
                         "compilation_time_ms": compilation_time_ms,
                         "execution_time_us": str(round(execution_time_us, 2)),
+                        "run_attempts": attempt,
                     },
                 )
-            except DeviceError as exc:
-                logger.error("  DEVICE ERROR: %s", exc)
-                emit("device_error", {"compilation_time_ms": compilation_time_ms})
+                break
 
     logger.info("")
     logger.info("==========================================")
