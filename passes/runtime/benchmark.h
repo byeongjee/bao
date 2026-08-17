@@ -41,6 +41,10 @@
  * Execution time is measured in post-processing as:
  *   falling edge of the unique short start pulse before the stop pulse →
  *   rising edge of the first long stop pulse.
+ *
+ * A cold power-up adds a sub-microsecond glitch before the start pulse:
+ * P3.4 is high-impedance until timing_gpio_init() clears LOCKLPM5, so it
+ * follows the rising supply rail. The extractor filters pulses below 2 us.
  */
 #ifdef __MSP430__
 #ifndef F_CPU

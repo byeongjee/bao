@@ -66,6 +66,22 @@ class TestExtractTiming:
         with pytest.raises(DeviceError, match="Ambiguous Saleae capture"):
             _extract_timing(csv_path)
 
+    def test_power_up_glitch_is_not_a_start_pulse(self, tmp_path: Path):
+        csv_path = write_capture_csv(
+            tmp_path,
+            [
+                (0.000000000, 0),
+                (0.000500000, 1),
+                (0.000500380, 0),  # 0.38 us glitch while VCC ramps
+                (0.001000000, 1),
+                (0.001010000, 0),
+                (0.379125720, 1),
+                (0.384125720, 0),
+            ],
+        )
+
+        assert _extract_timing(csv_path) == pytest.approx(378115.72)
+
     def test_short_pulses_after_stop_are_ignored(self, tmp_path: Path):
         csv_path = write_capture_csv(
             tmp_path,
