@@ -249,7 +249,7 @@ class TestSaleaeRun:
         )
 
         result = saleae_run(
-            Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0
+            Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0, None
         )
 
         assert result == pytest.approx(378115.72)
@@ -286,7 +286,7 @@ class TestSaleaeRun:
         )
 
         result = saleae_run(
-            Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0
+            Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0, None
         )
 
         assert result == pytest.approx(378115.72)
@@ -328,7 +328,9 @@ class TestSaleaeRun:
         with pytest.raises(
             DeviceError, match="Saleae capture did not complete after 3 attempts"
         ):
-            saleae_run(Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0)
+            saleae_run(
+                Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 60.0, None
+            )
 
         assert sleep_calls == [0.5, 0.5]
         assert manager.calls == 3
@@ -369,7 +371,9 @@ class TestSaleaeRun:
         manager.start_capture.return_value = capture
 
         with pytest.raises(DeviceError, match=r"timed out after 0\.01 seconds"):
-            saleae_run(Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 0.01)
+            saleae_run(
+                Path("/tmp/app.elf"), cast("Manager", manager), 30, 1.0, 0.01, None
+            )
 
         capture.manager.stub.WaitCapture.assert_called_once_with(request, timeout=0.01)
         capture.stop.assert_called_once_with()

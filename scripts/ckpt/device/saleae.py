@@ -24,7 +24,8 @@ if "GRPC_ENABLE_FORK_SUPPORT" not in os.environ:
     os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
 
 from ..errors import DeviceError
-from .flash import flash_and_hold
+from .flash import HeldFlashSession, flash_and_hold
+from .otii import OtiiSession, connect_debugger, isolate_target, power_target
 
 if TYPE_CHECKING:
     from saleae.automation import Capture, Manager
@@ -65,12 +66,28 @@ def discover_saleae() -> Manager:
         ) from exc
 
 
+def _start_target(
+    session: HeldFlashSession, otii: OtiiSession | None, flash_timeout: int
+) -> None:
+    """Start the flashed program: release it under the ez-FET, or cut the
+    ez-FET off and power the target from the Otii."""
+    if otii is None:
+        session.release(flash_timeout)
+        return
+    try:
+        isolate_target(otii)
+    finally:
+        session.abort()
+    power_target(otii)
+
+
 def saleae_run(
     elf_path: Path,
     manager: Manager,
     flash_timeout: int,
     after_trigger_seconds: float,
     capture_timeout_seconds: float,
+    otii: OtiiSession | None,
 ) -> float:
     """Flash ELF, capture GPIO waveform, return execution_time_us.
 
@@ -87,8 +104,10 @@ def saleae_run(
            target stays halted, so no stray pulses can occur while the
            capture is armed
         2. Start Saleae capture (trigger: PULSE_HIGH, min 1 ms)
-        3. Release the mspdebug session — the target resets and free-runs
-           exactly once inside the armed capture window
+        3. Start the target inside the armed capture window: release the
+           mspdebug session so it resets and free-runs exactly once, or —
+           with an Otii in the loop — isolate it from the ez-FET and power
+           it from the Otii main output
         4. Start pulse (~10 us) is captured but does not trigger
         5. Program runs (GPIO LOW — BOR resets are invisible)
         6. Stop pulse (~5 ms) fires the trigger
@@ -153,11 +172,14 @@ def saleae_run(
         try:
             with capture_context as capture:
                 try:
-                    session.release(flash_timeout)
+                    _start_target(session, otii, flash_timeout)
                     _wait_for_capture(capture, capture_timeout_seconds)
                 except Exception:
                     _stop_capture_quietly(capture)
                     raise
+                finally:
+                    if otii is not None:
+                        connect_debugger(otii)
 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     csv_path = Path(tmpdir) / "digital.csv"

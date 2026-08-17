@@ -75,7 +75,7 @@ def run_chunked_benchmarks(
         energy_config = default_energy_config(env, "milp")
 
     with (
-        optional_saleae(TIMING_COMPILE_ONLY_WARNING) as saleae_manager,
+        optional_saleae(TIMING_COMPILE_ONLY_WARNING) as (saleae_manager, otii),
         compilation_workdir(prefix="chunked_bench_") as workdir,
     ):
 
@@ -110,5 +110,6 @@ def run_chunked_benchmarks(
             output_csv=output_csv,
             csv_header=CSV_HEADER,
             saleae_manager=saleae_manager,
+            otii=otii,
             capture_timeout_seconds=capture_timeout_seconds,
         )

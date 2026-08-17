@@ -6,8 +6,10 @@ ez-FET debugger's SBW and 3V3 jumper lines. The target must be isolated
 from the debugger while it runs on replayed power. Benchmark completion and
 timing are measured by the Saleae (see device/saleae.py), not by the Otii.
 
-Continuous-power runs (``ckpt bench``, ``ckpt verify``) use the same wiring
-but need the opposite relay state; see :func:`debugger_connection`.
+Continuous-power runs (``ckpt bench``, ``ckpt verify``) use the same relays:
+the target is flashed through them, then isolated and powered from the Otii
+main output at 3.3 V for the run (see :func:`power_target`). Otherwise the
+ez-FET resets the target over SBW a few seconds after mspdebug releases it.
 
 Requires the ``otii-tcp-client`` package (``uv sync --extra otii``) and the
 ``otii_server`` binary (path via the ``OTII_SERVER_BIN`` environment
@@ -43,6 +45,7 @@ _ISOLATION_SETTLE_SECONDS = 3.0
 _EXP_VOLTAGE = 5.0
 _MAX_CURRENT_A = 0.01
 _VOLTAGE_CLAMP_V = 3.6  # MSP430FR5994 maximum operating voltage
+_TARGET_SUPPLY_V = 3.3
 
 # Warn when the replay schedule slipped further than this behind a sample.
 _PACING_LAG_WARN_SECONDS = 0.005
@@ -219,27 +222,25 @@ def otii_session() -> Iterator[OtiiSession]:
 
 
 @contextmanager
-def debugger_connection() -> Iterator[None]:
-    """Hold the switchboard relays closed for a continuous-power run.
+def debugger_connection() -> Iterator[OtiiSession | None]:
+    """Close the switchboard relays and yield the Otii session for the run.
 
-    ``ckpt bench`` and ``ckpt verify`` power the target from the ez-FET's 3V3
-    rail, which reaches the board through the same relays an intermittent run
-    opens. Closing them here means neither command needs the board rewired.
-
-    A no-op when no Otii is reachable: the board is then wired directly to the
-    ez-FET. The relays stay closed on exit — only an intermittent run opens
-    them.
+    Yields None when no Otii is reachable: the board is then wired directly
+    to the ez-FET. The relays stay closed on exit — only an intermittent run
+    opens them.
     """
     with ExitStack() as stack:
+        session: OtiiSession | None = None
         try:
-            connect_debugger(stack.enter_context(_otii_device()))
+            session = stack.enter_context(_otii_device())
+            connect_debugger(session)
         except DeviceError as exc:
             logger.info(
                 "No Otii switchboard in the loop (%s); assuming a direct "
                 "ez-FET connection",
                 exc,
             )
-        yield
+        yield session
 
 
 def connect_debugger(session: OtiiSession) -> None:
@@ -261,6 +262,13 @@ def isolate_target(session: OtiiSession) -> None:
         logger.info("Opening switchboard relays (target isolated)")
         session.arc.set_gpo(_RELAY_GPO, False)
     time.sleep(_ISOLATION_SETTLE_SECONDS)
+
+
+def power_target(session: OtiiSession) -> None:
+    """Supply the isolated target from the main output at 3.3 V."""
+    with _otii_errors("power on"):
+        session.arc.set_main_voltage(_TARGET_SUPPLY_V)
+        session.arc.set_main(True)
 
 
 def _clamp_voltage(voltage: float) -> float:
