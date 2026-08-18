@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_wait_count,runtime_recovery_boots,result
+cuckoo_filter,board,1,ok,4,9,485,2.18,70450.96,,6,0,256
+cuckoo_filter,board,2,ok,4,9,485,2.98,425541.36,,8,0,256
+cuckoo_filter,board,3,ok,4,9,485,4.08,83056.98,,6,0,256
+cuckoo_filter,board,4,ok,4,9,485,3.39,830106.94,,7,0,256
+cuckoo_filter,board,5,ok,4,9,485,2.66,81635.17,,7,0,256
+cuckoo_filter,board,6,ok,4,9,485,2.58,668460.1,,8,0,256
+cuckoo_filter,board,7,ok,4,9,485,3.52,1848273.65,,7,0,256
+cuckoo_filter,board,8,ok,4,9,485,3.5,837310.43,,11,0,256
+cuckoo_filter,board,9,ok,4,9,485,3.71,877439.13,,7,0,256
+cuckoo_filter,board,10,ok,4,9,485,1.76,59587.08,,5,0,256

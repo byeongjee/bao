@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_wait_count,runtime_recovery_boots,result
+activity_recognition,board,1,ok,3,1,615,2.3,181009.99,,14,0,64
+activity_recognition,board,2,ok,3,1,615,3.19,646930.79,,15,0,64
+activity_recognition,board,3,ok,3,1,615,4.11,258829.85,,21,0,64
+activity_recognition,board,4,ok,3,1,615,5.93,3446640.63,,18,0,64
+activity_recognition,board,5,ok,3,1,615,5.72,3127160.53,,18,1,64
+activity_recognition,board,6,ok,3,1,615,2.99,1096180.83,,18,0,64
+activity_recognition,board,7,ok,3,1,615,4.8,3045703.33,,19,0,64
+activity_recognition,board,8,ok,3,1,615,4.99,2338953.6,,21,1,64
+activity_recognition,board,9,ok,3,1,615,6.21,3359007.98,,16,0,64
+activity_recognition,board,10,ok,3,1,615,1.89,169770.33,,13,0,64
