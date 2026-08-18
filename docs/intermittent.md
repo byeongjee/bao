@@ -19,7 +19,7 @@ of truth for this measurement setup's wiring and software.
 - **MSP430FR5994 LaunchPad** — the board's supply capacitance is 11.5 µF
   (`benchmarks/config_board.json`). The on-board ez-FET stays on host USB the
   whole time; only its jumper lines to the target side are switched.
-- **5.6 kΩ series resistor** — between the Otii main output and the schottky
+- **560 Ω series resistor** — between the Otii main output and the schottky
   diode. It limits the charging current to a realistic harvester level; the
   Otii itself is a stiff voltage source.
 - **Schottky diode** — in series after the resistor, in front of the board
@@ -60,7 +60,7 @@ flowchart LR
     ckpt -->|TCP :1905 via otii_server| OTII
     logic2 -->|USB| saleae
 
-    main -->|5.6 kOhm resistor + schottky diode| mcu
+    main -->|560 Ohm resistor + schottky diode| mcu
     p5v -->|relay power| SB
     gpo2 -->|relay control| SB
     ezfet <-->|"J101 ez-FET side: 3V3, RST, TEST"| relay
@@ -72,7 +72,7 @@ flowchart LR
 
 | From | To | Notes |
 |------|----|-------|
-| Otii main output `+` | Board supply rail | Through the 5.6 kΩ resistor, then the schottky diode (anode toward the Otii, cathode → board) |
+| Otii main output `+` | Board supply rail | Through the 560 Ω resistor, then the schottky diode (anode toward the Otii, cathode → board) |
 | Otii main output `−` | Board GND | Common ground with everything below |
 | Otii `+5V` pin | Switchboard relay power | Via the 14-pin expansion-port connector; relays are unpowered (open) when the Otii is off |
 | Otii `GPO2` (expansion port) | Switchboard relay control | Jumper on the switchboard's 3-pin header set to the GPO2 side; high = relays closed |
@@ -104,7 +104,7 @@ output at a constant 3.3 V for the run, and reconnected for the NVM readback.
 Running the target on the ez-FET's 3V3 rail instead is not reliable — the
 ez-FET resets the target over SBW a few seconds after `mspdebug` releases it
 (see issue #72). For these runs wire the Otii main output **directly** to the
-board supply rail, without the 5.6 kΩ resistor and the schottky diode: at
+board supply rail, without the 560 Ω resistor and the schottky diode: at
 3.3 V the target draws milliamps, and the current-limited harvester path
 cannot hold the rail. Without an Otii both commands fall back to running on
 the ez-FET's 3V3 rail.
