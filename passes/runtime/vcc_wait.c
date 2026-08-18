@@ -1,5 +1,5 @@
 /*
- * wait_until_vcc_full — Block until the supply capacitor reaches 3.3 V.
+ * wait_until_vcc_full — Block until the supply capacitor reaches 3.0 V.
  *
  * Used by the HALT_WAIT halt mode for real intermittent-power evaluation:
  * called at every region boundary (after the PC/SP checkpoint), at
@@ -23,9 +23,12 @@
 
 #ifdef HALT_WAIT
 
-/* Full capacitor = 3.3 V supply. The battery monitor sees AVCC/2 = 1.65 V;
-   against the 2.0 V reference: 4095 * 1.65 / 2.0 = 3378 counts. */
-#define VCC_FULL_ADC_COUNTS 3378
+/* "Full" capacitor = 3.0 V supply: through the series schottky diode the
+   replayed traces only rarely exceed the ~3.5 V needed to reach 3.3 V, so
+   waiting for 3.3 V gates every boundary on a trace peak. The battery
+   monitor sees AVCC/2 = 1.5 V;
+   against the 2.0 V reference: 4095 * 1.5 / 2.0 = 3071 counts. */
+#define VCC_FULL_ADC_COUNTS 3071
 
 /* Sample period in VLO (~9.4 kHz) ticks: ~10 ms. */
 #define SAMPLE_PERIOD_TICKS 94
