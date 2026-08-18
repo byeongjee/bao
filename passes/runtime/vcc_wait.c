@@ -15,7 +15,9 @@
  * so the sleeping board draws only LPM3-level current (~1 uA).
  *
  * Called from the .crt_0010 boot path BEFORE data/BSS initialization,
- * so this file must not use any global variables.
+ * so this file must not use .data/.bss variables; cnt_wait lives in the
+ * .nvm section, which is programmed at flash time and never touched by
+ * the CRT.
  */
 
 #include <msp430.h>
@@ -29,6 +31,12 @@
    monitor sees AVCC/2 = 1.5 V;
    against the 2.0 V reference: 4095 * 1.5 / 2.0 = 3071 counts. */
 #define VCC_FULL_ADC_COUNTS 3071
+
+/* cnt_wait — number of times execution had to stop for energy: boundary
+   (or boot) found the capacitor below the threshold and entered the sleep
+   loop. This is the intermittent-power event that RockClimb's cost model
+   calls a wait; a real brownout is counted separately by cnt_recovery. */
+__attribute__((section(".nvm"))) uint32_t cnt_wait = 0;
 
 /* Sample period in VLO (~9.4 kHz) ticks: ~10 ms. */
 #define SAMPLE_PERIOD_TICKS 94
@@ -76,6 +84,7 @@ void wait_until_vcc_full(void) {
        samples read far below the threshold and VCC only rises while
        waiting, so early inaccuracy is harmless. */
     if (sample_avcc_half() < VCC_FULL_ADC_COUNTS) {
+        cnt_wait++;
         TA0CCR0 = SAMPLE_PERIOD_TICKS;
         TA0CCTL0 = CCIE;
         TA0CTL = TASSEL__ACLK | MC__UP | TACLR;
