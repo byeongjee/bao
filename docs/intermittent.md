@@ -131,7 +131,8 @@ For each (benchmark, capacitor, trace):
    Execution time is the first start-pulse falling edge to the stop-pulse
    rising edge, outages included.
 4. **Readback** — main off, relays closed again, NVM read via `mspdebug`
-   (`__nvm_done`, `__nvm_violation`, `cnt_recovery`, and with
+   (`__nvm_done`, `__nvm_violation`, `cnt_wait` — boundaries/boots that found
+   the capacitor below the threshold and slept — `cnt_recovery`, and with
    `--device-debug` — off by default, its counter updates and UART cost
    energy — also `cnt_boundary` and the result). Completed and violated
    runs park at boot, so their NVM state survives the reconnect.

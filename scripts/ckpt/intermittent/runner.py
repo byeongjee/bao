@@ -86,13 +86,20 @@ CSV_HEADER: list[str] = [
     "replay_seconds",
     "execution_time_us",
     "runtime_region_boundary_calls",
+    "runtime_wait_count",
     "runtime_recovery_boots",
     "result",
 ]
 
-# Every runtime defines these unconditionally; the remaining counters exist
-# only in DEVICE_DEBUG builds.
-_BASE_NVM_SYMBOLS = ["__nvm_violation", "__nvm_done", "__nvm_result", "cnt_recovery"]
+# Every runtime defines these unconditionally (cnt_wait comes from the
+# HALT_WAIT runtime); the remaining counters exist only in DEVICE_DEBUG builds.
+_BASE_NVM_SYMBOLS = [
+    "__nvm_violation",
+    "__nvm_done",
+    "__nvm_result",
+    "cnt_wait",
+    "cnt_recovery",
+]
 _DEBUG_NVM_SYMBOLS = ["cnt_boundary"]
 
 
@@ -536,6 +543,7 @@ def run_intermittent_benchmarks(
                     # relays close, so its counters and result no longer
                     # describe the replayed run — blank them.
                     if status in ("ok", "region_violation"):
+                        fields["runtime_wait_count"] = values.get("cnt_wait")
                         fields["runtime_recovery_boots"] = values.get("cnt_recovery")
                         if status == "ok":
                             fields["result"] = values.get("__nvm_result")
