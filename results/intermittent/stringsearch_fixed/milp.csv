@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_recovery_boots,result
+stringsearch_fixed,board,1,ok,4,357,743,8.99,529659.37,,0,20
+stringsearch_fixed,board,2,ok,4,357,743,17.17,4213289.04,,0,20
+stringsearch_fixed,board,3,ok,4,357,743,28.88,2205164.68,,0,20
+stringsearch_fixed,board,4,ok,4,357,743,20.81,1840173.7,,0,20
+stringsearch_fixed,board,5,ok,4,357,743,13.81,882967.02,,0,20
+stringsearch_fixed,board,6,ok,4,357,743,12.51,6616750.19,,1,20
+stringsearch_fixed,board,7,ok,4,357,743,20.9,16319420.27,,4,20
+stringsearch_fixed,board,8,ok,4,357,743,22.41,1173363.08,,0,20
+stringsearch_fixed,board,9,ok,4,357,743,24.01,7579066.4,,2,20
+stringsearch_fixed,board,10,ok,4,357,743,5.45,529733.36,,0,20

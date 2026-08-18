@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_recovery_boots,result
+aes,board,1,ok,5,225,593,8.53,153301.77,,0,107
+aes,board,2,ok,5,225,593,15.41,2477564.65,,0,107
+aes,board,3,ok,5,225,593,26.83,141016.71,,0,107
+aes,board,4,ok,5,225,593,20.21,1406091.34,,0,107
+aes,board,5,ok,5,225,593,13.11,214669.34,,0,107
+aes,board,6,ok,5,225,593,6.2,227248.54,,0,107
+aes,board,7,ok,5,225,593,4.71,140998.03,,0,107
+aes,board,8,ok,5,225,593,21.34,153141.6,,0,107
+aes,board,9,ok,5,225,593,23.61,7188946.15,,2,107
+aes,board,10,ok,5,225,593,5.1,153131.23,,0,107

@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_recovery_boots,result
+sha256_fixed,board,1,ok,3,3,758,8.47,31760.46,,0,244
+sha256_fixed,board,2,ok,3,3,758,12.94,31800.86,,0,244
+sha256_fixed,board,3,ok,3,3,758,26.71,19555.99,,0,244
+sha256_fixed,board,4,ok,3,3,758,19.0,31792.89,,0,244
+sha256_fixed,board,5,ok,3,3,758,13.0,31710.6,,0,244
+sha256_fixed,board,6,ok,3,3,758,5.96,31751.51,,0,244
+sha256_fixed,board,7,ok,3,3,758,4.62,19500.92,,0,244
+sha256_fixed,board,8,ok,3,3,758,21.33,31710.94,,0,244
+sha256_fixed,board,9,ok,3,3,758,23.43,7063210.29,,2,244
+sha256_fixed,board,10,ok,3,3,758,5.0,31827.97,,0,244

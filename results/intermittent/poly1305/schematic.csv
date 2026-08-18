@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_recovery_boots,result
+poly1305,board,1,ok,5,3,811,8.35,2378.35,,0,108
+poly1305,board,2,ok,5,3,811,12.91,2378.56,,0,108
+poly1305,board,3,ok,5,3,811,26.71,2378.71,,0,108
+poly1305,board,4,ok,5,3,811,18.89,2378.72,,0,108
+poly1305,board,5,ok,5,3,811,12.87,2378.72,,0,108
+poly1305,board,6,ok,5,3,811,5.91,2378.65,,0,108
+poly1305,board,7,ok,5,3,811,4.55,2378.78,,0,108
+poly1305,board,8,ok,5,3,811,21.3,2378.63,,0,108
+poly1305,board,9,ok,5,3,811,16.41,2378.83,,0,108
+poly1305,board,10,ok,5,3,811,4.94,2378.69,,0,108

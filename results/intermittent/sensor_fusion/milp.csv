@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_recovery_boots,result
+sensor_fusion,board,1,ok,2,17,705,8.62,216133.74,,0,613
+sensor_fusion,board,2,ok,2,17,705,15.51,2575017.09,,0,613
+sensor_fusion,board,3,ok,2,17,705,26.93,203632.38,,0,613
+sensor_fusion,board,4,ok,2,17,705,20.44,1517621.11,,0,613
+sensor_fusion,board,5,ok,2,17,705,13.2,302155.57,,0,613
+sensor_fusion,board,6,ok,2,17,705,6.3,363850.52,,0,613
+sensor_fusion,board,7,ok,2,17,705,4.75,203816.39,,0,613
+sensor_fusion,board,8,ok,2,17,705,22.05,893364.27,,0,613
+sensor_fusion,board,9,ok,2,17,705,23.51,7254147.73,,2,613
+sensor_fusion,board,10,ok,2,17,705,5.06,216184.82,,0,613
