@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_wait_count,runtime_recovery_boots,result
+chacha20,board,1,ok,3,3,0,2.04,15009.7,,2,0,97
+chacha20,board,2,ok,3,3,0,2.81,246515.96,,4,0,97
+chacha20,board,3,ok,3,3,0,3.99,26000.31,,3,0,97
+chacha20,board,4,ok,3,3,0,3.24,783847.25,,4,0,97
+chacha20,board,5,ok,3,3,0,2.6,26006.45,,3,0,97
+chacha20,board,6,ok,3,3,0,1.85,25986.73,,3,0,97
+chacha20,board,7,ok,3,3,0,2.61,945173.56,,3,0,97
+chacha20,board,8,ok,3,3,0,3.35,769633.87,,7,0,97
+chacha20,board,9,ok,3,3,0,3.55,833939.75,,4,0,97
+chacha20,board,10,ok,3,3,0,1.73,14994.2,,2,0,97

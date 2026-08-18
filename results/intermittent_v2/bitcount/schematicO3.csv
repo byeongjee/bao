@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_wait_count,runtime_recovery_boots,result
+bitcount,board,1,ok,3,2,707,2.15,117346.94,,9,0,14121
+bitcount,board,2,ok,3,2,707,3.14,558409.92,,10,0,14121
+bitcount,board,3,ok,3,2,707,4.08,141947.92,,9,0,14121
+bitcount,board,4,ok,3,2,707,5.14,2625368.67,,10,0,14121
+bitcount,board,5,ok,3,2,707,4.4,1858025.89,,10,0,14121
+bitcount,board,6,ok,3,2,707,2.53,715399.3,,11,0,14121
+bitcount,board,7,ok,3,2,707,3.74,2026771.6,,11,0,14121
+bitcount,board,8,ok,3,2,707,3.51,884109.66,,14,0,14121
+bitcount,board,9,ok,3,2,707,3.64,924154.99,,10,0,14121
+bitcount,board,10,ok,3,2,707,1.81,117408.84,,9,0,14121
