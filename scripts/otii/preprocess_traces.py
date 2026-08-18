@@ -2,14 +2,18 @@
 """Turn raw 1 kHz Mementos voltage traces into replay-ready traces.
 
     uv run python scripts/otii/preprocess_traces.py benchmarks/traces/original/[0-9]*.txt \
-        -o benchmarks/traces --vmax 3.6 --repeat 8
+        -o benchmarks/traces --vmax 3.6 --speedup 10 --repeat 80
 
-Per trace, in order: block-average to --rate, scale the traces listed in
-SCALE_TO_LEVEL, clip to --vmax, repeat --repeat times back to back.
+Per trace, in order: compress time by --speedup, block-average to --rate,
+scale the traces listed in SCALE_TO_LEVEL, clip to --vmax, repeat --repeat
+times back to back.
 
-Each output sample is the mean of the corresponding block of input samples
-(e.g. 20 samples for 50 Hz), which acts as the anti-aliasing filter; picking
-every 20th sample instead would alias fast spikes onto the output grid.
+--speedup plays the recording that many times faster than real time (the
+Mementos walks have a power failure only every 5-50 s, far slower than the
+benchmarks run). Each output sample is the mean of the corresponding block of
+input samples (e.g. 20 samples for 50 Hz at --speedup 1, 200 at --speedup
+10), which acts as the anti-aliasing filter; picking every 20th sample
+instead would alias fast spikes onto the output grid.
 Writes ``<out>/<n>.csv`` with time_s,voltage_v columns.
 """
 
@@ -63,6 +67,12 @@ def main():
     parser.add_argument("-o", "--out-dir", required=True, help="output directory")
     parser.add_argument("--rate", type=float, default=50.0, help="target rate in Hz")
     parser.add_argument(
+        "--speedup",
+        type=float,
+        default=1.0,
+        help="compress time by this factor (replay the recording this many times faster)",
+    )
+    parser.add_argument(
         "--vmax", type=float, default=None, help="clip output voltages to this maximum"
     )
     parser.add_argument(
@@ -76,9 +86,16 @@ def main():
     if args.repeat < 1:
         raise SystemExit("--repeat must be at least 1")
 
-    factor = round(SAMPLE_RATE / args.rate)
-    if not np.isclose(SAMPLE_RATE / args.rate, factor):
-        raise SystemExit(f"rate {args.rate} must divide {SAMPLE_RATE:.0f} Hz evenly")
+    if args.speedup <= 0:
+        raise SystemExit("--speedup must be positive")
+
+    input_rate = SAMPLE_RATE * args.speedup
+    factor = round(input_rate / args.rate)
+    if not np.isclose(input_rate / args.rate, factor):
+        raise SystemExit(
+            f"rate {args.rate} must divide {input_rate:g} Hz "
+            f"({SAMPLE_RATE:.0f} Hz x speedup {args.speedup:g}) evenly"
+        )
 
     os.makedirs(args.out_dir, exist_ok=True)
     for path in args.traces:
@@ -96,7 +113,7 @@ def main():
         write_csv(out_path, repeated, args.rate)
         print(
             f"{path} -> {out_path}: {len(voltage)} samples @ {SAMPLE_RATE:.0f} Hz "
-            f"-> {len(repeated)} @ {args.rate:g} Hz"
+            f"(x{args.speedup:g}) -> {len(repeated)} @ {args.rate:g} Hz"
         )
 
 
