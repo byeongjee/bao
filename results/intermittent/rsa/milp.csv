@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_recovery_boots,result
+rsa,board,1,ok,19,1599,841,8.99,521860.87,,0,32
+rsa,board,2,ok,19,1599,841,17.21,4212452.3,,0,32
+rsa,board,3,ok,19,1599,841,28.87,2212068.85,,0,32
+rsa,board,4,ok,19,1599,841,20.74,1842664.69,,0,32
+rsa,board,5,ok,19,1599,841,13.81,931972.35,,0,32
+rsa,board,6,ok,19,1599,841,12.6,6655209.71,,1,32
+rsa,board,7,ok,19,1599,841,20.84,16328439.13,,4,32
+rsa,board,8,ok,19,1599,841,22.34,1182071.74,,0,32
+rsa,board,9,ok,19,1599,841,23.91,7556080.32,,2,32
+rsa,board,10,ok,19,1599,841,5.5,510495.61,,0,32

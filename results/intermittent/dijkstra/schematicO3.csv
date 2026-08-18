@@ -1,0 +1,11 @@
+benchmark,capacitor,trace,status,region_boundaries,compilation_time_ms,profiling_time_ms,replay_seconds,execution_time_us,runtime_region_boundary_calls,runtime_recovery_boots,result
+dijkstra,board,1,ok,2,2,876,8.59,209086.96,,0,3788
+dijkstra,board,2,ok,2,2,876,15.51,2533177.52,,0,3788
+dijkstra,board,3,ok,2,2,876,26.89,160186.99,,0,3788
+dijkstra,board,4,ok,2,2,876,20.44,1534454.26,,0,3788
+dijkstra,board,5,ok,2,2,876,13.19,282920.38,,0,3788
+dijkstra,board,6,ok,2,2,876,6.31,332173.14,,0,3788
+dijkstra,board,7,ok,2,2,876,4.71,160171.99,,0,3788
+dijkstra,board,8,ok,2,2,876,22.06,825719.66,,0,3788
+dijkstra,board,9,ok,2,2,876,23.6,7218647.39,,2,3788
+dijkstra,board,10,ok,2,2,876,5.06,184785.06,,0,3788
