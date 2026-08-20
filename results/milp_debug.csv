@@ -1,7 +1,7 @@
 benchmark,capacitor,status,basic_blocks,edges,abstract_cfg_blocks,abstract_cfg_edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,candidate_globals,milp_allocation_mode,milp_variables,milp_constraints,milp_presolved_variables,milp_presolved_constraints,optimal_solution,distributed_checkpoints_inserted,vm_placed_globals,vm_placed_global_names,milp_solve_time_ms,result,run_attempts
-aes-5uF,5uF,ok,26,35,9,10,5,253,48176,909,26690.81,12,0,0,3,regional,2475,10033,75,168,yes,51,0,,27,107,1
-aes-10uF,10uF,ok,26,35,9,10,5,239,48624,672,26361.64,6,0,0,3,regional,2475,10033,86,194,yes,51,0,,30,107,1
-aes-50uF,50uF,ok,20,27,5,4,1,113,42112,608,27078.01,0,0,0,3,regional,1195,4341,28,34,yes,0,2,g_ctx:5;g_buf:5,8,107,1
+aes-5uF,5uF,ok,26,35,9,10,4,219,47456,416,105510.7,48,0,0,3,regional,2475,10033,61,134,yes,49,0,,31,107,1
+aes-10uF,10uF,ok,26,35,9,10,4,203,47936,389,104862.21,20,0,0,3,regional,2475,10033,61,133,yes,49,0,,27,107,1
+aes-50uF,50uF,ok,26,35,9,10,5,220,49456,451,104547.71,5,0,0,3,regional,2475,10033,80,177,yes,51,1,g_ctx:3,38,107,1
 crc-5uF,5uF,ok,11,15,8,9,3,13,37024,402,30044.6,17,0,0,1,regional,146,540,30,72,yes,0,0,,4,20431,1
 crc-10uF,10uF,ok,9,12,6,6,2,7,36208,1863,30156.8,8,0,0,1,regional,110,397,21,48,yes,0,0,,2,20431,1
 crc-50uF,50uF,ok,9,12,6,6,2,10,36096,428,30049.96,2,0,0,1,regional,110,397,22,48,yes,0,0,,3,20431,1

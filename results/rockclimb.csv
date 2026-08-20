@@ -1,7 +1,7 @@
 benchmark,capacitor,status,basic_blocks,edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,result,run_attempts
-aes-5uF,5uF,ok,373,552,15,53,33472,0,41731.19,0,,1
-aes-10uF,10uF,ok,401,594,17,58,34000,0,41482.93,0,,1
-aes-50uF,50uF,ok,401,594,17,59,33968,0,41482.85,0,,1
+aes-5uF,5uF,ok,373,552,15,6,32928,0,171503.31,3626,107,1
+aes-10uF,10uF,ok,401,594,17,6,33632,0,170436.57,3620,107,1
+aes-50uF,50uF,ok,401,594,17,6,33728,0,170443.92,3620,107,1
 crc-5uF,5uF,ok,225,309,8,2,24144,0,49373.59,1593,20431,1
 crc-10uF,10uF,ok,225,309,8,2,24128,0,49373.11,1593,20431,1
 crc-50uF,50uF,ok,225,309,8,2,24272,0,49375.21,1593,20431,1
