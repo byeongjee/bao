@@ -30,6 +30,7 @@ typedef struct {
 
 poly1305_ctx_t g_ctx;
 uint8_t g_hash[16] __attribute__((section(".fram")));
+uint8_t g_msg[128];
 
 /* --- Const data (no annotation) --- */
 
@@ -40,6 +41,7 @@ static const uint8_t key[32] = {0x85, 0xd6, 0xbe, 0x78, 0x57, 0x55, 0x6d, 0x33, 
 
 /* 128-byte test input */
 #define TEST_DATA_LEN 128
+#define NUM_MESSAGES 256
 static const uint8_t test_data[TEST_DATA_LEN] = {
     0x43, 0x72, 0x79, 0x70, 0x74, 0x6f, 0x67, 0x72, 0x61, 0x70, 0x68, 0x69, 0x63, 0x20, 0x46, 0x6f,
     0x72, 0x75, 0x6d, 0x20, 0x52, 0x65, 0x73, 0x65, 0x61, 0x72, 0x63, 0x68, 0x20, 0x47, 0x72, 0x6f,
@@ -256,9 +258,25 @@ FORCE_INLINE void poly1305_final(poly1305_ctx_t *ctx, uint8_t mac[16]) {
 
 __attribute__((noinline)) int main(void) {
     BENCH_INIT();
-    poly1305_init(&g_ctx, key);
-    poly1305_update(&g_ctx, test_data, TEST_DATA_LEN);
-    poly1305_final(&g_ctx, g_hash);
+    uint32_t iter, i;
+
+    for (i = 0; i < TEST_DATA_LEN; i++) {
+        __loop_tripcount(TEST_DATA_LEN);
+        g_msg[i] = test_data[i];
+    }
+
+    /* MAC a chain of messages: each MAC is folded back into the next message. */
+    for (iter = 0; iter < NUM_MESSAGES; iter++) {
+        __loop_tripcount(NUM_MESSAGES);
+        poly1305_init(&g_ctx, key);
+        poly1305_update(&g_ctx, g_msg, TEST_DATA_LEN);
+        poly1305_final(&g_ctx, g_hash);
+        for (i = 0; i < 16; i++) {
+            __loop_tripcount(16);
+            g_msg[i] ^= g_hash[i];
+        }
+    }
+
     BENCH_EXIT((int)g_hash[0]);
     return (int)g_hash[0];
 }
