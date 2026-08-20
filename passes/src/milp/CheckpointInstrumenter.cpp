@@ -316,27 +316,9 @@ unsigned CheckpointInstrumenter::insertRegionBoundaries(llvm::Function &F,
                     // materialized.
                     assert(state.getIneligLiveIn(&BB).count(V) &&
                            "solver-ordered save must be live-in at the boundary");
-                    // SSA value: unified commit via GetValueInMiddleOfBlock.
                     auto backupIt = nvmBackupMap_.find(V);
                     assert(backupIt != nvmBackupMap_.end() && "SSA commit requires an NVM backup");
-                    auto *defInst = llvm::cast<llvm::Instruction>(V);
-                    llvm::SSAUpdater commitUpdater;
-                    commitUpdater.Initialize(V->getType(), "ssa.commit");
-                    // For PHI nodes, register incoming values at predecessor
-                    // blocks.  AddAvailableValue(BB, V) marks V at BB's EXIT,
-                    // but GetValueInMiddleOfBlock(BB) queries BB's ENTRY (from
-                    // predecessors).  A PHI defined at BB's entry is not
-                    // reachable from predecessors via its own SSA name — only
-                    // the incoming operands are.
-                    if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(defInst)) {
-                        for (unsigned i = 0; i < PHI->getNumIncomingValues(); ++i)
-                            commitUpdater.AddAvailableValue(PHI->getIncomingBlock(i),
-                                                            PHI->getIncomingValue(i));
-                    } else {
-                        commitUpdater.AddAvailableValue(defInst->getParent(), V);
-                    }
-                    llvm::Value *reachingVal = commitUpdater.GetValueInMiddleOfBlock(&BB);
-                    builder.CreateStore(reachingVal, backupIt->second);
+                    builder.CreateStore(V, backupIt->second);
                 }
                 inserted++;
             }
