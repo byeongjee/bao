@@ -42,7 +42,7 @@ class SchematicStateAnalysis {
 
     unsigned getVarSizeBytes(llvm::Value *v) const;
 
-    // -- Strict-analysis diagnostics --
+    // -- Unresolved-call diagnostics --
 
     bool hasAnalysisErrors() const { return !analysisErrors_.empty(); }
     const std::vector<std::string> &getAnalysisErrors() const { return analysisErrors_; }
@@ -71,8 +71,7 @@ class SchematicStateAnalysis {
     std::vector<std::string> analysisErrors_;
 
     bool isAllowedDirectCall(const llvm::CallBase &CB) const;
-    bool validateInstructionForStrictMode(const llvm::Instruction &I);
-    void reportStrictError(const llvm::Instruction &I, const std::string &reason);
+    void validateCalls();
 
     void identifyCandidates();
     void computeAccessMaps();

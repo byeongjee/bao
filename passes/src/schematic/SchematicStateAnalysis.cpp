@@ -10,7 +10,6 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -31,6 +30,7 @@ static bool isWhitelistedHelperName(llvm::StringRef N) {
 SchematicStateAnalysis::SchematicStateAnalysis(llvm::Function &F, llvm::AAResults &AA)
     : F_(F), AA_(AA) {
     identifyCandidates();
+    validateCalls();
     computeAccessMaps();
 }
 
@@ -169,41 +169,24 @@ bool SchematicStateAnalysis::isAllowedDirectCall(const llvm::CallBase &CB) const
     return false;
 }
 
-void SchematicStateAnalysis::reportStrictError(const llvm::Instruction &I,
-                                               const std::string &reason) {
-    std::string instStr;
-    llvm::raw_string_ostream rso(instStr);
-    I.print(rso);
+// Unresolved pointer targets on loads/stores/mem intrinsics are not errors
+// here: AA-based counting in computeAccessMaps() tracks those accesses via
+// getModRefInfo. Only calls with unknown side effects are rejected.
+void SchematicStateAnalysis::validateCalls() {
+    for (llvm::BasicBlock &BB : F_) {
+        for (llvm::Instruction &I : BB) {
+            auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+            if (!CB || isAllowedDirectCall(*CB))
+                continue;
 
-    const auto *BB = I.getParent();
-    std::string blockName = BB ? getBlockName(*BB, F_) : "<unknown-bb>";
-
-    std::string msg = "Error: unresolved memory effect in function '" + F_.getName().str() +
-                      "', block '" + blockName + "': " + reason + " | inst=" + rso.str();
-    analysisErrors_.push_back(std::move(msg));
-}
-
-bool SchematicStateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I) {
-    if (auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
-        if (!isAllowedDirectCall(*CB)) {
-            reportStrictError(I, "call target/effects are unresolved in strict mode");
-            return false;
+            std::string instStr;
+            llvm::raw_string_ostream rso(instStr);
+            I.print(rso);
+            analysisErrors_.push_back("Error: unresolved call in function '" + F_.getName().str() +
+                                      "', block '" + getBlockName(BB, F_) +
+                                      "': target/effects cannot be analyzed | inst=" + rso.str());
         }
-        return true;
     }
-
-    // For loads, stores, and mem intrinsics: even when getUnderlyingObject
-    // cannot resolve the pointer to a specific candidate (common at O0 where
-    // pointers pass through alloca memory), AA-based counting in
-    // computeAccessMaps() still correctly tracks these accesses via
-    // getModRefInfo. So unresolved pointer targets are not errors for data
-    // access instructions — only for calls with unknown side effects.
-    if (llvm::isa<llvm::LoadInst>(&I) || llvm::isa<llvm::StoreInst>(&I) ||
-        llvm::isa<llvm::MemIntrinsic>(&I)) {
-        return true;
-    }
-
-    return true;
 }
 
 void SchematicStateAnalysis::computeAccessMaps() {
@@ -214,8 +197,6 @@ void SchematicStateAnalysis::computeAccessMaps() {
         const llvm::BasicBlock *BBKey = &BB;
 
         for (llvm::Instruction &I : BB) {
-            validateInstructionForStrictMode(I);
-
             // An isolated call's transitive memory effects belong to the callee
             // (folded onto call_entry's energy), not to the call site. Skip it so
             // call blocks have empty access maps and getBlockExecEnergy returns
