@@ -22,7 +22,7 @@ typedef uint32_t crc;
 
 /* Repeat the original 256-byte input to lengthen the timed workload
  * without changing the benchmark structure. */
-#define CRC_TEST_DATA_REPEATS 4
+#define CRC_TEST_DATA_REPEATS 16
 #define TEST_DATA_LEN (256 * CRC_TEST_DATA_REPEATS)
 
 #define CRC_TEST_DATA_256                                                                          \
@@ -46,10 +46,10 @@ typedef uint32_t crc;
         0x00
 
 static const uint8_t test_data[TEST_DATA_LEN] = {
-    CRC_TEST_DATA_256,
-    CRC_TEST_DATA_256,
-    CRC_TEST_DATA_256,
-    CRC_TEST_DATA_256,
+    CRC_TEST_DATA_256, CRC_TEST_DATA_256, CRC_TEST_DATA_256, CRC_TEST_DATA_256,
+    CRC_TEST_DATA_256, CRC_TEST_DATA_256, CRC_TEST_DATA_256, CRC_TEST_DATA_256,
+    CRC_TEST_DATA_256, CRC_TEST_DATA_256, CRC_TEST_DATA_256, CRC_TEST_DATA_256,
+    CRC_TEST_DATA_256, CRC_TEST_DATA_256, CRC_TEST_DATA_256, CRC_TEST_DATA_256,
 };
 
 /* Mutable global: CRC lookup table */

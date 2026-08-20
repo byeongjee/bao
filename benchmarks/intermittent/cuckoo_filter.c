@@ -5,8 +5,9 @@
 
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
-#define NUM_BUCKETS 256 // must be a power of 2
+#define NUM_BUCKETS 1024 // must be a power of 2
 #define MAX_RELOCATIONS 8
+#define NUM_ROUNDS 4
 
 typedef uint16_t value_t;
 typedef uint16_t hash_t;
@@ -145,36 +146,42 @@ __attribute__((noinline)) int main() {
     BENCH_INIT();
     lfsr_state = 0xACE1u;
 
-    // Clear Filter
-    for (int i = 0; i < NUM_BUCKETS; i++) {
-        __loop_tripcount(NUM_BUCKETS); // 256 iterations
-        filter[i] = 0;
-    }
-
     value_t key = INIT_KEY;
     volatile unsigned inserts = 0;
-
-    // 1. Insertion Phase
-    for (int i = 0; i < NUM_KEYS; ++i) {
-        __loop_tripcount(NUM_KEYS); // 128 iterations
-        key = generate_key(key);
-        bool success = insert(filter, key);
-
-        if (success)
-            inserts++;
-    }
-
-    // 2. Verification Phase
-    key = INIT_KEY; // Reset key generator
     volatile unsigned found = 0;
 
-    for (int i = 0; i < NUM_KEYS; ++i) {
-        __loop_tripcount(NUM_KEYS); // 128 iterations
-        key = generate_key(key);
-        bool member = lookup(filter, key);
+    // Each round fills a fresh filter with the next NUM_KEYS keys of the chain.
+    for (int round = 0; round < NUM_ROUNDS; ++round) {
+        __loop_tripcount(NUM_ROUNDS);
 
-        if (member)
-            found++;
+        // Clear Filter
+        for (int i = 0; i < NUM_BUCKETS; i++) {
+            __loop_tripcount(NUM_BUCKETS); // 1024 iterations
+            filter[i] = 0;
+        }
+
+        value_t start_key = key;
+
+        // 1. Insertion Phase
+        for (int i = 0; i < NUM_KEYS; ++i) {
+            __loop_tripcount(NUM_KEYS); // 512 iterations
+            key = generate_key(key);
+            bool success = insert(filter, key);
+
+            if (success)
+                inserts++;
+        }
+
+        // 2. Verification Phase
+        key = start_key; // Reset key generator to this round's start
+        for (int i = 0; i < NUM_KEYS; ++i) {
+            __loop_tripcount(NUM_KEYS); // 512 iterations
+            key = generate_key(key);
+            bool member = lookup(filter, key);
+
+            if (member)
+                found++;
+        }
     }
 
     BENCH_EXIT((int)(inserts + found));

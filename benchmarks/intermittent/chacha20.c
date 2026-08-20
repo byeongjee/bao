@@ -14,6 +14,7 @@
 #define FORCE_INLINE static inline __attribute__((always_inline))
 
 #define INPUT_SIZE 64
+#define NUM_BLOCKS 32
 
 /* --- ChaCha20 types --- */
 
@@ -158,8 +159,12 @@ __attribute__((noinline)) int main(void) {
         enc_output[i] = test_data[i];
     }
 
-    /* Encrypt */
-    ChaCha20_xor(&ctx, enc_output, enc_output, INPUT_SIZE);
+    /* Encrypt repeatedly in place; the block counter advances across calls,
+     * so this is a NUM_BLOCKS-block keystream applied to a chained buffer. */
+    for (i = 0; i < NUM_BLOCKS; i++) {
+        __loop_tripcount(NUM_BLOCKS);
+        ChaCha20_xor(&ctx, enc_output, enc_output, INPUT_SIZE);
+    }
 
     BENCH_EXIT((int)enc_output[0]);
     return (int)enc_output[0];
