@@ -1,5 +1,5 @@
 benchmark,status,compilation_time_ms,execution_time_us,run_attempts
-aes,ok,388,25537.59,1
+aes,ok,781,101393.22,1
 crc,ok,520,29595.65,1
 rsa,ok,365,43693.48,1
 dijkstra,ok,348,217097.52,1
