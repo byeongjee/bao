@@ -7,6 +7,8 @@ analysis, and device interaction.
 from __future__ import annotations
 
 import logging
+import signal
+import sys
 import time
 from pathlib import Path
 
@@ -253,6 +255,11 @@ def main(ctx: click.Context, log_level: str) -> None:
     from .toolchain import Toolchain
 
     setup_logging(log_level)
+
+    # Unwind on SIGTERM so context managers run their cleanup — otherwise a
+    # plain `kill` leaves an in-progress Saleae recording open in Logic 2,
+    # which then refuses to start a new capture session.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
 
     env = ProjectEnv.from_environ()
     tc = Toolchain.resolve(env)
