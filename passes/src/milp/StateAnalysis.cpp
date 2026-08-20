@@ -2,10 +2,14 @@
 #include "milp/LivenessAnalysis.h"
 
 #include "common/BlockUtils.h"
+#include "common/Logger.h"
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -21,6 +25,54 @@ namespace {
 static bool isWhitelistedHelperName(llvm::StringRef N) {
     return N.starts_with("__mspabi_") || N.starts_with("__aeabi_") || N.starts_with("__div") ||
            N.starts_with("__udiv") || N.starts_with("__mul") || N.starts_with("__mod");
+}
+
+static bool isEligibleGlobal(const llvm::GlobalVariable &GV) {
+    return !GV.isDeclaration() && !GV.isConstant() && GV.getValueType()->isSized() &&
+           !GV.getName().starts_with("llvm.") && !GV.getName().starts_with("__nvm_") &&
+           !GV.getName().starts_with("__vm_shadow_");
+}
+
+/// The unique eligible global a load/store directly accesses, or null.
+static llvm::GlobalVariable *eligibleAccessTarget(const llvm::Instruction &I) {
+    const llvm::Value *Ptr = nullptr;
+    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I))
+        Ptr = LI->getPointerOperand();
+    else if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I))
+        Ptr = SI->getPointerOperand();
+    else
+        return nullptr;
+
+    // Same resolution the instrumenter uses: it looks through phi/select, so
+    // a global reached only through a pointer induction variable is still
+    // found.
+    llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(Ptr);
+    return GV && isEligibleGlobal(*GV) ? GV : nullptr;
+}
+
+/// Whether I may read or write GV through a pointer that does not resolve to
+/// a unique global.
+static bool mayAccessThroughUnresolvedPointer(llvm::AAResults &AA, const llvm::Instruction &I,
+                                              llvm::GlobalVariable &GV) {
+    llvm::ModRefInfo MRI = AA.getModRefInfo(&I, llvm::MemoryLocation::getBeforeOrAfter(&GV));
+    if (MRI == llvm::ModRefInfo::NoModRef)
+        return false;
+
+    auto unresolved = [](const llvm::Value *Ptr) { return !resolveUniqueUnderlyingGlobal(Ptr); };
+
+    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I))
+        return unresolved(LI->getPointerOperand()) && llvm::isRefSet(MRI);
+    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I))
+        return unresolved(SI->getPointerOperand()) && llvm::isModSet(MRI);
+    if (auto *MT = llvm::dyn_cast<llvm::MemTransferInst>(&I))
+        return (unresolved(MT->getRawDest()) && llvm::isModSet(MRI)) ||
+               (unresolved(MT->getSource()) && llvm::isRefSet(MRI));
+    if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I))
+        return unresolved(MI->getRawDest()) && llvm::isModSet(MRI);
+    if (llvm::isa<llvm::CallBase>(I) || llvm::isa<llvm::AllocaInst>(I) ||
+        llvm::isa<llvm::PHINode>(I))
+        return false;
+    return I.mayReadOrWriteMemory();
 }
 
 } // namespace
@@ -40,6 +92,7 @@ const std::set<llvm::Value *> StateAnalysis::emptyValueSet_;
 StateAnalysis::StateAnalysis(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysis &cfg)
     : F_(F), AA_(AA), cfg_(cfg) {
     identifyVMObjs();
+    validateCalls();
     identifyIneligibleObjs();
     identifyIneligibleSSAValues();
     computeAccessMaps();
@@ -122,53 +175,44 @@ unsigned StateAnalysis::getVarSizeBytes(llvm::Value *v) const {
 
 // ---- Private implementation ----
 
+// The candidate set is the directly-accessed globals minus those an
+// unresolved access may alias: such a global cannot be redirected to a VM
+// shadow consistently, so it is conservatively kept in NVM.
 void StateAnalysis::identifyVMObjs() {
-    llvm::Module *M = F_.getParent();
-    if (!M)
-        return;
+    std::vector<llvm::GlobalVariable *> accessed = directlyAccessedGlobals();
+    std::set<llvm::GlobalVariable *> excluded = globalsAliasedByUnresolvedAccesses(accessed);
 
-    const llvm::DataLayout &DL = M->getDataLayout();
+    for (llvm::GlobalVariable *GV : excluded)
+        PLOGW << "StateAnalysis: global '" << GV->getName()
+              << "' may be aliased by an access with an unresolved target; keeping it in NVM";
 
-    std::set<llvm::GlobalVariable *> seen;
-    for (llvm::BasicBlock &BB : F_) {
-        for (llvm::Instruction &I : BB) {
-            const llvm::Value *Ptr = nullptr;
-            if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I))
-                Ptr = LI->getPointerOperand();
-            else if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I))
-                Ptr = SI->getPointerOperand();
-            else
-                continue;
+    auto kept = llvm::make_filter_range(
+        accessed, [&](llvm::GlobalVariable *GV) { return !excluded.count(GV); });
+    vmObjs_.assign(kept.begin(), kept.end());
+    vmObjSet_.insert(vmObjs_.begin(), vmObjs_.end());
 
-            // Same resolution the strict-mode check and the instrumenter use:
-            // it looks through phi/select, so a global reached only through a
-            // pointer induction variable still enters the candidate set instead
-            // of being silently pinned to NVM.
-            llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(Ptr);
-            if (!GV)
-                continue;
+    const llvm::DataLayout &DL = F_.getParent()->getDataLayout();
+    for (llvm::GlobalVariable *GV : vmObjs_)
+        varSizeBytes_[GV] = DL.getTypeAllocSize(GV->getValueType());
+}
 
-            // Structural filters
-            if (GV->isDeclaration())
-                continue;
-            if (GV->isConstant())
-                continue;
-            if (GV->getName().starts_with("llvm."))
-                continue;
-            if (GV->getName().starts_with("__nvm_"))
-                continue;
-            if (GV->getName().starts_with("__vm_shadow_"))
-                continue;
-            if (!GV->getValueType()->isSized())
-                continue;
-            if (!seen.insert(GV).second)
-                continue;
+std::vector<llvm::GlobalVariable *> StateAnalysis::directlyAccessedGlobals() const {
+    llvm::SetVector<llvm::GlobalVariable *> globals;
+    for (const llvm::Instruction &I : llvm::instructions(F_))
+        if (llvm::GlobalVariable *GV = eligibleAccessTarget(I))
+            globals.insert(GV);
+    return std::vector<llvm::GlobalVariable *>(globals.begin(), globals.end());
+}
 
-            vmObjs_.push_back(GV);
-            vmObjSet_.insert(GV);
-            varSizeBytes_[GV] = DL.getTypeAllocSize(GV->getValueType());
-        }
-    }
+std::set<llvm::GlobalVariable *> StateAnalysis::globalsAliasedByUnresolvedAccesses(
+    const std::vector<llvm::GlobalVariable *> &globals) const {
+    auto touched = [&](llvm::GlobalVariable *GV) {
+        return llvm::any_of(llvm::instructions(F_), [&](const llvm::Instruction &I) {
+            return mayAccessThroughUnresolvedPointer(AA_, I, *GV);
+        });
+    };
+    auto aliased = llvm::make_filter_range(globals, touched);
+    return {aliased.begin(), aliased.end()};
 }
 
 void StateAnalysis::identifyIneligibleObjs() {
@@ -305,99 +349,24 @@ bool StateAnalysis::isAllowedDirectCall(const llvm::CallBase &CB) const {
     return false;
 }
 
-void StateAnalysis::reportStrictError(const llvm::Instruction &I, const std::string &reason) {
-    std::string instStr;
-    llvm::raw_string_ostream rso(instStr);
-    I.print(rso);
-
-    const auto *BB = I.getParent();
-    std::string blockName = BB ? getBlockName(*BB, F_) : "<unknown-bb>";
-
-    std::string msg = "Error: unresolved memory effect in function '" + F_.getName().str() +
-                      "', block '" + blockName + "': " + reason + " | inst=" + rso.str();
-    analysisErrors_.push_back(std::move(msg));
-}
-
-bool StateAnalysis::validateInstructionForStrictMode(const llvm::Instruction &I) {
+void StateAnalysis::validateCalls() {
     if (vmObjs_.empty())
-        return true;
+        return;
 
-    auto mayTouchCandidate = [&](bool checkRef, bool checkMod) {
-        for (llvm::GlobalVariable *GV : vmObjs_) {
-            auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
-            llvm::ModRefInfo MRI = AA_.getModRefInfo(&I, Loc);
-            if ((checkRef && llvm::isRefSet(MRI)) || (checkMod && llvm::isModSet(MRI))) {
-                return true;
-            }
-        }
-        return false;
-    };
+    for (llvm::BasicBlock &BB : F_) {
+        for (llvm::Instruction &I : BB) {
+            auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+            if (!CB || isAllowedDirectCall(*CB))
+                continue;
 
-    if (auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
-        if (!isAllowedDirectCall(*CB)) {
-            reportStrictError(I, "call target/effects are unresolved in strict mode");
-            return false;
-        }
-        return true;
-    }
-
-    // Accesses resolve via resolveUniqueUnderlyingGlobal, which looks through
-    // phi/select: a pointer whose every possible base is the same global (e.g.
-    // a pointer induction variable over a global array) touches that global and
-    // nothing else. If it is a candidate the instrumenter redirects it
-    // statically; if it is not (a constant, a declaration, an NVM-resident
-    // runtime global), no candidate can be reached. Either way the access is
-    // resolved. Multi-base pointers (e.g. a select between two globals) stay
-    // unresolved and fall through to the mayTouchCandidate error below.
-    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
-        if (resolveUniqueUnderlyingGlobal(LI->getPointerOperand()))
-            return true;
-        if (mayTouchCandidate(/*ref*/ true, /*mod*/ false)) {
-            reportStrictError(I, "load may alias candidate globals but target is unresolved");
-            return false;
-        }
-        return true;
-    }
-
-    if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-        if (resolveUniqueUnderlyingGlobal(SI->getPointerOperand()))
-            return true;
-        if (mayTouchCandidate(/*ref*/ false, /*mod*/ true)) {
-            reportStrictError(I, "store may alias candidate globals but target is unresolved");
-            return false;
-        }
-        return true;
-    }
-
-    if (auto *MI = llvm::dyn_cast<llvm::MemIntrinsic>(&I)) {
-        bool directCandidate = false;
-        if (auto *MCI = llvm::dyn_cast<llvm::MemCpyInst>(MI)) {
-            if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(MCI->getDest()))
-                directCandidate |= isCandidateGlobal(GV);
-            if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(MCI->getSource()))
-                directCandidate |= isCandidateGlobal(GV);
-        } else {
-            if (llvm::GlobalVariable *GV = resolveUniqueUnderlyingGlobal(MI->getRawDest()))
-                directCandidate |= isCandidateGlobal(GV);
-        }
-
-        if (!directCandidate && mayTouchCandidate(/*ref*/ true, /*mod*/ true)) {
-            reportStrictError(I,
-                              "mem intrinsic may touch candidate globals via unresolved pointer");
-            return false;
-        }
-        return true;
-    }
-
-    if (I.mayReadOrWriteMemory() && !llvm::isa<llvm::AllocaInst>(&I) &&
-        !llvm::isa<llvm::PHINode>(&I)) {
-        if (mayTouchCandidate(/*ref*/ true, /*mod*/ true)) {
-            reportStrictError(I, "memory instruction touching candidate globals is unresolved");
-            return false;
+            std::string instStr;
+            llvm::raw_string_ostream rso(instStr);
+            I.print(rso);
+            analysisErrors_.push_back("Error: unresolved call in function '" + F_.getName().str() +
+                                      "', block '" + getBlockName(BB, F_) +
+                                      "': target/effects cannot be analyzed | inst=" + rso.str());
         }
     }
-
-    return true;
 }
 
 void StateAnalysis::computeAccessMaps() {
@@ -405,8 +374,6 @@ void StateAnalysis::computeAccessMaps() {
         const llvm::BasicBlock *BBKey = &BB;
 
         for (llvm::Instruction &I : BB) {
-            validateInstructionForStrictMode(I);
-
             // Process candidate globals (eligible).
             auto processEligGV = [&](llvm::GlobalVariable *GV) {
                 auto Loc = llvm::MemoryLocation::getBeforeOrAfter(GV);
