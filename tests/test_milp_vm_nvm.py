@@ -148,8 +148,8 @@ def test_vm_rewrite_through_pointer_phi(run_milp, tmp_path):
     """scenario_ptr_iv_vm.c: phi-derived accesses to a VM-placed array are rewritten.
 
     The loop walks g_hot via a pointer induction variable, so its accesses
-    reach the global only through a phi. Strict mode must accept the
-    single-base phi (not skip the function), and the instrumenter must
+    reach the global only through a phi. Candidate identification must
+    resolve the single-base phi (not exclude the global), and the instrumenter must
     redirect the accesses to the shadow via the runtime-offset form
     shadow + (p - g_hot).
     """

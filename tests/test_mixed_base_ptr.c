@@ -1,7 +1,7 @@
 /* Multi-base pointer access to candidate globals.
  * p can point into either a or b, so the access cannot be statically
- * redirected to a single VM shadow. Strict mode must fail the compile
- * with an explicit error instead of silently skipping the function. */
+ * redirected to a single VM shadow. The globals it may alias are excluded
+ * from the candidate set and stay in NVM; the compile succeeds. */
 
 int a[4], b[4];
 int pick;

@@ -107,13 +107,12 @@ def test_milp_infeasible(run_milp, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Missing bb-freq-file test
+# Multi-base pointer test
 # ---------------------------------------------------------------------------
-def test_milp_fails_on_multi_base_pointer(run_milp, tmp_path):
+def test_milp_keeps_multi_base_pointer_globals_in_nvm(run_milp, tmp_path):
     """test_mixed_base_ptr.c: an access whose pointer can root at more than
-    one candidate global cannot be redirected to a single VM shadow, so the
-    pass must fail the compile explicitly rather than silently skip the
-    function."""
+    one global cannot be redirected to a single VM shadow, so the globals it
+    may alias are excluded from the candidate set and stay in NVM."""
     result = run_milp(
         TESTS_DIR / "test_mixed_base_ptr.c",
         ESTIMATOR_UNIFORM,
@@ -123,10 +122,12 @@ def test_milp_fails_on_multi_base_pointer(run_milp, tmp_path):
     check_assertions(
         result,
         {
-            "exit": "nonzero",
-            "stderr_contains": "unresolved memory/call effects",
+            "exit": 0,
+            "stderr_contains": "keeping it in NVM",
         },
     )
+    assert "__vm_shadow_a" not in result.output_ir
+    assert "__vm_shadow_b" not in result.output_ir
 
 
 # ---------------------------------------------------------------------------

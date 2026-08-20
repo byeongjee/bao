@@ -19,17 +19,18 @@ namespace checkpoint {
 /// Resolve \p Ptr to its unique underlying GlobalVariable, looking through
 /// phi/select (unlike llvm::getUnderlyingObject). Returns nullptr when the
 /// base is not provably a single global — e.g. a select between two globals,
-/// or a base the lookup cannot resolve. Shared by the strict-mode validator
+/// or a base the lookup cannot resolve. Shared by candidate identification
 /// and the VM-region access rewrite so both agree on which accesses are
 /// statically redirectable to a shadow.
 llvm::GlobalVariable *resolveUniqueUnderlyingGlobal(const llvm::Value *Ptr);
 
 /// Computes candidate-global state data for MILP checkpoint optimization.
 ///
-/// All directly-accessed globals in the function are candidates for VM/NVM
-/// placement. Intra-procedural analysis only with strict unresolved-memory
-/// policy: unresolved effects are diagnostics that the MILP pass turns into
-/// a fatal compile error.
+/// Directly-accessed globals are candidates for VM/NVM placement, minus any
+/// global that an access with an unresolved target may alias; those stay in
+/// NVM. Intra-procedural analysis only: calls whose memory effects cannot be
+/// analyzed are diagnostics that the MILP pass turns into a fatal compile
+/// error.
 ///
 /// V_inelig includes:
 /// - Static allocas (stack slots)
@@ -64,7 +65,7 @@ class StateAnalysis {
     /// D_{b,v}: 1 if ineligible v may be defined in block b.
     bool getIneligDefIndicator(const llvm::BasicBlock *BB, llvm::Value *v) const;
 
-    // -- Strict-analysis diagnostics --
+    // -- Unresolved-call diagnostics --
 
     bool hasAnalysisErrors() const { return !analysisErrors_.empty(); }
     const std::vector<std::string> &getAnalysisErrors() const { return analysisErrors_; }
@@ -118,9 +119,11 @@ class StateAnalysis {
     static const std::set<llvm::Value *> emptyValueSet_;
 
     bool isAllowedDirectCall(const llvm::CallBase &CB) const;
-    bool validateInstructionForStrictMode(const llvm::Instruction &I);
-    void reportStrictError(const llvm::Instruction &I, const std::string &reason);
+    void validateCalls();
 
+    std::vector<llvm::GlobalVariable *> directlyAccessedGlobals() const;
+    std::set<llvm::GlobalVariable *>
+    globalsAliasedByUnresolvedAccesses(const std::vector<llvm::GlobalVariable *> &globals) const;
     void identifyVMObjs();
     void identifyIneligibleObjs();
     void identifyIneligibleSSAValues();

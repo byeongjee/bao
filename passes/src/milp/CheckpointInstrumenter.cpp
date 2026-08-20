@@ -163,8 +163,9 @@ void CheckpointInstrumenter::rewriteAccessesInVMRegions(llvm::Function &F,
     // through phi/select: shadow + (ptr - global) is correct for any runtime
     // pointer value as long as every possible base is the same global (e.g.
     // a pointer induction variable over a global array). Pointers with more
-    // than one possible base never reach here — StateAnalysis strict mode
-    // rejects the whole function for those.
+    // than one possible base resolve to nullptr and are left untouched;
+    // StateAnalysis excludes the globals they may alias from the candidate
+    // set, so those are never VM-placed.
     const NodeMap &nodeMap = cfg.getNodeMap();
     const llvm::DataLayout &DL = M_.getDataLayout();
     llvm::Type *intPtrTy = DL.getIntPtrType(M_.getContext());
