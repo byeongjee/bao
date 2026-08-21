@@ -82,6 +82,7 @@ src/common/LoopTripCount.cpp
     src/milp/StateAnalysis.cpp
     src/milp/LivenessAnalysis.cpp
     src/milp/EnergyModel.cpp
+    src/milp/EnergyPathUtils.cpp
     src/milp/AllocaToGlobalPass.cpp
     src/milp/LoopStripMiningPass.cpp
     src/milp/AbstractCFG.cpp

@@ -35,7 +35,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -121,13 +120,8 @@ struct SelectedLoopPlan {
     size_t detailIndex = 0;
 };
 
-using checkpoint::WorstCasePathResult;
-
-enum class VisitState {
-    Unvisited = 0,
-    Visiting,
-    Visited,
-};
+using checkpoint::computeWorstCasePath;
+using checkpoint::WorstCasePath;
 
 struct LoopStripMiningStats {
     unsigned loopsSeen = 0;
@@ -146,7 +140,6 @@ struct HeaderPhiInfo {
 };
 
 using checkpoint::containsInvoke;
-using checkpoint::getDirectChildLoop;
 using checkpoint::getMarkerTripCount;
 using checkpoint::hasStripMinedLoopMetadata;
 using checkpoint::removeLoopTripCountMetadata;
@@ -303,187 +296,11 @@ static std::optional<uint64_t> exactSubLoopTripCount(Loop *SubL, ScalarEvolution
     return markerTC;
 }
 
-static std::optional<uint64_t> summarySubLoopTripCount(Loop *SubL, ScalarEvolution &SE) {
-    unsigned scevTC = SE.getSmallConstantTripCount(SubL);
-    auto markerTC = getMarkerTripCount(SubL);
-
-    if (scevTC > 0 && markerTC)
-        return std::min<uint64_t>(scevTC, *markerTC);
-    if (scevTC > 0)
-        return scevTC;
-    return markerTC;
-}
-
-static WorstCasePathResult
-computeWorstCasePath(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy, LoopInfo &LI,
-                     ScalarEvolution &SE,
-                     function_ref<std::optional<uint64_t>(Loop *)> subLoopTripCount) {
-    WorstCasePathResult result;
-
-    BasicBlock *Header = L->getHeader();
-    BasicBlock *Latch = L->getLoopLatch();
-    if (!Header || !Latch) {
-        result.error = "missing-header-or-latch";
-        return result;
-    }
-
-    DenseMap<const Loop *, double> subLoopTotal;
-    DenseMap<const Loop *, SmallPtrSet<const BasicBlock *, 16>> subLoopBlocks;
-    for (Loop *SubL : L->getSubLoops()) {
-        std::optional<uint64_t> subTC = subLoopTripCount(SubL);
-        if (!subTC) {
-            result.error = "sub-loop-unknown-trip-count";
-            return result;
-        }
-
-        auto subPath = computeWorstCasePath(SubL, blockEnergy, LI, SE, subLoopTripCount);
-        if (!subPath.ok) {
-            result.error = "sub-loop-energy-unavailable";
-            return result;
-        }
-
-        subLoopTotal[SubL] = subPath.energy * static_cast<double>(*subTC);
-        for (const BasicBlock *BB : SubL->blocks())
-            subLoopBlocks[SubL].insert(BB);
-    }
-
-    auto getEnergy = [&](const BasicBlock *BB) -> double {
-        Loop *ChildL = getDirectChildLoop(L, BB, LI);
-        if (ChildL && ChildL->getHeader() == BB) {
-            auto it = subLoopTotal.find(ChildL);
-            return (it != subLoopTotal.end()) ? it->second : 0.0;
-        }
-        auto it = blockEnergy.find(BB);
-        return (it != blockEnergy.end()) ? it->second : 0.0;
-    };
-
-    auto getSuccs = [&](const BasicBlock *BB) -> SmallVector<const BasicBlock *, 4> {
-        SmallVector<const BasicBlock *, 4> succs;
-        Loop *ChildL = getDirectChildLoop(L, BB, LI);
-        if (ChildL && ChildL->getHeader() == BB) {
-            SmallVector<BasicBlock *, 4> exits;
-            ChildL->getExitBlocks(exits);
-            for (BasicBlock *Exit : exits)
-                succs.push_back(Exit);
-        } else {
-            for (const BasicBlock *Succ : successors(BB))
-                succs.push_back(Succ);
-        }
-        return succs;
-    };
-
-    if (Header == Latch) {
-        result.ok = true;
-        result.energy = getEnergy(Header);
-        result.blocksOnPath.insert(Header);
-        return result;
-    }
-
-    DenseMap<const BasicBlock *, VisitState> visitState;
-    DenseMap<const BasicBlock *, double> memo;
-    DenseMap<const BasicBlock *, const BasicBlock *> bestSucc;
-    bool cycleDetected = false;
-
-    std::function<double(const BasicBlock *)> dfs = [&](const BasicBlock *BB) -> double {
-        if (BB == Latch) {
-            return getEnergy(BB);
-        }
-
-        VisitState state = visitState.lookup(BB);
-        if (state == VisitState::Visiting) {
-            cycleDetected = true;
-            return -1.0;
-        }
-        if (state == VisitState::Visited) {
-            return memo[BB];
-        }
-
-        visitState[BB] = VisitState::Visiting;
-        double bestSuccEnergy = -1.0;
-        const BasicBlock *best = nullptr;
-        for (const BasicBlock *Succ : getSuccs(BB)) {
-            if (!L->contains(Succ)) {
-                continue;
-            }
-            if (BB == Latch && Succ == Header) {
-                continue;
-            }
-            double succEnergy = dfs(Succ);
-            if (succEnergy < 0.0) {
-                continue;
-            }
-            if (succEnergy > bestSuccEnergy) {
-                bestSuccEnergy = succEnergy;
-                best = Succ;
-            }
-        }
-        visitState[BB] = VisitState::Visited;
-
-        if (!best || bestSuccEnergy < 0.0) {
-            memo[BB] = -1.0;
-            return -1.0;
-        }
-
-        bestSucc[BB] = best;
-        memo[BB] = getEnergy(BB) + bestSuccEnergy;
-        return memo[BB];
-    };
-
-    double energy = dfs(Header);
-    if (cycleDetected) {
-        result.error = "unsupported-intra-loop-cycle";
-        return result;
-    }
-    if (energy <= 0.0) {
-        result.error = "unable-to-compute-path-energy";
-        return result;
-    }
-
-    SmallPtrSet<const BasicBlock *, 16> pathBlocks;
-    const BasicBlock *cur = Header;
-    while (cur) {
-        pathBlocks.insert(cur);
-        Loop *ChildL = getDirectChildLoop(L, cur, LI);
-        if (ChildL && ChildL->getHeader() == cur) {
-            auto it = subLoopBlocks.find(ChildL);
-            if (it != subLoopBlocks.end()) {
-                pathBlocks.insert(it->second.begin(), it->second.end());
-            }
-        }
-        if (cur == Latch) {
-            break;
-        }
-        auto it = bestSucc.find(cur);
-        if (it == bestSucc.end()) {
-            result.error = "path-reconstruction-failed";
-            return result;
-        }
-        cur = it->second;
-    }
-
-    if (pathBlocks.empty() || !pathBlocks.count(Latch)) {
-        result.error = "path-reconstruction-failed";
-        return result;
-    }
-
-    result.ok = true;
-    result.energy = energy;
-    result.blocksOnPath = std::move(pathBlocks);
-    return result;
-}
-
-static WorstCasePathResult
-computeWorstCaseIterationEnergy(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                                LoopInfo &LI, ScalarEvolution &SE) {
+static WorstCasePath
+computeWorstCaseIterationPath(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
+                              LoopInfo &LI, ScalarEvolution &SE) {
     return computeWorstCasePath(L, blockEnergy, LI, SE,
                                 [&](Loop *SubL) { return exactSubLoopTripCount(SubL, SE); });
-}
-
-static WorstCasePathResult
-computeWorstCaseSummaryPathResult(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
-                                  LoopInfo &LI, ScalarEvolution &SE) {
-    return computeWorstCasePath(L, blockEnergy, LI, SE,
-                                [&](Loop *SubL) { return summarySubLoopTripCount(SubL, SE); });
 }
 
 static std::optional<uint64_t> getConstantTripCount(Loop *L, ScalarEvolution &SE,
@@ -683,17 +500,17 @@ enclosingResidual(Loop *L, ScalarEvolution &SE,
     if (!P)
         return std::nullopt;
 
-    WorstCasePathResult path =
+    WorstCasePath parentPath =
         computeWorstCasePath(P, blockEnergy, LI, SE, [&](Loop *SubL) -> std::optional<uint64_t> {
             if (SubL == L)
                 return uint64_t{0};
             return exactSubLoopTripCount(SubL, SE);
         });
-    if (!path.ok)
+    if (!parentPath.ok)
         return std::nullopt;
 
     SmallPtrSet<const BasicBlock *, 16> residualBlocks;
-    for (const BasicBlock *BB : path.blocksOnPath)
+    for (const BasicBlock *BB : parentPath.blocksOnPath)
         if (!L->contains(BB))
             residualBlocks.insert(BB);
 
@@ -701,7 +518,8 @@ enclosingResidual(Loop *L, ScalarEvolution &SE,
     double commitDefMargin = 0.0;
     double stateMargin = computeBoundaryStateMarginOnPath(residualBlocks, state, params,
                                                           restoreLiveInMargin, commitDefMargin);
-    return path.energy + computeNvmAccessMarginOnPath(residualBlocks, state, params) + stateMargin;
+    return parentPath.energy + computeNvmAccessMarginOnPath(residualBlocks, state, params) +
+           stateMargin;
 }
 
 /// Exact constant trip count for loops with a single exiting block; records
@@ -858,22 +676,22 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         return result;
     }
 
-    WorstCasePathResult iterEnergy = computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
-    if (!iterEnergy.ok) {
-        result.skipReason = iterEnergy.error;
+    WorstCasePath iterPath = computeWorstCaseIterationPath(L, blockEnergy, LI, SE);
+    if (!iterPath.ok) {
+        result.skipReason = iterPath.error;
         return result;
     }
-    if (iterEnergy.energy <= 0.0) {
+    if (iterPath.energy <= 0.0) {
         result.skipReason = "nonpositive-iteration-energy";
         return result;
     }
-    result.detail.iterEnergy = iterEnergy.energy;
+    result.detail.iterEnergy = iterPath.energy;
 
-    double perIterNvmPenalty = computeNvmAccessMarginOnPath(iterEnergy.blocksOnPath, state, params);
+    double perIterNvmPenalty = computeNvmAccessMarginOnPath(iterPath.blocksOnPath, state, params);
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
     double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-        iterEnergy.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
+        iterPath.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
     double budgetAfterBoundary = budget - boundaryStateMargin;
     result.detail.perIterNvmPenalty = perIterNvmPenalty;
     result.detail.loopStripMiningCost = params.loopStripMiningCost;
@@ -887,7 +705,7 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
             "budget=" + std::to_string(budget) +
             ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
             ", loop-strip-mining-cost=" + std::to_string(params.loopStripMiningCost) +
-            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+            ", per-iter-path-energy=" + std::to_string(iterPath.energy) +
             ", restore-livein-margin=" + std::to_string(restoreLiveInMargin) +
             ", commit-def-margin=" + std::to_string(commitDefMargin) +
             ", boundary-state-margin=" + std::to_string(boundaryStateMargin) +
@@ -895,12 +713,12 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         return result;
     }
 
-    double perIterTotalEnergy = iterEnergy.energy + perIterNvmPenalty + params.loopStripMiningCost;
+    double perIterTotalEnergy = iterPath.energy + perIterNvmPenalty + params.loopStripMiningCost;
     result.detail.perIterTotalEnergy = perIterTotalEnergy;
     if (perIterTotalEnergy <= 0.0) {
         result.skipReason = "nonpositive-per-iter-total-energy";
         result.skipDetail =
-            "per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+            "per-iter-path-energy=" + std::to_string(iterPath.energy) +
             ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
             ", loop-strip-mining-cost=" + std::to_string(params.loopStripMiningCost) +
             ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
@@ -918,7 +736,7 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
         result.skipDetail =
             "budget-after-boundary=" + std::to_string(budgetAfterBoundary) +
             ", strict-budget=" + std::to_string(strictBudget) +
-            ", per-iter-path-energy=" + std::to_string(iterEnergy.energy) +
+            ", per-iter-path-energy=" + std::to_string(iterPath.energy) +
             ", per-iter-nvm-penalty=" + std::to_string(perIterNvmPenalty) +
             ", loop-strip-mining-cost=" + std::to_string(params.loopStripMiningCost) +
             ", per-iter-total-energy=" + std::to_string(perIterTotalEnergy);
@@ -938,9 +756,9 @@ static PlanResult buildRewritePlan(Loop *L, ScalarEvolution &SE,
     }
 
     std::optional<uint64_t> exactTripCount = computeExactTripCount(L, SE, result);
-    if (tryStripMiningPlan(L, K, iterEnergy.energy, exactTripCount, result))
+    if (tryStripMiningPlan(L, K, iterPath.energy, exactTripCount, result))
         return result;
-    buildChunkingPlan(L, Latch, K, iterEnergy.energy, exactTripCount, result);
+    buildChunkingPlan(L, Latch, K, iterPath.energy, exactTripCount, result);
     return result;
 }
 
@@ -961,7 +779,7 @@ struct ChunkBudgetResult {
     std::string error;
 };
 
-static ChunkBudgetResult maxKOnPath(const WorstCasePathResult &path, double perIterNvmPenalty,
+static ChunkBudgetResult maxKOnPath(const WorstCasePath &iterPath, double perIterNvmPenalty,
                                     double perIterOverhead,
                                     const checkpoint::MILPEnergyParams &params,
                                     const checkpoint::StateAnalysis &state) {
@@ -976,14 +794,14 @@ static ChunkBudgetResult maxKOnPath(const WorstCasePathResult &path, double perI
     double restoreLiveInMargin = 0.0;
     double commitDefMargin = 0.0;
     double boundaryStateMargin = computeBoundaryStateMarginOnPath(
-        path.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
+        iterPath.blocksOnPath, state, params, restoreLiveInMargin, commitDefMargin);
     double budgetAfterBoundary = budget - boundaryStateMargin;
     if (budgetAfterBoundary <= 0.0) {
         out.error = "nonpositive-effective-budget";
         return out;
     }
 
-    double perIterTotalEnergy = path.energy + perIterNvmPenalty + perIterOverhead;
+    double perIterTotalEnergy = iterPath.energy + perIterNvmPenalty + perIterOverhead;
     if (perIterTotalEnergy <= 0.0) {
         out.error = "nonpositive-per-iter-total-energy";
         return out;
@@ -1001,7 +819,7 @@ static ChunkBudgetResult maxKOnPath(const WorstCasePathResult &path, double perI
     out.ok = true;
     out.maxK =
         std::min<uint64_t>(static_cast<uint64_t>(rawK), std::numeric_limits<unsigned>::max());
-    out.iterEnergy = path.energy;
+    out.iterEnergy = iterPath.energy;
     return out;
 }
 
@@ -1009,39 +827,49 @@ static ChunkBudgetResult
 maxKWithStripMiningCost(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
                         const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
                         ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
-    WorstCasePathResult path = computeWorstCaseIterationEnergy(L, blockEnergy, LI, SE);
-    if (!path.ok || path.energy <= 0.0) {
+    WorstCasePath iterPath = computeWorstCaseIterationPath(L, blockEnergy, LI, SE);
+    if (!iterPath.ok || iterPath.energy <= 0.0) {
         ChunkBudgetResult out;
-        out.error = path.error.empty() ? "post-chunk-iter-energy-unavailable" : path.error;
+        out.error = iterPath.error.empty() ? "post-chunk-iter-energy-unavailable" : iterPath.error;
         return out;
     }
 
-    double perIterNvmPenalty = computeNvmAccessMarginOnPath(path.blocksOnPath, state, params);
-    return maxKOnPath(path, perIterNvmPenalty, params.loopStripMiningCost, params, state);
+    double perIterNvmPenalty = computeNvmAccessMarginOnPath(iterPath.blocksOnPath, state, params);
+    return maxKOnPath(iterPath, perIterNvmPenalty, params.loopStripMiningCost, params, state);
 }
 
-/// Mirrors what AbstractCFG will charge when it decides whether to summarize the
-/// loop: only VM-placed objects, and no strip-mining cost.
+/// Max chunk K that AbstractCFG's summarizer will accept; inverts the
+/// SummaryBudget predicate.
 static ChunkBudgetResult
 maxKMatchingSummarizer(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
                        const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
                        ScalarEvolution &SE, const checkpoint::StateAnalysis &state) {
-    WorstCasePathResult path = computeWorstCaseSummaryPathResult(L, blockEnergy, LI, SE);
-    if (!path.ok || path.energy <= 0.0) {
-        ChunkBudgetResult out;
-        out.error = path.error.empty() ? "post-chunk-summary-path-unavailable" : path.error;
+    ChunkBudgetResult out;
+    checkpoint::SummaryBudget summaryBudget =
+        checkpoint::computeSummaryBudget(L, blockEnergy, LI, SE, state, params);
+    if (!summaryBudget.ok) {
+        out.error = summaryBudget.error;
         return out;
     }
 
-    double perIterNvmPenalty = 0.0;
-    for (const BasicBlock *BB : path.blocksOnPath) {
-        for (GlobalVariable *GV : state.getVMObjs()) {
-            unsigned accesses = state.getLoadCount(BB, GV) + state.getStoreCount(BB, GV);
-            perIterNvmPenalty += static_cast<double>(accesses) * params.nvmAccessPenalty;
-        }
+    double available = summaryBudget.budgetAfterBoundary - summaryBudget.fixedEnergy();
+    if (available <= 0.0) {
+        out.error = "nonpositive-effective-budget";
+        return out;
     }
 
-    return maxKOnPath(path, perIterNvmPenalty, 0.0, params, state);
+    double strictAvailable = std::nextafter(available, -std::numeric_limits<double>::infinity());
+    double rawK = std::floor(strictAvailable / summaryBudget.perIterEnergy());
+    if (!std::isfinite(rawK) || rawK <= 0.0) {
+        out.error = "post-chunk-k-zero";
+        return out;
+    }
+
+    out.ok = true;
+    out.maxK =
+        std::min<uint64_t>(static_cast<uint64_t>(rawK), std::numeric_limits<unsigned>::max());
+    out.iterEnergy = summaryBudget.worstCasePath.energy;
+    return out;
 }
 
 static bool updateChunkLoopBound(Loop *L, uint64_t currentK, uint64_t newK) {
