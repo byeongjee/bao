@@ -59,6 +59,10 @@ void CheckpointInstrumenter::applyMemoryPlacement(const StateAnalysis &state) {
         if (GV->getSection().empty())
             GV->setSection(".fram");
     }
+    for (llvm::GlobalVariable *GV : state.getNVMKeptGlobals()) {
+        if (GV->getSection().empty())
+            GV->setSection(".fram");
+    }
 }
 
 void CheckpointInstrumenter::createShadowGlobals(llvm::Function &F, const MILPSolution &solution,
