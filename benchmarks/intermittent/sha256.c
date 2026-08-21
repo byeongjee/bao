@@ -16,6 +16,7 @@
 #define SHA256_HASH_SIZE 32
 #define SHA256_HASH_WORDS 8
 #define DATA_LEN 128
+#define NUM_UPDATES 16
 
 /* --- SHA-256 types --- */
 
@@ -249,7 +250,11 @@ FORCE_INLINE void sha256_final(SHA256_CTX *sc, uint8_t hash[SHA256_HASH_SIZE]) {
 __attribute__((noinline)) int main(void) {
     BENCH_INIT();
     sha256_init(&g_ctx);
-    sha256_update(&g_ctx, data, DATA_LEN);
+    /* Stream the test block NUM_UPDATES times: one NUM_UPDATES*DATA_LEN-byte message. */
+    for (int i = 0; i < NUM_UPDATES; i++) {
+        __loop_tripcount(NUM_UPDATES);
+        sha256_update(&g_ctx, data, DATA_LEN);
+    }
     sha256_final(&g_ctx, g_hash);
     BENCH_EXIT((int)g_hash[0]);
     return (int)g_hash[0];
