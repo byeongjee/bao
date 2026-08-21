@@ -1,0 +1,14 @@
+benchmark,capacitor,status,compilation_time_ms,execution_time_us,run_attempts
+aes,10uF,ok,1242,104204.13,1
+crc,10uF,ok,781,29759.3,1
+rsa,10uF,ok,849,45171.49,1
+dijkstra,10uF,ok,737,217308.64,1
+qsort,10uF,ok,791,1044367.77,1
+activity_recognition,10uF,ok,964,33727.52,1
+bitcount,10uF,ok,1288,4414158.76,1
+chacha20,10uF,ok,1221,50808.98,1
+sensor_fusion,10uF,ok,859,25121.86,1
+poly1305,10uF,ok,923,475356.64,1
+cuckoo_filter,10uF,ok,761,41320.7,1
+sha256_fixed,10uF,ok,975,87104.11,1
+stringsearch_fixed,10uF,ok,1236,35354.39,1
