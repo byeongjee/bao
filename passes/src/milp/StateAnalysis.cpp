@@ -185,6 +185,7 @@ void StateAnalysis::identifyVMObjs() {
     for (llvm::GlobalVariable *GV : excluded)
         PLOGW << "StateAnalysis: global '" << GV->getName()
               << "' may be aliased by an access with an unresolved target; keeping it in NVM";
+    nvmKeptGlobals_.assign(excluded.begin(), excluded.end());
 
     auto kept = llvm::make_filter_range(
         accessed, [&](llvm::GlobalVariable *GV) { return !excluded.count(GV); });

@@ -45,6 +45,11 @@ class StateAnalysis {
     const std::vector<llvm::GlobalVariable *> &getVMObjs() const { return vmObjs_; }
     bool isCandidateGlobal(llvm::GlobalVariable *gv) const;
 
+    /// Directly-accessed globals excluded from the candidate set because an
+    /// unresolved access may alias them; the instrumenter must keep these in
+    /// NVM.
+    const std::vector<llvm::GlobalVariable *> &getNVMKeptGlobals() const { return nvmKeptGlobals_; }
+
     // -- Eligible live-in/def --
 
     /// Candidate globals live-in at block b.
@@ -93,6 +98,7 @@ class StateAnalysis {
     // Candidate globals (V_elig)
     std::vector<llvm::GlobalVariable *> vmObjs_;
     std::set<llvm::GlobalVariable *> vmObjSet_;
+    std::vector<llvm::GlobalVariable *> nvmKeptGlobals_;
     std::vector<std::string> analysisErrors_;
 
     // Ineligible objects (V_inelig): allocas, cross-block SSA values
