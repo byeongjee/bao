@@ -20,4 +20,5 @@ uv run python scripts/otii/preprocess_traces.py benchmarks/traces/original/[0-9]
 Trace 3 peaks at 3.13 V, below the target's operating range, so it is scaled up
 first (`SCALE_TO_LEVEL` in the script), anchored on its 99th percentile.
 
-`traces_grid.png` overlays the 50 Hz traces on the 1 kHz originals.
+`traces_grid.pdf` shows one repetition period of each replay-ready trace
+(`Rscript scripts/plot_power_traces.R benchmarks/traces`).
