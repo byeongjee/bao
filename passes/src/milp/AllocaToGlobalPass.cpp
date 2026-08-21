@@ -8,6 +8,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
+#include "llvm/TargetParser/Triple.h"
 
 namespace checkpoint {
 
@@ -45,11 +46,10 @@ PreservedAnalyses AllocaToGlobalPass::run(Function &F, FunctionAnalysisManager &
     if (F.getName() != "main")
         return PreservedAnalyses::all();
 
-    // Aggregates only: a scalar already commits with one store.
     SmallVector<AllocaInst *, 8> targets;
     for (Instruction &I : F.getEntryBlock()) {
         auto *AI = dyn_cast<AllocaInst>(&I);
-        if (AI && AI->isStaticAlloca() && globalTypeFor(AI)->isAggregateType())
+        if (AI && AI->isStaticAlloca())
             targets.push_back(AI);
     }
 
@@ -57,6 +57,9 @@ PreservedAnalyses AllocaToGlobalPass::run(Function &F, FunctionAnalysisManager &
         return PreservedAnalyses::all();
 
     Module &M = *F.getParent();
+    // .fram is an MSP430 linker section; host builds (BB frequency
+    // collection) reject it as a mach-o section specifier.
+    bool useFramSection = M.getTargetTriple().getArch() == Triple::msp430;
     for (AllocaInst *AI : targets) {
         Type *globalTy = globalTypeFor(AI);
         std::string name =
@@ -67,7 +70,8 @@ PreservedAnalyses AllocaToGlobalPass::run(Function &F, FunctionAnalysisManager &
         auto *GV =
             new GlobalVariable(M, globalTy, /*isConstant=*/false, GlobalValue::InternalLinkage,
                                Constant::getNullValue(globalTy), name);
-        GV->setSection(".fram");
+        if (useFramSection)
+            GV->setSection(".fram");
         GV->setAlignment(AI->getAlign());
 
         eraseLifetimeMarkers(AI);

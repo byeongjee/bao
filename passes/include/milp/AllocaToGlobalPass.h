@@ -4,7 +4,7 @@
 
 namespace checkpoint {
 
-/// Rewrites main's aggregate allocas into internal globals in .fram.
+/// Rewrites main's allocas into internal globals in .fram.
 ///
 /// MILP links with the stack in SRAM, so a live stack object is copied to
 /// FRAM and back at every region boundary.  A .fram global is durable on its
