@@ -1027,7 +1027,7 @@ static ReclampResult applyReclamp(Loop *L, uint64_t currentK, const ChunkBudgetR
     detail.postChunkIterEnergyValid = true;
     detail.postChunkIterEnergy = budget.iterEnergy;
 
-    result.newK = std::min<uint64_t>(currentK, budget.maxK);
+    result.newK = budget.maxK;
     if (result.newK == currentK) {
         result.outcome = ReclampOutcome::Unchanged;
         return result;
