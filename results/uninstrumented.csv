@@ -10,5 +10,5 @@ chacha20,ok,501,50961.77,1
 sensor_fusion,ok,367,25029.82,1
 poly1305,ok,457,475495.65,1
 cuckoo_filter,ok,445,41990.8,1
-sha256_fixed,ok,470,86538.23,1
+sha256,ok,379,88640.11,1
 stringsearch_fixed,ok,361,33074.97,1
