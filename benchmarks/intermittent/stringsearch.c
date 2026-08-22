@@ -19,7 +19,7 @@
 
 static uint32_t table[256] __attribute__((used, section(".fram")));
 static uint32_t len __attribute__((used, section(".fram")));
-static uint32_t findme_idx __attribute__((used, section(".fram")));
+static char *findme __attribute__((used, section(".fram")));
 
 // --- Const data ---
 
@@ -67,6 +67,8 @@ FORCE_INLINE void init_search(const char *pattern) {
         __loop_tripcount(16);
         table[(unsigned char)pattern[i]] = len - i - 1;
     }
+
+    findme = (char *)pattern;
 }
 
 FORCE_INLINE const char *strsearch(const char *pattern, const char *text) {
@@ -94,7 +96,7 @@ FORCE_INLINE const char *strsearch(const char *pattern, const char *text) {
         if (shift == 0) {
             // Check for match
             const char *here = &text[pos - len + 1];
-            const char *a = find_strings[findme_idx];
+            const char *a = findme;
             const char *b = here;
             uint32_t matched = 1;
             uint32_t j;
@@ -124,8 +126,7 @@ __attribute__((noinline)) int main(void) {
 
     for (i = 0; i < NUM_PATTERNS; i++) {
         __loop_tripcount(NUM_PATTERNS);
-        findme_idx = (uint32_t)i;
-        const char *findme = find_strings[findme_idx];
+        findme = (char *)find_strings[i];
 
         // Compute pattern length manually (no strlen)
         len = 0;
