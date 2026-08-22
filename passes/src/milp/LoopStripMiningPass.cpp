@@ -840,6 +840,15 @@ maxKWithStripMiningCost(Loop *L, const DenseMap<const BasicBlock *, double> &blo
 
 /// Max chunk K that AbstractCFG's summarizer will accept; inverts the
 /// SummaryBudget predicate.
+static uint64_t largestKWithin(double budget, double perIterEnergy) {
+    double strictBudget = std::nextafter(budget, -std::numeric_limits<double>::infinity());
+    double rawK = std::floor(strictBudget / perIterEnergy);
+    if (!std::isfinite(rawK) || rawK <= 0.0) {
+        return 0;
+    }
+    return std::min<uint64_t>(static_cast<uint64_t>(rawK), std::numeric_limits<unsigned>::max());
+}
+
 static ChunkBudgetResult
 maxKMatchingSummarizer(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
                        const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
@@ -852,22 +861,20 @@ maxKMatchingSummarizer(Loop *L, const DenseMap<const BasicBlock *, double> &bloc
         return out;
     }
 
-    double available = summaryBudget.budgetAfterBoundary - summaryBudget.fixedEnergy();
-    if (available <= 0.0) {
+    double chunkBudget = summaryBudget.budgetAfterBoundary - summaryBudget.fixedEnergy();
+    if (chunkBudget <= 0.0) {
         out.error = "nonpositive-effective-budget";
         return out;
     }
 
-    double strictAvailable = std::nextafter(available, -std::numeric_limits<double>::infinity());
-    double rawK = std::floor(strictAvailable / summaryBudget.perIterEnergy());
-    if (!std::isfinite(rawK) || rawK <= 0.0) {
+    uint64_t maxK = largestKWithin(chunkBudget, summaryBudget.perIterEnergy());
+    if (maxK == 0) {
         out.error = "post-chunk-k-zero";
         return out;
     }
 
     out.ok = true;
-    out.maxK =
-        std::min<uint64_t>(static_cast<uint64_t>(rawK), std::numeric_limits<unsigned>::max());
+    out.maxK = maxK;
     out.iterEnergy = summaryBudget.worstCasePath.energy;
     return out;
 }
