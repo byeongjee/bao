@@ -849,6 +849,17 @@ static uint64_t largestKWithin(double budget, double perIterEnergy) {
     return std::min<uint64_t>(static_cast<uint64_t>(rawK), std::numeric_limits<unsigned>::max());
 }
 
+static double surroundingIterationEnergy(Loop *ChunkBody, ScalarEvolution &SE,
+                                         const DenseMap<const BasicBlock *, double> &blockEnergy,
+                                         const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
+                                         const checkpoint::StateAnalysis &state) {
+    Loop *ChunkOuter = ChunkBody->getParentLoop();
+    if (!ChunkOuter) {
+        return 0.0;
+    }
+    return enclosingResidual(ChunkOuter, SE, blockEnergy, params, LI, state).value_or(0.0);
+}
+
 static ChunkBudgetResult
 maxKMatchingSummarizer(Loop *L, const DenseMap<const BasicBlock *, double> &blockEnergy,
                        const checkpoint::MILPEnergyParams &params, LoopInfo &LI,
@@ -867,14 +878,18 @@ maxKMatchingSummarizer(Loop *L, const DenseMap<const BasicBlock *, double> &bloc
         return out;
     }
 
-    uint64_t maxK = largestKWithin(chunkBudget, summaryBudget.perIterEnergy());
-    if (maxK == 0) {
+    uint64_t maxKAlone = largestKWithin(chunkBudget, summaryBudget.perIterEnergy());
+    if (maxKAlone == 0) {
         out.error = "post-chunk-k-zero";
         return out;
     }
 
+    double surrounding = surroundingIterationEnergy(L, SE, blockEnergy, params, LI, state);
+    uint64_t maxKSharingRegion =
+        largestKWithin(chunkBudget - surrounding, summaryBudget.perIterEnergy());
+
     out.ok = true;
-    out.maxK = maxK;
+    out.maxK = maxKSharingRegion >= 2 ? maxKSharingRegion : maxKAlone;
     out.iterEnergy = summaryBudget.worstCasePath.energy;
     return out;
 }
