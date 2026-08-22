@@ -29,7 +29,7 @@ BENCHMARKS = [
     "poly1305",
     "cuckoo_filter",
     "sha256_fixed",
-    "stringsearch_fixed",
+    "stringsearch",
 ]
 
 setup_logging("INFO")

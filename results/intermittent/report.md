@@ -29,7 +29,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 (68) | 10/10 / 10/10 / 1366 / 81 / 22.26 | 10/10 / 10/10 / 4409 / 172 / 61.56 | 10/10 / 10/10 / 2949 / 142 / 44.93 | 10/10 / 10/10 / 2089 / 105 / 32.94 |
 | cuckoo_filter (4048) | 10/10 / 10/10 / 169 / 3 / 1.69 | 10/10 / 10/10 / 1902 / 71 / 26.46 | 10/10 / 10/10 / 1018 / 49 / 15.46 | 10/10 / 10/10 / 178 / 3 / 1.80 |
 | sha256_fixed (131) | 10/10 / 10/10 / 184 / 9 / 2.44 | 10/10 / 10/10 / 1098 / 35 / 14.31 | 10/10 / 10/10 / 425 / 13 / 5.63 | 10/10 / 10/10 / 346 / 15 / 4.86 |
-| stringsearch_fixed (20) | 10/10 / 10/10 / 208 / 2 / 1.98 | 9/10 / 9/9 / 7991 / 360 / 118.34 | 10/10 / 10/10 / 600 / 19 / 7.63 | 10/10 / 10/10 / 232 / 5 / 2.45 |
+| stringsearch (20) | 10/10 / 10/10 / 208 / 2 / 1.98 | 9/10 / 9/9 / 7991 / 360 / 118.34 | 10/10 / 10/10 / 600 / 19 / 7.63 | 10/10 / 10/10 / 232 / 5 / 2.45 |
 
 ## Per trace: waits by benchmark x algorithm (`inc` = incomplete)
 
@@ -49,7 +49,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 132 | 322 | 275 | 185 |
 | cuckoo_filter | 14 | 131 | 88 | 14 |
 | sha256_fixed | 18 | 76 | 37 | 34 |
-| stringsearch_fixed | 15 | 609 | 46 | 17 |
+| stringsearch | 15 | 609 | 46 | 17 |
 
 ### trace 2
 
@@ -67,7 +67,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 131 | 409 | 279 | 193 |
 | cuckoo_filter | 15 | 175 | 95 | 17 |
 | sha256_fixed | 18 | 96 | 41 | 33 |
-| stringsearch_fixed | 21 | 813 | 59 | 21 |
+| stringsearch | 21 | 813 | 59 | 21 |
 
 ### trace 3
 
@@ -85,7 +85,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 129 | 666 | 341 | 243 |
 | cuckoo_filter | 20 | 304 | 121 | 21 |
 | sha256_fixed | 17 | 181 | 56 | 33 |
-| stringsearch_fixed | 25 | 1513 | 84 | 29 |
+| stringsearch | 25 | 1513 | 84 | 29 |
 
 ### trace 4
 
@@ -103,7 +103,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 137 | 525 | 285 | 185 |
 | cuckoo_filter | 18 | 224 | 105 | 18 |
 | sha256_fixed | 19 | 138 | 42 | 34 |
-| stringsearch_fixed | 25 | inc | 63 | 29 |
+| stringsearch | 25 | inc | 63 | 29 |
 
 ### trace 5
 
@@ -121,7 +121,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 138 | 402 | 288 | 215 |
 | cuckoo_filter | 18 | 175 | 101 | 21 |
 | sha256_fixed | 19 | 102 | 43 | 35 |
-| stringsearch_fixed | 22 | 849 | 61 | 23 |
+| stringsearch | 22 | 849 | 61 | 23 |
 
 ### trace 6
 
@@ -139,7 +139,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 131 | 383 | 273 | 203 |
 | cuckoo_filter | 17 | 161 | 98 | 17 |
 | sha256_fixed | 17 | 91 | 34 | 33 |
-| stringsearch_fixed | 19 | 761 | 54 | 22 |
+| stringsearch | 19 | 761 | 54 | 22 |
 
 ### trace 7
 
@@ -157,7 +157,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 128 | 391 | 273 | 190 |
 | cuckoo_filter | 16 | 177 | 94 | 17 |
 | sha256_fixed | 17 | 99 | 41 | 33 |
-| stringsearch_fixed | 21 | 795 | 56 | 21 |
+| stringsearch | 21 | 795 | 56 | 21 |
 
 ### trace 8
 
@@ -175,7 +175,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 148 | 559 | 323 | 252 |
 | cuckoo_filter | 20 | 247 | 117 | 21 |
 | sha256_fixed | 20 | 136 | 49 | 37 |
-| stringsearch_fixed | 26 | 1182 | 74 | 28 |
+| stringsearch | 26 | 1182 | 74 | 28 |
 
 ### trace 9
 
@@ -193,7 +193,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 137 | 365 | 298 | 204 |
 | cuckoo_filter | 18 | 151 | 97 | 18 |
 | sha256_fixed | 19 | 89 | 38 | 35 |
-| stringsearch_fixed | 19 | 728 | 51 | 20 |
+| stringsearch | 19 | 728 | 51 | 20 |
 
 ### trace 10
 
@@ -211,7 +211,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | poly1305 | 155 | 387 | 314 | 219 |
 | cuckoo_filter | 13 | 157 | 102 | 14 |
 | sha256_fixed | 20 | 90 | 44 | 39 |
-| stringsearch_fixed | 15 | 741 | 52 | 22 |
+| stringsearch | 15 | 741 | 52 | 22 |
 
 ## Per benchmark x algorithm x trace
 
@@ -323,7 +323,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | schematic | ok w=37 rec=1 t=2.58s | ok w=41 rec=0 t=1.86s | ok w=56 rec=0 t=1.05s | ok w=42 rec=0 t=11.13s | ok w=43 rec=2 t=8.08s | ok w=34 rec=0 t=1.65s | ok w=41 rec=0 t=6.56s | ok w=49 rec=4 t=6.99s | ok w=38 rec=0 t=8.42s | ok w=44 rec=6 t=7.95s |
 | schematicO3 | ok w=34 rec=1 t=2.53s | ok w=33 rec=0 t=1.62s | ok w=33 rec=0 t=0.67s | ok w=34 rec=1 t=8.67s | ok w=35 rec=2 t=6.27s | ok w=33 rec=0 t=1.61s | ok w=33 rec=0 t=5.52s | ok w=37 rec=3 t=5.51s | ok w=35 rec=2 t=8.33s | ok w=39 rec=6 t=7.91s |
 
-### stringsearch_fixed (baseline result 20)
+### stringsearch (baseline result 20)
 
 | algo | tr1 | tr2 | tr3 | tr4 | tr5 | tr6 | tr7 | tr8 | tr9 | tr10 |
 |---|---|---|---|---|---|---|---|---|---|---|

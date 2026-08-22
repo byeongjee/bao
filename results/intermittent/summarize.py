@@ -17,7 +17,7 @@ BENCHMARKS = [
     "poly1305",
     "cuckoo_filter",
     "sha256_fixed",
-    "stringsearch_fixed",
+    "stringsearch",
 ]
 ALGOS = ["milp", "rockclimb", "schematic", "schematicO3"]
 TRACES = [str(i) for i in range(1, 11)]
