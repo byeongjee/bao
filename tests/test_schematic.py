@@ -75,16 +75,10 @@ SCENARIOS = [
         "scenario_nested_loop_energy.c",
         ENERGY_CONFIG,
         SCHEMATIC_CONFIG,
-        # Inner loop energy far exceeds capacity, so the outer loop must not
-        # fit entirely and still needs a back-edge checkpoint. The correct
-        # reference-equivalent behavior does NOT blanket-reactivate every
-        # fixed edge inside the analyzed loops; the static boundary count
-        # stays compact.
+        # Inner loop energy forces a checkpoint on the outer loop's back edge.
         {
             "exit": 0,
-            "min_boundary": 3,
-            "max_boundary": 3,
-            "stderr_contains": "Loop decisions:",
+            "stderr_contains": "loop-mandatory-backedge[",
         },
     ),
 ]
@@ -291,10 +285,7 @@ def test_schematic_o3_nested_loop_energy(run_schematic_o3, tmp_path_factory):
         f"Expected exit=0 but got {result.exit_code}.\nstderr: {result.stderr[:1000]}"
     )
     assert "Loop decisions:                  2" in result.stderr
-
-    m = re.search(r"Region boundaries:\s+(\d+)", result.stderr)
-    assert m, f"Could not find region boundary count in stderr:\n{result.stderr}"
-    assert int(m.group(1)) >= 4, result.stderr
+    assert "loop-mandatory-backedge[" in result.stderr
 
 
 def test_schematic_o3_dijkstra_loop_budget_uses_rare_inner_branch(

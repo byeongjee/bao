@@ -24,9 +24,10 @@ static std::string loopOriginTag(llvm::Loop *L, llvm::StringRef reason) {
 static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAlloc,
                                          SchematicSolution &solution, const CFGAnalysis &cfg,
                                          const SchematicStateAnalysis &state,
-                                         const SchematicParams &params, SchematicGraph &graph,
-                                         SchematicBlock *headerBlock, SchematicBlock *latchBlock,
-                                         SchematicBlock *startSynth, SchematicBlock *endSynth);
+                                         const SchematicParams &params, llvm::LoopInfo &LI,
+                                         SchematicGraph &graph, SchematicBlock *headerBlock,
+                                         SchematicBlock *latchBlock, SchematicBlock *startSynth,
+                                         SchematicBlock *endSynth);
 
 static std::map<llvm::Value *, VariableAccessEstimate>
 estimateLoopVariableAccess(const LoadedLoopTrace &loopTrace, const SchematicStateAnalysis &state,
@@ -485,7 +486,7 @@ static void refineLoopBudgetWithConvergence(
                                                         nullptr, loopMemoryAllocations, tracker);
         bodyAlloc = newAlloc;
 
-        recomputeLoopBodyEnergyOnCFG(L, bodyAlloc, solution, cfg, state, params, graph,
+        recomputeLoopBodyEnergyOnCFG(L, bodyAlloc, solution, cfg, state, params, LI, graph,
                                      blocks.headerBlock, blocks.latchBlock, blocks.startSynth,
                                      blocks.endSynth);
         refreshDisabledCheckpointEnergy(cfg, solution, state, params, LI, graph, L);
@@ -544,9 +545,10 @@ static void applyLoopCheckpointPolicy(llvm::Loop *L, unsigned maxTripCount,
 static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAlloc,
                                          SchematicSolution &solution, const CFGAnalysis &cfg,
                                          const SchematicStateAnalysis &state,
-                                         const SchematicParams &params, SchematicGraph &graph,
-                                         SchematicBlock *headerBlock, SchematicBlock *latchBlock,
-                                         SchematicBlock *startSynth, SchematicBlock *endSynth) {
+                                         const SchematicParams &params, llvm::LoopInfo &LI,
+                                         SchematicGraph &graph, SchematicBlock *headerBlock,
+                                         SchematicBlock *latchBlock, SchematicBlock *startSynth,
+                                         SchematicBlock *endSynth) {
     auto sharedAlloc = std::make_shared<RegionAllocation>(bodyAlloc);
 
     // Reset loop-local energy state and apply the converged body allocation.
@@ -575,205 +577,12 @@ static void recomputeLoopBodyEnergyOnCFG(llvm::Loop *L, RegionAllocation &bodyAl
     double eToLeave =
         computeLoopExitEnergyToLeave(bodyAlloc, state, params, /*includeLoopIncrementCost=*/true);
 
-    auto isCurrentLoopBackedge = [&](SchematicBlock *src, SchematicBlock *dst) {
-        return src == latchBlock && dst == headerBlock;
-    };
-    auto isBlockInLoop = [&](SchematicBlock *block) {
-        llvm::BasicBlock *BB = block ? block->getLLVMBlock() : nullptr;
-        return BB && L->contains(BB);
-    };
-
-    // Forward propagation over the real loop CFG (LoopBodyNoBackedge).
-    // Like propagateEnergyLeft, this deliberately diverges from the reference's
-    // greedy max-first walk (which can drop the worst-case path at joins whose
-    // costlier side has more hops): build the DAG of reachable disabled edges
-    // first, then propagate the max accumulated cost in topological order,
-    // mirroring the backward pass below.
-    {
-        CFGEdge seedEdge{startSynth, headerBlock};
-        std::deque<CFGEdge> toVisit = {seedEdge};
-        std::set<CFGEdge> visited;
-        std::map<CFGEdge, std::vector<CFGEdge>> dagAdj;
-        dagAdj[seedEdge];
-
-        while (!toVisit.empty()) {
-            CFGEdge edge = toVisit.front();
-            toVisit.pop_front();
-            if (!visited.insert(edge).second)
-                continue;
-
-            SchematicBlock *block = edge.dst;
-            if (!isBlockInLoop(block))
-                continue;
-
-            llvm::BasicBlock *BB = block->getLLVMBlock();
-            for (llvm::BasicBlock *succBB : llvm::successors(BB)) {
-                if (!L->contains(succBB))
-                    continue;
-                SchematicBlock *succ = graph.getOrCreate(succBB);
-                CFGEdge childEdge{block, succ};
-                if (visited.count(childEdge))
-                    continue;
-                if (isCurrentLoopBackedge(block, succ))
-                    continue;
-                if (!isDisabledCheckpoint(solution, childEdge))
-                    continue;
-                dagAdj[childEdge];
-                dagAdj[edge].push_back(childEdge);
-                toVisit.push_back(childEdge);
-            }
-        }
-
-        std::map<CFGEdge, unsigned> inDeg;
-        for (auto &[node, children] : dagAdj) {
-            if (inDeg.find(node) == inDeg.end())
-                inDeg[node] = 0;
-            for (auto &child : children)
-                inDeg[child]++;
-        }
-
-        std::deque<CFGEdge> topoQueue;
-        for (auto &[node, deg] : inDeg)
-            if (deg == 0)
-                topoQueue.push_back(node);
-
-        std::map<CFGEdge, double> maxCost;
-        std::set<llvm::BasicBlock *> seenLoops;
-        maxCost[seedEdge] = 0.0;
-
-        while (!topoQueue.empty()) {
-            CFGEdge edge = topoQueue.front();
-            topoQueue.pop_front();
-
-            double cost = maxCost.count(edge) ? maxCost[edge] : 0.0;
-            maxCost.erase(edge);
-
-            SchematicBlock *block = edge.dst;
-            if (isBlockInLoop(block)) {
-                auto metaIt = solution.blockMeta.find(block);
-                if (metaIt != solution.blockMeta.end()) {
-                    const auto &loopOpt = metaIt->second.loop;
-                    if (loopOpt.has_value()) {
-                        llvm::BasicBlock *loopHeader = loopOpt->loop->getHeader();
-                        if (!seenLoops.count(loopHeader)) {
-                            seenLoops.insert(loopHeader);
-                            cost += (loopOpt->nbIter - 1) * loopOpt->costOneIt;
-                        }
-                    }
-                }
-
-                cost += getBlockExecEnergy(block, solution, cfg, state, params);
-                double energyLeft = energyLeftStart - cost;
-                if (energyLeft < solution.blockMeta[block].E_left)
-                    solution.blockMeta[block].E_left = energyLeft;
-
-                for (auto &childEdge : dagAdj[edge]) {
-                    if (maxCost.find(childEdge) == maxCost.end() || cost > maxCost[childEdge])
-                        maxCost[childEdge] = cost;
-                }
-            }
-
-            for (auto &childEdge : dagAdj[edge]) {
-                inDeg[childEdge]--;
-                if (inDeg[childEdge] == 0)
-                    topoQueue.push_back(childEdge);
-            }
-        }
-    }
-
-    // Backward propagation over the real loop CFG (LoopBodyNoBackedge).
-    {
-        std::deque<CFGEdge> toVisit = {CFGEdge{latchBlock, endSynth}};
-        std::set<CFGEdge> visited;
-        std::map<CFGEdge, std::vector<CFGEdge>> dagAdj;
-        dagAdj[CFGEdge{latchBlock, endSynth}];
-
-        while (!toVisit.empty()) {
-            CFGEdge edge = toVisit.front();
-            toVisit.pop_front();
-            if (!visited.insert(edge).second)
-                continue;
-
-            SchematicBlock *block = edge.src;
-            if (!isBlockInLoop(block))
-                continue;
-
-            llvm::BasicBlock *BB = block->getLLVMBlock();
-            for (llvm::BasicBlock *predBB : llvm::predecessors(BB)) {
-                if (!L->contains(predBB))
-                    continue;
-                SchematicBlock *pred = graph.getOrCreate(predBB);
-                CFGEdge childEdge{pred, block};
-                if (visited.count(childEdge))
-                    continue;
-                if (isCurrentLoopBackedge(pred, block))
-                    continue;
-                if (!isDisabledCheckpoint(solution, childEdge))
-                    continue;
-                dagAdj[childEdge];
-                dagAdj[edge].push_back(childEdge);
-                toVisit.push_back(childEdge);
-            }
-        }
-
-        std::map<CFGEdge, unsigned> inDeg;
-        for (auto &[node, children] : dagAdj) {
-            if (inDeg.find(node) == inDeg.end())
-                inDeg[node] = 0;
-            for (auto &child : children)
-                inDeg[child]++;
-        }
-
-        std::deque<CFGEdge> topoQueue;
-        for (auto &[node, deg] : inDeg)
-            if (deg == 0)
-                topoQueue.push_back(node);
-
-        std::map<CFGEdge, double> maxEToLeave;
-        std::set<llvm::BasicBlock *> seenLoops;
-        CFGEdge seedEdge{latchBlock, endSynth};
-        maxEToLeave[seedEdge] = eToLeave;
-
-        while (!topoQueue.empty()) {
-            CFGEdge edge = topoQueue.front();
-            topoQueue.pop_front();
-
-            double energy = maxEToLeave.count(edge) ? maxEToLeave[edge] : 0.0;
-            maxEToLeave.erase(edge);
-
-            SchematicBlock *block = edge.src;
-            if (isBlockInLoop(block)) {
-                auto metaIt = solution.blockMeta.find(block);
-                if (metaIt != solution.blockMeta.end()) {
-                    const auto &loopOpt = metaIt->second.loop;
-                    if (loopOpt.has_value()) {
-                        llvm::BasicBlock *loopHeader = loopOpt->loop->getHeader();
-                        if (!seenLoops.count(loopHeader)) {
-                            seenLoops.insert(loopHeader);
-                            energy += (loopOpt->nbIter - 1) * loopOpt->costOneIt;
-                        }
-                    }
-                }
-
-                energy += getBlockExecEnergy(block, solution, cfg, state, params);
-                if (energy > solution.blockMeta[block].E_to_leave)
-                    solution.blockMeta[block].E_to_leave = energy;
-            }
-
-            for (auto &childEdge : dagAdj[edge]) {
-                if (maxEToLeave.find(childEdge) == maxEToLeave.end() ||
-                    energy > maxEToLeave[childEdge]) {
-                    maxEToLeave[childEdge] = energy;
-                }
-            }
-
-            for (auto &childEdge : dagAdj[edge]) {
-                inDeg[childEdge]--;
-                if (inDeg[childEdge] == 0)
-                    topoQueue.push_back(childEdge);
-            }
-        }
-    }
+    // Propagate over the loop body only (loopScope = L; the shared walkers skip
+    // L's own back-edge), so the result is the cost of one body traversal.
+    propagateEnergyLeft(CFGEdge{startSynth, headerBlock}, energyLeftStart, solution, cfg, state,
+                        params, LI, L);
+    propagateEnergyToLeave(CFGEdge{latchBlock, endSynth}, eToLeave, solution, cfg, state, params,
+                           LI, L);
 
     solution.blockMeta[startSynth].E_left = energyLeftStart;
     solution.blockMeta[startSynth].E_to_leave = solution.blockMeta[headerBlock].E_to_leave;
@@ -960,10 +769,12 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.initialEndEToLeave = budget.endEToLeave;
     decision.initialELoop = budget.ELoop;
 
-    // Inner loop multi-iteration costs are handled by applyLoopIterationAdjustment's
-    // direct E_to_leave/E_left adjustment on loop blocks (matching Python reference
-    // schematic.py:643-664) and by propagation's seenLoops scaling (which
-    // applies unconditionally, without loopScope filtering).
+    // An analyzed inner loop contributes its extra iterations in two places:
+    // applyLoopIterationAdjustment adds (n-1)*E_loop to its own blocks
+    // (reference schematic.py:642-643), and the shared propagation walkers add
+    // the same amount once per loop header when a path crosses it
+    // (reference cfg_modification.py:231-234). E_loop below therefore already
+    // includes every nested loop at its full iteration count.
 
     decision.E_loop = budget.ELoop;
     decision.bodyAllocation = bodyAlloc;

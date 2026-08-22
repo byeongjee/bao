@@ -27,6 +27,34 @@ double getBlockExecEnergy(SchematicBlock *block, const SchematicSolution &soluti
     return E;
 }
 
+/// Extra energy for the remaining iterations of an already-analyzed loop that
+/// `bb` belongs to, charged once per loop header per propagation
+/// (reference: cfg_modification.py:231-234 and :293-295). Without this, a
+/// path crossing an inner loop is costed as if the loop ran once.
+/// The seed energy handed to a propagation was read off a block whose
+/// E_to_leave/E_left already include its loop's (n-1)*E_loop adjustment, so
+/// that loop must not be charged again when the walk starts inside it
+/// (reference: cfg_modification.py:191-193 and :276-278).
+static void markSeedLoopSeen(SchematicBlock *bb, const SchematicSolution &solution,
+                             std::set<llvm::BasicBlock *> &seenLoops) {
+    if (!bb)
+        return;
+    auto metaIt = solution.blockMeta.find(bb);
+    if (metaIt != solution.blockMeta.end() && metaIt->second.loop)
+        seenLoops.insert(metaIt->second.loop->loop->getHeader());
+}
+
+static double loopIterationCharge(SchematicBlock *bb, const SchematicSolution &solution,
+                                  std::set<llvm::BasicBlock *> &seenLoops) {
+    auto metaIt = solution.blockMeta.find(bb);
+    if (metaIt == solution.blockMeta.end() || !metaIt->second.loop)
+        return 0.0;
+    const LoopMark &mark = *metaIt->second.loop;
+    if (!seenLoops.insert(mark.loop->getHeader()).second)
+        return 0.0;
+    return (mark.nbIter - 1) * mark.costOneIt;
+}
+
 void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
                             SchematicSolution &solution, const CFGAnalysis &cfg,
                             const SchematicStateAnalysis &state, const SchematicParams &params,
@@ -89,6 +117,8 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
             topoQueue.push_back(node);
 
     std::map<CFGEdge, double> maxEToLeave;
+    std::set<llvm::BasicBlock *> seenLoops;
+    markSeedLoopSeen(seedEdge.src, solution, seenLoops);
     maxEToLeave[seedEdge] = seedEToLeave;
 
     while (!topoQueue.empty()) {
@@ -100,9 +130,8 @@ void propagateEnergyToLeave(const CFGEdge &seedEdge, double seedEToLeave,
 
         SchematicBlock *bb = ckpt.src;
         if (bb) {
-            // Add block execution cost
-            double blockCost = getBlockExecEnergy(bb, solution, cfg, state, params);
-            eToLeave += blockCost;
+            eToLeave += loopIterationCharge(bb, solution, seenLoops);
+            eToLeave += getBlockExecEnergy(bb, solution, cfg, state, params);
 
             // Update E_to_leave if larger
             if (eToLeave > solution.blockMeta[bb].E_to_leave)
@@ -193,6 +222,8 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
             topoQueue.push_back(node);
 
     std::map<CFGEdge, double> maxCost;
+    std::set<llvm::BasicBlock *> seenLoops;
+    markSeedLoopSeen(seedEdge.dst, solution, seenLoops);
     maxCost[seedEdge] = 0.0;
 
     while (!topoQueue.empty()) {
@@ -204,7 +235,7 @@ void propagateEnergyLeft(const CFGEdge &seedEdge, double seedELeft, SchematicSol
 
         SchematicBlock *bb = ckpt.dst;
         if (bb) {
-            // Add block execution cost and compute energy_left
+            cost += loopIterationCharge(bb, solution, seenLoops);
             cost += getBlockExecEnergy(bb, solution, cfg, state, params);
             double energyLeft = seedELeft - cost;
 
