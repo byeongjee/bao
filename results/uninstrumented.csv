@@ -11,4 +11,4 @@ sensor_fusion,ok,367,25029.82,1
 poly1305,ok,457,475495.65,1
 cuckoo_filter,ok,445,41990.8,1
 sha256,ok,379,88640.11,1
-stringsearch_fixed,ok,361,33074.97,1
+stringsearch,ok,361,33074.97,1

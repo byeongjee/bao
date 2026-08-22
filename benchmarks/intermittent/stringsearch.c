@@ -13,16 +13,20 @@
 // --- Configuration ---
 #define NUM_PATTERNS 26
 #define TEXT_LEN 512
+#define MAX_PATTERN_LEN 12
 
 // --- Mutable globals (MILP candidates) ---
 
 static uint32_t table[256] __attribute__((used, section(".fram")));
 static uint32_t len __attribute__((used, section(".fram")));
-static char *findme __attribute__((used, section(".fram")));
+static uint32_t findme_idx __attribute__((used, section(".fram")));
 
 // --- Const data ---
 
-static const char *find_strings[NUM_PATTERNS] = {
+/* Stored as a 2-D char array rather than an array of pointers: a pointer array
+ * in memory has a target-dependent element stride, which breaks the native
+ * (64-bit) trace replay of IR that was optimized for MSP430's 16-bit pointers. */
+static const char find_strings[NUM_PATTERNS][MAX_PATTERN_LEN] = {
     "Kur",    "gent",   "lass",  "suns", "for",       "xxx", "long", "have",  "where",
     "xxxxxx", "xxxxxx", "pense", "pow",  "xxxxx",     "Yo",  "and",  "faded", "20",
     "you",    "bac",    "an",    "way",  "possibili", "fat", "imag", "th"};
@@ -63,8 +67,6 @@ FORCE_INLINE void init_search(const char *pattern) {
         __loop_tripcount(16);
         table[(unsigned char)pattern[i]] = len - i - 1;
     }
-
-    findme = (char *)pattern;
 }
 
 FORCE_INLINE const char *strsearch(const char *pattern, const char *text) {
@@ -92,7 +94,7 @@ FORCE_INLINE const char *strsearch(const char *pattern, const char *text) {
         if (shift == 0) {
             // Check for match
             const char *here = &text[pos - len + 1];
-            const char *a = findme;
+            const char *a = find_strings[findme_idx];
             const char *b = here;
             uint32_t matched = 1;
             uint32_t j;
@@ -122,7 +124,8 @@ __attribute__((noinline)) int main(void) {
 
     for (i = 0; i < NUM_PATTERNS; i++) {
         __loop_tripcount(NUM_PATTERNS);
-        findme = (char *)find_strings[i];
+        findme_idx = (uint32_t)i;
+        const char *findme = find_strings[findme_idx];
 
         // Compute pattern length manually (no strlen)
         len = 0;
