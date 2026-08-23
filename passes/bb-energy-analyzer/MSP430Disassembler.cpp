@@ -368,7 +368,8 @@ std::string MSP430Disassembler::parseOperandMode(const std::string &operand) {
 
 unsigned MSP430Disassembler::countStackAccesses(const Instruction &instr, bool fpIsR4) {
     const std::string &m = instr.mnemonic;
-    if (m == "push" || m == "pop" || m == "call" || m == "ret" || m == "reti")
+    if (m == "push" || m == "pop" || m == "call" || m == "calla" || m == "ret" || m == "reta" ||
+        m == "reti")
         return 1;
     if (m == "pushm" || m == "popm") {
         // pushm #N, rX / popm #N, rX
@@ -379,8 +380,8 @@ unsigned MSP430Disassembler::countStackAccesses(const Instruction &instr, bool f
         return 1;
     }
 
-    static const std::regex spOrFpOperand(R"(@?[rR][14]\+?|.*\([rR][14]\))");
-    static const std::regex spOperand(R"(@?[rR]1\+?|.*\([rR]1\))");
+    static const std::regex spOrFpOperand(R"(@[rR][14]\+?|.*\([rR][14]\))");
+    static const std::regex spOperand(R"(@[rR]1\+?|.*\([rR]1\))");
     const std::regex &pattern = fpIsR4 ? spOrFpOperand : spOperand;
 
     unsigned count = 0;
