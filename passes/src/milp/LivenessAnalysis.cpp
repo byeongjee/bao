@@ -1,5 +1,7 @@
 #include "milp/LivenessAnalysis.h"
 
+#include "milp/AllocaToGlobalPass.h"
+
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
@@ -69,6 +71,13 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
                         seenMustStore = true;
                     }
                 }
+            }
+
+            // A promoted alloca holds no defined value at function entry, so
+            // nothing before the entry block's first full store needs saving.
+            if (&BB == &F.getEntryBlock() && GV->hasMetadata(PromotedAllocaMD)) {
+                info.loadBeforeMustStore = false;
+                info.hasMustStore = true;
             }
 
             blockGVInfo[key] = info;

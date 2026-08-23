@@ -4,6 +4,10 @@
 
 namespace checkpoint {
 
+/// Metadata kind marking a global that AllocaToGlobalPass created from an
+/// alloca; its contents are undefined at function entry.
+inline constexpr const char *PromotedAllocaMD = "ckpt.promoted_alloca";
+
 /// Rewrites main's allocas into internal globals in .fram.
 ///
 /// MILP links with the stack in SRAM, so a live stack object is copied to
