@@ -263,6 +263,8 @@ def _precomputed_pipeline(
             str(opts.energy_config),
             "--bb-mapping",
             str(mir_bb_mapping),
+            # The RockClimb linker script places the stack in FRAM.
+            f"--stack-access-penalty={read_nvm_access_penalty(opts.rockclimb_config)}",
             f"-ckpt-log-level={opts.pass_log_level}",
             str(energy_obj),
         ],
