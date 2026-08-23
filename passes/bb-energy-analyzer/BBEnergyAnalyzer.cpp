@@ -12,6 +12,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <regex>
 
 using namespace llvm;
 using namespace bbanalyzer;
@@ -96,6 +97,11 @@ static cl::opt<std::string>
 
 static cl::opt<std::string> OutputFile("o", cl::init("-"),
                                        cl::desc("Output JSON file (default: stdout)"));
+
+static cl::opt<double> StackAccessPenalty(
+    "stack-access-penalty", cl::init(0.0),
+    cl::desc("Extra energy per stack memory access (for builds whose stack lives in FRAM; "
+             "the energy parameters are calibrated with the stack in SRAM)"));
 
 static cl::opt<bool> DumpLineMap("dump-line-map", cl::init(false),
                                  cl::desc("Dump resolved address->BB line map and exit"));
@@ -194,6 +200,22 @@ int main(int argc, char **argv) {
         funcOutput["bb_count"] = funcMap.bbToAddresses.size();
         funcOutput["bb_energy"] = json::object();
 
+        // r4 addresses the stack only when the prologue makes it the frame
+        // pointer (mov r1, r4); otherwise it is a general-purpose register.
+        bool fpIsR4 = false;
+        if (StackAccessPenalty > 0.0) {
+            static const std::regex fpPrologue(R"(r1,\s*r4)");
+            for (const auto &[bbIndex, ranges] : funcMap.bbToAddresses) {
+                for (const auto &range : ranges) {
+                    for (const auto &insn : instructions) {
+                        if (insn.address >= range.start && insn.address < range.end &&
+                            insn.mnemonic == "mov" && std::regex_match(insn.operands, fpPrologue))
+                            fpIsR4 = true;
+                    }
+                }
+            }
+        }
+
         for (const auto &[bbIndex, ranges] : funcMap.bbToAddresses) {
             double bbEnergy = 0.0;
             int instrCount = 0;
@@ -217,6 +239,10 @@ int main(int argc, char **argv) {
                                 model.getCallEnergy(insn.addrMode, insn.callTarget, sizeArg);
                         } else {
                             bbEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);
+                        }
+                        if (StackAccessPenalty > 0.0) {
+                            bbEnergy += StackAccessPenalty *
+                                        MSP430Disassembler::countStackAccesses(insn, fpIsR4);
                         }
                         instrCount++;
                         instructionMapped[i] = true;

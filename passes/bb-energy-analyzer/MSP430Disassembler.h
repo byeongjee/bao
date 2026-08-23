@@ -28,6 +28,11 @@ class MSP430Disassembler {
     /// @return List of instructions with addresses
     std::vector<Instruction> disassemble(const std::string &elfPath);
 
+    /// Number of stack memory accesses an instruction performs: operands
+    /// addressed through SP (r1) or, when *fpIsR4*, the frame pointer (r4),
+    /// plus the implicit push/pop of push, pop, call, ret and pushm/popm.
+    static unsigned countStackAccesses(const Instruction &instr, bool fpIsR4);
+
     /// Parse instruction and relocation lines from msp430-elf-objdump -d -r output.
     /// Exposed separately so parsing can be tested without invoking the external tool.
     /// Mnemonic width suffixes (e.g., .b/.w) are normalized away because the

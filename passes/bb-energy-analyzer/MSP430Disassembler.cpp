@@ -366,4 +366,42 @@ std::string MSP430Disassembler::parseOperandMode(const std::string &operand) {
     return "symbolic";
 }
 
+unsigned MSP430Disassembler::countStackAccesses(const Instruction &instr, bool fpIsR4) {
+    const std::string &m = instr.mnemonic;
+    if (m == "push" || m == "pop" || m == "call" || m == "ret" || m == "reti")
+        return 1;
+    if (m == "pushm" || m == "popm") {
+        // pushm #N, rX / popm #N, rX
+        std::regex countPattern(R"(#(\d+))");
+        std::smatch match;
+        if (std::regex_search(instr.operands, match, countPattern))
+            return static_cast<unsigned>(std::stoul(match[1]));
+        return 1;
+    }
+
+    static const std::regex spOrFpOperand(R"(@?[rR][14]\+?|.*\([rR][14]\))");
+    static const std::regex spOperand(R"(@?[rR]1\+?|.*\([rR]1\))");
+    const std::regex &pattern = fpIsR4 ? spOrFpOperand : spOperand;
+
+    unsigned count = 0;
+    std::string current;
+    auto flush = [&]() {
+        current.erase(0, current.find_first_not_of(" \t"));
+        if (!current.empty()) {
+            current.erase(current.find_last_not_of(" \t") + 1);
+            if (std::regex_match(current, pattern))
+                count++;
+        }
+        current.clear();
+    };
+    for (char ch : instr.operands) {
+        if (ch == ',')
+            flush();
+        else
+            current += ch;
+    }
+    flush();
+    return count;
+}
+
 } // namespace bbanalyzer

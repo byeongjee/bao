@@ -25,6 +25,7 @@ from .common import (
     link_algorithm,
     now_ms,
     optimize_ir,
+    read_nvm_access_penalty,
     run_assembly_energy,
     strip_ir_for_native,
     write_assembly_energy_config,
@@ -160,6 +161,9 @@ def compile_schematic(
         energy_config = opts.energy_config
         analyzer_stderr = ""
         if opts.estimator_mode == "assembly":
+            assert opts.schematic_config is not None, (
+                "schematic_config required for energy"
+            )
             bb_energy, analyzer_stderr = run_assembly_energy(
                 tc,
                 env,
@@ -168,6 +172,8 @@ def compile_schematic(
                 opts.energy_config,
                 opts.pass_log_level,
                 opt_level=opts.opt_level,
+                # SCHEMATIC links with the RockClimb script: stack in FRAM.
+                stack_access_penalty=read_nvm_access_penalty(opts.schematic_config),
             )
             energy_config = write_assembly_energy_config(
                 tmp / "asm_energy_config.json",
