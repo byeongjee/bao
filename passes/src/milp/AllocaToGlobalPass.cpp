@@ -7,6 +7,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -73,6 +74,9 @@ PreservedAnalyses AllocaToGlobalPass::run(Function &F, FunctionAnalysisManager &
         if (useFramSection)
             GV->setSection(".fram");
         GV->setAlignment(AI->getAlign());
+        // The alloca's contents are undefined at function entry, so liveness
+        // can treat the global as dead there instead of charging a restore.
+        GV->setMetadata(PromotedAllocaMD, MDNode::get(M.getContext(), {}));
 
         eraseLifetimeMarkers(AI);
         AI->replaceAllUsesWith(GV);
