@@ -329,14 +329,22 @@ static void copyLoopBoundaryEnergyToSyntheticBlocks(SchematicSolution &solution,
         solution.blockMeta[blocks.endSynth].E_left = solution.blockMeta[blocks.latchBlock].E_left;
 }
 
+// The iteration budget is what remains after restoring at the back-edge
+// checkpoint that starts the interval and reserving the save at the one that
+// ends it. The paper's Algorithm 1 (line 6) and the reference implementation
+// (schematic.py, nb_it_with_budget) omit the restore; the paper's own RCG cost
+// model charges it, and so do we.
 static LoopIterationBudget readLoopIterationBudget(const LoopBoundaryBlocks &blocks,
+                                                   const RegionAllocation &bodyAlloc,
+                                                   const SchematicStateAnalysis &state,
                                                    const SchematicParams &params,
                                                    const SchematicSolution &solution) {
     LoopIterationBudget budget;
     budget.startEToLeave = solution.blockMeta.at(blocks.startSynth).E_to_leave;
     budget.endEToLeave = solution.blockMeta.at(blocks.endSynth).E_to_leave;
     budget.ELoop = budget.startEToLeave - budget.endEToLeave + params.loopIncrementCostNvm;
-    budget.availableEnergy = params.capacity - budget.endEToLeave;
+    budget.availableEnergy =
+        computeLoopEntryEnergyLeft(bodyAlloc, state, params) - budget.endEToLeave;
     if (budget.ELoop > 0.0) {
         budget.rawNumIterations =
             static_cast<int>(std::floor(budget.availableEnergy / budget.ELoop)) - 1;
@@ -491,7 +499,7 @@ static void refineLoopBudgetWithConvergence(
                                      blocks.endSynth);
         refreshDisabledCheckpointEnergy(cfg, solution, state, params, LI, graph, L);
 
-        budget = readLoopIterationBudget(blocks, params, solution);
+        budget = readLoopIterationBudget(blocks, bodyAlloc, state, params, solution);
         decision.E_loop = budget.ELoop;
         decision.bodyAllocation = bodyAlloc;
 
@@ -499,14 +507,35 @@ static void refineLoopBudgetWithConvergence(
             break;
 
         // Convergence uses startEToLeave rather than endEToLeave, matching the
-        // Python reference loop-budget update.
-        budget.availableEnergy = params.capacity - budget.startEToLeave;
+        // Python reference loop-budget update (schematic.py:614), but charges
+        // the restore at the back-edge checkpoint, which the reference omits.
+        budget.availableEnergy =
+            computeLoopEntryEnergyLeft(bodyAlloc, state, params) - budget.startEToLeave;
         if (budget.availableEnergy <= 0.0)
             break;
         budget.rawNumIterations =
             static_cast<int>(std::floor(budget.availableEnergy / budget.ELoop)) - 1;
         budget.numIterations = static_cast<unsigned>(std::max(budget.rawNumIterations, 0));
     }
+}
+
+static unsigned
+splitLoopBodyAtFixedBoundary(llvm::Loop *L,
+                             const std::vector<std::vector<SchematicBlock *>> &bodyPaths,
+                             SchematicSolution &solution) {
+    unsigned enabled = 0;
+    for (const auto &path : bodyPaths) {
+        for (size_t i = 1; i < path.size(); ++i) {
+            auto metaIt = solution.blockMeta.find(path[i]);
+            if (metaIt == solution.blockMeta.end() || !metaIt->second.analyzed)
+                continue;
+            enableCheckpoint(solution, CFGEdge{path[i - 1], path[i]},
+                             loopOriginTag(L, "body-does-not-fit"));
+            ++enabled;
+            break;
+        }
+    }
+    return enabled;
 }
 
 static void applyLoopCheckpointPolicy(llvm::Loop *L, unsigned maxTripCount,
@@ -764,7 +793,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     // synthetic blocks now have proper edges via SchematicGraph.
     // Reference: Python's first_bb/last_bb in E_loop computation (schematic.py:566-569).
     copyLoopBoundaryEnergyToSyntheticBlocks(solution, blocks);
-    LoopIterationBudget budget = readLoopIterationBudget(blocks, params_, solution);
+    LoopIterationBudget budget =
+        readLoopIterationBudget(blocks, bodyAlloc, state_, params_, solution);
     decision.initialStartEToLeave = budget.startEToLeave;
     decision.initialEndEToLeave = budget.endEToLeave;
     decision.initialELoop = budget.ELoop;
@@ -814,6 +844,21 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
     decision.finalEndEToLeave = budget.endEToLeave;
     decision.finalAvailableEnergy = budget.availableEnergy;
     decision.finalRawNumIterations = budget.rawNumIterations;
+
+    if (budget.rawNumIterations < 0) {
+        unsigned enabled = splitLoopBodyAtFixedBoundary(L, bodyPaths, solution);
+        if (enabled == 0) {
+            PLOGE << "SCHEMATIC infeasible: loop at " << blocks.header->getName()
+                  << " does not fit in one charge and has no fixed body boundary";
+            return false;
+        }
+        recomputeLoopBodyEnergyOnCFG(L, bodyAlloc, solution, cfg_, state_, params_, LI_, graph_,
+                                     blocks.headerBlock, blocks.latchBlock, blocks.startSynth,
+                                     blocks.endSynth);
+        refreshDisabledCheckpointEnergy(cfg_, solution, state_, params_, LI_, graph_, L);
+        budget = readLoopIterationBudget(blocks, bodyAlloc, state_, params_, solution);
+        decision.E_loop = budget.ELoop;
+    }
 
     // Decide checkpoint type.
     PLOGD << "[LoopAnalyzer] loop=" << blocks.header->getName() << " numIt=" << budget.numIterations
