@@ -332,6 +332,22 @@ bool SchematicPass::solveFunction(Function &F, FunctionAnalysisManager &AM,
         return false;
     }
 
+    // The estimator costs a block with every candidate in VM; SCHEMATIC's
+    // cost model (reference memory_allocator.py) starts from the all-NVM cost
+    // and subtracts the gain of each VM placement, so convert once here.
+    // Allocas live on the FRAM stack, whose accesses the assembly estimator
+    // already charges (stack_access_penalty), so only globals are converted.
+    for (BasicBlock &BB : F) {
+        double nvmPenalty = 0.0;
+        for (Value *v : state.getCandidates()) {
+            if (!isa<GlobalVariable>(v))
+                continue;
+            nvmPenalty += params.nvmAccessPenalty *
+                          (state.getLoadCount(&BB, v) + state.getStoreCount(&BB, v));
+        }
+        ctx.cfg->setBlockEnergyCost(&BB, ctx.cfg->getBlockInfo(&BB).energyCost + nvmPenalty);
+    }
+
     // Create the SchematicGraph that owns all SchematicBlock instances.
     SchematicGraph graph;
     graph.addCFGEdges(F);
