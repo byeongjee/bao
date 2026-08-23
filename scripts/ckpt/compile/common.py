@@ -273,6 +273,7 @@ def run_assembly_energy(
     pass_log_level: str,
     *,
     opt_level: int,
+    stack_access_penalty: float,
 ) -> tuple[Path, str]:
     """Run the assembly-based BB energy estimation pipeline.
 
@@ -284,6 +285,10 @@ def run_assembly_energy(
     *opt_level* is the ``llc`` optimization level; pass the same value used for
     device codegen (``compile_to_object``) so the assembly measured for energy
     matches the assembly that actually runs.
+
+    *stack_access_penalty* is added per stack memory access. The energy
+    parameters are calibrated with the stack in SRAM; pipelines whose linker
+    script puts the stack in FRAM pass the config's ``nvm_access_penalty``.
 
     Returns (bb_energy_path, analyzer_stderr).
     """
@@ -329,6 +334,7 @@ def run_assembly_energy(
             str(params_config),
             "--bb-mapping",
             str(bb_mapping),
+            f"--stack-access-penalty={stack_access_penalty}",
             f"-ckpt-log-level={pass_log_level}",
             str(energy_obj),
         ],
@@ -337,6 +343,12 @@ def run_assembly_energy(
 
     bb_energy.write_text(result.stdout)
     return bb_energy, result.stderr
+
+
+def read_nvm_access_penalty(config_path: Path) -> float:
+    """Read ``nvm_access_penalty`` from an algorithm config JSON."""
+    with open(config_path) as f:
+        return float(json.load(f)["nvm_access_penalty"])
 
 
 # ---------------------------------------------------------------------------

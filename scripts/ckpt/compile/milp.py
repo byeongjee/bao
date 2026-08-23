@@ -195,6 +195,7 @@ def _assembly_mode(
         opts.energy_config,
         opts.pass_log_level,
         opt_level=opts.opt_level,
+        stack_access_penalty=0.0,
     )
 
     pre_energy_config = write_assembly_energy_config(
@@ -227,6 +228,7 @@ def _assembly_mode(
         opts.energy_config,
         opts.pass_log_level,
         opt_level=opts.opt_level,
+        stack_access_penalty=0.0,
     )
 
     post_energy_config = write_assembly_energy_config(

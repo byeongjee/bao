@@ -20,6 +20,7 @@ from .common import (
     compile_annotated_ir,
     link_algorithm,
     optimize_ir_with_options,
+    read_nvm_access_penalty,
     run_assembly_energy,
     write_assembly_energy_config,
 )
@@ -340,6 +341,8 @@ def _run_rockclimb_preprocess(
         opts.energy_config,
         opts.pass_log_level,
         opt_level=opts.opt_level,
+        # The RockClimb linker script places the stack in FRAM.
+        stack_access_penalty=read_nvm_access_penalty(opts.rockclimb_config),
     )
     preprocess_energy_config = write_assembly_energy_config(
         tmp / "preprocess_energy_config.json",
