@@ -83,6 +83,7 @@ def _write_rockclimb_config(tmp_path: Path, *, capacity: float) -> Path:
                 "N_reg": 2,
                 "reg_store_energy": 0.0,
                 "reg_restore_energy": 0.0,
+                "nvm_access_penalty": 0.0,
                 "rockclimb": {"distributed_checkpointing": True},
             }
         )
@@ -103,6 +104,7 @@ def _write_board_like_config(tmp_path: Path, *, capacity: float) -> Path:
                 "N_reg": 16,
                 "reg_store_energy": 0.0,
                 "reg_restore_energy": 2.0,
+                "nvm_access_penalty": 0.0,
                 "rockclimb": {"distributed_checkpointing": True},
             }
         )
