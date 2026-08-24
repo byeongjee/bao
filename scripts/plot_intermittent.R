@@ -13,10 +13,14 @@
 # Usage:
 #   Rscript scripts/plot_intermittent.R [--result-dir DIR] [--output-dir DIR]
 
-suppressPackageStartupMessages({
-  library(tidyverse)
-  library(scales)
-})
+script_args <- commandArgs(trailingOnly = FALSE)
+script_file_arg <- script_args[grepl("^--file=", script_args)]
+script_dir <- if (length(script_file_arg) > 0) {
+  dirname(normalizePath(sub("^--file=", "", script_file_arg[1])))
+} else {
+  "scripts"
+}
+source(file.path(script_dir, "plot_common.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(flag, default) {
@@ -27,8 +31,13 @@ result_dir <- get_arg("--result-dir", "results/intermittent")
 output_dir <- get_arg("--output-dir", result_dir)
 
 REF <- "milp"
-ALGOS <- c(rockclimb = "ROCKCLIMB", schematic = "SCHEMATIC", schematicO3 = "SCHEMATIC-O3")
-COLORS <- c(ROCKCLIMB = "#009E73", SCHEMATIC = "#D55E00", `SCHEMATIC-O3` = "#CC79A7")
+config <- load_plot_config(DEFAULT_CONFIG_PATH)
+REF_LABEL <- config$algorithms$label[config$algorithms$algo == REF]
+series <- config$algorithms %>% filter(algo != REF)
+ALGOS <- setNames(series$label, series$algo)
+COLORS <- setNames(series$color, series$label)
+PATTERNS <- setNames(series$pattern, series$label)
+PATTERN_ANGLES <- setNames(series$pattern_angle, series$label)
 BENCHMARK_LABELS <- c(activity_recognition = "ar", stringsearch = "string_search")
 
 theme_benchmark <- function() {
@@ -41,6 +50,7 @@ theme_benchmark <- function() {
       legend.position = "top",
       legend.title = element_blank(),
       legend.text = element_text(size = 13),
+      legend.key.size = unit(0.68, "cm"),
       legend.margin = margin(0, 0, 0, 0),
       panel.grid.major.x = element_blank(),
       panel.grid.minor = element_blank(),
@@ -93,7 +103,24 @@ box_data <- bind_rows(
   per_bench %>% transmute(benchmark = "geomean", algo, normalized = geomean)
 ) %>% mutate(benchmark = factor(benchmark, levels = levels(bars$benchmark)))
 p_box <- ggplot(box_data, aes(benchmark, normalized, fill = algo)) +
-  geom_boxplot(position = position_dodge(0.8), width = 0.7, outlier.size = 0.8, linewidth = 0.35) +
+  ggpattern::geom_boxplot_pattern(
+    aes(pattern = algo, pattern_angle = algo),
+    position = position_dodge(0.8), width = 0.7, outlier.size = 0.8, linewidth = 0.35,
+    key_glyph = ggpattern::draw_key_polygon_pattern,
+    pattern_fill = PATTERN_FILL_COLOUR, pattern_colour = PATTERN_COLOUR,
+    pattern_density = PATTERN_DENSITY, pattern_spacing = PATTERN_SPACING,
+    pattern_units = PATTERN_UNITS,
+    pattern_alpha = PATTERN_ALPHA, pattern_size = PATTERN_SIZE,
+    pattern_key_scale_factor = 1.0) +
+  ggpattern::scale_pattern_manual(values = PATTERNS) +
+  ggpattern::scale_pattern_angle_manual(values = PATTERN_ANGLES) +
+  guides(pattern = "none", pattern_angle = "none", fill = guide_legend(override.aes = list(
+    pattern = unname(PATTERNS), pattern_angle = unname(PATTERN_ANGLES),
+    pattern_fill = PATTERN_FILL_COLOUR, pattern_colour = PATTERN_COLOUR,
+    pattern_density = PATTERN_LEGEND_DENSITY, pattern_spacing = PATTERN_LEGEND_SPACING,
+    pattern_units = PATTERN_UNITS,
+    pattern_alpha = PATTERN_LEGEND_ALPHA, pattern_size = PATTERN_LEGEND_SIZE,
+    pattern_key_scale_factor = PATTERN_LEGEND_SCALE))) +
   geom_point(data = bars, aes(benchmark, geomean, group = algo), shape = 23, size = 1.8,
              fill = "white", position = position_dodge(0.8)) +
   geom_text(data = bars, aes(benchmark, 0.72, label = sprintf("%.1f", geomean), color = algo),
@@ -103,6 +130,7 @@ p_box <- ggplot(box_data, aes(benchmark, normalized, fill = algo)) +
   scale_fill_manual(values = COLORS) +
   scale_color_manual(values = COLORS) +
   y_scale +
-  labs(y = "Execution time normalized to BAO") +
   theme_benchmark()
-ggsave(file.path(output_dir, "normalized_time_box.pdf"), p_box, width = 12.5, height = 3.95)
+ggsave(file.path(output_dir, "normalized_time_box.pdf"),
+       stack_ylab(p_box, "Relative Execution Time", paste0("(to ", REF_LABEL, ")")),
+       width = 12.5, height = 3.95)
