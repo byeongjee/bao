@@ -6,10 +6,9 @@
 # (benchmark, trace) pairs where either run did not complete are dropped; the
 # number of dropped traces is annotated under the bar.
 #
-# Outputs (log-scale y axis):
-#   normalized_time_bar.pdf  geometric mean over traces per benchmark, plus the
-#                            geometric mean over all benchmarks
-#   normalized_time_box.pdf  distribution over traces per benchmark
+# Output (log-scale y axis): normalized_time_box.pdf, the distribution over
+# traces per benchmark; diamonds and labels give the geometric mean over traces,
+# and the last group the geometric mean over all benchmarks.
 #
 # Usage:
 #   Rscript scripts/plot_intermittent.R [--result-dir DIR] [--output-dir DIR]
@@ -87,19 +86,6 @@ print(overall %>% select(algo, geomean, dropped), n = Inf)
 y_scale <- scale_y_log10(breaks = c(1, 2, 5, 10, 20, 50, 100, 200, 500),
                          labels = label_number(accuracy = 1, suffix = "x"))
 
-p_bar <- ggplot(bars, aes(benchmark, geomean, fill = algo)) +
-  geom_col(position = position_dodge(0.8), width = 0.75) +
-  geom_text(data = filter(bars, dropped > 0), aes(label = paste0("-", dropped), y = 1),
-            position = position_dodge(0.8), vjust = 1.4, size = 3.2) +
-  geom_text(aes(label = sprintf("%.1f", geomean)), position = position_dodge(0.8),
-            vjust = -0.3, size = 2.3) +
-  geom_hline(yintercept = 1, linetype = "dashed", linewidth = 0.4) +
-  geom_vline(xintercept = length(levels(bars$benchmark)) - 0.5, color = "grey60", linewidth = 0.4) +
-  scale_fill_manual(values = COLORS) +
-  y_scale +
-  labs(y = "Execution time normalized to BAO") +
-  theme_benchmark()
-ggsave(file.path(output_dir, "normalized_time_bar.pdf"), p_bar, width = 11, height = 3.95)
 
 # Last group: distribution of per-benchmark geomeans; diamonds mark the geomean.
 box_data <- bind_rows(
@@ -110,10 +96,13 @@ p_box <- ggplot(box_data, aes(benchmark, normalized, fill = algo)) +
   geom_boxplot(position = position_dodge(0.8), width = 0.7, outlier.size = 0.8, linewidth = 0.35) +
   geom_point(data = bars, aes(benchmark, geomean, group = algo), shape = 23, size = 1.8,
              fill = "white", position = position_dodge(0.8)) +
+  geom_text(data = bars, aes(benchmark, 0.72, label = sprintf("%.1f", geomean), color = algo),
+            position = position_dodge(0.8), size = 2.1, show.legend = FALSE) +
   geom_hline(yintercept = 1, linetype = "dashed", linewidth = 0.4) +
   geom_vline(xintercept = length(levels(bars$benchmark)) - 0.5, color = "grey60", linewidth = 0.4) +
   scale_fill_manual(values = COLORS) +
+  scale_color_manual(values = COLORS) +
   y_scale +
   labs(y = "Execution time normalized to BAO") +
   theme_benchmark()
-ggsave(file.path(output_dir, "normalized_time_box.pdf"), p_box, width = 11, height = 3.95)
+ggsave(file.path(output_dir, "normalized_time_box.pdf"), p_box, width = 12.5, height = 3.95)
