@@ -738,8 +738,7 @@ main <- function() {
   if (!is.null(filter_benchmarks)) {
     benchmarks <- filter_benchmarks[filter_benchmarks %in% all_benchmarks]
   } else {
-    real <- setdiff(all_benchmarks, "test")
-    benchmarks <- sort(if (length(real) > 0) real else all_benchmarks)
+    benchmarks <- sort(all_benchmarks)
   }
 
   if (length(benchmarks) == 0) stop("No benchmarks found.")
