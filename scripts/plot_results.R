@@ -47,6 +47,7 @@ suppressPackageStartupMessages({
   library(tidyverse)
   library(scales)
   library(grid)
+  library(gtable)
 })
 
 if (!requireNamespace("jsonlite", quietly = TRUE)) {
@@ -189,6 +190,27 @@ METRICS <- list(
     title = "Compilation Time"
   )
 )
+
+# Y-axis title with a smaller second line. Plotmath's atop() pads the two
+# lines far more than the text needs, so the title grob is built directly and
+# swapped into the rendered gtable.
+stack_ylab <- function(p, main, sub) {
+  main_g <- textGrob(main, rot = 90,
+                     gp = gpar(fontsize = 15.5, fontfamily = "Helvetica"))
+  sub_g <- textGrob(sub, rot = 90,
+                    gp = gpar(fontsize = 11, fontfamily = "Helvetica"))
+  title <- gtable(
+    widths = unit.c(grobWidth(main_g), unit(2, "pt"), grobWidth(sub_g),
+                    unit(7, "pt")),
+    heights = unit(1, "null")
+  )
+  title <- gtable_add_grob(title, list(main_g, sub_g), t = 1, l = c(1, 3))
+  gt <- ggplotGrob(p)
+  idx <- which(gt$layout$name == "ylab-l")
+  gt$grobs[[idx]] <- title
+  gt$widths[gt$layout$l[idx]] <- sum(title$widths)
+  gt
+}
 
 BENCHMARK_LABELS <- c(
   activity_recognition = "ar"
@@ -640,7 +662,8 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       left_join(base, by = "benchmark") %>%
       mutate(value = if_else(!is.na(base_value) & base_value != 0,
                              value / base_value, NA_real_)) %>%
-      select(-base_value)
+      select(-base_value) %>%
+      filter(algo != norm_algo)
   }
 
   # Compute geometric mean across benchmarks for each algorithm
@@ -701,8 +724,10 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
     plot_df <- plot_df %>% mutate(display_value = log_t(display_value))
   }
 
+  y_sub <- NULL
   if (normalize && !is.null(norm_algo)) {
     y_label <- metric_info$relative_ylabel
+    y_sub <- paste0("(to ", alg_style$label[alg_style$algo == norm_algo], ")")
   } else {
     y_label <- metric_info$ylabel
   }
@@ -809,11 +834,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
   # Add value labels on bars (positions computed in data space, then
   # transformed to log space for force_log plots)
   label_df <- plot_df_orig %>%
-    filter(!is.na(display_value), display_value > 0, !clipped)
-  if (normalize && !is.null(norm_algo)) {
-    label_df <- label_df %>% filter(algo != norm_algo)
-  }
-  label_df <- label_df %>%
+    filter(!is.na(display_value), display_value > 0, !clipped) %>%
     compute_label_positions(force_log, use_symlog)
   if (force_log && nrow(label_df) > 0) {
     label_df <- label_df %>% mutate(label_y = log_t(label_y))
@@ -836,9 +857,6 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
     )
   }
 
-  if (normalize && !is.null(norm_algo)) {
-    clipped_df <- clipped_df %>% filter(algo != norm_algo)
-  }
   clipped_df <- clipped_df %>%
     compute_label_positions(force_log, use_symlog)
   if (nrow(clipped_df) > 0) {
@@ -960,7 +978,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
                       clip = "off")
   }
 
-  p
+  if (is.null(y_sub)) p else stack_ylab(p, y_label, y_sub)
 }
 
 # -- Main ---------------------------------------------------------------------
@@ -1113,7 +1131,8 @@ main <- function() {
         }
         cat("Saved", filepath, "\n")
       } else {
-        print(p)
+        grid.newpage()
+        grid.draw(p)
       }
     }
   }
