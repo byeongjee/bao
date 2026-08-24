@@ -1,8 +1,8 @@
 {
   "algorithms": [
     { "algo": "milp",        "label": "BAO",          "color": "#0072B2", "pattern": "stripe", "pattern_angle": 45 },
-    { "algo": "schematic",   "label": "SCHEMATIC",    "color": "#D55E00", "pattern": "stripe", "pattern_angle": -45 },
     { "algo": "rockclimb",   "label": "ROCKCLIMB",    "color": "#009E73", "pattern": "stripe", "pattern_angle": 90 },
+    { "algo": "schematic",   "label": "SCHEMATIC",    "color": "#D55E00", "pattern": "stripe", "pattern_angle": -45 },
     { "algo": "schematicO3", "label": "SCHEMATIC-O3", "color": "#CC79A7", "pattern": "stripe", "pattern_angle": 0 }
   ],
   "baselines": [
