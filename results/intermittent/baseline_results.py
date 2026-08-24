@@ -28,7 +28,7 @@ BENCHMARKS = [
     "sensor_fusion",
     "poly1305",
     "cuckoo_filter",
-    "sha256_fixed",
+    "sha256",
     "stringsearch",
 ]
 
