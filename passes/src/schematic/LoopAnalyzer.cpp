@@ -519,23 +519,25 @@ static void refineLoopBudgetWithConvergence(
     }
 }
 
-static unsigned
+static bool
 splitLoopBodyAtFixedBoundary(llvm::Loop *L,
                              const std::vector<std::vector<SchematicBlock *>> &bodyPaths,
                              SchematicSolution &solution) {
-    unsigned enabled = 0;
     for (const auto &path : bodyPaths) {
+        bool split = false;
         for (size_t i = 1; i < path.size(); ++i) {
             auto metaIt = solution.blockMeta.find(path[i]);
             if (metaIt == solution.blockMeta.end() || !metaIt->second.analyzed)
                 continue;
             enableCheckpoint(solution, CFGEdge{path[i - 1], path[i]},
                              loopOriginTag(L, "body-does-not-fit"));
-            ++enabled;
+            split = true;
             break;
         }
+        if (!split)
+            return false;
     }
-    return enabled;
+    return true;
 }
 
 static void applyLoopCheckpointPolicy(llvm::Loop *L, unsigned maxTripCount,
@@ -840,14 +842,8 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
                                     state_, params_, LI_, tracker_, graph_, budget, bodyAlloc,
                                     decision);
 
-    decision.finalStartEToLeave = budget.startEToLeave;
-    decision.finalEndEToLeave = budget.endEToLeave;
-    decision.finalAvailableEnergy = budget.availableEnergy;
-    decision.finalRawNumIterations = budget.rawNumIterations;
-
     if (budget.rawNumIterations < 0) {
-        unsigned enabled = splitLoopBodyAtFixedBoundary(L, bodyPaths, solution);
-        if (enabled == 0) {
+        if (!splitLoopBodyAtFixedBoundary(L, bodyPaths, solution)) {
             PLOGE << "SCHEMATIC infeasible: loop at " << blocks.header->getName()
                   << " does not fit in one charge and has no fixed body boundary";
             return false;
@@ -858,7 +854,17 @@ bool LoopAnalyzer::analyzeLoop(llvm::Loop *L, SchematicSolution &solution) {
         refreshDisabledCheckpointEnergy(cfg_, solution, state_, params_, LI_, graph_, L);
         budget = readLoopIterationBudget(blocks, bodyAlloc, state_, params_, solution);
         decision.E_loop = budget.ELoop;
+        if (budget.rawNumIterations < 0) {
+            PLOGE << "SCHEMATIC infeasible: loop at " << blocks.header->getName()
+                  << " still does not fit in one charge after splitting the body";
+            return false;
+        }
     }
+
+    decision.finalStartEToLeave = budget.startEToLeave;
+    decision.finalEndEToLeave = budget.endEToLeave;
+    decision.finalAvailableEnergy = budget.availableEnergy;
+    decision.finalRawNumIterations = budget.rawNumIterations;
 
     // Decide checkpoint type.
     PLOGD << "[LoopAnalyzer] loop=" << blocks.header->getName() << " numIt=" << budget.numIterations
