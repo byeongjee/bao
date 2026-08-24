@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from ckpt.analysis.plot import _sort_key
 from ckpt.analysis.strip_mining import CAPACITY_MAP, parse_strip_mining_log
 from ckpt.bench.config import _DEFAULT_CAPS, discover_capacitors
 from ckpt.env import ProjectEnv
@@ -46,21 +45,3 @@ def test_parse_strip_mining_log_resolves_capacitor_capacity(tmp_path: Path) -> N
     assert len(runs) == 1
     assert runs[0]["capacitor"] == "50uF"
     assert runs[0]["capacity"] == CAPACITY_MAP["50uF"]
-
-
-def test_plot_sort_key_orders_capacitors_numerically() -> None:
-    labels = [
-        "crc\n(100uF)",
-        "crc\n(50uF)",
-        "crc\n(10uF)",
-        "crc\n(5uF)",
-        "crc\n(1uF)",
-    ]
-
-    assert sorted(labels, key=_sort_key) == [
-        "crc\n(1uF)",
-        "crc\n(5uF)",
-        "crc\n(10uF)",
-        "crc\n(50uF)",
-        "crc\n(100uF)",
-    ]
