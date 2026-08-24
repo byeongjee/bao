@@ -38,118 +38,12 @@ script_dir <- if (!is.na(script_path)) {
 } else {
   "scripts"
 }
-local_r_lib <- file.path(dirname(script_dir), ".Rlib")
-if (dir.exists(local_r_lib)) {
-  .libPaths(c(local_r_lib, .libPaths()))
-}
-
-suppressPackageStartupMessages({
-  library(tidyverse)
-  library(scales)
-  library(grid)
-  library(gtable)
-})
-
-if (!requireNamespace("jsonlite", quietly = TRUE)) {
-  stop("jsonlite is required to read the plot config. ",
-       "Install it with install.packages(\"jsonlite\").")
-}
-
-HAS_GGPATTERN <- requireNamespace("ggpattern", quietly = TRUE)
-PDF_DEVICE <- "pdf"
-
-# -- Series definitions (from --config) ---------------------------------------
-#
-# No CSV name is hardcoded here. The config lists two kinds of series:
-#
-#   algorithms  per-capacitor results, one bar group per capacitor plot. Files
-#               default to "<algo>.csv" / "<algo>_debug.csv" (with the
-#               "-swbor-no-debug" / "-swbor" spellings as fallbacks); override
-#               with explicit "csv" / "debug_csv".
-#   baselines   capacitor-independent references (e.g. uninstrumented builds),
-#               replicated across benchmarks. "csv" is required. Optional
-#               "metrics" restricts the baseline to specific metric keys, and
-#               "normalize_ref" marks the series normalization divides by.
-#
-# Entry order defines bar and legend order; algorithms come before baselines.
-
-DEFAULT_CONFIG_PATH <- file.path(script_dir, "plot_config.json")
+source(file.path(script_dir, "plot_common.R"))
 
 REQUIRED_ALGO_FOR_BENCHMARKS <- NULL
 
-config_field <- function(entry, name, default) {
-  value <- entry[[name]]
-  if (is.null(value)) default else value
-}
-
-parse_series_style <- function(entry, kind) {
-  if (is.null(entry$algo) || is.null(entry$label)) {
-    stop("Each ", kind, " entry needs an \"algo\" id and a \"label\".")
-  }
-  tibble(
-    algo = as.character(entry$algo),
-    label = as.character(entry$label),
-    color = as.character(config_field(entry, "color", "#595959")),
-    pattern = as.character(config_field(entry, "pattern", "none")),
-    pattern_angle = as.numeric(config_field(entry, "pattern_angle", 0))
-  )
-}
-
-load_plot_config <- function(path) {
-  if (!file.exists(path)) {
-    stop("Plot config not found: ", path)
-  }
-  raw <- jsonlite::fromJSON(path, simplifyVector = FALSE)
-
-  if (length(raw$algorithms) == 0) {
-    stop("Plot config has no \"algorithms\" entries: ", path)
-  }
-
-  algorithms <- map_dfr(raw$algorithms, function(entry) {
-    parse_series_style(entry, "algorithm") %>%
-      mutate(
-        csv = as.character(config_field(entry, "csv", NA_character_)),
-        debug_csv = as.character(config_field(entry, "debug_csv", NA_character_))
-      )
-  })
-
-  baselines <- map_dfr(raw$baselines, function(entry) {
-    if (is.null(entry$csv)) {
-      stop("Baseline \"", entry$algo, "\" needs a \"csv\" filename.")
-    }
-    parse_series_style(entry, "baseline") %>%
-      mutate(
-        csv = as.character(entry$csv),
-        metrics = list(as.character(config_field(entry, "metrics", character()))),
-        normalize_ref = isTRUE(config_field(entry, "normalize_ref", FALSE))
-      )
-  })
-
-  style <- bind_rows(
-    select(algorithms, algo, label, color, pattern, pattern_angle),
-    if (nrow(baselines) > 0) {
-      select(baselines, algo, label, color, pattern, pattern_angle)
-    }
-  )
-  duplicated_ids <- unique(style$algo[duplicated(style$algo)])
-  if (length(duplicated_ids) > 0) {
-    stop("Duplicate series ids in ", path, ": ",
-         paste(duplicated_ids, collapse = ", "))
-  }
-
-  norm_ref <- if (nrow(baselines) > 0) baselines$algo[baselines$normalize_ref] else character()
-  if (length(norm_ref) > 1) {
-    stop("More than one baseline is marked \"normalize_ref\" in ", path, ": ",
-         paste(norm_ref, collapse = ", "))
-  }
-
-  list(
-    algorithms = algorithms,
-    baselines = baselines,
-    style = style,
-    norm_ref = if (length(norm_ref) == 1) norm_ref else NA_character_
-  )
-}
+HAS_GGPATTERN <- requireNamespace("ggpattern", quietly = TRUE)
+PDF_DEVICE <- "pdf"
 
 # -- Metric definitions -------------------------------------------------------
 
@@ -190,28 +84,6 @@ METRICS <- list(
     title = "Compilation Time"
   )
 )
-
-# Y-axis title with a smaller second line. Plotmath's atop() pads the two
-# lines far more than the text needs, so the title grob is built directly and
-# swapped into the rendered gtable.
-stack_ylab <- function(p, main, sub) {
-  main_g <- textGrob(main, rot = 90,
-                     gp = gpar(fontsize = 15.5, fontfamily = "Helvetica"))
-  sub_g <- textGrob(sub, rot = 90,
-                    gp = gpar(fontsize = 11, fontfamily = "Helvetica"))
-  # Column widths are line heights rather than grobWidth(), which ignores
-  # descenders.
-  title <- gtable(
-    widths = unit(c(15.5 * 1.2, 11 * 1.2, 7), "pt"),
-    heights = unit(1, "null")
-  )
-  title <- gtable_add_grob(title, list(main_g, sub_g), t = 1, l = c(1, 2))
-  gt <- ggplotGrob(p)
-  idx <- which(gt$layout$name == "ylab-l")
-  gt$grobs[[idx]] <- title
-  gt$widths[gt$layout$l[idx]] <- sum(title$widths)
-  gt
-}
 
 BENCHMARK_LABELS <- c(
   activity_recognition = "ar"
@@ -380,18 +252,6 @@ LABEL_SIZE <- 3.6
 LABEL_GAP <- 0.015
 LABEL_EXTENT_BASE <- 0.01
 LABEL_EXTENT_PER_CHAR <- 0.028
-PATTERN_FILL_COLOUR <- "white"
-PATTERN_COLOUR <- "grey10"
-PATTERN_DENSITY <- 0.28
-PATTERN_SPACING <- 0.05
-PATTERN_ALPHA <- 1.0
-PATTERN_SIZE <- 0.3
-PATTERN_LEGEND_SCALE <- 1.4
-PATTERN_LEGEND_DENSITY <- 0.42
-PATTERN_LEGEND_SPACING <- 0.035
-PATTERN_LEGEND_ALPHA <- 1.0
-PATTERN_LEGEND_SIZE <- 0.42
-
 format_metric_value <- function(value, normalize) {
   if (normalize) {
     return(if (value >= 100) sprintf("%.0f", value)
@@ -622,6 +482,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       pattern_colour = PATTERN_COLOUR,
       pattern_density = PATTERN_DENSITY,
       pattern_spacing = PATTERN_SPACING,
+      pattern_units = PATTERN_UNITS,
       pattern_alpha = PATTERN_ALPHA,
       pattern_size = PATTERN_SIZE,
       pattern_key_scale_factor = 1.0
@@ -665,6 +526,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
           pattern_colour = PATTERN_COLOUR,
           pattern_density = PATTERN_LEGEND_DENSITY,
           pattern_spacing = PATTERN_LEGEND_SPACING,
+          pattern_units = PATTERN_UNITS,
           pattern_alpha = PATTERN_LEGEND_ALPHA,
           pattern_size = PATTERN_LEGEND_SIZE,
           pattern_key_scale_factor = PATTERN_LEGEND_SCALE
