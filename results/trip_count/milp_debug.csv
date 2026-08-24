@@ -1,0 +1,14 @@
+benchmark,capacitor,status,basic_blocks,edges,abstract_cfg_blocks,abstract_cfg_edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,candidate_globals,milp_allocation_mode,milp_variables,milp_constraints,milp_presolved_variables,milp_presolved_constraints,optimal_solution,distributed_checkpoints_inserted,vm_placed_globals,vm_placed_global_names,milp_solve_time_ms,result,run_attempts
+activity_recognition-10uF,10uF,ok,16,22,8,9,4,38,40624,381,34054.13,13,0,0,9,regional,533,1986,147,323,yes,6,8,lfsr_state:4;__local_main.features.i.sroa.0:4;__local_main.features.i.sroa.4:4;__local_main.features.i4.sroa.0:4;__local_main.features.i4.sroa.4:4;__local_main.stats.sroa.0.i:8;__local_main.features.i13.sroa.0:4;__local_main.features.i13.sroa.5:4,23,64,1
+aes-10uF,10uF,ok,26,35,9,10,4,210,46384,393,104872.82,20,0,0,3,regional,2475,10033,61,133,yes,49,0,,25,107,1
+bitcount-10uF,10uF,ok,64,95,52,75,22,370,75344,412,6179187.38,80096,0,0,2,regional,8126,35533,1885,5944,yes,49,0,,202,52382,1
+chacha20-10uF,10uF,ok,11,15,4,4,2,20,37760,395,50568.56,8,0,0,3,regional,495,1907,23,46,yes,30,0,,3,79,1
+crc-10uF,10uF,ok,9,12,6,6,3,10,35888,404,29834.06,5,0,0,2,regional,117,414,18,37,yes,0,1,__local_main.result:6,2,20431,1
+cuckoo_filter-10uF,10uF,ok,23,33,15,20,4,202,47184,414,72446.45,2052,0,0,3,regional,1009,4162,344,951,yes,12,0,,166,4048,1
+dijkstra-10uF,10uF,ok,17,24,11,15,7,139,45344,405,1126739.77,3787,0,0,5,regional,1229,4972,223,550,yes,48,1,__local_main.nodes.i:5,100,33447,1
+poly1305-10uF,10uF,ok,7,9,4,4,2,14,36752,374,478678.17,86,0,0,3,regional,559,2135,31,68,yes,0,0,,3,68,1
+qsort-10uF,10uF,ok,17,24,12,15,5,18,38208,398,1092206.94,643,0,0,2,regional,324,1264,36,75,yes,7,0,,6,27023,1
+rsa-10uF,10uF,ok,144,209,86,119,43,4645,146048,407,74921.11,324,0,0,8,regional,21292,91133,3214,9905,yes,59,3,g_product:54;__local_main.qn_arr.i:11;__local_main.qn_arr.i34:8,4174,32,1
+sensor_fusion-10uF,10uF,ok,177,268,4,4,2,18,38928,418,25607.51,17,0,0,2,regional,431,1696,17,34,yes,0,1,g_output:4,5,613,1
+sha256-10uF,10uF,ok,38,54,14,18,6,166,55520,409,94456.81,18,0,0,6,regional,4083,16818,307,830,yes,79,0,,85,131,1
+stringsearch-10uF,10uF,ok,41,58,31,43,12,543,62832,409,82554.74,2270,0,0,4,regional,2200,9143,1070,3127,yes,21,3,__local_main.total_found:7;len:7;findme:7,473,20,1
