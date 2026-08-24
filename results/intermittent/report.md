@@ -28,7 +28,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion (613) | 10/10 / 10/10 / 113 / 0 / 1.00 | 10/10 / 10/10 / 126 / 0 / 1.12 | 10/10 / 10/10 / 166 / 1 / 1.62 | 10/10 / 10/10 / 168 / 2 / 1.75 |
 | poly1305 (68) | 10/10 / 10/10 / 1362 / 78 / 22.47 | 10/10 / 10/10 / 4423 / 169 / 61.44 | 10/10 / 10/10 / 2967 / 147 / 44.49 | 10/10 / 10/10 / 2113 / 99 / 33.08 |
 | cuckoo_filter (4048) | 10/10 / 10/10 / 145 / 1 / 1.40 | 10/10 / 10/10 / 1888 / 71 / 26.07 | 10/10 / 10/10 / 1358 / 60 / 19.55 | 10/10 / 10/10 / 221 / 8 / 2.55 |
-| sha256_fixed (131) | 10/10 / 10/10 / 186 / 11 / 2.67 | 10/10 / 10/10 / 1093 / 35 / 13.93 | 10/10 / 10/10 / 471 / 19 / 6.19 | 10/10 / 10/10 / 348 / 16 / 4.86 |
+| sha256 (131) | 10/10 / 10/10 / 186 / 11 / 2.67 | 10/10 / 10/10 / 1093 / 35 / 13.93 | 10/10 / 10/10 / 471 / 19 / 6.19 | 10/10 / 10/10 / 348 / 16 / 4.86 |
 | stringsearch (20) | 10/10 / 10/10 / 197 / 2 / 1.85 | 10/10 / 10/10 / 9005 / 355 / 129.31 | 10/10 / 10/10 / 700 / 27 / 9.38 | 10/10 / 10/10 / 231 / 5 / 2.45 |
 
 ## Per trace: waits by benchmark x algorithm (`inc` = incomplete)
@@ -48,7 +48,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 9 | 10 | 14 | 12 |
 | poly1305 | 132 | 318 | 273 | 185 |
 | cuckoo_filter | 12 | 132 | 115 | 18 |
-| sha256_fixed | 18 | 74 | 37 | 35 |
+| sha256 | 18 | 74 | 37 | 35 |
 | stringsearch | 15 | 601 | 57 | 17 |
 
 ### trace 2
@@ -66,7 +66,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 12 | 12 | 16 | 16 |
 | poly1305 | 131 | 422 | 285 | 190 |
 | cuckoo_filter | 14 | 178 | 124 | 20 |
-| sha256_fixed | 18 | 104 | 48 | 33 |
+| sha256 | 18 | 104 | 48 | 33 |
 | stringsearch | 18 | 813 | 66 | 22 |
 
 ### trace 3
@@ -84,7 +84,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 13 | 14 | 20 | 21 |
 | poly1305 | 129 | 662 | 329 | 243 |
 | cuckoo_filter | 17 | 303 | 174 | 26 |
-| sha256_fixed | 17 | 178 | 63 | 33 |
+| sha256 | 17 | 178 | 63 | 33 |
 | stringsearch | 24 | 1434 | 94 | 28 |
 
 ### trace 4
@@ -102,7 +102,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 11 | 14 | 17 | 20 |
 | poly1305 | 135 | 522 | 311 | 197 |
 | cuckoo_filter | 17 | 230 | 141 | 27 |
-| sha256_fixed | 19 | 135 | 48 | 34 |
+| sha256 | 19 | 135 | 48 | 34 |
 | stringsearch | 22 | 1158 | 77 | 29 |
 
 ### trace 5
@@ -120,7 +120,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 11 | 13 | 16 | 16 |
 | poly1305 | 137 | 405 | 293 | 215 |
 | cuckoo_filter | 12 | 171 | 133 | 22 |
-| sha256_fixed | 18 | 95 | 50 | 35 |
+| sha256 | 18 | 95 | 50 | 35 |
 | stringsearch | 20 | 816 | 70 | 23 |
 
 ### trace 6
@@ -138,7 +138,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 12 | 14 | 16 | 17 |
 | poly1305 | 130 | 387 | 278 | 204 |
 | cuckoo_filter | 14 | 159 | 128 | 21 |
-| sha256_fixed | 17 | 93 | 39 | 33 |
+| sha256 | 17 | 93 | 39 | 33 |
 | stringsearch | 20 | 758 | 64 | 22 |
 
 ### trace 7
@@ -156,7 +156,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 12 | 13 | 18 | 18 |
 | poly1305 | 128 | 395 | 271 | 215 |
 | cuckoo_filter | 15 | 162 | 127 | 21 |
-| sha256_fixed | 17 | 93 | 42 | 33 |
+| sha256 | 17 | 93 | 42 | 33 |
 | stringsearch | 21 | 809 | 62 | 20 |
 
 ### trace 8
@@ -174,7 +174,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 15 | 16 | 19 | 21 |
 | poly1305 | 148 | 560 | 319 | 251 |
 | cuckoo_filter | 17 | 246 | 158 | 24 |
-| sha256_fixed | 23 | 140 | 54 | 37 |
+| sha256 | 23 | 140 | 54 | 37 |
 | stringsearch | 24 | 1176 | 78 | 28 |
 
 ### trace 9
@@ -192,7 +192,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 9 | 10 | 16 | 15 |
 | poly1305 | 137 | 367 | 300 | 198 |
 | cuckoo_filter | 15 | 154 | 123 | 20 |
-| sha256_fixed | 19 | 93 | 46 | 36 |
+| sha256 | 19 | 93 | 46 | 36 |
 | stringsearch | 18 | 709 | 64 | 20 |
 
 ### trace 10
@@ -210,7 +210,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | sensor_fusion | 9 | 10 | 14 | 12 |
 | poly1305 | 155 | 385 | 308 | 215 |
 | cuckoo_filter | 12 | 153 | 135 | 22 |
-| sha256_fixed | 20 | 88 | 44 | 39 |
+| sha256 | 20 | 88 | 44 | 39 |
 | stringsearch | 15 | 731 | 68 | 22 |
 
 ## Per benchmark x algorithm x trace
@@ -314,7 +314,7 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | schematic | ok w=115 rec=4 t=7.74s | ok w=124 rec=2 t=8.64s | ok w=174 rec=1 t=5.27s | ok w=141 rec=2 t=34.87s | ok w=133 rec=8 t=26.63s | ok w=128 rec=2 t=11.42s | ok w=127 rec=0 t=19.47s | ok w=158 rec=16 t=25.50s | ok w=123 rec=4 t=28.39s | ok w=135 rec=21 t=27.58s |
 | schematicO3 | ok w=18 rec=1 t=0.84s | ok w=20 rec=0 t=0.75s | ok w=26 rec=0 t=0.36s | ok w=27 rec=2 t=5.90s | ok w=22 rec=1 t=3.19s | ok w=21 rec=0 t=1.16s | ok w=21 rec=0 t=3.48s | ok w=24 rec=1 t=2.40s | ok w=20 rec=0 t=3.42s | ok w=22 rec=3 t=3.98s |
 
-### sha256_fixed (baseline result 131)
+### sha256 (baseline result 131)
 
 | algo | tr1 | tr2 | tr3 | tr4 | tr5 | tr6 | tr7 | tr8 | tr9 | tr10 |
 |---|---|---|---|---|---|---|---|---|---|---|

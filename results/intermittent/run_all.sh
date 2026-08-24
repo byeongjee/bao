@@ -3,7 +3,7 @@
 # traces. Resumable: a (benchmark, algo) CSV with one row per trace is skipped;
 # a partial one (interrupted run) is deleted and redone.
 cd "$(dirname "$0")/../.." || exit 1
-BENCHMARKS="aes crc rsa dijkstra qsort activity_recognition bitcount chacha20 sensor_fusion poly1305 cuckoo_filter sha256_fixed stringsearch"
+BENCHMARKS="aes crc rsa dijkstra qsort activity_recognition bitcount chacha20 sensor_fusion poly1305 cuckoo_filter sha256 stringsearch"
 ALGOS="milp rockclimb schematic schematicO3"
 TRACES=1,2,3,4,5,6,7,8,9,10
 NTRACES=10
