@@ -30,14 +30,14 @@ output_dir <- get_arg("--output-dir", result_dir)
 REF <- "milp"
 ALGOS <- c(rockclimb = "ROCKCLIMB", schematic = "SCHEMATIC", schematicO3 = "SCHEMATIC-O3")
 COLORS <- c(ROCKCLIMB = "#009E73", SCHEMATIC = "#D55E00", `SCHEMATIC-O3` = "#CC79A7")
-BENCHMARK_LABELS <- c(activity_recognition = "ar")
+BENCHMARK_LABELS <- c(activity_recognition = "ar", stringsearch = "string_search")
 
 theme_benchmark <- function() {
   theme_minimal(base_size = 15, base_family = "Helvetica") +
     theme(
       axis.title.x = element_blank(),
       axis.title.y = element_text(size = 15.5, margin = margin(r = 7)),
-      axis.text.x = element_text(size = 14, angle = 15, hjust = 1, vjust = 1),
+      axis.text.x = element_text(size = 11),
       axis.text.y = element_text(size = 12.5),
       legend.position = "top",
       legend.title = element_blank(),
@@ -55,7 +55,7 @@ summary <- read_csv(file.path(result_dir, "summary.csv"), show_col_types = FALSE
 bench_order <- unique(summary$benchmark)
 bench_label <- function(b) {
   l <- BENCHMARK_LABELS[b]
-  ifelse(is.na(l), b, l)
+  gsub("_", "\n", ifelse(is.na(l), b, l))
 }
 
 ok <- summary %>%
@@ -95,7 +95,7 @@ p_bar <- ggplot(bars, aes(benchmark, geomean, fill = algo)) +
   geom_vline(xintercept = length(levels(bars$benchmark)) - 0.5, color = "grey60", linewidth = 0.4) +
   scale_fill_manual(values = COLORS) +
   y_scale +
-  labs(y = "Norm. execution time (BAO = 1)") +
+  labs(y = "Execution time normalized to BAO") +
   theme_benchmark()
 ggsave(file.path(output_dir, "normalized_time_bar.pdf"), p_bar, width = 11, height = 3.95)
 
@@ -112,6 +112,6 @@ p_box <- ggplot(box_data, aes(benchmark, normalized, fill = algo)) +
   geom_vline(xintercept = length(levels(bars$benchmark)) - 0.5, color = "grey60", linewidth = 0.4) +
   scale_fill_manual(values = COLORS) +
   y_scale +
-  labs(y = "Norm. execution time (BAO = 1)") +
+  labs(y = "Execution time normalized to BAO") +
   theme_benchmark()
 ggsave(file.path(output_dir, "normalized_time_box.pdf"), p_box, width = 11, height = 3.95)
