@@ -151,7 +151,6 @@ ckpt intermittent schematicO3 [BENCHMARKS...] --trace 1,2 [--cap board] [--devic
 # Analysis
 ckpt analyze strip-mining LOG_FILE [-o CSV]
 ckpt analyze milp-coarse  ...    # coarse-allocation MILP analysis
-ckpt analyze plot       CSV_DIR [--metric M] [--algorithms A...]
 
 # Device interaction
 ckpt device read-serial [--timeout N] [--end-marker M]
@@ -206,8 +205,7 @@ scripts/ckpt/
 │   └── schematic.py     # SCHEMATIC semantic verification
 └── analysis/
     ├── strip_mining.py  # Parse verbose logs for strip-mining K values
-    ├── milp_coarse.py   # Coarse-allocation MILP analysis
-    └── plot.py          # Plot benchmark CSV results (requires `uv sync --extra plot`)
+    └── milp_coarse.py   # Coarse-allocation MILP analysis
 ```
 
 ### Standalone Scripts

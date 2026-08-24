@@ -14,7 +14,6 @@ from pathlib import Path
 
 import click
 
-from .analysis.plot import ALGORITHMS, METRICS
 from .bench.all import ALL_ALGORITHMS, DEFAULT_ALGORITHMS
 from .compile.common import HALT_MODES
 from .errors import (
@@ -1813,51 +1812,6 @@ def analyze_milp_coarse_cmd(
 
     if output is not None:
         write_milp_coarse_summary_csv(summary_rows, Path(output))
-
-
-@analyze.command("plot")
-@click.argument("csv_dir", type=click.Path(exists=True))
-@click.option(
-    "--metric",
-    type=click.Choice(list(METRICS.keys())),
-    default="prologue",
-    help="Metric to plot.",
-)
-@click.option(
-    "--algorithms",
-    multiple=True,
-    type=click.Choice(list(ALGORITHMS.keys())),
-    help="Algorithms to include (default: all).",
-)
-@click.option("--benchmarks", multiple=True, help="Benchmark programs to include.")
-@click.option("--capacitors", multiple=True, help="Capacitor sizes to include.")
-@click.option(
-    "--normalize",
-    type=click.Choice(list(ALGORITHMS.keys())),
-    help="Normalize values relative to this algorithm.",
-)
-@click.option("-o", "--output", type=click.Path(), help="Output file (e.g., plot.png).")
-def analyze_plot_cmd(
-    csv_dir: str,
-    metric: str,
-    algorithms: tuple[str, ...],
-    benchmarks: tuple[str, ...],
-    capacitors: tuple[str, ...],
-    normalize: str | None,
-    output: str | None,
-) -> None:
-    """Plot benchmark comparison chart from CSV results."""
-    from .analysis.plot import plot_benchmarks
-
-    plot_benchmarks(
-        csv_dir=Path(csv_dir),
-        metric=metric,
-        algorithms=_list_or_none(algorithms),
-        benchmarks=_list_or_none(benchmarks),
-        capacitors=_list_or_none(capacitors),
-        normalize=normalize,
-        output_file=_path_or_none(output),
-    )
 
 
 # =========================================================================
