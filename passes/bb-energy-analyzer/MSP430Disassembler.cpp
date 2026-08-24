@@ -368,12 +368,8 @@ std::string MSP430Disassembler::parseOperandMode(const std::string &operand) {
 
 unsigned MSP430Disassembler::countStackAccesses(const Instruction &instr, bool fpIsR4) {
     const std::string &m = instr.mnemonic;
-    if (m == "push" || m == "pop" || m == "call" || m == "calla" || m == "ret" || m == "reta" ||
-        m == "reti")
-        return 1;
     if (m == "pushm" || m == "popm") {
-        // pushm #N, rX / popm #N, rX
-        std::regex countPattern(R"(#(\d+))");
+        static const std::regex countPattern(R"(#(\d+))");
         std::smatch match;
         if (std::regex_search(instr.operands, match, countPattern))
             return static_cast<unsigned>(std::stoul(match[1]));
@@ -402,6 +398,12 @@ unsigned MSP430Disassembler::countStackAccesses(const Instruction &instr, bool f
             current += ch;
     }
     flush();
+
+    // These push or pop one word on top of whatever their operand addresses,
+    // so a stack-relative operand costs an access of its own.
+    if (m == "push" || m == "pop" || m == "call" || m == "calla" || m == "ret" || m == "reta" ||
+        m == "reti")
+        return count + 1;
     return count;
 }
 
