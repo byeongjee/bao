@@ -72,6 +72,8 @@ void unifyPair(Loop *Outer, Loop *Inner) {
 } // namespace
 
 PreservedAnalyses UnifyAnnotatedLoopPass::run(Function &F, FunctionAnalysisManager &) {
+    checkpoint::initLogging();
+
     bool Changed = false;
     while (true) {
         DominatorTree DT(F);
