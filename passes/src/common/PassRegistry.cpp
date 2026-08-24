@@ -3,6 +3,7 @@
 #include "milp/AllocaToGlobalPass.h"
 #include "milp/LoopStripMiningPass.h"
 #include "milp/MILPCheckpointPass.h"
+#include "milp/UnifyAnnotatedLoopPass.h"
 #include "rockclimb/RockClimbLoopUnrollPass.h"
 #include "schematic/CallIsolation.h"
 #include "schematic/SchematicPass.h"
@@ -80,12 +81,17 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
     return {LLVM_PLUGIN_API_VERSION, "CheckpointPasses", LLVM_VERSION_STRING, [](PassBuilder &PB) {
                 PB.registerPipelineParsingCallback([](StringRef Name, FunctionPassManager &FPM,
                                                       ArrayRef<PassBuilder::PipelineElement>) {
+                    if (Name == "milp-unify-annotated-loops") {
+                        FPM.addPass(checkpoint::UnifyAnnotatedLoopPass());
+                        return true;
+                    }
                     if (Name == "checkpoint") {
                         FPM.addPass(checkpoint::AllocaToGlobalPass());
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+                        FPM.addPass(checkpoint::UnifyAnnotatedLoopPass());
                         FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
@@ -100,6 +106,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+                        FPM.addPass(checkpoint::UnifyAnnotatedLoopPass());
                         FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::MILPCheckpointPass());
                         return true;
@@ -116,6 +123,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+                        FPM.addPass(checkpoint::UnifyAnnotatedLoopPass());
                         FPM.addPass(checkpoint::LoopStripMiningPass());
                         FPM.addPass(checkpoint::BBFreqCollectorPass());
                         return true;
@@ -126,6 +134,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FPM.addPass(LCSSAPass());
                         FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
                         FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+                        FPM.addPass(checkpoint::UnifyAnnotatedLoopPass());
                         FPM.addPass(checkpoint::LoopStripMiningPass());
                         return true;
                     }

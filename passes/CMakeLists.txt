@@ -84,6 +84,7 @@ src/common/LoopTripCount.cpp
     src/milp/EnergyModel.cpp
     src/milp/EnergyPathUtils.cpp
     src/milp/AllocaToGlobalPass.cpp
+    src/milp/UnifyAnnotatedLoopPass.cpp
     src/milp/LoopStripMiningPass.cpp
     src/milp/AbstractCFG.cpp
     src/milp/MILPCheckpointPass.cpp
