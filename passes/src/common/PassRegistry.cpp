@@ -174,6 +174,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         FunctionPassManager FPM;
                         FPM.addPass(LoopSimplifyPass());
                         FPM.addPass(LCSSAPass());
+                        FPM.addPass(checkpoint::UnifyAnnotatedLoopPass());
                         MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
                         MPM.addPass(checkpoint::SchematicPass());
                         return true;
