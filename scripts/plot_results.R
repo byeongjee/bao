@@ -199,12 +199,13 @@ stack_ylab <- function(p, main, sub) {
                      gp = gpar(fontsize = 15.5, fontfamily = "Helvetica"))
   sub_g <- textGrob(sub, rot = 90,
                     gp = gpar(fontsize = 11, fontfamily = "Helvetica"))
+  # Column widths are line heights rather than grobWidth(), which ignores
+  # descenders.
   title <- gtable(
-    widths = unit.c(grobWidth(main_g), unit(2, "pt"), grobWidth(sub_g),
-                    unit(7, "pt")),
+    widths = unit(c(15.5 * 1.2, 11 * 1.2, 7), "pt"),
     heights = unit(1, "null")
   )
-  title <- gtable_add_grob(title, list(main_g, sub_g), t = 1, l = c(1, 3))
+  title <- gtable_add_grob(title, list(main_g, sub_g), t = 1, l = c(1, 2))
   gt <- ggplotGrob(p)
   idx <- which(gt$layout$name == "ylab-l")
   gt$grobs[[idx]] <- title
@@ -372,16 +373,13 @@ DEFAULT_METRICS <- c("execution_time", "runtime_region_boundary_calls")
 LOG_SCALE_METRICS <- c("execution_time", "runtime_region_boundary_calls")
 OUTLIER_RATIO_THRESHOLD <- 3.0
 OUTLIER_HEADROOM <- 1.15
-LINEAR_LABEL_CROWDING_THRESHOLD <- 0.04
-TRANSFORMED_LABEL_CROWDING_THRESHOLD <- 0.11
-LINEAR_LABEL_OFFSET_BASE <- 0.055
-LINEAR_LABEL_OFFSET_STEP <- 0.08
-TRANSFORMED_LABEL_OFFSET_BASE <- 0.08
-TRANSFORMED_LABEL_OFFSET_STEP <- 0.12
-LINEAR_TOP_HEADROOM_BASE <- 0.05
-LINEAR_TOP_HEADROOM_PER_TIER <- 0.08
-TRANSFORMED_TOP_HEADROOM_BASE <- 0.04
-TRANSFORMED_TOP_HEADROOM_PER_TIER <- 0.12
+# Bar value labels: vertical text anchored at its own bar. Gap and text
+# extent are fractions of the panel height (axis space), so they look the
+# same on linear, pseudo-log, and log axes.
+LABEL_SIZE <- 3.6
+LABEL_GAP <- 0.015
+LABEL_EXTENT_BASE <- 0.01
+LABEL_EXTENT_PER_CHAR <- 0.028
 PATTERN_FILL_COLOUR <- "white"
 PATTERN_COLOUR <- "grey10"
 PATTERN_DENSITY <- 0.28
@@ -396,7 +394,9 @@ PATTERN_LEGEND_SIZE <- 0.42
 
 format_metric_value <- function(value, normalize) {
   if (normalize) {
-    return(sprintf("%.2f", value))
+    return(if (value >= 100) sprintf("%.0f", value)
+           else if (value >= 10) sprintf("%.1f", value)
+           else sprintf("%.2f", value))
   }
 
   if (value >= 1e6) {
@@ -454,160 +454,6 @@ compute_display_limit <- function(values) {
   }
 
   max(second, tail) * OUTLIER_HEADROOM
-}
-
-assign_label_tiers <- function(df, threshold) {
-  if (nrow(df) == 0) {
-    return(df)
-  }
-
-  row_ids <- seq_len(nrow(df))
-  ordered_idx <- order(df$transformed_value, decreasing = TRUE, na.last = TRUE)
-  ordered_df <- df[ordered_idx, , drop = FALSE]
-  ordered_rows <- row_ids[ordered_idx]
-
-  cluster_id <- integer(nrow(ordered_df))
-  current_cluster <- 1L
-
-  for (i in seq_len(nrow(ordered_df))) {
-    if (i == 1) {
-      cluster_id[i] <- current_cluster
-      next
-    }
-
-    prev_value <- ordered_df$transformed_value[i - 1]
-    curr_value <- ordered_df$transformed_value[i]
-    separated <- !is.finite(prev_value) || !is.finite(curr_value) ||
-      abs(prev_value - curr_value) >= threshold
-
-    if (separated) {
-      current_cluster <- current_cluster + 1L
-    }
-    cluster_id[i] <- current_cluster
-  }
-
-  ordered_df <- ordered_df %>%
-    mutate(row_id = ordered_rows, cluster_id = cluster_id) %>%
-    group_by(cluster_id) %>%
-    mutate(label_tier = row_number() - 1L) %>%
-    ungroup()
-
-  ordered_df[order(ordered_df$row_id), , drop = FALSE] %>%
-    select(-row_id)
-}
-
-compute_label_positions <- function(df, force_log, use_symlog) {
-  if (nrow(df) == 0) {
-    return(df)
-  }
-
-  transformed_values <- if (force_log) {
-    log10(df$display_value)
-  } else if (use_symlog) {
-    pseudo_log_trans(base = 10)$transform(df$display_value)
-  } else {
-    scale_ref <- max(df$display_value, na.rm = TRUE)
-    df$display_value / max(scale_ref, 1)
-  }
-
-  threshold <- if (force_log || use_symlog) {
-    TRANSFORMED_LABEL_CROWDING_THRESHOLD
-  } else {
-    LINEAR_LABEL_CROWDING_THRESHOLD
-  }
-
-  positioned_df <- df %>%
-    mutate(transformed_value = transformed_values) %>%
-    group_by(benchmark) %>%
-    group_modify(~ assign_label_tiers(.x, threshold)) %>%
-    ungroup() %>%
-    group_by(benchmark, cluster_id) %>%
-    mutate(
-      cluster_top_transformed = max(transformed_value, na.rm = TRUE),
-      cluster_top_display = max(display_value, na.rm = TRUE)
-    ) %>%
-    ungroup() %>%
-    mutate(
-      benchmark_index = as.integer(benchmark),
-      benchmark_count = max(benchmark_index, na.rm = TRUE),
-      label_hjust = case_when(
-        benchmark_index == 1L ~ 0,
-        benchmark_index == benchmark_count ~ 1,
-        TRUE ~ 0.5
-      )
-    )
-
-  if (force_log || use_symlog) {
-    trans <- if (force_log) {
-      transform_log10()
-    } else {
-      pseudo_log_trans(base = 10)
-    }
-    positioned_df <- positioned_df %>%
-      mutate(
-        label_y = trans$inverse(
-          cluster_top_transformed +
-            TRANSFORMED_LABEL_OFFSET_BASE +
-            TRANSFORMED_LABEL_OFFSET_STEP * label_tier
-        )
-      )
-  } else {
-    scale_ref <- max(positioned_df$display_value, na.rm = TRUE)
-    positioned_df <- positioned_df %>%
-      mutate(
-        label_y = cluster_top_display +
-          scale_ref * (LINEAR_LABEL_OFFSET_BASE +
-                         LINEAR_LABEL_OFFSET_STEP * label_tier)
-      )
-  }
-
-  positioned_df %>%
-    select(-transformed_value, -cluster_id, -cluster_top_transformed,
-           -cluster_top_display, -benchmark_index, -benchmark_count)
-}
-
-compute_max_label_tier <- function(df) {
-  if (nrow(df) == 0 || !"label_tier" %in% names(df)) {
-    return(0L)
-  }
-
-  as.integer(max(0, max(df$label_tier, na.rm = TRUE)))
-}
-
-extract_label_positions <- function(df) {
-  if (!"label_y" %in% names(df)) {
-    return(numeric())
-  }
-
-  df$label_y
-}
-
-compute_upper_limit <- function(max_value, max_label_tier, force_log, use_symlog,
-                                has_clipped_values) {
-  if (!is.finite(max_value) || max_value <= 0) {
-    return(max_value)
-  }
-
-  if (force_log || use_symlog) {
-    trans <- if (force_log) {
-      transform_log10()
-    } else {
-      pseudo_log_trans(base = 10)
-    }
-    headroom <- TRANSFORMED_TOP_HEADROOM_BASE +
-      TRANSFORMED_TOP_HEADROOM_PER_TIER * max_label_tier
-    if (has_clipped_values) {
-      headroom <- headroom + 0.05
-    }
-    return(trans$inverse(trans$transform(max_value) + headroom))
-  }
-
-  headroom <- LINEAR_TOP_HEADROOM_BASE +
-    LINEAR_TOP_HEADROOM_PER_TIER * max_label_tier
-  if (has_clipped_values) {
-    headroom <- headroom + 0.04
-  }
-  max_value * (1 + headroom)
 }
 
 plot_metric_for_cap <- function(cap, metric_key, metric_info,
@@ -831,34 +677,42 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
 
   p <- p + theme_benchmark()
 
-  # Add value labels on bars (positions computed in data space, then
-  # transformed to log space for force_log plots)
-  label_df <- plot_df_orig %>%
-    filter(!is.na(display_value), display_value > 0, !clipped) %>%
-    compute_label_positions(force_log, use_symlog)
-  if (force_log && nrow(label_df) > 0) {
-    label_df <- label_df %>% mutate(label_y = log_t(label_y))
+  # Axis-space mapping for label placement. Geoms take pre-transformed
+  # values on force_log plots and data values otherwise.
+  to_axis <- if (force_log) {
+    log_t
+  } else if (use_symlog) {
+    pseudo_log_trans(base = 10)$transform
+  } else {
+    identity
   }
+  from_axis <- if (use_symlog) pseudo_log_trans(base = 10)$inverse else identity
+
+  label_df <- plot_df_orig %>%
+    filter(!is.na(display_value), display_value > 0) %>%
+    mutate(
+      label = vapply(value, format_metric_value,
+                     FUN.VALUE = character(1), normalize = normalize),
+      label = if_else(clipped, paste0(label, " ^"), label)
+    )
+  bar_top <- max(to_axis(plot_df_orig$display_value), na.rm = TRUE)
+  label_extent <- LABEL_EXTENT_BASE +
+    LABEL_EXTENT_PER_CHAR * max(c(0, nchar(label_df$label)))
+  y_hi_axis <- bar_top / (1 - LABEL_GAP - label_extent)
+  label_df <- label_df %>%
+    mutate(label_y = from_axis(to_axis(display_value) + LABEL_GAP * y_hi_axis))
+
   if (nrow(label_df) > 0) {
-    p <- p + geom_label(
+    p <- p + geom_text(
       data = label_df,
-      aes(
-        y = label_y,
-        label = vapply(value, format_metric_value,
-                       FUN.VALUE = character(1), normalize = normalize),
-        hjust = label_hjust
-      ),
+      aes(y = label_y, label = label,
+          fontface = if_else(clipped, "bold", "plain")),
       position = text_position,
-      vjust = 0,
-      size = 3.8, color = "grey25",
-      fill = alpha("white", 0.75),
-      linewidth = 0,
-      label.padding = unit(0.12, "lines")
+      angle = 90, hjust = 0, vjust = 0.5,
+      size = LABEL_SIZE, color = "grey20"
     )
   }
 
-  clipped_df <- clipped_df %>%
-    compute_label_positions(force_log, use_symlog)
   if (nrow(clipped_df) > 0) {
     clipped_df <- clipped_df %>%
       mutate(
@@ -869,44 +723,20 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
       clipped_df <- clipped_df %>%
         mutate(
           seg_y_start = log_t(seg_y_start),
-          seg_y_end = log_t(seg_y_end),
-          label_y = log_t(label_y)
+          seg_y_end = log_t(seg_y_end)
         )
     }
-  }
-  if (nrow(clipped_df) > 0) {
-    p <- p +
-      geom_segment(
-        data = clipped_df,
-        aes(x = benchmark, xend = benchmark,
-            y = seg_y_start, yend = seg_y_end,
-            group = algo_label),
-        inherit.aes = FALSE,
-        position = text_position,
-        linewidth = 0.35,
-        color = "grey15",
-        arrow = arrow(type = "closed", length = unit(0.07, "in"))
-      ) +
-      geom_label(
-        data = clipped_df,
-        aes(
-          y = label_y,
-          label = paste0(
-            vapply(value, format_metric_value,
-                   FUN.VALUE = character(1), normalize = normalize),
-            " ^"
-          ),
-          hjust = label_hjust
-        ),
-        position = text_position,
-        vjust = 0,
-        size = 3.9,
-        color = "grey15",
-        fontface = "bold",
-        fill = alpha("white", 0.75),
-        linewidth = 0,
-        label.padding = unit(0.12, "lines")
-      )
+    p <- p + geom_segment(
+      data = clipped_df,
+      aes(x = benchmark, xend = benchmark,
+          y = seg_y_start, yend = seg_y_end,
+          group = algo_label),
+      inherit.aes = FALSE,
+      position = text_position,
+      linewidth = 0.35,
+      color = "grey15",
+      arrow = arrow(type = "closed", length = unit(0.07, "in"))
+    )
   }
 
   # Normalization reference line
@@ -915,36 +745,7 @@ plot_metric_for_cap <- function(cap, metric_key, metric_info,
                         color = "grey50", linewidth = 0.5)
   }
 
-  max_label_tier <- max(
-    compute_max_label_tier(label_df),
-    compute_max_label_tier(clipped_df)
-  )
-  top_display_value <- max(
-    c(
-      plot_df$display_value,
-      extract_label_positions(label_df),
-      extract_label_positions(clipped_df)
-    ),
-    na.rm = TRUE
-  )
-  y_hi <- if (force_log) {
-    # Values are already in log10 space, so the transformed headroom of
-    # compute_upper_limit is applied additively here (same result).
-    headroom <- TRANSFORMED_TOP_HEADROOM_BASE +
-      TRANSFORMED_TOP_HEADROOM_PER_TIER * max_label_tier
-    if (nrow(clipped_df) > 0) {
-      headroom <- headroom + 0.05
-    }
-    top_display_value + headroom
-  } else {
-    compute_upper_limit(
-      top_display_value,
-      max_label_tier,
-      force_log,
-      use_symlog,
-      nrow(clipped_df) > 0
-    )
-  }
+  y_hi <- from_axis(y_hi_axis)
 
   if (force_log) {
     # Log-scaled bar chart drawn in pre-transformed log10 space on a linear
