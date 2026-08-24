@@ -73,9 +73,10 @@ computeEligibleLiveness(llvm::Function &F, llvm::AAResults &AA, const CFGAnalysi
                 }
             }
 
-            // A promoted alloca holds no defined value at function entry, so
+            // A promoted alloca holds no defined value at main's entry, so
             // nothing before the entry block's first full store needs saving.
-            if (&BB == &F.getEntryBlock() && GV->hasMetadata(PromotedAllocaMD)) {
+            if (&BB == &F.getEntryBlock() && F.getName() == "main" &&
+                GV->hasMetadata(PromotedAllocaMD)) {
                 info.loadBeforeMustStore = false;
                 info.hasMustStore = true;
             }
