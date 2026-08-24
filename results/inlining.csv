@@ -1,0 +1,14 @@
+benchmark,text_always_inline,text_o3_inline,delta_bytes,delta_percent,elf_text_always_inline,elf_text_o3_inline,o3_out_of_line_functions
+activity_recognition,4468,3244,1224,37.7,4688,3464,acquire_window;featurize;train
+aes,5896,4402,1494,33.9,5982,4488,Cipher
+bitcount,1870,1868,2,0.1,1938,1936,
+chacha20,5068,4474,594,13.3,5154,4560,
+crc,952,952,0,0.0,1020,1020,
+cuckoo_filter,674,680,-6,-0.9,762,768,
+dijkstra,744,744,0,0.0,812,812,
+poly1305,4372,4198,174,4.1,4586,4412,poly1305_blocks
+qsort,858,858,0,0.0,946,946,
+rsa,2220,1576,644,40.9,2422,1778,mult_mod_operation
+sensor_fusion,3706,3590,116,3.2,5384,5268,
+sha256,7574,3346,4228,126.4,7660,3432,sha256_update
+stringsearch,758,736,22,3.0,814,792,
