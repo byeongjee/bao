@@ -184,6 +184,7 @@ def _make_compile_fn(
                 milp_gap=0.0,
                 milp_log_file="",
                 coarse_allocation=False,
+                tripcount_annotations=True,
                 save_temps=False,
                 extra_defines=list(_SHRINK_DEFINES),
             )

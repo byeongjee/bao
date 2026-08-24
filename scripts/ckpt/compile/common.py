@@ -122,12 +122,17 @@ def compile_annotated_ir(
     cpu_freq: int,
     extra_includes: list[str],
     extra_defines: list[str],
+    tripcount_annotations: bool,
 ) -> Path:
     """Shared phase 1 of the instrumented pipelines: C -> raw IR -> tripcounts.
 
     No LLVM pass has run on the returned IR, so the ``__loop_tripcount``
     markers still sit inside their source loops for exact trip-count
     annotation. Returns the annotated IR path (tmp/tripcount.ll).
+
+    With ``tripcount_annotations=False`` the annotation pass is skipped and
+    the raw IR is returned; the no-op marker calls are inlined away by the
+    middle-end optimization, so the passes see no trip-count metadata.
     """
     input_ll = tmp / "input.ll"
     includes = list(extra_includes)
@@ -143,6 +148,9 @@ def compile_annotated_ir(
         extra_includes=includes,
         extra_defines=[f"F_CPU={cpu_freq}", *extra_defines],
     )
+
+    if not tripcount_annotations:
+        return input_ll
 
     tripcount_ll = tmp / "tripcount.ll"
     annotate_tripcounts(tc, env, input_ll, tripcount_ll)

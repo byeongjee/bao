@@ -37,6 +37,7 @@ def verify_all(
             energy_config=energy_config,
             estimator_mode=estimator_mode,
             coarse_allocation=False,
+            tripcount_annotations=True,
             pass_log_level=pass_log_level,
         ),
         rockclimb_spec(

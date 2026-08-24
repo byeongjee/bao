@@ -110,6 +110,7 @@ def compile_schematic(
             cpu_freq=opts.cpu_freq,
             extra_includes=opts.extra_includes,
             extra_defines=opts.extra_defines,
+            tripcount_annotations=True,
         )
 
         # Middle-end optimization

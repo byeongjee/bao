@@ -49,6 +49,7 @@ class MilpCompileOptions:
     milp_log_file: str
     coarse_allocation: bool
     save_temps: bool
+    tripcount_annotations: bool
     extra_includes: list[str] = field(default_factory=list)
     extra_defines: list[str] = field(default_factory=list)
 
@@ -105,6 +106,7 @@ def compile_milp(
             cpu_freq=opts.cpu_freq,
             extra_includes=opts.extra_includes,
             extra_defines=opts.extra_defines,
+            tripcount_annotations=opts.tripcount_annotations,
         )
 
         # Middle-end optimization

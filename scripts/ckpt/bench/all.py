@@ -133,6 +133,7 @@ def _run_step(
             energy_config=opts.energy_config,
             cpu_freq=opts.cpu_freq,
             coarse_allocation=opts.coarse_allocation,
+            tripcount_annotations=True,
             milp_gap=opts.milp_gap,
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,

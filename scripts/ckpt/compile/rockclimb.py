@@ -100,6 +100,7 @@ def compile_rockclimb(
             cpu_freq=opts.cpu_freq,
             extra_includes=[],
             extra_defines=opts.extra_defines,
+            tripcount_annotations=True,
         )
 
         # Step 1c: Middle-end optimization (the second half of what a plain

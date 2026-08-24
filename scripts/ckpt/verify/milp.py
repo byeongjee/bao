@@ -22,6 +22,7 @@ def milp_spec(
     energy_config: Path | None,
     estimator_mode: str,
     coarse_allocation: bool,
+    tripcount_annotations: bool,
     pass_log_level: str,
 ) -> AlgorithmSpec:
     """Build the MILP verification spec."""
@@ -60,6 +61,7 @@ def milp_spec(
                 milp_gap=0.0,
                 milp_log_file="",
                 coarse_allocation=coarse_allocation,
+                tripcount_annotations=tripcount_annotations,
                 save_temps=False,
                 extra_defines=extra_defines,
             ),
@@ -88,6 +90,7 @@ def verify_milp(
     cpu_freq: int,
     capture_timeout_seconds: float,
     coarse_allocation: bool,
+    tripcount_annotations: bool,
     pass_log_level: str,
 ) -> list[BenchResult]:
     """Verify semantic correctness of MILP checkpoint insertion."""
@@ -96,6 +99,7 @@ def verify_milp(
         energy_config=energy_config,
         estimator_mode=estimator_mode,
         coarse_allocation=coarse_allocation,
+        tripcount_annotations=tripcount_annotations,
         pass_log_level=pass_log_level,
     )
     return verify_algorithms(
