@@ -91,6 +91,8 @@ p_bar <- ggplot(bars, aes(benchmark, geomean, fill = algo)) +
   geom_col(position = position_dodge(0.8), width = 0.75) +
   geom_text(data = filter(bars, dropped > 0), aes(label = paste0("-", dropped), y = 1),
             position = position_dodge(0.8), vjust = 1.4, size = 3.2) +
+  geom_text(aes(label = sprintf("%.1f", geomean)), position = position_dodge(0.8),
+            vjust = -0.3, size = 2.3) +
   geom_hline(yintercept = 1, linetype = "dashed", linewidth = 0.4) +
   geom_vline(xintercept = length(levels(bars$benchmark)) - 0.5, color = "grey60", linewidth = 0.4) +
   scale_fill_manual(values = COLORS) +
