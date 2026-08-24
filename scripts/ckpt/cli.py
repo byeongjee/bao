@@ -154,6 +154,11 @@ _coarse_allocation_flag = click.option(
     is_flag=True,
     help="Use one MILP placement variable per eligible value instead of per-region placement.",
 )
+_no_tripcount_flag = click.option(
+    "--no-tripcount",
+    is_flag=True,
+    help="Ignore __loop_tripcount annotations; loops with unknown bounds are chunked.",
+)
 _milp_gap_option = click.option(
     "--milp-gap",
     type=float,
@@ -420,6 +425,7 @@ def _handle_accumulate_keys(result, accumulate_keys: str | None) -> None:
     "--milp-log-file", type=click.Path(), default="", help="Gurobi log file path."
 )
 @_coarse_allocation_flag
+@_no_tripcount_flag
 @_accumulate_keys_option
 @click.pass_context
 def compile_milp_cmd(
@@ -442,6 +448,7 @@ def compile_milp_cmd(
     milp_gap: float,
     milp_log_file: str,
     coarse_allocation: bool,
+    no_tripcount: bool,
     accumulate_keys: str | None,
     csv_path: str | None,
 ) -> None:
@@ -498,6 +505,7 @@ def compile_milp_cmd(
             milp_gap=milp_gap,
             milp_log_file=milp_log_file,
             coarse_allocation=coarse_allocation,
+            tripcount_annotations=not no_tripcount,
             save_temps=save_temps,
         ),
     )
@@ -979,6 +987,7 @@ def bench() -> None:
 @_energy_override_option
 @_cpu_freq_option("16")
 @_coarse_allocation_flag
+@_no_tripcount_flag
 @_milp_gap_option
 @_accumulate_keys_option
 @_saleae_timeout_option
@@ -994,6 +1003,7 @@ def bench_milp_cmd(
     energy_config: str | None,
     cpu_freq: str,
     coarse_allocation: bool,
+    no_tripcount: bool,
     milp_gap: float,
     accumulate_keys: str | None,
     timeout: float,
@@ -1014,6 +1024,7 @@ def bench_milp_cmd(
         energy_config=_path_or_none(energy_config),
         cpu_freq=_mhz_to_hz(cpu_freq),
         coarse_allocation=coarse_allocation,
+        tripcount_annotations=not no_tripcount,
         milp_gap=milp_gap,
         pass_log_level=ctx.obj["pass_log_level"],
         accumulate_keys_file=_path_or_none(accumulate_keys),
@@ -1597,6 +1608,7 @@ def verify_rockclimb_cmd(
 @_estimator_mode_option
 @_cpu_freq_option("16")
 @_coarse_allocation_flag
+@_no_tripcount_flag
 @_saleae_timeout_option
 @click.pass_context
 def verify_milp_cmd(
@@ -1608,6 +1620,7 @@ def verify_milp_cmd(
     estimator_mode: str,
     cpu_freq: str,
     coarse_allocation: bool,
+    no_tripcount: bool,
     timeout: float,
 ) -> None:
     """Verify semantic correctness of MILP checkpoint insertion."""
@@ -1625,6 +1638,7 @@ def verify_milp_cmd(
         estimator_mode=estimator_mode,
         cpu_freq=_mhz_to_hz(cpu_freq),
         coarse_allocation=coarse_allocation,
+        tripcount_annotations=not no_tripcount,
         pass_log_level=ctx.obj["pass_log_level"],
     )
     if not all_ok(results):
