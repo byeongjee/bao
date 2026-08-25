@@ -1,0 +1,6 @@
+benchmark,capacitor,status,basic_blocks,edges,abstract_cfg_blocks,abstract_cfg_edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,candidate_globals,milp_allocation_mode,milp_variables,milp_constraints,milp_presolved_variables,milp_presolved_constraints,optimal_solution,distributed_checkpoints_inserted,vm_placed_globals,vm_placed_global_names,milp_solve_time_ms,result,run_attempts
+activity_recognition-50uF,50uF,ok,14,19,6,6,3,55,41024,471,33902.97,0,0,0,9,regional,429,1568,117,240,yes,9,8,lfsr_state:6;__local_main.features.i.sroa.0:2;__local_main.features.i.sroa.4:2;__local_main.features.i3.sroa.0:2;__local_main.features.i3.sroa.4:2;__local_main.stats.sroa.0.i:6;__local_main.features.i12.sroa.0:6;__local_main.features.i12.sroa.5:6,20,,1
+dijkstra-50uF,50uF,ok,14,20,7,9,2,72,41440,512,216728.98,0,0,0,5,regional,684,2734,113,242,yes,33,0,,26,,1
+rsa-50uF,50uF,ok,112,165,22,27,7,512,63968,547,45240.04,0,0,0,8,regional,3979,16305,734,1941,yes,3,0,,372,,1
+aes-50uF,50uF,ok,26,35,9,10,5,265,50416,445,104614.06,0,0,0,3,regional,2475,10033,80,177,yes,51,1,g_ctx:3,38,,1
+qsort-50uF,50uF,ok,13,18,6,6,3,11,37840,434,1032141.22,0,0,0,2,regional,130,470,4,6,yes,0,1,g_checksum_sink:2,1,,1

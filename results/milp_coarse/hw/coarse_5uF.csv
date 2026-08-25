@@ -1,0 +1,3 @@
+benchmark,capacitor,status,basic_blocks,edges,abstract_cfg_blocks,abstract_cfg_edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,candidate_globals,milp_allocation_mode,milp_variables,milp_constraints,milp_presolved_variables,milp_presolved_constraints,optimal_solution,distributed_checkpoints_inserted,vm_placed_globals,vm_placed_global_names,milp_solve_time_ms,result,run_attempts
+activity_recognition-5uF,5uF,ok,16,22,8,9,3,43,40608,466,34234.88,0,0,0,9,coarse,470,1799,115,241,yes,0,0,,12,,1
+cuckoo_filter-5uF,5uF,ok,22,32,9,11,4,34,40256,463,43952.87,0,0,0,3,coarse,552,2244,48,107,yes,8,2,__local_main.inserts:9;__local_main.found:9,10,,1

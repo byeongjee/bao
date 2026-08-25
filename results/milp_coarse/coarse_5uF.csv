@@ -1,0 +1,14 @@
+benchmark,capacitor,status,basic_blocks,edges,abstract_cfg_blocks,abstract_cfg_edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,candidate_globals,milp_allocation_mode,milp_variables,milp_constraints,milp_presolved_variables,milp_presolved_constraints,optimal_solution,distributed_checkpoints_inserted,vm_placed_globals,vm_placed_global_names,milp_solve_time_ms
+activity_recognition,5uF,ok,16,22,8,9,3,41,40800,406,9,coarse,470,1799,115,241,yes,0,0,,11
+aes,5uF,ok,26,35,9,10,4,255,47456,410,3,coarse,2451,9959,43,93,yes,49,0,,25
+bitcount,5uF,ok,61,92,36,51,17,228,65392,483,2,coarse,5680,24786,684,2069,yes,16,0,,84
+chacha20,5uF,ok,11,15,4,4,2,34,38752,405,3,coarse,486,1877,19,33,yes,30,0,,4
+crc,5uF,ok,11,15,8,9,4,14,37184,415,2,coarse,143,526,13,30,yes,0,1,__local_main.result:8,3
+cuckoo_filter,5uF,ok,22,32,9,11,4,27,40384,414,3,coarse,552,2244,48,107,yes,8,2,__local_main.inserts:9;__local_main.found:9,8
+dijkstra,5uF,ok,17,24,9,12,3,58,41584,448,5,coarse,935,3789,99,207,yes,38,0,,15
+poly1305,5uF,ok,5,6,4,4,2,24,38224,420,3,coarse,362,1370,25,49,yes,0,0,,3
+qsort,5uF,ok,17,24,12,15,5,19,39584,405,2,coarse,302,1185,46,114,yes,7,0,,6
+rsa,5uF,ok,116,171,26,33,7,214,56704,427,8,coarse,4780,20041,175,500,yes,2,0,,58
+sensor_fusion,5uF,ok,174,264,174,263,4,67546,521296,430,2,coarse,24103,107065,21731,73805,yes,11,0,,66534
+sha256,5uF,ok,29,42,23,30,4,286,63616,481,6,coarse,5695,23534,700,1908,yes,99,0,,110
+stringsearch,5uF,ok,32,46,18,24,5,195,48160,418,4,coarse,887,3632,344,921,yes,6,0,,152
