@@ -1,0 +1,14 @@
+benchmark,status,compilation_time_ms,execution_time_us,run_attempts
+aes,ok,1131,1095946.58,1
+crc,ok,834,254936.75,1
+rsa,ok,346,99875.44,1
+dijkstra,ok,555,825605.54,1
+qsort,ok,382,1221403.77,1
+activity_recognition,ok,372,82434.85,1
+bitcount,ok,875,9196999.45,1
+chacha20,ok,855,77745.13,1
+sensor_fusion,ok,397,28341.89,1
+poly1305,ok,384,568162.69,1
+cuckoo_filter,ok,871,247673.97,1
+sha256,ok,373,103203.96,1
+stringsearch,ok,857,97920.42,1
