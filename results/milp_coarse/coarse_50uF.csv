@@ -1,0 +1,14 @@
+benchmark,capacitor,status,basic_blocks,edges,abstract_cfg_blocks,abstract_cfg_edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,candidate_globals,milp_allocation_mode,milp_variables,milp_constraints,milp_presolved_variables,milp_presolved_constraints,optimal_solution,distributed_checkpoints_inserted,vm_placed_globals,vm_placed_global_names,milp_solve_time_ms
+activity_recognition,50uF,ok,14,19,6,6,2,35,39776,440,9,coarse,384,1446,85,168,yes,8,8,lfsr_state:6;__local_main.features.i.sroa.0:6;__local_main.features.i.sroa.4:6;__local_main.features.i3.sroa.0:6;__local_main.features.i3.sroa.4:6;__local_main.stats.sroa.0.i:6;__local_main.features.i12.sroa.0:6;__local_main.features.i12.sroa.5:6,7
+aes,50uF,ok,26,35,9,10,5,236,47360,412,3,coarse,2451,9959,43,93,yes,51,0,,22
+bitcount,50uF,ok,61,92,36,51,13,232,64000,429,2,coarse,5680,24786,684,2069,yes,16,0,,90
+chacha20,50uF,ok,11,15,4,4,2,34,38880,411,3,coarse,486,1877,19,33,yes,31,1,__local_main.tmp.i:4,4
+crc,50uF,ok,9,12,4,3,2,9,36576,501,2,coarse,78,263,4,6,yes,0,1,__local_main.result:4,1
+cuckoo_filter,50uF,ok,18,26,5,5,2,16,38016,404,3,coarse,210,796,40,78,yes,2,2,__local_main.inserts:5;__local_main.found:5,4
+dijkstra,50uF,ok,14,20,7,9,3,46,40944,403,5,coarse,654,2623,73,170,yes,35,0,,14
+poly1305,50uF,ok,7,9,4,4,2,29,38992,473,3,coarse,550,2105,25,50,yes,0,0,,4
+qsort,50uF,ok,13,18,6,6,3,8,37792,404,2,coarse,120,439,4,6,yes,0,0,,1
+rsa,50uF,ok,112,165,22,27,8,311,58368,405,8,coarse,3811,15804,622,1633,yes,4,0,,179
+sensor_fusion,50uF,ok,177,268,4,4,2,50,39056,481,2,coarse,425,1675,14,26,yes,2,1,__local_main.acc:4,2
+sha256,50uF,ok,31,45,8,9,3,99,44112,415,6,coarse,1953,7643,48,100,yes,18,1,__local_main.lengthPad.i:8,18
+stringsearch,50uF,ok,29,42,16,21,2,71,43248,404,4,coarse,718,2913,308,805,yes,0,2,len:16;findme:16,34
