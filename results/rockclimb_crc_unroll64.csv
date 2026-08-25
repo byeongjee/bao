@@ -1,0 +1,2 @@
+benchmark,capacitor,status,basic_blocks,edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,result,run_attempts
+crc-10uF,10uF,ok,3051,4094,3,2310,48960,0,31298.09,69,20431,1
