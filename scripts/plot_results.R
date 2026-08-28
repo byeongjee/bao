@@ -51,36 +51,36 @@ METRICS <- list(
   region_boundaries = list(
     source = "debug", column = "region_boundaries",
     include_baselines = FALSE,
-    ylabel = "# Region Boundaries (static)",
-    relative_ylabel = "Relative Region Boundaries",
+    ylabel = "# Static Boundaries",
+    relative_ylabel = "Relative Boundaries",
     title = "Region Boundaries"
   ),
   runtime_region_boundary_calls = list(
     source = "debug", column = "runtime_region_boundary_calls",
     include_baselines = FALSE,
-    ylabel = "# Runtime Region Boundary Calls",
-    relative_ylabel = "Relative Region Boundary Hits",
+    ylabel = "# Boundary Calls",
+    relative_ylabel = "Relative Hits",
     title = "Region Boundary Calls at Run-time"
   ),
   execution_time = list(
     source = "no-debug", column = "execution_time_us",
     include_baselines = TRUE,
     ylabel = expression("Execution Time (" * mu * "s)"),
-    relative_ylabel = "Relative Execution Time",
+    relative_ylabel = "Relative Time",
     title = "Execution Time"
   ),
   profiling_time = list(
     source = "no-debug", column = "profiling_time_ms",
     include_baselines = FALSE,
     ylabel = "Profiling Time (ms)",
-    relative_ylabel = "Relative Profiling Time",
+    relative_ylabel = "Relative Profile Time",
     title = "Profiling Time"
   ),
   compilation_time = list(
     source = "no-debug", column = "compilation_time_ms",
     include_baselines = TRUE,
     ylabel = "Compilation Time (ms)",
-    relative_ylabel = "Relative Compilation Time",
+    relative_ylabel = "Compilation Ratio",
     title = "Compilation Time"
   )
 )
@@ -97,14 +97,17 @@ theme_benchmark <- function() {
       plot.title = element_blank(),
       plot.caption = element_text(color = "grey35", size = 10.5, hjust = 0,
                                   margin = margin(t = 4)),
-      axis.title.x = element_text(size = 15.5, margin = margin(t = 7)),
-      axis.title.y = element_text(size = 15.5, margin = margin(r = 7)),
+      axis.title.x = element_text(size = AXIS_TITLE_SIZE,
+                                  margin = margin(t = 7)),
+      axis.title.y = element_text(size = AXIS_TITLE_SIZE,
+                                  margin = margin(r = 7)),
       axis.text.x = element_text(size = 14, angle = 15, hjust = 1, vjust = 1),
       axis.text.y = element_text(size = 12.5),
       legend.position = "top",
       legend.title = element_blank(),
       legend.text = element_text(size = 13),
-      legend.key.size = unit(0.68, "cm"),
+      legend.key.height = unit(LEGEND_KEY_HEIGHT_CM, "cm"),
+      legend.key.width = unit(0.68, "cm"),
       legend.box.spacing = unit(0.01, "cm"),
       legend.margin = margin(0, 0, 0, 0),
       panel.grid.major.x = element_blank(),
@@ -249,9 +252,10 @@ OUTLIER_HEADROOM <- 1.15
 # extent are fractions of the panel height (axis space), so they look the
 # same on linear, pseudo-log, and log axes.
 LABEL_SIZE <- 3.6
-LABEL_GAP <- 0.015
-LABEL_EXTENT_BASE <- 0.01
-LABEL_EXTENT_PER_CHAR <- 0.028
+LABEL_HEIGHT_SCALE <- 3.95 / PLOT_HEIGHT_IN
+LABEL_GAP <- 0.015 * LABEL_HEIGHT_SCALE
+LABEL_EXTENT_BASE <- 0.01 * LABEL_HEIGHT_SCALE
+LABEL_EXTENT_PER_CHAR <- 0.028 * LABEL_HEIGHT_SCALE
 format_metric_value <- function(value, normalize) {
   if (normalize) {
     return(if (value >= 100) sprintf("%.0f", value)
@@ -781,7 +785,8 @@ main <- function() {
         w <- max(6.4, n_bm * 0.9 + 1.4)
 
         save_plot <- function() {
-          ggsave(filepath, p, width = w, height = 3.95, device = PDF_DEVICE)
+          ggsave(filepath, p, width = w, height = PLOT_HEIGHT_IN,
+                 device = PDF_DEVICE)
         }
         if (HAS_GGPATTERN && log_scale && metric_key %in% LOG_SCALE_METRICS) {
           # ggpattern bars still originate at y = 0 internally, so log-scale

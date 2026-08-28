@@ -44,13 +44,16 @@ theme_benchmark <- function() {
   theme_minimal(base_size = 15, base_family = "Helvetica") +
     theme(
       axis.title.x = element_blank(),
-      axis.title.y = element_text(size = 15.5, margin = margin(r = 7)),
+      axis.title.y = element_text(size = AXIS_TITLE_SIZE,
+                                  margin = margin(r = 7)),
       axis.text.x = element_text(size = 11),
       axis.text.y = element_text(size = 12.5),
       legend.position = "top",
       legend.title = element_blank(),
       legend.text = element_text(size = 13),
-      legend.key.size = unit(0.68, "cm"),
+      legend.key.height = unit(LEGEND_KEY_HEIGHT_CM, "cm"),
+      legend.key.width = unit(0.68, "cm"),
+      legend.box.spacing = unit(0.01, "cm"),
       legend.margin = margin(0, 0, 0, 0),
       panel.grid.major.x = element_blank(),
       panel.grid.minor = element_blank(),
@@ -132,5 +135,5 @@ p_box <- ggplot(box_data, aes(benchmark, normalized, fill = algo)) +
   y_scale +
   theme_benchmark()
 ggsave(file.path(output_dir, "normalized_time_box.pdf"),
-       stack_ylab(p_box, "Relative Execution Time", paste0("(to ", REF_LABEL, ")")),
-       width = 12.5, height = 3.95)
+       stack_ylab(p_box, "Relative Time", paste0("(to ", REF_LABEL, ")")),
+       width = 12.5, height = PLOT_HEIGHT_IN)

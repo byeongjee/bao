@@ -126,6 +126,13 @@ PATTERN_LEGEND_SPACING <- 0.055
 PATTERN_LEGEND_ALPHA <- 1.0
 PATTERN_LEGEND_SIZE <- 0.42
 
+# Compact paper figure dimensions. Preserve readable text and reclaim vertical
+# space from the legend before shrinking the data panel.
+PLOT_HEIGHT_IN <- 2.6
+LEGEND_KEY_HEIGHT_CM <- 0.55
+AXIS_TITLE_SIZE <- 13
+AXIS_SUBTITLE_SIZE <- 9.5
+
 # -- Axis title ---------------------------------------------------------------
 
 # Y-axis title with a smaller second line. Plotmath's atop() pads the two
@@ -133,13 +140,16 @@ PATTERN_LEGEND_SIZE <- 0.42
 # swapped into the rendered gtable.
 stack_ylab <- function(p, main, sub) {
   main_g <- textGrob(main, rot = 90,
-                     gp = gpar(fontsize = 15.5, fontfamily = "Helvetica"))
+                     gp = gpar(fontsize = AXIS_TITLE_SIZE,
+                               fontfamily = "Helvetica"))
   sub_g <- textGrob(sub, rot = 90,
-                    gp = gpar(fontsize = 11, fontfamily = "Helvetica"))
+                    gp = gpar(fontsize = AXIS_SUBTITLE_SIZE,
+                              fontfamily = "Helvetica"))
   # Column widths are line heights rather than grobWidth(), which ignores
   # descenders.
   title <- gtable(
-    widths = unit(c(15.5 * 1.2, 11 * 1.2, 7), "pt"),
+    widths = unit(c(AXIS_TITLE_SIZE * 1.2,
+                    AXIS_SUBTITLE_SIZE * 1.2, 7), "pt"),
     heights = unit(1, "null")
   )
   title <- gtable_add_grob(title, list(main_g, sub_g), t = 1, l = c(1, 2))
