@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 
-# The replay-ready traces are 80 back-to-back repetitions of one compressed
+# The replay-ready traces are 320 back-to-back repetitions of one compressed
 # walk (see benchmarks/traces/README.md); plot a single period of each.
-repetitions <- 80
+repetitions <- 320
 
 load_trace <- function(path) {
   values <- read.csv(path, colClasses = c("numeric", "numeric"))
@@ -47,18 +47,18 @@ main <- function() {
   ))
 
   # Headroom above the highest sample so the panel labels never overlap.
-  y_top <- voltage_max * 1.15
+  y_top <- voltage_max * 1.12
 
   rows <- 2
   cols <- 5
-  pdf(output_path, width = 3.35, height = 1.9, pointsize = 8)
+  pdf(output_path, width = 3.35, height = 1.35, pointsize = 8)
   on.exit(if (dev.cur() > 1) dev.off(), add = TRUE)
   par(
     mfrow = c(rows, cols),
-    mar = c(1.2, 0.35, 0.35, 0.2),
-    oma = c(1.4, 2.4, 0.2, 0.2),
-    mgp = c(1.5, 0.25, 0),
-    tcl = -0.2
+    mar = c(0.9, 0.35, 0.25, 0.2),
+    oma = c(0.3, 2.4, 0.1, 0.2),
+    mgp = c(1.5, 0.12, 0),
+    tcl = -0.15
   )
 
   for (i in seq_along(traces)) {
@@ -76,18 +76,22 @@ main <- function() {
     )
     lines(trace$time, trace$voltage, col = "#26619c", lwd = 0.5)
     box(lwd = 0.6)
-    axis(1, at = pretty(c(0, time_max), n = 2), lwd = 0.6, cex.axis = 0.8)
-    axis(2, at = c(0, 1.5, 3), labels = left_column, lwd = 0.6, cex.axis = 0.8)
+    # The unit rides on the last tick label, so no shared "Time (s)" row.
+    ticks <- pretty(c(0, time_max), n = 2)
+    ticks <- ticks[ticks <= par("usr")[2]]
+    tick_labels <- as.character(ticks)
+    tick_labels[length(ticks)] <- paste(tick_labels[length(ticks)], "s")
+    axis(1, at = ticks, labels = tick_labels, lwd = 0.6, cex.axis = 0.7)
+    axis(2, at = c(0, 1.5, 3), labels = left_column, lwd = 0.6, cex.axis = 0.7)
     text(
       x = time_max * 0.96,
-      y = y_top * 0.97,
+      y = y_top * 0.96,
       labels = trace$id,
       adj = c(1, 1),
-      cex = 0.85
+      cex = 0.8
     )
   }
 
-  mtext("Time (s)", side = 1, outer = TRUE, line = 0.4, cex = 0.8)
   mtext("Voltage (V)", side = 2, outer = TRUE, line = 1.3, cex = 0.8)
   dev.off()
 
