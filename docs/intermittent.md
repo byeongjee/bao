@@ -26,9 +26,11 @@ of truth for this measurement setup's wiring and software.
   supply rail (anode toward the Otii, cathode at the board). It blocks
   back-feed into the Otii output while the ez-FET's 3V3 powers the board for
   flashing and readback.
-- **Saleae Logic** — wired to P3.4 as in [saleae.md](saleae.md). It captures
-  the benchmark start/stop pulses during the replay: completion detection
-  and execution time both come from this capture.
+- **Saleae Logic** — channel 0 wired to P3.4 as in [saleae.md](saleae.md),
+  channel 1 to P3.5. Channel 0 captures the benchmark start/stop pulses
+  during the replay: completion detection and execution time both come
+  from this capture. Channel 1 captures the wait pulses (below) that split
+  the recharge time out of it.
 
 ## Wiring Diagram
 
@@ -65,7 +67,7 @@ flowchart LR
     gpo2 -->|relay control| SB
     ezfet <-->|"J101 ez-FET side: 3V3, RST, TEST"| relay
     relay <-->|"J101 target side: 3V3, RST, TEST"| mcu
-    mcu -->|P3.4 pulse| saleae
+    mcu -->|P3.4 / P3.5 pulses| saleae
 ```
 
 ## Connections
@@ -82,6 +84,7 @@ flowchart LR
 | LaunchPad `GND` jumper (J101) | — | Left mounted: ground stays common at all times, not routed through the switchboard |
 | Host USB | ez-FET USB connector | Direct — the switchboard's USB interface is not used |
 | Saleae digital channel 0 | MSP430 `P3.4` | Start/stop pulses: completion detection + execution time |
+| Saleae digital channel 1 | MSP430 `P3.5` | Wait enter/exit pulses: recharge time |
 | Saleae GND | Board GND | |
 
 On the LaunchPad's J101 isolation block, only the `GND` jumper stays mounted.
@@ -130,9 +133,22 @@ For each (benchmark, capacitor, trace):
    early; no trigger by the end of the trace means `status=incomplete`.
    Execution time is the first start-pulse falling edge to the stop-pulse
    rising edge, outages included.
+
+   Every boundary or boot that finds the capacitor below the threshold
+   pulses P3.5 right before it sleeps and right after it wakes
+   (`passes/runtime/vcc_wait.c`): the enter pulse is one port write pair,
+   the exit pulse the same with four `nop`s in between, so the host tells
+   them apart by width (about 5 vs 9 CPU cycles high). The recharge time
+   of a run is the sum of enter-to-exit spans inside the execution-time
+   window. A wait cut short by a brownout has no exit pulse; the recovery
+   boot waits again, so its enter pulse follows directly and the span runs
+   on to that wait's exit, counting the outage and reboot as power-off
+   time. Pulses that coincide with a channel-0 pulse are the cold power-up
+   glitch (every floating pin follows the rising rail) and are dropped.
 4. **Readback** — main off, relays closed again, NVM read via `mspdebug`
    (`__nvm_done`, `__nvm_violation`, `cnt_wait` — boundaries/boots that found
-   the capacitor below the threshold and slept — `cnt_recovery`, and with
+   the capacitor below the threshold and slept, checked against the pulse
+   count — `cnt_recovery`, and with
    `--device-debug` — off by default, its counter updates and UART cost
    energy — also `cnt_boundary` and the result). Completed and violated
    runs park at boot, so their NVM state survives the reconnect.
