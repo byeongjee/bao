@@ -8,10 +8,10 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 
 | algo | runs | complete | correct (of complete) | incomplete | mean waits | mean rec | mean t (s) |
 |---|---|---|---|---|---|---|---|
-| milp | 130 | 130 | 130 | 0 | 23.9 | 0.9 | 3.13 |
-| rockclimb | 130 | 130 | 130 | 0 | 312.2 | 11.9 | 43.57 |
-| schematic | 130 | 130 | 130 | 0 | 125.2 | 5.1 | 17.58 |
-| schematicO3 | 130 | 130 | 130 | 0 | 37.9 | 1.3 | 5.04 |
+| milp | 130 | 130 | 130 | 0 | 23.8 | 0.8 | 3.15 |
+| rockclimb | 130 | 130 | 130 | 0 | 312.8 | 11.9 | 43.64 |
+| schematic | 130 | 130 | 130 | 0 | 125.2 | 5.1 | 17.61 |
+| schematicO3 | 130 | 130 | 130 | 0 | 38.0 | 1.3 | 5.12 |
 
 ## Per benchmark: complete / correct / total waits / total rec / mean t (s)
 
@@ -26,9 +26,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount (14121) | 10/10 / 10/10 / 90 / 0 / 0.81 | 10/10 / 10/10 / 4164 / 160 / 59.32 | 10/10 / 10/10 / 447 / 12 / 5.44 | 10/10 / 10/10 / 104 / 0 / 1.00 |
 | chacha20 (79) | 10/10 / 10/10 / 115 / 2 / 1.30 | 10/10 / 10/10 / 626 / 18 / 7.64 | 10/10 / 10/10 / 356 / 15 / 4.89 | 10/10 / 10/10 / 252 / 8 / 3.38 |
 | sensor_fusion (613) | 10/10 / 10/10 / 108 / 0 / 0.99 | 10/10 / 10/10 / 125 / 0 / 1.12 | 10/10 / 10/10 / 167 / 1 / 1.62 | 10/10 / 10/10 / 165 / 1 / 1.51 |
-| poly1305 (68) | 10/10 / 10/10 / 1361 / 76 / 22.00 | 10/10 / 10/10 / 4385 / 165 / 60.79 | 10/10 / 10/10 / 2961 / 148 / 44.31 | 10/10 / 10/10 / 2081 / 97 / 31.95 |
+| poly1305 (68) | 10/10 / 10/10 / 1359 / 74 / 22.08 | 10/10 / 10/10 / 4444 / 172 / 61.40 | 10/10 / 10/10 / 2963 / 146 / 44.58 | 10/10 / 10/10 / 2092 / 95 / 32.89 |
 | cuckoo_filter (4048) | 10/10 / 10/10 / 146 / 1 / 1.40 | 10/10 / 10/10 / 1898 / 71 / 25.94 | 10/10 / 10/10 / 1360 / 54 / 18.83 | 10/10 / 10/10 / 221 / 7 / 2.56 |
-| sha256 (131) | 10/10 / 10/10 / 184 / 9 / 2.45 | 10/10 / 10/10 / 1073 / 35 / 13.64 | 10/10 / 10/10 / 464 / 18 / 6.21 | 10/10 / 10/10 / 348 / 15 / 4.85 |
+| sha256 (131) | 10/10 / 10/10 / 184 / 7 / 2.58 | 10/10 / 10/10 / 1088 / 35 / 13.98 | 10/10 / 10/10 / 469 / 18 / 6.30 | 10/10 / 10/10 / 345 / 14 / 4.89 |
 | stringsearch (20) | 10/10 / 10/10 / 194 / 2 / 1.79 | 10/10 / 10/10 / 8905 / 346 / 126.74 | 10/10 / 10/10 / 691 / 23 / 9.09 | 10/10 / 10/10 / 232 / 5 / 2.45 |
 
 ## Per trace: waits by benchmark x algorithm (`inc` = incomplete)
@@ -46,9 +46,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 8 | 280 | 32 | 9 |
 | chacha20 | 11 | 46 | 34 | 22 |
 | sensor_fusion | 8 | 10 | 14 | 12 |
-| poly1305 | 132 | 322 | 269 | 185 |
+| poly1305 | 132 | 323 | 267 | 184 |
 | cuckoo_filter | 13 | 130 | 117 | 18 |
-| sha256 | 18 | 74 | 38 | 35 |
+| sha256 | 18 | 75 | 37 | 34 |
 | stringsearch | 14 | 594 | 55 | 16 |
 
 ### trace 2
@@ -64,9 +64,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 8 | 381 | 40 | 11 |
 | chacha20 | 12 | 61 | 34 | 24 |
 | sensor_fusion | 12 | 12 | 16 | 16 |
-| poly1305 | 131 | 407 | 281 | 191 |
+| poly1305 | 131 | 417 | 285 | 196 |
 | cuckoo_filter | 14 | 170 | 125 | 22 |
-| sha256 | 18 | 99 | 45 | 33 |
+| sha256 | 18 | 98 | 44 | 33 |
 | stringsearch | 19 | 804 | 68 | 21 |
 
 ### trace 3
@@ -82,9 +82,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 7 | 663 | 63 | 9 |
 | chacha20 | 11 | 96 | 37 | 28 |
 | sensor_fusion | 13 | 14 | 20 | 20 |
-| poly1305 | 129 | 651 | 335 | 241 |
+| poly1305 | 129 | 673 | 349 | 244 |
 | cuckoo_filter | 16 | 297 | 175 | 26 |
-| sha256 | 18 | 172 | 61 | 33 |
+| sha256 | 18 | 177 | 61 | 33 |
 | stringsearch | 24 | 1393 | 94 | 28 |
 
 ### trace 4
@@ -100,9 +100,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 8 | 532 | 53 | 10 |
 | chacha20 | 12 | 72 | 35 | 25 |
 | sensor_fusion | 11 | 14 | 18 | 22 |
-| poly1305 | 133 | 518 | 298 | 189 |
+| poly1305 | 136 | 525 | 285 | 190 |
 | cuckoo_filter | 16 | 234 | 139 | 24 |
-| sha256 | 19 | 130 | 49 | 35 |
+| sha256 | 20 | 134 | 47 | 34 |
 | stringsearch | 21 | 1170 | 71 | 30 |
 
 ### trace 5
@@ -118,9 +118,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 9 | 388 | 43 | 11 |
 | chacha20 | 11 | 57 | 36 | 27 |
 | sensor_fusion | 11 | 12 | 17 | 16 |
-| poly1305 | 138 | 407 | 291 | 214 |
+| poly1305 | 138 | 408 | 291 | 211 |
 | cuckoo_filter | 13 | 170 | 132 | 23 |
-| sha256 | 18 | 98 | 46 | 35 |
+| sha256 | 18 | 100 | 50 | 35 |
 | stringsearch | 20 | 789 | 67 | 22 |
 
 ### trace 6
@@ -136,9 +136,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 10 | 352 | 39 | 12 |
 | chacha20 | 11 | 55 | 33 | 23 |
 | sensor_fusion | 11 | 14 | 17 | 18 |
-| poly1305 | 131 | 383 | 287 | 207 |
+| poly1305 | 130 | 385 | 276 | 206 |
 | cuckoo_filter | 13 | 164 | 128 | 19 |
-| sha256 | 17 | 91 | 39 | 33 |
+| sha256 | 17 | 88 | 40 | 33 |
 | stringsearch | 19 | 758 | 66 | 22 |
 
 ### trace 7
@@ -154,9 +154,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 9 | 354 | 41 | 10 |
 | chacha20 | 11 | 55 | 34 | 23 |
 | sensor_fusion | 11 | 13 | 17 | 15 |
-| poly1305 | 128 | 385 | 276 | 191 |
+| poly1305 | 128 | 384 | 274 | 197 |
 | cuckoo_filter | 15 | 171 | 126 | 22 |
-| sha256 | 17 | 93 | 45 | 33 |
+| sha256 | 17 | 96 | 45 | 33 |
 | stringsearch | 20 | 791 | 61 | 23 |
 
 ### trace 8
@@ -172,9 +172,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 14 | 541 | 55 | 14 |
 | chacha20 | 13 | 75 | 37 | 31 |
 | sensor_fusion | 14 | 16 | 19 | 19 |
-| poly1305 | 148 | 564 | 316 | 244 |
+| poly1305 | 148 | 566 | 328 | 248 |
 | cuckoo_filter | 18 | 248 | 158 | 25 |
-| sha256 | 20 | 138 | 56 | 37 |
+| sha256 | 20 | 136 | 56 | 37 |
 | stringsearch | 25 | 1153 | 81 | 27 |
 
 ### trace 9
@@ -190,9 +190,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 9 | 327 | 40 | 9 |
 | chacha20 | 12 | 56 | 37 | 24 |
 | sensor_fusion | 9 | 10 | 15 | 15 |
-| poly1305 | 139 | 362 | 301 | 203 |
+| poly1305 | 135 | 365 | 302 | 199 |
 | cuckoo_filter | 15 | 155 | 126 | 20 |
-| sha256 | 19 | 91 | 41 | 35 |
+| sha256 | 18 | 94 | 45 | 34 |
 | stringsearch | 18 | 716 | 63 | 21 |
 
 ### trace 10
@@ -208,9 +208,9 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | bitcount | 8 | 346 | 41 | 9 |
 | chacha20 | 11 | 53 | 39 | 25 |
 | sensor_fusion | 8 | 10 | 14 | 12 |
-| poly1305 | 152 | 386 | 307 | 216 |
+| poly1305 | 152 | 398 | 306 | 217 |
 | cuckoo_filter | 13 | 159 | 134 | 22 |
-| sha256 | 20 | 87 | 44 | 39 |
+| sha256 | 20 | 90 | 44 | 39 |
 | stringsearch | 14 | 737 | 65 | 22 |
 
 ## Per benchmark x algorithm x trace
@@ -300,10 +300,10 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 
 | algo | tr1 | tr2 | tr3 | tr4 | tr5 | tr6 | tr7 | tr8 | tr9 | tr10 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| milp | ok w=132 rec=4 t=10.19s | ok w=131 rec=2 t=9.70s | ok w=129 rec=1 t=5.16s | ok w=133 rec=5 t=36.68s | ok w=138 rec=9 t=29.77s | ok w=131 rec=3 t=11.92s | ok w=128 rec=0 t=22.96s | ok w=148 rec=18 t=28.60s | ok w=139 rec=10 t=33.34s | ok w=152 rec=24 t=31.67s |
-| rockclimb | ok w=322 rec=9 t=23.53s | ok w=407 rec=7 t=28.00s | ok w=651 rec=6 t=24.23s | ok w=518 rec=0 t=116.07s | ok w=407 rec=25 t=79.38s | ok w=383 rec=6 t=32.61s | ok w=385 rec=0 t=60.11s | ok w=564 rec=55 t=85.52s | ok w=362 rec=0 t=83.40s | ok w=386 rec=57 t=75.01s |
-| schematic | ok w=269 rec=8 t=20.23s | ok w=281 rec=5 t=20.35s | ok w=335 rec=3 t=13.01s | ok w=298 rec=1 t=68.90s | ok w=291 rec=19 t=60.78s | ok w=287 rec=7 t=26.86s | ok w=276 rec=0 t=43.83s | ok w=316 rec=37 t=57.77s | ok w=301 rec=20 t=68.36s | ok w=307 rec=48 t=63.05s |
-| schematicO3 | ok w=185 rec=5 t=13.50s | ok w=191 rec=3 t=13.84s | ok w=241 rec=2 t=9.22s | ok w=189 rec=0 t=50.59s | ok w=214 rec=14 t=43.45s | ok w=207 rec=5 t=20.10s | ok w=191 rec=0 t=32.95s | ok w=244 rec=28 t=43.96s | ok w=203 rec=7 t=48.36s | ok w=216 rec=33 t=43.48s |
+| milp | ok w=132 rec=4 t=10.19s | ok w=131 rec=2 t=9.76s | ok w=129 rec=1 t=5.19s | ok w=136 rec=8 t=37.33s | ok w=138 rec=9 t=29.74s | ok w=130 rec=2 t=11.95s | ok w=128 rec=0 t=22.95s | ok w=148 rec=18 t=28.64s | ok w=135 rec=6 t=33.42s | ok w=152 rec=24 t=31.64s |
+| rockclimb | ok w=323 rec=9 t=23.58s | ok w=417 rec=7 t=28.09s | ok w=673 rec=6 t=24.66s | ok w=525 rec=0 t=108.20s | ok w=408 rec=26 t=80.64s | ok w=385 rec=7 t=34.49s | ok w=384 rec=0 t=61.02s | ok w=566 rec=57 t=88.66s | ok w=365 rec=0 t=85.87s | ok w=398 rec=60 t=78.81s |
+| schematic | ok w=267 rec=8 t=20.17s | ok w=285 rec=5 t=21.02s | ok w=349 rec=3 t=13.15s | ok w=285 rec=1 t=68.95s | ok w=291 rec=19 t=58.99s | ok w=276 rec=5 t=26.94s | ok w=274 rec=0 t=44.83s | ok w=328 rec=37 t=57.82s | ok w=302 rec=20 t=70.84s | ok w=306 rec=48 t=63.08s |
+| schematicO3 | ok w=184 rec=5 t=13.53s | ok w=196 rec=4 t=16.30s | ok w=244 rec=2 t=9.22s | ok w=190 rec=0 t=53.05s | ok w=211 rec=14 t=43.48s | ok w=206 rec=4 t=20.17s | ok w=197 rec=0 t=34.34s | ok w=248 rec=30 t=46.97s | ok w=199 rec=3 t=48.41s | ok w=217 rec=33 t=43.47s |
 
 ### cuckoo_filter (baseline result 4048)
 
@@ -318,10 +318,10 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 
 | algo | tr1 | tr2 | tr3 | tr4 | tr5 | tr6 | tr7 | tr8 | tr9 | tr10 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| milp | ok w=18 rec=1 t=0.87s | ok w=18 rec=0 t=0.75s | ok w=18 rec=0 t=0.34s | ok w=19 rec=2 t=5.24s | ok w=18 rec=1 t=3.19s | ok w=17 rec=0 t=1.14s | ok w=17 rec=0 t=3.09s | ok w=20 rec=1 t=2.41s | ok w=19 rec=1 t=3.44s | ok w=20 rec=3 t=3.99s |
-| rockclimb | ok w=74 rec=2 t=5.14s | ok w=99 rec=1 t=5.60s | ok w=172 rec=1 t=4.96s | ok w=130 rec=0 t=24.43s | ok w=98 rec=6 t=18.64s | ok w=91 rec=1 t=6.61s | ok w=93 rec=0 t=14.87s | ok w=138 rec=12 t=19.38s | ok w=91 rec=0 t=20.83s | ok w=87 rec=12 t=15.90s |
-| schematic | ok w=38 rec=1 t=2.59s | ok w=45 rec=0 t=1.92s | ok w=61 rec=0 t=1.08s | ok w=49 rec=1 t=11.29s | ok w=46 rec=3 t=9.30s | ok w=39 rec=0 t=1.68s | ok w=45 rec=0 t=8.57s | ok w=56 rec=6 t=9.28s | ok w=41 rec=1 t=8.42s | ok w=44 rec=6 t=7.97s |
-| schematicO3 | ok w=35 rec=1 t=2.53s | ok w=33 rec=0 t=1.65s | ok w=33 rec=0 t=0.66s | ok w=35 rec=2 t=8.64s | ok w=35 rec=2 t=6.26s | ok w=33 rec=0 t=1.63s | ok w=33 rec=0 t=5.54s | ok w=37 rec=3 t=5.52s | ok w=35 rec=1 t=8.23s | ok w=39 rec=6 t=7.90s |
+| milp | ok w=18 rec=0 t=0.89s | ok w=18 rec=0 t=0.77s | ok w=18 rec=0 t=0.34s | ok w=20 rec=2 t=5.24s | ok w=18 rec=1 t=3.20s | ok w=17 rec=0 t=1.14s | ok w=17 rec=0 t=4.43s | ok w=20 rec=1 t=2.41s | ok w=18 rec=0 t=3.43s | ok w=20 rec=3 t=3.98s |
+| rockclimb | ok w=75 rec=2 t=5.16s | ok w=98 rec=1 t=5.61s | ok w=177 rec=1 t=5.01s | ok w=134 rec=0 t=26.99s | ok w=100 rec=6 t=18.68s | ok w=88 rec=1 t=6.64s | ok w=96 rec=0 t=15.55s | ok w=136 rec=12 t=19.41s | ok w=94 rec=0 t=20.82s | ok w=90 rec=12 t=15.90s |
+| schematic | ok w=37 rec=1 t=2.61s | ok w=44 rec=0 t=1.93s | ok w=61 rec=0 t=1.11s | ok w=47 rec=0 t=11.31s | ok w=50 rec=3 t=9.32s | ok w=40 rec=0 t=1.68s | ok w=45 rec=0 t=8.56s | ok w=56 rec=6 t=10.05s | ok w=45 rec=2 t=8.44s | ok w=44 rec=6 t=7.97s |
+| schematicO3 | ok w=34 rec=1 t=2.54s | ok w=33 rec=0 t=1.68s | ok w=33 rec=0 t=0.67s | ok w=34 rec=1 t=8.68s | ok w=35 rec=2 t=6.29s | ok w=33 rec=0 t=1.60s | ok w=33 rec=0 t=5.69s | ok w=37 rec=3 t=5.51s | ok w=34 rec=1 t=8.32s | ok w=39 rec=6 t=7.90s |
 
 ### stringsearch (baseline result 20)
 
@@ -332,3 +332,29 @@ Cell: `ok` = completed (stop pulse + __nvm_done) and return code equals the unin
 | schematic | ok w=55 rec=1 t=3.40s | ok w=68 rec=1 t=4.48s | ok w=94 rec=0 t=1.40s | ok w=71 rec=0 t=16.37s | ok w=67 rec=4 t=12.48s | ok w=66 rec=1 t=5.83s | ok w=61 rec=0 t=10.04s | ok w=81 rec=7 t=11.63s | ok w=63 rec=0 t=13.40s | ok w=65 rec=9 t=11.91s |
 | schematicO3 | ok w=16 rec=0 t=0.21s | ok w=21 rec=0 t=0.72s | ok w=28 rec=0 t=0.34s | ok w=30 rec=0 t=6.02s | ok w=22 rec=1 t=3.18s | ok w=22 rec=0 t=1.12s | ok w=23 rec=0 t=3.08s | ok w=27 rec=1 t=2.40s | ok w=21 rec=0 t=3.41s | ok w=22 rec=3 t=3.95s |
 
+## Decomposition (normalized to Bao's total on the same trace; mean over traces, then benchmarks)
+
+| algo | runs | total (arith) | total (geomean) | t_exec | t_checkpoint | t_recharge | t_rest | power-off share |
+|---|---|---|---|---|---|---|---|---|
+| milp | 130 | 1.00 | 1.00 | 1.515 (151.5%) | 0.080 (8.0%) | 0.913 (91.3%) | -1.508 (-150.8%) | 91.3% |
+| rockclimb | 130 | 64.04 | 18.64 | 1.515 (2.2%) | 47.572 (35.9%) | 62.603 (97.3%) | -47.648 (-35.4%) | 97.3% |
+| schematic | 130 | 19.08 | 6.71 | 1.515 (23.8%) | 2.817 (32.0%) | 18.713 (96.9%) | -3.964 (-52.7%) | 96.9% |
+| schematicO3 | 130 | 2.34 | 1.68 | 1.515 (125.9%) | 0.298 (23.6%) | 2.239 (93.9%) | -1.711 (-143.4%) | 93.9% |
+
+## Decomposition per benchmark (mean share of each run's total: exec / ckpt / recharge / rest)
+
+| benchmark | milp | rockclimb | schematic | schematicO3 |
+|---|---|---|---|---|
+| aes | 6% / 0% / 94% / 0% | 0% / 2% / 98% / -0% | 0% / 2% / 98% / -0% | 2% / 0% / 98% / -0% |
+| crc | 14% / 0% / 85% / -0% | 0% / 2% / 98% / -0% | 0% / 2% / 98% / -0% | 10% / 3% / 88% / 0% |
+| rsa | 5% / 1% / 94% / -0% | 0% / 2% / 98% / -0% | 1% / 1% / 98% / 0% | 3% / 1% / 96% / -0% |
+| dijkstra | 69% / 5% / 91% / -65% | 0% / 18% / 98% / -16% | 4% / 14% / 98% / -16% | 62% / 8% / 92% / -61% |
+| qsort | 287% / 33% / 92% / -312% | 7% / 86% / 98% / -90% | 118% / 49% / 95% / -162% | 180% / 68% / 93% / -242% |
+| activity_recognition | 8% / 1% / 91% / -0% | 0% / 2% / 98% / -0% | 1% / 2% / 97% / -0% | 7% / 1% / 92% / -0% |
+| bitcount | 1535% / 59% / 90% / -1584% | 10% / 345% / 98% / -353% | 173% / 337% / 97% / -506% | 1352% / 218% / 91% / -1561% |
+| chacha20 | 12% / 0% / 88% / 0% | 1% / 2% / 97% / -0% | 2% / 2% / 96% / -0% | 4% / 1% / 96% / 0% |
+| sensor_fusion | 8% / 1% / 91% / 0% | 7% / 1% / 92% / -0% | 5% / 2% / 93% / -0% | 6% / 2% / 93% / -0% |
+| poly1305 | 3% / 0% / 97% / 0% | 1% / 1% / 98% / -0% | 1% / 1% / 98% / -0% | 2% / 0% / 98% / 0% |
+| cuckoo_filter | 9% / 1% / 91% / -0% | 0% / 2% / 98% / -0% | 0% / 2% / 98% / -0% | 3% / 1% / 95% / -0% |
+| sha256 | 7% / 1% / 92% / 0% | 1% / 1% / 98% / -0% | 3% / 1% / 96% / 0% | 4% / 1% / 96% / 0% |
+| stringsearch | 6% / 2% / 92% / -0% | 0% / 2% / 98% / -0% | 1% / 2% / 97% / -0% | 4% / 2% / 94% / -0% |
