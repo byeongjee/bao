@@ -582,8 +582,9 @@ def _replay_timing_from_pulses(pulses: list[tuple[float, float]]) -> float | Non
 
 # Wait pulse widths in CPU cycles (vcc_wait.c): the enter pulse is a port
 # set followed by a port clear; the exit pulse has four nops in between.
-_WAIT_ENTER_CYCLES = 5
-_WAIT_EXIT_CYCLES = 9
+# Measured at 16 MHz: 370-390 ns and 690-700 ns.
+_WAIT_ENTER_CYCLES = 6
+_WAIT_EXIT_CYCLES = 11
 
 # A wait pulse this close to a channel-0 pulse is the cold power-up glitch:
 # every floating pin follows the rising rail at the same moment, and the
@@ -622,12 +623,14 @@ def _wait_timing_from_pulses(
     count = 0
     deaths = 0
     open_since: float | None = None
+    widths: dict[bool, list[float]] = {False: [], True: []}
     for rise, fall in wait_pulses:
         if rise < start_time or rise > stop_time:
             continue
         if _coincides_with_timing_pulse((rise, fall), timing_pulses):
             continue
         is_exit = (fall - rise) >= exit_min_width
+        widths[is_exit].append(fall - rise)
         if not is_exit:
             if open_since is None:
                 open_since = rise
@@ -644,6 +647,16 @@ def _wait_timing_from_pulses(
             "Wait entered at %.6f s never exited before the stop pulse", open_since
         )
         total += stop_time - open_since
+    for is_exit, ws in widths.items():
+        if ws:
+            logger.debug(
+                "Wait %s pulses: %d, width %.0f-%.0f ns (split at %.0f ns)",
+                "exit" if is_exit else "enter",
+                len(ws),
+                min(ws) * 1e9,
+                max(ws) * 1e9,
+                exit_min_width * 1e9,
+            )
 
     return WaitTiming(
         wait_time_us=total * 1_000_000, wait_count=count, wait_deaths=deaths
