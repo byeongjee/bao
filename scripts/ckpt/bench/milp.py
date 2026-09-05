@@ -134,6 +134,7 @@ def run_milp_benchmarks(
     milp_gap: float,
     pass_log_level: str,
     accumulate_keys_file: Path | None,
+    extra_defines: list[str],
 ) -> None:
     """Run MILP checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -200,6 +201,7 @@ def run_milp_benchmarks(
                 cpu_freq=cpu_freq,
                 opt_level=3,
                 clang_opt_level=3,
+                extra_defines=list(extra_defines),
                 milp_gap=milp_gap,
                 milp_log_file="",
                 coarse_allocation=coarse_allocation,

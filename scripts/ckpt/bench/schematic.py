@@ -197,6 +197,7 @@ def run_schematic_benchmarks(
     pass_log_level: str,
     algorithm_label: str,
     accumulate_keys_file: Path | None,
+    extra_defines: list[str],
 ) -> None:
     """Run SCHEMATIC checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -267,7 +268,7 @@ def run_schematic_benchmarks(
                     cpu_freq=cpu_freq,
                     clang_opt_level=clang_opt_level,
                     pass_log_level=pass_log_level,
-                    extra_defines=[],
+                    extra_defines=list(extra_defines),
                 )
 
             trace_json, profiling_ms = trace_cache[bench_name]
@@ -290,6 +291,7 @@ def run_schematic_benchmarks(
                 cpu_freq=cpu_freq,
                 opt_level=3,
                 clang_opt_level=clang_opt_level,
+                extra_defines=list(extra_defines),
                 save_temps=False,
                 trace_file=trace_json,
                 linker_script=None,

@@ -91,6 +91,7 @@ def run_rockclimb_benchmarks(
     max_unroll: int | None,
     pass_log_level: str,
     accumulate_keys_file: Path | None,
+    extra_defines: list[str],
 ) -> None:
     """Run RockClimb checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -144,6 +145,7 @@ def run_rockclimb_benchmarks(
                 halt_mode=halt_mode,
                 cpu_freq=cpu_freq,
                 clang_opt_level=3,
+                extra_defines=list(extra_defines),
                 opt_level=3,
                 max_unroll=max_unroll,
                 save_temps=False,

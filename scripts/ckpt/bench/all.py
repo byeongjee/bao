@@ -137,6 +137,7 @@ def _run_step(
             milp_gap=opts.milp_gap,
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
+            extra_defines=[],
         )
     elif step.algorithm == "rockclimb":
         from .rockclimb import run_rockclimb_benchmarks
@@ -155,6 +156,7 @@ def _run_step(
             max_unroll=opts.max_unroll,
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
+            extra_defines=[],
         )
     elif step.algorithm in ("schematic", "schematicO3"):
         from ..compile.schematic import CLANG_OPT_LEVEL_BY_LABEL
@@ -177,6 +179,7 @@ def _run_step(
             pass_log_level=opts.pass_log_level,
             algorithm_label=step.algorithm,
             accumulate_keys_file=None,
+            extra_defines=[],
         )
     elif step.algorithm in ("uninstrumented", "uninstrumentedO0"):
         from ..compile.uninstrumented import OPT_LEVELS_BY_LABEL
@@ -193,6 +196,7 @@ def _run_step(
             algorithm_label=step.algorithm,
             clang_opt_level=clang_opt_level,
             opt_level=opt_level,
+            extra_defines=[],
         )
     elif step.algorithm == "chunked":
         from ..compile.chunked import OPT_LEVELS
