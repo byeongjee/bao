@@ -138,7 +138,7 @@ For each (benchmark, capacitor, trace):
    pulses P3.5 right before it sleeps and right after it wakes
    (`passes/runtime/vcc_wait.c`): the enter pulse is one port write pair,
    the exit pulse the same with four `nop`s in between, so the host tells
-   them apart by width (about 5 vs 9 CPU cycles high). The recharge time
+   them apart by width (about 6 vs 11 CPU cycles high). The recharge time
    of a run is the sum of enter-to-exit spans inside the execution-time
    window. A wait cut short by a brownout has no exit pulse; the recovery
    boot waits again, so its enter pulse follows directly and the span runs
