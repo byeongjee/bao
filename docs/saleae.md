@@ -10,6 +10,8 @@ is the single source of truth for the hardware wiring and software setup.
 - Wire MSP430FR5994 **P3.4** to Saleae **digital channel 0**, and connect
   ground between the board and the analyzer.
 - The channel is sampled at 100 MHz.
+- `ckpt intermittent` additionally uses **P3.5** on **digital channel 1**
+  for the wait pulses; see [intermittent.md](intermittent.md).
 
 ## Software
 
