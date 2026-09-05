@@ -178,7 +178,7 @@ for b in BENCHMARKS:
 # ---------------------------------------------------------------------------
 # Decomposition: T_total = T_exec + T_checkpoint + T_recharge + T_rest
 #   T_recharge   = wait_time_us (Saleae wait channel, outages included)
-#   T_exec       = uninstrumented O3 under continuous power (../uninstrumented.csv)
+#   T_exec       = uninstrumented O3 under continuous power (continuous/uninstrumented.csv)
 #   T_checkpoint = continuous-power time of the same wait-mode binary at the
 #                  board cap (continuous/<algo>.csv) minus T_exec: state saves
 #                  plus the voltage check at every boundary
@@ -200,7 +200,7 @@ def read_bench_times(path):
 
 
 COMPONENTS = ["t_exec", "t_checkpoint", "t_recharge", "t_rest"]
-t_uninstr = read_bench_times(OUT.parent / "uninstrumented.csv")
+t_uninstr = read_bench_times(OUT / "continuous" / "uninstrumented.csv")
 t_cont = {a: read_bench_times(OUT / "continuous" / f"{a}.csv") for a in ALGOS}
 
 decomp = []
