@@ -46,6 +46,7 @@ from ..device.otii import (
     replay_trace,
 )
 from ..device.saleae import (
+    ReplayTiming,
     capture_completion_watcher,
     discover_saleae,
     finish_pulse_capture,
@@ -85,6 +86,9 @@ CSV_HEADER: list[str] = [
     "profiling_time_ms",
     "replay_seconds",
     "execution_time_us",
+    "wait_time_us",
+    "saleae_wait_count",
+    "saleae_wait_deaths",
     "runtime_region_boundary_calls",
     "runtime_wait_count",
     "runtime_recovery_boots",
@@ -320,10 +324,11 @@ def _run_on_trace(
     elf: Path,
     samples: list[tuple[float, float]],
     nvm_symbols: list[str],
-) -> tuple[float, bool, float | None, dict[str, int]]:
+    cpu_freq: int,
+) -> tuple[float, ReplayTiming, dict[str, int]]:
     """Flash, isolate, replay one trace, then reconnect and read NVM.
 
-    Returns ``(replay_seconds, completed, execution_time_us, nvm_values)``.
+    Returns ``(replay_seconds, timing, nvm_values)``.
     """
     connect_debugger(otii)
     session = flash_and_hold(elf, FLASH_TIMEOUT)
@@ -350,13 +355,13 @@ def _run_on_trace(
 
         with capture_completion_watcher(capture) as benchmark_done:
             replay_seconds = replay_trace(otii, samples, benchmark_done)
-        completed, execution_time_us = finish_pulse_capture(
-            capture, _CAPTURE_FINISH_TIMEOUT_SECONDS
+        timing = finish_pulse_capture(
+            capture, _CAPTURE_FINISH_TIMEOUT_SECONDS, cpu_freq
         )
 
     connect_debugger(otii)
     values = read_nvm(tc, elf, FLASH_TIMEOUT, nvm_symbols)
-    return replay_seconds, completed, execution_time_us, values
+    return replay_seconds, timing, values
 
 
 def _build_row(
@@ -504,10 +509,14 @@ def run_intermittent_benchmarks(
                     )
                     fields = dict(static_fields)
                     try:
-                        replay_seconds, completed, execution_time_us, values = (
-                            _run_on_trace(
-                                tc, otii, saleae_manager, elf, samples, nvm_symbols
-                            )
+                        replay_seconds, timing, values = _run_on_trace(
+                            tc,
+                            otii,
+                            saleae_manager,
+                            elf,
+                            samples,
+                            nvm_symbols,
+                            cpu_freq,
                         )
                     except DeviceError as exc:
                         logger.error("  DEVICE ERROR: %s", exc)
@@ -528,16 +537,22 @@ def run_intermittent_benchmarks(
                     done = values.get("__nvm_done", 0) == 1
                     if values.get("__nvm_violation", 0) != 0:
                         status = "region_violation"
-                    elif completed and done:
+                    elif timing.completed and done:
                         status = "ok"
-                    elif completed:
+                    elif timing.completed:
                         status = "unconfirmed"
                     else:
                         status = "incomplete"
 
                     fields["replay_seconds"] = str(round(replay_seconds, 2))
-                    if status == "ok" and execution_time_us is not None:
-                        fields["execution_time_us"] = str(round(execution_time_us, 2))
+                    if status == "ok" and timing.execution_time_us is not None:
+                        fields["execution_time_us"] = str(
+                            round(timing.execution_time_us, 2)
+                        )
+                    if status == "ok" and timing.wait is not None:
+                        fields["wait_time_us"] = str(round(timing.wait.wait_time_us, 2))
+                        fields["saleae_wait_count"] = timing.wait.wait_count
+                        fields["saleae_wait_deaths"] = timing.wait.wait_deaths
                     # Counters are trustworthy only when the device parked at
                     # readback: done committed (ok) or violation park. Any
                     # other run resumes under debugger power the moment the
@@ -546,6 +561,17 @@ def run_intermittent_benchmarks(
                     if status in ("ok", "region_violation"):
                         fields["runtime_wait_count"] = values.get("cnt_wait")
                         fields["runtime_recovery_boots"] = values.get("cnt_recovery")
+                        # Every wait pulses once on entry, so the pulses inside
+                        # the timing window can never outnumber cnt_wait (the
+                        # fresh-boot wait precedes the start pulse).
+                        if timing.wait is not None and "cnt_wait" in values:
+                            enters = timing.wait.wait_count + timing.wait.wait_deaths
+                            if enters > values["cnt_wait"]:
+                                logger.warning(
+                                    "  %d wait enter pulses but cnt_wait=%d",
+                                    enters,
+                                    values["cnt_wait"],
+                                )
                         if status == "ok":
                             fields["result"] = values.get("__nvm_result")
                         if device_debug:

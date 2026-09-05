@@ -15,6 +15,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
     from saleae.automation import Capture, Manager
 
 _SALEAE_CHANNEL = 0
+# Wait enter/exit pulses from vcc_wait.c under intermittent power.
+_WAIT_CHANNEL = 1
 _SALEAE_SAMPLE_RATE = 100_000_000  # 100 MHz
 _MAX_CAPTURE_ATTEMPTS = 3
 _CAPTURE_START_RETRY_DELAY_SECONDS = 0.5
@@ -287,34 +290,42 @@ def _is_ambiguous_capture(exc: DeviceError) -> bool:
     return str(exc).startswith(_AMBIGUOUS_CAPTURE_PREFIX)
 
 
-def _collect_pulses(csv_path: Path) -> list[tuple[float, float]]:
-    """Parse a Saleae digital CSV export into (rising_time, falling_time) pairs.
+def _collect_channel_pulses(csv_path: Path) -> list[list[tuple[float, float]]]:
+    """Parse a Saleae digital CSV export into (rising_time, falling_time) pairs
+    per channel column.
 
-    The CSV has columns like ``Time [s], Channel 0``.
+    The CSV has columns like ``Time [s], Channel 0, Channel 1``; every row
+    carries the state of all exported channels, so each column is scanned
+    for its own edges.
     """
-    pulses: list[tuple[float, float]] = []
-    prev_val: int | None = None
-    rising_time: float | None = None
-
     with open(csv_path) as f:
-        f.readline()  # skip header
+        header = f.readline()
+        n_channels = header.count(",")
+        pulses: list[list[tuple[float, float]]] = [[] for _ in range(n_channels)]
+        prev_vals: list[int | None] = [None] * n_channels
+        rising_times: list[float | None] = [None] * n_channels
         for line in f:
             parts = line.strip().split(",")
-            if len(parts) < 2:
+            if len(parts) < n_channels + 1:
                 continue
             timestamp = float(parts[0])
-            value = int(parts[1])
-
-            if prev_val is not None:
-                if prev_val == 0 and value == 1:
-                    rising_time = timestamp
-                elif prev_val == 1 and value == 0 and rising_time is not None:
-                    pulses.append((rising_time, timestamp))
-                    rising_time = None
-
-            prev_val = value
-
+            for ch in range(n_channels):
+                value = int(parts[ch + 1])
+                prev_val = prev_vals[ch]
+                rising_time = rising_times[ch]
+                if prev_val is not None:
+                    if prev_val == 0 and value == 1:
+                        rising_times[ch] = timestamp
+                    elif prev_val == 1 and value == 0 and rising_time is not None:
+                        pulses[ch].append((rising_time, timestamp))
+                        rising_times[ch] = None
+                prev_vals[ch] = value
     return pulses
+
+
+def _collect_pulses(csv_path: Path) -> list[tuple[float, float]]:
+    """Pulses on the first channel column of a Saleae digital CSV export."""
+    return _collect_channel_pulses(csv_path)[0]
 
 
 def _start_pulses(pulses: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -407,8 +418,10 @@ def _extract_timing(csv_path: Path) -> float:
 def start_pulse_capture(manager: Manager, after_trigger_seconds: float):
     """Arm a capture that triggers on the >=1 ms stop pulse on channel 0.
 
-    Returns the capture context manager from ``manager.start_capture``;
-    the caller enters it and later calls :func:`finish_pulse_capture`.
+    The wait channel is recorded alongside so the recharge time can be
+    split out afterwards. Returns the capture context manager from
+    ``manager.start_capture``; the caller enters it and later calls
+    :func:`finish_pulse_capture`.
     """
     from saleae.automation import (
         CaptureConfiguration,
@@ -418,7 +431,7 @@ def start_pulse_capture(manager: Manager, after_trigger_seconds: float):
     )
 
     device_config = LogicDeviceConfiguration(
-        enabled_digital_channels=[_SALEAE_CHANNEL],
+        enabled_digital_channels=[_SALEAE_CHANNEL, _WAIT_CHANNEL],
         digital_sample_rate=_SALEAE_SAMPLE_RATE,
     )
     capture_config = CaptureConfiguration(
@@ -472,42 +485,78 @@ def capture_completion_watcher(capture) -> Iterator[threading.Event]:
         thread.join()
 
 
-def finish_pulse_capture(capture, wait_seconds: float) -> tuple[bool, float | None]:
+@dataclass(frozen=True)
+class WaitTiming:
+    """Recharge waits inside the execution-time window of a replayed run."""
+
+    wait_time_us: float
+    # Waits started inside the window; a wait that died and was resumed
+    # by the recovery boot's wait counts once.
+    wait_count: int
+    # Enter pulses that followed an unfinished wait: the board browned out
+    # while waiting and rebooted into another wait.
+    wait_deaths: int
+
+
+@dataclass(frozen=True)
+class ReplayTiming:
+    """Outcome of a pulse capture over one trace replay.
+
+    - ``completed`` False: the trigger never fired (run incomplete); the
+      capture is stopped and the other fields are None.
+    - ``execution_time_us``: first start-pulse falling edge to stop-pulse
+      rising edge. Unlike :func:`saleae_run`, several start pulses are
+      expected: a run that dies before its first checkpoint boots fresh and
+      pulses again, and the wall-clock time (outages included) starts at the
+      first attempt. None when the trigger fired but no timing could be
+      extracted.
+    - ``wait``: the recharge waits inside that window; None whenever
+      ``execution_time_us`` is.
+    """
+
+    completed: bool
+    execution_time_us: float | None
+    wait: WaitTiming | None
+
+
+def finish_pulse_capture(
+    capture, wait_seconds: float, cpu_freq_hz: int
+) -> ReplayTiming:
     """Resolve an armed pulse capture after the trace replay ended.
 
     By this point the target is unpowered, so the stop pulse either already
     fired the trigger or never will — *wait_seconds* only needs to cover the
-    capture's after-trigger tail.
-
-    Returns ``(completed, execution_time_us)``:
-    - ``(False, None)`` — the trigger never fired (run incomplete); the
-      capture is stopped.
-    - ``(True, None)`` — the trigger fired but no timing could be extracted.
-    - ``(True, us)`` — execution time from the first start-pulse falling
-      edge to the stop-pulse rising edge. Unlike :func:`saleae_run`, several
-      start pulses are expected: a run that dies before its first checkpoint
-      boots fresh and pulses again, and the wall-clock time (outages
-      included) starts at the first attempt.
+    capture's after-trigger tail. *cpu_freq_hz* sets the pulse-width scale
+    that tells wait enter pulses from exit pulses.
     """
     try:
         _wait_for_capture(capture, wait_seconds)
     except DeviceError:
         _stop_capture_quietly(capture)
-        return False, None
+        return ReplayTiming(completed=False, execution_time_us=None, wait=None)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         csv_path = Path(tmpdir) / "digital.csv"
         capture.export_raw_data_csv(
             directory=tmpdir,
-            digital_channels=[_SALEAE_CHANNEL],
+            digital_channels=[_SALEAE_CHANNEL, _WAIT_CHANNEL],
         )
-        pulses = _collect_pulses(csv_path)
+        channels = _collect_channel_pulses(csv_path)
+    pulses, wait_pulses = channels[0], channels[1]
 
-    return True, _replay_timing_from_pulses(pulses)
+    window = _replay_window(pulses)
+    if window is None:
+        return ReplayTiming(completed=True, execution_time_us=None, wait=None)
+    start_time, stop_time = window
+    return ReplayTiming(
+        completed=True,
+        execution_time_us=(stop_time - start_time) * 1_000_000,
+        wait=_wait_timing_from_pulses(pulses, wait_pulses, window, cpu_freq_hz),
+    )
 
 
-def _replay_timing_from_pulses(pulses: list[tuple[float, float]]) -> float | None:
-    """First start-pulse falling edge -> first stop-pulse rising edge, in us."""
+def _replay_window(pulses: list[tuple[float, float]]) -> tuple[float, float] | None:
+    """(first start-pulse falling edge, first stop-pulse rising edge), in s."""
     long_pulses = _stop_pulses(pulses)
     if not long_pulses:
         logger.warning("Capture triggered but no stop pulse found in the export")
@@ -519,4 +568,83 @@ def _replay_timing_from_pulses(pulses: list[tuple[float, float]]) -> float | Non
         logger.warning("Stop pulse captured but no start pulse precedes it")
         return None
 
-    return (stop_time - start_falls[0]) * 1_000_000  # seconds -> us
+    return start_falls[0], stop_time
+
+
+def _replay_timing_from_pulses(pulses: list[tuple[float, float]]) -> float | None:
+    """First start-pulse falling edge -> first stop-pulse rising edge, in us."""
+    window = _replay_window(pulses)
+    if window is None:
+        return None
+    start_time, stop_time = window
+    return (stop_time - start_time) * 1_000_000  # seconds -> us
+
+
+# Wait pulse widths in CPU cycles (vcc_wait.c): the enter pulse is a port
+# set followed by a port clear; the exit pulse has four nops in between.
+_WAIT_ENTER_CYCLES = 5
+_WAIT_EXIT_CYCLES = 9
+
+# A wait pulse this close to a channel-0 pulse is the cold power-up glitch:
+# every floating pin follows the rising rail at the same moment, and the
+# wait code never runs while P3.4 is pulsing.
+_GLITCH_COINCIDENCE_SECONDS = 0.000002  # 2 us
+
+
+def _coincides_with_timing_pulse(
+    pulse: tuple[float, float], timing_pulses: list[tuple[float, float]]
+) -> bool:
+    rise, fall = pulse
+    return any(
+        r - _GLITCH_COINCIDENCE_SECONDS <= fall
+        and rise <= f + _GLITCH_COINCIDENCE_SECONDS
+        for r, f in timing_pulses
+    )
+
+
+def _wait_timing_from_pulses(
+    timing_pulses: list[tuple[float, float]],
+    wait_pulses: list[tuple[float, float]],
+    window: tuple[float, float],
+    cpu_freq_hz: int,
+) -> WaitTiming:
+    """Sum the recharge waits inside *window* from the wait-channel pulses.
+
+    A wait spans its enter pulse to the next exit pulse. An enter pulse that
+    arrives while a wait is still open means the board died during that
+    wait and rebooted into another one: the span carries on, so the outage
+    and reboot count as power-off time.
+    """
+    start_time, stop_time = window
+    exit_min_width = (_WAIT_ENTER_CYCLES + _WAIT_EXIT_CYCLES) / 2 / cpu_freq_hz
+
+    total = 0.0
+    count = 0
+    deaths = 0
+    open_since: float | None = None
+    for rise, fall in wait_pulses:
+        if rise < start_time or rise > stop_time:
+            continue
+        if _coincides_with_timing_pulse((rise, fall), timing_pulses):
+            continue
+        is_exit = (fall - rise) >= exit_min_width
+        if not is_exit:
+            if open_since is None:
+                open_since = rise
+                count += 1
+            else:
+                deaths += 1
+        elif open_since is None:
+            logger.warning("Wait exit pulse at %.6f s without a preceding enter", rise)
+        else:
+            total += rise - open_since
+            open_since = None
+    if open_since is not None:
+        logger.warning(
+            "Wait entered at %.6f s never exited before the stop pulse", open_since
+        )
+        total += stop_time - open_since
+
+    return WaitTiming(
+        wait_time_us=total * 1_000_000, wait_count=count, wait_deaths=deaths
+    )

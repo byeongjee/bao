@@ -6,7 +6,12 @@ import threading
 
 import pytest
 from ckpt.device.otii import OtiiSession, replay_trace
-from ckpt.device.saleae import _collect_pulses, _replay_timing_from_pulses
+from ckpt.device.saleae import (
+    _collect_channel_pulses,
+    _collect_pulses,
+    _replay_timing_from_pulses,
+    _wait_timing_from_pulses,
+)
 from ckpt.env import ProjectEnv
 from ckpt.errors import ConfigError
 from ckpt.intermittent.runner import load_trace, resolve_traces
@@ -54,6 +59,73 @@ class TestCollectPulses:
         p = tmp_path / "digital.csv"
         p.write_text("Time [s],Channel 0\n0.0,0\n1.0,1\n")
         assert _collect_pulses(p) == []
+
+    def test_two_channels(self, tmp_path):
+        # Every row carries both channel states; each column has its own edges.
+        p = tmp_path / "digital.csv"
+        p.write_text(
+            "Time [s],Channel 0,Channel 1\n"
+            "0.0,0,0\n1.0,1,0\n1.00001,0,0\n1.5,0,1\n1.5000003,0,0\n"
+            "1.7,0,1\n1.7000006,0,0\n2.0,1,0\n2.005,0,0\n"
+        )
+        ch0, ch1 = _collect_channel_pulses(p)
+        assert ch0 == [(1.0, 1.00001), (2.0, 2.005)]
+        assert ch1 == [(1.5, 1.5000003), (1.7, 1.7000006)]
+
+
+F_CPU = 16_000_000
+ENTER = 5 / F_CPU  # port set + clear
+EXIT = 9 / F_CPU  # four nops in between
+
+
+def enter(t):
+    return (t, t + ENTER)
+
+
+def exit_(t):
+    return (t, t + EXIT)
+
+
+# Start pulse at 1.0 (falls at 1.00001), stop pulse rises at 5.0.
+TIMING = [(1.0, 1.00001), (5.0, 5.005)]
+WINDOW = (1.00001, 5.0)
+
+
+class TestWaitTimingFromPulses:
+    def test_sums_waits(self):
+        waits = [enter(2.0), exit_(2.3), enter(3.0), exit_(3.1)]
+        w = _wait_timing_from_pulses(TIMING, waits, WINDOW, F_CPU)
+        assert w.wait_time_us == pytest.approx(0.4e6)
+        assert (w.wait_count, w.wait_deaths) == (2, 0)
+
+    def test_death_during_wait_extends_the_span(self):
+        # Died at ~2.2 while waiting; the recovery boot waited again at 2.5.
+        waits = [enter(2.0), enter(2.5), exit_(2.8)]
+        w = _wait_timing_from_pulses(TIMING, waits, WINDOW, F_CPU)
+        assert w.wait_time_us == pytest.approx(0.8e6)
+        assert (w.wait_count, w.wait_deaths) == (1, 1)
+
+    def test_waits_outside_window_ignored(self):
+        # Fresh-boot wait before the start pulse, and a stray one after stop.
+        waits = [enter(0.5), exit_(0.9), enter(2.0), exit_(2.3), enter(6.0)]
+        w = _wait_timing_from_pulses(TIMING, waits, WINDOW, F_CPU)
+        assert w.wait_time_us == pytest.approx(0.3e6)
+        assert (w.wait_count, w.wait_deaths) == (1, 0)
+
+    def test_power_up_glitch_dropped(self):
+        # A reboot at 2.4 glitches every pin at once; the wait channel's
+        # copy must not be read as a second enter.
+        timing = [(1.0, 1.00001), (2.4, 2.4000004), (5.0, 5.005)]
+        waits = [enter(2.0), (2.4000001, 2.4000004), enter(2.5), exit_(2.8)]
+        w = _wait_timing_from_pulses(timing, waits, WINDOW, F_CPU)
+        assert w.wait_time_us == pytest.approx(0.8e6)
+        assert (w.wait_count, w.wait_deaths) == (1, 1)
+
+    def test_unfinished_wait_runs_to_stop(self):
+        waits = [enter(4.0)]
+        w = _wait_timing_from_pulses(TIMING, waits, WINDOW, F_CPU)
+        assert w.wait_time_us == pytest.approx(1.0e6)
+        assert (w.wait_count, w.wait_deaths) == (1, 0)
 
 
 class TestLoadTrace:
