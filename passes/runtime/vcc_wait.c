@@ -14,6 +14,15 @@
  * ~150 uA combined, which would fight the capacitor's charging current),
  * so the sleeping board draws only LPM3-level current (~1 uA).
  *
+ * Each wait is bracketed by a pulse on P3.5 for the Saleae (channel 1,
+ * see docs/intermittent.md): one right before the sleep loop and one
+ * right after it, so the host can sum the recharge time out of the
+ * end-to-end measurement. The exit pulse is a few cycles wider than the
+ * enter pulse, which is how the host tells them apart. Each pulse is a
+ * handful of cycles in front of a >=10 ms sleep, and a boundary that
+ * does not wait never touches the pin. hw_init (boot_common.inc) has
+ * already driven every port output-low, so no pin setup is needed.
+ *
  * Called from the .crt_0010 boot path BEFORE data/BSS initialization,
  * so this file must not use .data/.bss variables; cnt_wait lives in the
  * .nvm section, which is programmed at flash time and never touched by
@@ -40,6 +49,19 @@ __attribute__((section(".nvm"))) uint32_t cnt_wait = 0;
 
 /* Sample period in VLO (~9.4 kHz) ticks: ~10 ms. */
 #define SAMPLE_PERIOD_TICKS 94
+
+#define WAIT_PIN BIT5
+
+static inline void pulse_wait_enter(void) {
+    P3OUT |= WAIT_PIN;
+    P3OUT &= ~WAIT_PIN;
+}
+
+static inline void pulse_wait_exit(void) {
+    P3OUT |= WAIT_PIN;
+    __asm__ volatile("nop\n\tnop\n\tnop\n\tnop");
+    P3OUT &= ~WAIT_PIN;
+}
 
 /* Power up REF + ADC, take one battery-monitor sample, power both down.
    The ~75 us reference settling cost per sample is negligible against
@@ -84,6 +106,7 @@ void wait_until_vcc_full(void) {
        samples read far below the threshold and VCC only rises while
        waiting, so early inaccuracy is harmless. */
     if (sample_avcc_half() < VCC_FULL_ADC_COUNTS) {
+        pulse_wait_enter();
         cnt_wait++;
         TA0CCR0 = SAMPLE_PERIOD_TICKS;
         TA0CCTL0 = CCIE;
@@ -97,6 +120,7 @@ void wait_until_vcc_full(void) {
         TA0CTL = MC__STOP;
         TA0CCTL0 = 0;
         TA0CTL |= TACLR;
+        pulse_wait_exit();
     }
 }
 
