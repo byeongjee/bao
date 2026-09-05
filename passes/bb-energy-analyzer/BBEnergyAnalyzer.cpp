@@ -106,6 +106,29 @@ static cl::opt<double> StackAccessPenalty(
 static cl::opt<bool> DumpLineMap("dump-line-map", cl::init(false),
                                  cl::desc("Dump resolved address->BB line map and exit"));
 
+static cl::opt<unsigned> UnknownCopySize(
+    "unknown-copy-size", cl::init(0),
+    cl::desc("Byte count charged to a memcpy/memset call whose size is not a compile-time "
+             "constant (0: charge the call's base cost only)"));
+
+/// Size argument to charge for a `call memcpy/memset`: the immediate found
+/// by extractSizeArg, else --unknown-copy-size when set.
+static std::optional<unsigned> copySizeArg(const std::vector<Instruction> &instructions,
+                                           size_t callIdx) {
+    const auto &insn = instructions[callIdx];
+    std::optional<unsigned> sizeArg = extractSizeArg(instructions, callIdx);
+    if (sizeArg.has_value())
+        return sizeArg;
+    if (UnknownCopySize > 0) {
+        PLOGW << "WARNING: non-constant size for " << insn.callTarget << " at 0x"
+              << Twine::utohexstr(insn.address) << ", charging " << UnknownCopySize << " bytes";
+        return UnknownCopySize.getValue();
+    }
+    PLOGW << "WARNING: could not extract constant size for " << insn.callTarget << " at 0x"
+          << Twine::utohexstr(insn.address) << ", using base cost only";
+    return std::nullopt;
+}
+
 int main(int argc, char **argv) {
     cl::ParseCommandLineOptions(
         argc, argv,
@@ -226,15 +249,8 @@ int main(int argc, char **argv) {
                     if (insn.address >= range.start && insn.address < range.end) {
                         if (insn.mnemonic == "call") {
                             std::optional<unsigned> sizeArg;
-                            if (insn.callTarget == "memcpy" || insn.callTarget == "memset") {
-                                sizeArg = extractSizeArg(instructions, i);
-                                if (!sizeArg.has_value()) {
-                                    PLOGW << "WARNING: could not extract constant size for "
-                                          << insn.callTarget << " at 0x"
-                                          << Twine::utohexstr(insn.address)
-                                          << ", using base cost only";
-                                }
-                            }
+                            if (insn.callTarget == "memcpy" || insn.callTarget == "memset")
+                                sizeArg = copySizeArg(instructions, i);
                             bbEnergy +=
                                 model.getCallEnergy(insn.addrMode, insn.callTarget, sizeArg);
                         } else {
@@ -304,14 +320,8 @@ int main(int argc, char **argv) {
             unmappedCount++;
             if (insn.mnemonic == "call") {
                 std::optional<unsigned> sizeArg;
-                if (insn.callTarget == "memcpy" || insn.callTarget == "memset") {
-                    sizeArg = extractSizeArg(instructions, i);
-                    if (!sizeArg.has_value()) {
-                        PLOGW << "WARNING: could not extract constant size for " << insn.callTarget
-                              << " at 0x" << Twine::utohexstr(insn.address)
-                              << ", using base cost only";
-                    }
-                }
+                if (insn.callTarget == "memcpy" || insn.callTarget == "memset")
+                    sizeArg = copySizeArg(instructions, i);
                 unmappedEnergy += model.getCallEnergy(insn.addrMode, insn.callTarget, sizeArg);
             } else {
                 unmappedEnergy += model.getEnergy(insn.mnemonic, insn.addrMode);

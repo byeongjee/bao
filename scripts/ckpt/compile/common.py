@@ -26,6 +26,12 @@ MATH_LINK_FLAGS = ["-lm"]
 # instead of halting (see passes/runtime/vcc_wait.c).
 HALT_MODES = ("bor", "swbor", "wait")
 
+# Bytes charged to a memcpy/memset whose size is not a compile-time constant
+# (sha256_update and poly1305_update copy a runtime remainder into their
+# block buffer). The largest such buffer among the benchmarks is SHA-256's
+# 64-byte block, so this upper bound keeps the energy estimate conservative.
+UNKNOWN_COPY_SIZE_BYTES = 64
+
 
 def raises_compilation_error(fn):
     """Convert ToolError from subprocess steps into CompilationError.
@@ -343,6 +349,7 @@ def run_assembly_energy(
             "--bb-mapping",
             str(bb_mapping),
             f"--stack-access-penalty={stack_access_penalty}",
+            f"--unknown-copy-size={UNKNOWN_COPY_SIZE_BYTES}",
             f"-ckpt-log-level={pass_log_level}",
             str(energy_obj),
         ],
