@@ -364,5 +364,29 @@ if decomp:
     T += [r"\bottomrule", r"\end{tabular}"]
     (OUT / "decomposition.tex").write_text("\n".join(T) + "\n")
 
+    # Appendix table: per benchmark, mean share of each run's total as
+    # exec / ckpt / recharge (boot+restore is the remainder).
+    T = [
+        r"\begin{tabular}{l" + "r" * len(ALGOS) + "}",
+        r"\toprule",
+        "Bench. & " + " & ".join(NAMES[a] for a in ALGOS) + r" \\",
+        r"\midrule",
+    ]
+    for b in BENCHMARKS:
+        cells = []
+        for a in ALGOS:
+            da = [d for d in decomp if d["benchmark"] == b and d["algorithm"] == a]
+            cells.append(
+                " / ".join(
+                    f"{100 * mean([d[c] / d['t_total'] for d in da]):.1f}"
+                    for c in ["t_exec", "t_checkpoint", "t_recharge"]
+                )
+                if da
+                else "---"
+            )
+        T.append(b.replace("_", r"\_") + " & " + " & ".join(cells) + r" \\")
+    T += [r"\bottomrule", r"\end{tabular}"]
+    (OUT / "decomposition_per_benchmark.tex").write_text("\n".join(T) + "\n")
+
 (OUT / "report.md").write_text("\n".join(L) + "\n")
 print(f"{len(rows)} rows -> summary.csv, report.md; {len(decomp)} decomposed rows")
