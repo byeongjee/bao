@@ -331,24 +331,35 @@ if decomp:
             )
         L.append(f"| {b} | " + " | ".join(cells) + " |")
 
-    # LaTeX table for the paper: one row per system.
+    # LaTeX table for the paper: one row per system. Total is the geomean
+    # ratio to Bao (as in the figure); the parts are mean shares of each
+    # run's own total, so they add up to 100%.
     NAMES = {
         "milp": r"\tool",
         "rockclimb": r"\rockclimb",
         "schematic": r"\schematic",
         "schematicO3": r"\schematicO",
     }
+
+    def pct(x):
+        return r"$<0.1$" if abs(x) < 0.0005 else f"{100 * x:.1f}"
+
     T = [
-        r"\begin{tabular}{lrrrrrr}",
+        r"\begin{tabular}{lrrrrr}",
         r"\toprule",
-        r"System & $T_{\mathrm{total}}$ & $T_{\mathrm{exec}}$ & $T_{\mathrm{ckpt}}$ & $T_{\mathrm{recharge}}$ & $T_{\mathrm{boot+restore}}$ & power-off \\",
+        r"& & \multicolumn{3}{c}{power-on (\%)} & power-off (\%) \\",
+        r"\cmidrule(lr){3-5} \cmidrule(lr){6-6}",
+        (
+            r"System & $T_{\mathrm{total}}$ & $T_{\mathrm{exec}}$ & $T_{\mathrm{ckpt}}$ & "
+            r"$T_{\mathrm{boot+restore}}$ & $T_{\mathrm{recharge}}$ \\"
+        ),
         r"\midrule",
     ]
     for a, v in summary_algo.items():
+        sh = v["share"]
         T.append(
-            f"{NAMES[a]} & {v['norm']['t_total']:.2f} & "
-            + " & ".join(f"{v['norm'][c]:.2f}" for c in COMPONENTS)
-            + f" & {100 * v['share']['t_recharge']:.0f}\\% \\\\"
+            f"{NAMES[a]} & {v['gmean_total']:.1f}$\\times$ & {pct(sh['t_exec'])} & "
+            f"{pct(sh['t_checkpoint'])} & {pct(sh['t_rest'])} & {pct(sh['t_recharge'])} \\\\"
         )
     T += [r"\bottomrule", r"\end{tabular}"]
     (OUT / "decomposition.tex").write_text("\n".join(T) + "\n")
