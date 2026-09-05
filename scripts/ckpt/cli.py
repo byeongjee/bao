@@ -135,6 +135,13 @@ _opt_level_option = click.option(
 _extra_includes_option = click.option(
     "-I", "extra_includes", multiple=True, help="Extra include dirs."
 )
+_bench_define_option = click.option(
+    "-D",
+    "defines",
+    multiple=True,
+    help="Extra preprocessor defines for the benchmark sources (e.g. INTERMITTENT_BUILD, "
+    "which shrinks dijkstra, qsort, and bitcount the way `ckpt intermittent` does).",
+)
 _estimator_mode_option = click.option(
     "--estimator-mode",
     type=click.Choice(["assembly", "ir"]),
@@ -991,6 +998,7 @@ def bench() -> None:
 @_milp_gap_option
 @_accumulate_keys_option
 @_saleae_timeout_option
+@_bench_define_option
 @click.pass_context
 def bench_milp_cmd(
     ctx: click.Context,
@@ -1007,6 +1015,7 @@ def bench_milp_cmd(
     milp_gap: float,
     accumulate_keys: str | None,
     timeout: float,
+    defines: tuple[str, ...],
 ) -> None:
     """Run MILP benchmarks across programs and capacitor sizes."""
     from .bench.milp import run_milp_benchmarks
@@ -1028,6 +1037,7 @@ def bench_milp_cmd(
         milp_gap=milp_gap,
         pass_log_level=ctx.obj["pass_log_level"],
         accumulate_keys_file=_path_or_none(accumulate_keys),
+        extra_defines=list(defines),
     )
 
 
@@ -1042,6 +1052,7 @@ def bench_milp_cmd(
 @_max_unroll_option
 @_accumulate_keys_option
 @_saleae_timeout_option
+@_bench_define_option
 @click.pass_context
 def bench_rockclimb_cmd(
     ctx: click.Context,
@@ -1055,6 +1066,7 @@ def bench_rockclimb_cmd(
     max_unroll: int,
     accumulate_keys: str | None,
     timeout: float,
+    defines: tuple[str, ...],
 ) -> None:
     """Run RockClimb benchmarks across programs and capacitor sizes."""
     from .bench.rockclimb import run_rockclimb_benchmarks
@@ -1073,6 +1085,7 @@ def bench_rockclimb_cmd(
         max_unroll=max_unroll,
         pass_log_level=ctx.obj["pass_log_level"],
         accumulate_keys_file=_path_or_none(accumulate_keys),
+        extra_defines=list(defines),
     )
 
 
@@ -1087,6 +1100,7 @@ _bench_schematic_options = _add_options(
     _cpu_freq_option("16"),
     _accumulate_keys_option,
     _saleae_timeout_option,
+    _bench_define_option,
 )
 
 
@@ -1105,6 +1119,7 @@ def _bench_schematic_impl(
     cpu_freq: str,
     accumulate_keys: str | None,
     timeout: float,
+    defines: tuple[str, ...],
 ) -> None:
     from .bench.schematic import run_schematic_benchmarks
     from .compile.schematic import CLANG_OPT_LEVEL_BY_LABEL
@@ -1126,6 +1141,7 @@ def _bench_schematic_impl(
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label=algorithm_label,
         accumulate_keys_file=_path_or_none(accumulate_keys),
+        extra_defines=list(defines),
     )
 
 
@@ -1152,6 +1168,7 @@ def bench_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
 @_output_csv_option
 @_cpu_freq_option("16")
 @_saleae_timeout_option
+@_bench_define_option
 @click.pass_context
 def bench_uninstrumented_cmd(
     ctx: click.Context,
@@ -1159,10 +1176,17 @@ def bench_uninstrumented_cmd(
     output: str | None,
     cpu_freq: str,
     timeout: float,
+    defines: tuple[str, ...],
 ) -> None:
     """Run uninstrumented baselines and measure execution time."""
     _bench_uninstrumented_impl(
-        ctx, benchmarks, output, cpu_freq, timeout, algorithm_label="uninstrumented"
+        ctx,
+        benchmarks,
+        output,
+        cpu_freq,
+        timeout,
+        algorithm_label="uninstrumented",
+        extra_defines=list(defines),
     )
 
 
@@ -1173,6 +1197,7 @@ def _bench_uninstrumented_impl(
     cpu_freq: str,
     timeout: float,
     algorithm_label: str,
+    extra_defines: list[str],
 ) -> None:
     from .bench.uninstrumented import run_uninstrumented_benchmarks
     from .compile.uninstrumented import OPT_LEVELS_BY_LABEL
@@ -1188,6 +1213,7 @@ def _bench_uninstrumented_impl(
         algorithm_label=algorithm_label,
         clang_opt_level=clang_opt_level,
         opt_level=opt_level,
+        extra_defines=extra_defines,
     )
 
 
@@ -1206,7 +1232,13 @@ def bench_uninstrumented_o0_cmd(
 ) -> None:
     """Run uninstrumented baselines with O0 frontend IR and O3 backend."""
     _bench_uninstrumented_impl(
-        ctx, benchmarks, output, cpu_freq, timeout, algorithm_label="uninstrumentedO0"
+        ctx,
+        benchmarks,
+        output,
+        cpu_freq,
+        timeout,
+        algorithm_label="uninstrumentedO0",
+        extra_defines=[],
     )
 
 

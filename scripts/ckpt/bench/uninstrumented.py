@@ -46,6 +46,7 @@ def run_uninstrumented_benchmarks(
     algorithm_label: str,
     clang_opt_level: int,
     opt_level: int,
+    extra_defines: list[str],
 ) -> None:
     """Compile and measure uninstrumented baselines for all benchmarks.
 
@@ -85,6 +86,7 @@ def run_uninstrumented_benchmarks(
                     opt_level=opt_level,
                     clang_opt_level=clang_opt_level,
                     link=True,
+                    extra_defines=list(extra_defines),
                 ),
             )
             return result.elf_file
