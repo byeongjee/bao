@@ -1,0 +1,14 @@
+benchmark,capacitor,status,basic_blocks,edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,runtime_debug_save_reg_calls,runtime_debug_restore_reg_calls,runtime_debug_store_mem_calls,runtime_debug_restore_mem_calls,result,candidate_globals,enabled_checkpoints,loop_decisions,paths_analyzed,runtime_calls_inserted,run_attempts
+activity_recognition-board,board,ok,12,16,8,1,29296,445,39998.59,40,560,0,3,3,64,11,6,4,1,14,1
+aes-board,board,ok,20,27,2,1,29568,464,126187.14,125,1750,0,0,0,107,3,2,7,1,2,1
+bitcount-board,board,ok,44,67,17,2,29248,546,5085973.18,1510,21140,0,0,0,52382,2,9,13,1,17,1
+chacha20-board,board,ok,9,12,1,1,29040,440,61651.26,31,434,0,0,0,79,3,1,3,1,1,1
+crc-board,board,ok,7,9,3,1,28816,502,38322.05,7,98,0,0,0,20431,2,2,3,1,3,1
+cuckoo_filter-board,board,ok,18,26,5,1,29056,460,58137.16,33,462,0,0,0,4048,3,3,4,1,5,1
+dijkstra-board,board,ok,14,20,2,1,28928,469,245195.83,135,1890,0,0,0,33447,5,1,3,1,2,1
+poly1305-board,board,ok,5,6,1,0,28976,440,551378.65,255,3570,0,0,0,68,3,1,2,1,1,1
+qsort-board,board,ok,10,14,7,0,29424,460,1419780.36,678,9492,0,0,0,27023,2,4,4,1,7,1
+rsa-board,board,ok,104,155,14,19,30448,471,57767.12,82,1148,0,1,0,32,8,10,25,1,15,1
+sensor_fusion-board,board,ok,174,264,1,505,30256,453,33430.86,49,686,0,0,0,613,2,1,1,1,1,1
+sha256-board,board,ok,29,42,6,1,29536,439,101808.97,33,462,0,0,0,131,6,6,10,1,6,1
+stringsearch-board,board,ok,29,42,4,2,29168,640,48412.61,94,1316,0,0,0,20,4,3,7,1,4,1
