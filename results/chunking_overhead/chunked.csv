@@ -8,7 +8,7 @@ activity_recognition,10uF,ok,3247,33693.67,1
 bitcount,10uF,ok,1377,4428974.03,1
 chacha20,10uF,ok,1575,50808.39,1
 sensor_fusion,10uF,ok,970,25134.98,1
-poly1305,10uF,ok,1083,475324.33,1
+poly1305,10uF,ok,807,475284.8,1
 cuckoo_filter,10uF,ok,726,42792.49,1
-sha256,10uF,ok,1451,90023.65,1
+sha256,10uF,ok,783,90004.1,1
 stringsearch,10uF,ok,699,36199.28,1

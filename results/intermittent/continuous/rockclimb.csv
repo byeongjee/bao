@@ -1,0 +1,14 @@
+benchmark,capacitor,status,basic_blocks,edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,result,run_attempts
+aes-board,board,ok,373,552,15,6,32832,0,550975.62,3626,107,1
+crc-board,board,ok,225,309,8,2,24192,0,216194.95,1593,20431,1
+rsa-board,board,ok,206,293,32,2,25040,0,1447878.49,11649,32,1
+dijkstra-board,board,ok,17,24,4,0,22784,0,14830271.82,121836,33447,1
+qsort-board,board,ok,27,36,5,0,23456,0,13831691.2,106371,27023,1
+activity_recognition-board,board,ok,1466,2021,8,19,33744,0,161195.62,1049,64,1
+bitcount-board,board,ok,72,107,14,1,24048,0,155062022.16,1246544,52382,1
+chacha20-board,board,ok,11,14,4,3,26592,0,129703.22,641,79,1
+sensor_fusion-board,board,ok,1458,2165,2,7,31280,0,29768.17,18,613,1
+poly1305-board,board,ok,148,219,4,5,26416,0,790667.08,2177,68,1
+cuckoo_filter-board,board,ok,33,50,5,1,23056,0,423264.77,3149,4048,1
+sha256-board,board,ok,69,97,11,7,28528,0,205243.05,975,131,1
+stringsearch-board,board,ok,41,60,8,1,22864,0,2119550.64,17481,20,1
