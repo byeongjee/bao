@@ -44,6 +44,7 @@ with debugger_connection() as otii, closing(discover_saleae()) as saleae:
             result, err = _run_baseline(
                 tc,
                 env,
+                saved_build=None,
                 bench_path=bench_path,
                 workdir=tmp,
                 cpu_freq=16_000_000,

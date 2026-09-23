@@ -7,6 +7,7 @@ from pathlib import Path
 from ..bench.milp import NVM_SYMBOLS
 from ..compile.milp import MilpCompileOptions, compile_milp
 from ..env import ProjectEnv
+from ..saved_build import SavedBuild
 from ..toolchain import Toolchain
 from .common import (
     AlgorithmSpec,
@@ -92,6 +93,7 @@ def verify_milp(
     coarse_allocation: bool,
     tripcount_annotations: bool,
     pass_log_level: str,
+    saved_build: SavedBuild | None,
 ) -> list[BenchResult]:
     """Verify semantic correctness of MILP checkpoint insertion."""
     spec = milp_spec(
@@ -111,4 +113,5 @@ def verify_milp(
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
+        saved_build=saved_build,
     )[spec.name]

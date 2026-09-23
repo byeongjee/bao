@@ -25,5 +25,6 @@ RUN uv sync --frozen --extra test \
     && cmake -S passes -B passes/build -G Ninja -DLLVM_DIR=/opt/llvm/lib/cmake/llvm \
     && cmake --build passes/build
 
-ENV PATH=/artifact/.venv/bin:$PATH
+ENV PATH=/artifact/.venv/bin:$PATH \
+    CKPT_IN_DOCKER=1
 CMD ["bash"]

@@ -36,7 +36,7 @@ from ..env import ProjectEnv
 from ..errors import CompilationError, ConfigError, DeviceError, RegionViolationError
 from ..output_parser import detect_infeasibility
 from ..runner import StepResult
-from ..tempdir import compilation_workdir
+from ..saved_build import SAVED_ERRORS, SavedBuild, build_workdir, compile_or_load
 from ..toolchain import Toolchain
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,7 @@ def verify_algorithms(
     halt_mode: str,
     cpu_freq: int,
     capture_timeout_seconds: float,
+    saved_build: SavedBuild | None,
 ) -> dict[str, list[BenchResult]]:
     """Run semantic verification for one or more checkpoint algorithms.
 
@@ -118,12 +119,54 @@ def verify_algorithms(
       4. Compare against the baseline result
 
     Returns per-algorithm result lists, keyed by algorithm name.
+
+    With ``--save-build`` only the compile steps run, saving each result, and
+    the returned lists are empty.
     """
     from ..bench.config import discover_benchmarks, discover_capacitors
 
     bench_files = discover_benchmarks(env, benchmarks)
     if not bench_files:
         raise ConfigError("No benchmarks to verify")
+
+    if saved_build is not None and saved_build.save:
+        capacitors = discover_capacitors(env, algorithms[0].name, caps)
+        for bench_path in bench_files:
+            bench_saved = saved_build.sub(bench_path.stem)
+            with build_workdir(bench_saved, prefix="") as tmp:
+                logger.info("%s: compiling baseline ...", bench_path.stem)
+                try:
+                    _load_or_compile_baseline(
+                        tc, env, bench_saved, bench_path, tmp, cpu_freq
+                    )
+                except SAVED_ERRORS as exc:
+                    logger.error("  FAILED (compilation): %s", exc)
+                for cap in capacitors:
+                    for spec in algorithms:
+                        logger.info(
+                            "%s %s %s: compiling ...",
+                            spec.name,
+                            bench_path.stem,
+                            cap.label,
+                        )
+                        workdir = tmp / f"{spec.name}_{cap.label}"
+                        workdir.mkdir(exist_ok=True)
+                        try:
+                            _load_or_compile_instrumented(
+                                tc,
+                                env,
+                                bench_saved,
+                                spec,
+                                bench_path,
+                                cap.config_path,
+                                cap.label,
+                                workdir,
+                                halt_mode,
+                                cpu_freq,
+                            )
+                        except SAVED_ERRORS as exc:
+                            logger.error("  FAILED (compilation): %s", exc)
+        return {spec.name: [] for spec in algorithms}
 
     # The relays must close before the Saleae/device probing below: with the
     # intermittent-power rig wired up they carry the ez-FET's SBW and 3V3
@@ -137,11 +180,15 @@ def verify_algorithms(
 
         for bench_path in bench_files:
             bench_name = bench_path.stem
-            with compilation_workdir(prefix=f"ckpt_verify_{bench_name}_") as tmp:
+            bench_saved = (
+                saved_build.sub(bench_name) if saved_build is not None else None
+            )
+            with build_workdir(bench_saved, prefix=f"ckpt_verify_{bench_name}_") as tmp:
                 logger.info("%s: baseline ...", bench_name)
                 baseline_result, baseline_error = _run_baseline(
                     tc,
                     env,
+                    saved_build=bench_saved,
                     bench_path=bench_path,
                     workdir=tmp,
                     cpu_freq=cpu_freq,
@@ -178,6 +225,7 @@ def verify_algorithms(
                             result = _verify_instrumented(
                                 tc,
                                 env,
+                                saved_build=bench_saved,
                                 spec=spec,
                                 bench_path=bench_path,
                                 bench_name=bench_name,
@@ -241,10 +289,56 @@ def _compile_baseline(
     return elf
 
 
+def _load_or_compile_baseline(
+    tc: Toolchain,
+    env: ProjectEnv,
+    saved_build: SavedBuild | None,
+    bench_path: Path,
+    workdir: Path,
+    cpu_freq: int,
+) -> Path:
+    elf, _ = compile_or_load(
+        saved_build,
+        "baseline",
+        lambda: _compile_baseline(tc, env, bench_path, workdir / "baseline", cpu_freq),
+    )
+    return elf
+
+
+def _load_or_compile_instrumented(
+    tc: Toolchain,
+    env: ProjectEnv,
+    saved_build: SavedBuild | None,
+    spec: AlgorithmSpec,
+    bench_path: Path,
+    cap_config: Path,
+    cap_label: str,
+    workdir: Path,
+    halt_mode: str,
+    cpu_freq: int,
+) -> InstrumentedOutput:
+    inst, _ = compile_or_load(
+        saved_build,
+        f"{spec.name}_{cap_label}",
+        lambda: spec.compile_instrumented(
+            tc,
+            env,
+            bench_path,
+            workdir,
+            cap_config,
+            halt_mode,
+            cpu_freq,
+            list(VERIFY_DEFINES),
+        ),
+    )
+    return inst
+
+
 def _run_baseline(
     tc: Toolchain,
     env: ProjectEnv,
     *,
+    saved_build: SavedBuild | None,
     bench_path: Path,
     workdir: Path,
     cpu_freq: int,
@@ -257,12 +351,8 @@ def _run_baseline(
     Returns ``(baseline_result, None)`` on success or ``(None, error)``.
     """
     try:
-        baseline_elf = _compile_baseline(
-            tc,
-            env,
-            bench_path,
-            workdir / "baseline",
-            cpu_freq,
+        baseline_elf = _load_or_compile_baseline(
+            tc, env, saved_build, bench_path, workdir, cpu_freq
         )
     except (CompilationError, OSError) as exc:
         msg = f"Baseline compilation failed: {exc}"
@@ -309,6 +399,7 @@ def _verify_instrumented(
     tc: Toolchain,
     env: ProjectEnv,
     *,
+    saved_build: SavedBuild | None,
     spec: AlgorithmSpec,
     bench_path: Path,
     bench_name: str,
@@ -327,15 +418,17 @@ def _verify_instrumented(
 
     # -- B: Compile instrumented --
     try:
-        inst = spec.compile_instrumented(
+        inst = _load_or_compile_instrumented(
             tc,
             env,
+            saved_build,
+            spec,
             bench_path,
-            workdir,
             cap_config,
+            cap_label,
+            workdir,
             halt_mode,
             cpu_freq,
-            list(VERIFY_DEFINES),
         )
         compile_output = inst.compile_output
     except CompilationError as exc:

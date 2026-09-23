@@ -8,6 +8,11 @@
 
 set -e
 
+# The compilation toolchain is in the Docker image; outside it, run there.
+if [[ "${CKPT_IN_DOCKER:-}" != 1 ]]; then
+    exec docker run --rm -v "$GRB_LICENSE_FILE:/licenses/gurobi.lic:ro" bao tests/run_tests.sh "$@"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TMP_DIR="$PROJECT_DIR/tmp"

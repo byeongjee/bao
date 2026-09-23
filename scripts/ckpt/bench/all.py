@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..env import ProjectEnv
 from ..errors import CkptError
+from ..saved_build import SavedBuild
 from ..toolchain import Toolchain
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ def _run_step(
     *,
     step: BenchStep,
     output_csv: Path,
+    saved_build: SavedBuild | None,
 ) -> None:
     """Dispatch one step to its benchmark runner."""
     if step.algorithm == "milp":
@@ -138,6 +140,7 @@ def _run_step(
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
             extra_defines=[],
+            saved_build=saved_build,
         )
     elif step.algorithm == "rockclimb":
         from .rockclimb import run_rockclimb_benchmarks
@@ -157,6 +160,7 @@ def _run_step(
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
             extra_defines=[],
+            saved_build=saved_build,
         )
     elif step.algorithm in ("schematic", "schematicO3"):
         from ..compile.schematic import CLANG_OPT_LEVEL_BY_LABEL
@@ -180,6 +184,7 @@ def _run_step(
             algorithm_label=step.algorithm,
             accumulate_keys_file=None,
             extra_defines=[],
+            saved_build=saved_build,
         )
     elif step.algorithm in ("uninstrumented", "uninstrumentedO0"):
         from ..compile.uninstrumented import OPT_LEVELS_BY_LABEL
@@ -197,6 +202,7 @@ def _run_step(
             clang_opt_level=clang_opt_level,
             opt_level=opt_level,
             extra_defines=[],
+            saved_build=saved_build,
         )
     elif step.algorithm == "chunked":
         from ..compile.chunked import OPT_LEVELS
@@ -215,6 +221,7 @@ def _run_step(
             pass_log_level=opts.pass_log_level,
             clang_opt_level=clang_opt_level,
             opt_level=opt_level,
+            saved_build=saved_build,
         )
     else:
         raise CkptError(f"Unknown benchmark algorithm: {step.algorithm}")
@@ -279,14 +286,20 @@ def run_bench_all(
     skip_existing: bool,
     plot: bool,
     plot_config: Path | None,
+    saved_build: SavedBuild | None,
 ) -> list[StepOutcome]:
     """Run every step sequentially, then plot; returns one outcome per step.
 
     A step that fails with a toolchain, subprocess or OS error is logged and
     recorded as failed: later steps and the plotting stage still run over
     whatever completed. Any other exception aborts the whole matrix.
+
+    Each step saves to or loads from its own subdirectory of *saved_build*.
+    With ``--save-build`` nothing is written to *result_dir* and no plots are made.
     """
-    result_dir.mkdir(parents=True, exist_ok=True)
+    saving = saved_build is not None and saved_build.save
+    if not saving:
+        result_dir.mkdir(parents=True, exist_ok=True)
     opts = BenchAllOptions(
         benchmarks=benchmarks,
         caps=caps,
@@ -320,14 +333,23 @@ def run_bench_all(
 
         logger.info("[%d/%d] === %s -> %s ===", index, len(steps), step.label, csv_path)
         try:
-            _run_step(env, tc, opts, step=step, output_csv=csv_path)
+            _run_step(
+                env,
+                tc,
+                opts,
+                step=step,
+                output_csv=csv_path,
+                saved_build=saved_build.sub(csv_path.stem)
+                if saved_build is not None
+                else None,
+            )
         except (CkptError, subprocess.SubprocessError, OSError) as exc:
             logger.error("Step '%s' failed: %s", step.label, exc)
             outcomes.append(StepOutcome(step.label, csv_path, STATUS_FAILED, str(exc)))
             continue
         outcomes.append(StepOutcome(step.label, csv_path, STATUS_OK, ""))
 
-    if plot:
+    if plot and not saving:
         outcomes.append(run_plot(env, result_dir=result_dir, plot_config=plot_config))
 
     return outcomes

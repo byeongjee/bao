@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..env import ProjectEnv
+from ..saved_build import SavedBuild
 from ..toolchain import Toolchain
 from .common import BenchResult, Status, verify_algorithms
 from .milp import milp_spec
@@ -29,6 +30,7 @@ def verify_all(
     cpu_freq: int,
     capture_timeout_seconds: float,
     pass_log_level: str,
+    saved_build: SavedBuild | None,
 ) -> dict[str, list[BenchResult]]:
     """Verify every algorithm; returns per-algorithm result lists."""
     specs = [
@@ -66,6 +68,7 @@ def verify_all(
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
+        saved_build=saved_build,
     )
 
 

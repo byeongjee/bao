@@ -60,7 +60,7 @@ from ..output_parser import (
     load_stats_json,
     parse_pass_output,
 )
-from ..tempdir import compilation_workdir
+from ..saved_build import SAVED_ERRORS, SavedBuild, build_workdir, compile_or_load
 from ..toolchain import Toolchain
 
 logger = logging.getLogger(__name__)
@@ -394,8 +394,12 @@ def run_intermittent_benchmarks(
     cpu_freq: int,
     max_unroll: int | None,
     pass_log_level: str,
+    saved_build: SavedBuild | None,
 ) -> None:
-    """Run *algorithm* over (benchmark x capacitor x trace) under replayed power."""
+    """Run *algorithm* over (benchmark x capacitor x trace) under replayed power.
+
+    With ``--save-build`` only the compile step runs, saving each result.
+    """
     bench_paths = discover_benchmarks(env, benchmarks)
     if not bench_paths:
         raise ConfigError("No benchmarks to run")
@@ -415,11 +419,38 @@ def run_intermittent_benchmarks(
     if device_debug:
         nvm_symbols += _DEBUG_NVM_SYMBOLS
 
+    if saved_build is not None and saved_build.save:
+        with build_workdir(saved_build, prefix="") as workdir:
+            compile_fn = _make_compile_fn(
+                algorithm,
+                env,
+                tc,
+                workdir,
+                energy_config=energy_config,
+                estimator_mode=estimator_mode,
+                cpu_freq=cpu_freq,
+                device_debug=device_debug,
+                max_unroll=max_unroll,
+                pass_log_level=pass_log_level,
+            )
+            for bench_path in bench_paths:
+                for cap in capacitors:
+                    logger.info("Compiling %s-%s ...", bench_path.stem, cap.label)
+                    try:
+                        compile_or_load(
+                            saved_build,
+                            f"{bench_path.stem}_{cap.label}",
+                            lambda: compile_fn(bench_path, cap),  # noqa: B023
+                        )
+                    except SAVED_ERRORS as exc:
+                        logger.error("  FAILED (compilation): %s", exc)
+        return
+
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with (
         closing(discover_saleae()) as saleae_manager,
         otii_session() as otii,
-        compilation_workdir(prefix=f"intermittent_{algorithm}_") as workdir,
+        build_workdir(saved_build, prefix=f"intermittent_{algorithm}_") as workdir,
         open(output_csv, "w", newline="") as csvfile,
     ):
         writer = csv.writer(csvfile)
@@ -451,7 +482,11 @@ def run_intermittent_benchmarks(
             for cap in capacitors:
                 logger.info("Compiling %s-%s ...", bench_name, cap.label)
                 try:
-                    compile_result = compile_fn(bench_path, cap)
+                    compile_result, _ = compile_or_load(
+                        saved_build,
+                        f"{bench_name}_{cap.label}",
+                        lambda: compile_fn(bench_path, cap),  # noqa: B023
+                    )
                 except CompilationError as exc:
                     logger.error("  FAILED (compilation): %s", exc)
                     for trace_label, _ in traces:

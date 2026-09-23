@@ -29,6 +29,10 @@ class ToolError(CkptError):
             f"stderr: {result.stderr[:500]}"
         )
 
+    # Pickling (see saved_build.py) must re-run __init__ with its own arguments.
+    def __reduce__(self):
+        return (type(self), (self.step, self.result), self.__dict__)
+
 
 class CompilationError(ToolError):
     """A compilation step failed.
@@ -50,6 +54,9 @@ class ToolNotFoundError(CkptError):
         self.step = name
         self.result = None
         super().__init__(f"{name} not found at: {path}")
+
+    def __reduce__(self):
+        return (type(self), (self.name, self.path), self.__dict__)
 
 
 class DeviceError(CkptError):
@@ -75,3 +82,6 @@ class InfeasibleError(CkptError):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(f"Infeasible: {reason}")
+
+    def __reduce__(self):
+        return (type(self), (self.reason,), self.__dict__)
