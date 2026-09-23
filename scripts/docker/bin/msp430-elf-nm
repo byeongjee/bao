@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Runs msp430-elf-nm inside the artifact Docker image with the same arguments.
+# A container cannot see host files, so each file argument's directory is
+# mounted at the same path.
+set -euo pipefail
+
+mounts=()
+for arg in "$@"; do
+    if [ -f "$arg" ]; then
+        mounts+=(-v "$(dirname "$arg"):$(dirname "$arg"):ro")
+    fi
+done
+exec docker run --rm "${mounts[@]}" bao msp430-elf-nm "$@"
