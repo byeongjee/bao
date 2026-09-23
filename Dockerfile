@@ -6,8 +6,8 @@
 #
 # msp430-gcc is distributed only as an x86-64 Linux binary, so the image is amd64.
 
-ARG LLVM_REPO=https://github.com/llvm/llvm-project.git
-ARG LLVM_COMMIT=384cecd5b20107e1453eaee008e8f4fd22b42c9e
+ARG LLVM_REPO=https://github.com/byeongjee/llvm-project.git
+ARG LLVM_COMMIT=8aa57e39c0f3e62e08558880db2a86eb48e3af85
 
 FROM --platform=linux/amd64 ubuntu:24.04 AS llvm
 ARG LLVM_REPO
