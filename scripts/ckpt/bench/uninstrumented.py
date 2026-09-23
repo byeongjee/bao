@@ -15,7 +15,7 @@ from ..compile.uninstrumented import (
 )
 from ..env import ProjectEnv
 from ..errors import ConfigError
-from ..tempdir import compilation_workdir
+from ..saved_build import SavedBuild, build_workdir
 from ..toolchain import Toolchain
 from .config import CapacitorConfig, discover_benchmarks
 from .runner import (
@@ -47,6 +47,7 @@ def run_uninstrumented_benchmarks(
     clang_opt_level: int,
     opt_level: int,
     extra_defines: list[str],
+    saved_build: SavedBuild | None,
 ) -> None:
     """Compile and measure uninstrumented baselines for all benchmarks.
 
@@ -67,7 +68,7 @@ def run_uninstrumented_benchmarks(
 
     with (
         optional_saleae(TIMING_COMPILE_ONLY_WARNING) as (saleae_manager, otii),
-        compilation_workdir(prefix=f"{algorithm_label}_bench_") as workdir,
+        build_workdir(saved_build, prefix=f"{algorithm_label}_bench_") as workdir,
     ):
 
         def compile_fn(bench_path: Path, _cap: CapacitorConfig | None) -> Path | None:
@@ -100,4 +101,5 @@ def run_uninstrumented_benchmarks(
             saleae_manager=saleae_manager,
             otii=otii,
             capture_timeout_seconds=capture_timeout_seconds,
+            saved_build=saved_build,
         )

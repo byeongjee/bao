@@ -6,9 +6,11 @@ analysis, and device interaction.
 
 from __future__ import annotations
 
+import functools
 import logging
 import signal
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -16,6 +18,7 @@ import click
 
 from .bench.all import ALL_ALGORITHMS, DEFAULT_ALGORITHMS
 from .compile.common import HALT_MODES
+from .docker import IN_DOCKER, run_in_docker
 from .errors import (
     CkptError,
     CompilationError,
@@ -25,6 +28,7 @@ from .errors import (
     ToolNotFoundError,
 )
 from .log import python_to_cpp_log_level, setup_logging
+from .saved_build import SavedBuild
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,64 @@ _saleae_timeout_option = click.option(
     show_default=True,
     help="Maximum wait in seconds for each Saleae capture.",
 )
+
+
+def _docker_or_exit(args: list[str], mounts: list[Path]) -> None:
+    code = run_in_docker(args, mounts)
+    if code != 0:
+        raise SystemExit(code)
+
+
+def _saved_build_options(f):
+    """Add --save-build/--from-build and run the compile steps in Docker.
+
+    On the host, compilation runs in the Docker image and the device steps
+    run here: --save-build DIR only compiles, --from-build DIR only runs the
+    device steps, and without either option both run through a temporary DIR.
+    Inside the image the options are used as given. The command reads the
+    resulting :class:`SavedBuild` (or None) from ``ctx.obj["saved_build"]``.
+    """
+
+    @click.option(
+        "--save-build",
+        type=click.Path(file_okay=False),
+        help="Only compile, in Docker, and save the results to DIR.",
+    )
+    @click.option(
+        "--from-build",
+        type=click.Path(exists=True, file_okay=False),
+        help="Skip compiling and use the results saved to DIR by --save-build.",
+    )
+    @functools.wraps(f)
+    def wrapper(*args, save_build: str | None, from_build: str | None, **kwargs):
+        ctx = click.get_current_context()
+        if save_build and from_build:
+            raise click.UsageError("--save-build and --from-build are exclusive")
+        if from_build:
+            ctx.obj["saved_build"] = SavedBuild(Path(from_build).resolve(), False)
+            return f(*args, **kwargs)
+        if IN_DOCKER:
+            ctx.obj["saved_build"] = (
+                SavedBuild(Path(save_build).resolve(), True) if save_build else None
+            )
+            return f(*args, **kwargs)
+        if save_build:
+            path = Path(save_build).resolve()
+            path.mkdir(parents=True, exist_ok=True)
+            _docker_or_exit(sys.argv[1:], [path])
+            return None
+        with tempfile.TemporaryDirectory(prefix="ckpt_build_") as tmp:
+            path = Path(tmp).resolve()
+            _docker_or_exit([*sys.argv[1:], "--save-build", str(path)], [path])
+            ctx.obj["saved_build"] = SavedBuild(path, False)
+            return f(*args, **kwargs)
+
+    return wrapper
+
+
+def _saving(ctx: click.Context) -> bool:
+    saved_build = ctx.obj["saved_build"]
+    return saved_build is not None and saved_build.save
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +333,11 @@ def main(ctx: click.Context, log_level: str) -> None:
     # plain `kill` leaves an in-progress Saleae recording open in Logic 2,
     # which then refuses to start a new capture session.
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
+
+    # compile has no device steps, so on the host it runs in Docker as a whole.
+    if not IN_DOCKER and ctx.invoked_subcommand == "compile":
+        _docker_or_exit(sys.argv[1:], [])
+        ctx.exit(0)
 
     env = ProjectEnv.from_environ()
     tc = Toolchain.resolve(env)
@@ -999,6 +1066,7 @@ def bench() -> None:
 @_accumulate_keys_option
 @_saleae_timeout_option
 @_bench_define_option
+@_saved_build_options
 @click.pass_context
 def bench_milp_cmd(
     ctx: click.Context,
@@ -1038,6 +1106,7 @@ def bench_milp_cmd(
         pass_log_level=ctx.obj["pass_log_level"],
         accumulate_keys_file=_path_or_none(accumulate_keys),
         extra_defines=list(defines),
+        saved_build=ctx.obj["saved_build"],
     )
 
 
@@ -1053,6 +1122,7 @@ def bench_milp_cmd(
 @_accumulate_keys_option
 @_saleae_timeout_option
 @_bench_define_option
+@_saved_build_options
 @click.pass_context
 def bench_rockclimb_cmd(
     ctx: click.Context,
@@ -1086,6 +1156,7 @@ def bench_rockclimb_cmd(
         pass_log_level=ctx.obj["pass_log_level"],
         accumulate_keys_file=_path_or_none(accumulate_keys),
         extra_defines=list(defines),
+        saved_build=ctx.obj["saved_build"],
     )
 
 
@@ -1142,12 +1213,14 @@ def _bench_schematic_impl(
         algorithm_label=algorithm_label,
         accumulate_keys_file=_path_or_none(accumulate_keys),
         extra_defines=list(defines),
+        saved_build=ctx.obj["saved_build"],
     )
 
 
 @bench.command("schematic")
 @click.argument("benchmarks", nargs=-1)
 @_bench_schematic_options
+@_saved_build_options
 @click.pass_context
 def bench_schematic_cmd(ctx: click.Context, **kwargs) -> None:
     """Run SCHEMATIC benchmarks across programs and capacitor sizes."""
@@ -1157,6 +1230,7 @@ def bench_schematic_cmd(ctx: click.Context, **kwargs) -> None:
 @bench.command("schematicO3")
 @click.argument("benchmarks", nargs=-1)
 @_bench_schematic_options
+@_saved_build_options
 @click.pass_context
 def bench_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
     """Run SCHEMATIC-O3 benchmarks across programs and capacitor sizes."""
@@ -1169,6 +1243,7 @@ def bench_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
 @_cpu_freq_option("16")
 @_saleae_timeout_option
 @_bench_define_option
+@_saved_build_options
 @click.pass_context
 def bench_uninstrumented_cmd(
     ctx: click.Context,
@@ -1214,6 +1289,7 @@ def _bench_uninstrumented_impl(
         clang_opt_level=clang_opt_level,
         opt_level=opt_level,
         extra_defines=extra_defines,
+        saved_build=ctx.obj["saved_build"],
     )
 
 
@@ -1222,6 +1298,7 @@ def _bench_uninstrumented_impl(
 @_output_csv_option
 @_cpu_freq_option("16")
 @_saleae_timeout_option
+@_saved_build_options
 @click.pass_context
 def bench_uninstrumented_o0_cmd(
     ctx: click.Context,
@@ -1249,6 +1326,7 @@ def bench_uninstrumented_o0_cmd(
 @_energy_override_option
 @_cpu_freq_option("16")
 @_saleae_timeout_option
+@_saved_build_options
 @click.pass_context
 def bench_chunked_cmd(
     ctx: click.Context,
@@ -1276,6 +1354,7 @@ def bench_chunked_cmd(
         clang_opt_level=clang_opt_level,
         opt_level=opt_level,
         pass_log_level=ctx.obj["pass_log_level"],
+        saved_build=ctx.obj["saved_build"],
     )
 
 
@@ -1337,6 +1416,7 @@ def _default_result_dir() -> str:
     help="Plot config for plot_results.R (default: scripts/plot_config.json).",
 )
 @_saleae_timeout_option
+@_saved_build_options
 @click.pass_context
 def bench_all_cmd(
     ctx: click.Context,
@@ -1380,7 +1460,10 @@ def bench_all_cmd(
         skip_existing=skip_existing,
         plot=plot,
         plot_config=_path_or_none(plot_config),
+        saved_build=ctx.obj["saved_build"],
     )
+    if _saving(ctx):
+        return
 
     click.echo(format_summary(outcomes, out_dir))
     if not all_ok(outcomes):
@@ -1462,6 +1545,7 @@ def _run_intermittent(
         cpu_freq=_mhz_to_hz(cpu_freq),
         max_unroll=max_unroll,
         pass_log_level=ctx.obj["pass_log_level"],
+        saved_build=ctx.obj["saved_build"],
     )
 
 
@@ -1473,6 +1557,7 @@ def intermittent() -> None:
 @intermittent.command("milp")
 @_intermittent_common_options
 @_estimator_mode_option
+@_saved_build_options
 @click.pass_context
 def intermittent_milp_cmd(
     ctx: click.Context,
@@ -1502,6 +1587,7 @@ def intermittent_milp_cmd(
 @intermittent.command("rockclimb")
 @_intermittent_common_options
 @_max_unroll_option
+@_saved_build_options
 @click.pass_context
 def intermittent_rockclimb_cmd(
     ctx: click.Context,
@@ -1531,6 +1617,7 @@ def intermittent_rockclimb_cmd(
 @intermittent.command("schematic")
 @_intermittent_common_options
 @_estimator_mode_option
+@_saved_build_options
 @click.pass_context
 def intermittent_schematic_cmd(
     ctx: click.Context,
@@ -1560,6 +1647,7 @@ def intermittent_schematic_cmd(
 @intermittent.command("schematicO3")
 @_intermittent_common_options
 @_estimator_mode_option
+@_saved_build_options
 @click.pass_context
 def intermittent_schematic_o3_cmd(
     ctx: click.Context,
@@ -1603,6 +1691,7 @@ def verify() -> None:
 @_verify_halt_mode_option
 @_cpu_freq_option("16")
 @_saleae_timeout_option
+@_saved_build_options
 @click.pass_context
 def verify_rockclimb_cmd(
     ctx: click.Context,
@@ -1627,6 +1716,7 @@ def verify_rockclimb_cmd(
         energy_config=_path_or_none(energy_config),
         cpu_freq=_mhz_to_hz(cpu_freq),
         pass_log_level=ctx.obj["pass_log_level"],
+        saved_build=ctx.obj["saved_build"],
     )
     if not all_ok(results):
         raise SystemExit(1)
@@ -1642,6 +1732,7 @@ def verify_rockclimb_cmd(
 @_coarse_allocation_flag
 @_no_tripcount_flag
 @_saleae_timeout_option
+@_saved_build_options
 @click.pass_context
 def verify_milp_cmd(
     ctx: click.Context,
@@ -1672,6 +1763,7 @@ def verify_milp_cmd(
         coarse_allocation=coarse_allocation,
         tripcount_annotations=not no_tripcount,
         pass_log_level=ctx.obj["pass_log_level"],
+        saved_build=ctx.obj["saved_build"],
     )
     if not all_ok(results):
         raise SystemExit(1)
@@ -1714,6 +1806,7 @@ def _verify_schematic_impl(
         cpu_freq=_mhz_to_hz(cpu_freq),
         pass_log_level=ctx.obj["pass_log_level"],
         algorithm_label=algorithm_label,
+        saved_build=ctx.obj["saved_build"],
     )
     if not all_ok(results):
         raise SystemExit(1)
@@ -1722,6 +1815,7 @@ def _verify_schematic_impl(
 @verify.command("schematic")
 @click.argument("benchmarks", nargs=-1)
 @_verify_schematic_options
+@_saved_build_options
 @click.pass_context
 def verify_schematic_cmd(ctx: click.Context, **kwargs) -> None:
     """Verify semantic correctness of SCHEMATIC checkpoint insertion."""
@@ -1731,6 +1825,7 @@ def verify_schematic_cmd(ctx: click.Context, **kwargs) -> None:
 @verify.command("schematicO3")
 @click.argument("benchmarks", nargs=-1)
 @_verify_schematic_options
+@_saved_build_options
 @click.pass_context
 def verify_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
     """Verify semantic correctness of SCHEMATIC-O3 checkpoint insertion."""
@@ -1751,6 +1846,7 @@ def verify_schematic_o3_cmd(ctx: click.Context, **kwargs) -> None:
     type=click.Path(),
     help="Also write the final report to this file.",
 )
+@_saved_build_options
 @click.pass_context
 def verify_all_cmd(
     ctx: click.Context,
@@ -1778,7 +1874,10 @@ def verify_all_cmd(
         cpu_freq=_mhz_to_hz(cpu_freq),
         capture_timeout_seconds=timeout,
         pass_log_level=ctx.obj["pass_log_level"],
+        saved_build=ctx.obj["saved_build"],
     )
+    if _saving(ctx):
+        return
 
     report = format_report(results, halt_mode)
     click.echo(report)

@@ -14,7 +14,7 @@ from pathlib import Path
 from ..compile.chunked import ChunkedCompileOptions, compile_chunked
 from ..env import ProjectEnv
 from ..errors import ConfigError
-from ..tempdir import compilation_workdir
+from ..saved_build import SavedBuild, build_workdir
 from ..toolchain import Toolchain
 from .config import (
     CapacitorConfig,
@@ -53,6 +53,7 @@ def run_chunked_benchmarks(
     pass_log_level: str,
     clang_opt_level: int,
     opt_level: int,
+    saved_build: SavedBuild | None,
 ) -> None:
     """Compile and measure chunking-only baselines for all benchmarks.
 
@@ -76,7 +77,7 @@ def run_chunked_benchmarks(
 
     with (
         optional_saleae(TIMING_COMPILE_ONLY_WARNING) as (saleae_manager, otii),
-        compilation_workdir(prefix="chunked_bench_") as workdir,
+        build_workdir(saved_build, prefix="chunked_bench_") as workdir,
     ):
 
         def compile_fn(bench_path: Path, cap: CapacitorConfig | None) -> Path | None:
@@ -112,4 +113,5 @@ def run_chunked_benchmarks(
             saleae_manager=saleae_manager,
             otii=otii,
             capture_timeout_seconds=capture_timeout_seconds,
+            saved_build=saved_build,
         )

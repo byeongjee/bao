@@ -37,6 +37,7 @@ from ..output_parser import (
     parse_nvm_output,
     parse_pass_output,
 )
+from ..saved_build import SAVED_ERRORS, SavedBuild, compile_or_load
 from ..toolchain import Toolchain
 from .config import CapacitorConfig
 
@@ -327,6 +328,7 @@ def run_benchmark_matrix(
     otii: OtiiSession | None,
     capture_timeout_seconds: float,
     accumulate_keys_file: Path | None,
+    saved_build: SavedBuild | None,
 ) -> None:
     """Run compile + Saleae timing + optional NVM-read across benchmark x capacitor matrix.
 
@@ -341,7 +343,23 @@ def run_benchmark_matrix(
 
     Prints progress like ``[1/12] Running crc-1uF ...`` and a summary at
     the end.
+
+    With ``--save-build`` only step 1 runs, saving each result.
     """
+    if saved_build is not None and saved_build.save:
+        for bench_path in benchmarks:
+            for cap in capacitors:
+                logger.info("Compiling %s-%s ...", bench_path.stem, cap.label)
+                try:
+                    compile_or_load(
+                        saved_build,
+                        f"{bench_path.stem}_{cap.label}",
+                        lambda: compile_fn(bench_path, cap),  # noqa: B023
+                    )
+                except SAVED_ERRORS as exc:
+                    logger.error("  FAILED (compilation): %s", exc)
+        return
+
     # Open CSV and write header
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(output_csv, "w", newline="") as csvfile:
@@ -366,7 +384,11 @@ def run_benchmark_matrix(
                 compile_result_profiling_ms: int = 0
                 stats_json_path: Path | None = None
                 try:
-                    compile_result = compile_fn(bench_path, cap)
+                    compile_result, _ = compile_or_load(
+                        saved_build,
+                        f"{bench_name}_{cap.label}",
+                        lambda: compile_fn(bench_path, cap),  # noqa: B023
+                    )
                     output_dir: Path | None = compile_result.out_dir
                     compile_output: str = compile_result.pass_output
                     stats_json_path = compile_result.stats_json
@@ -546,6 +568,7 @@ def run_timing_matrix(
     saleae_manager: Manager | None,
     otii: OtiiSession | None,
     capture_timeout_seconds: float,
+    saved_build: SavedBuild | None,
 ) -> None:
     """Compile + flash + time benchmarks without pass statistics or NVM readback.
 
@@ -553,17 +576,35 @@ def run_timing_matrix(
     and chunked baselines: rows carry only compile time and execution time.
     When *capacitors* is None the loop is per-benchmark only and the CSV has
     no capacitor column.
+
+    With ``--save-build`` only the compile step runs, saving each result.
     """
+    items: list[tuple[Path, CapacitorConfig | None]]
+    if capacitors is None:
+        items = [(b, None) for b in bench_paths]
+    else:
+        items = [(b, c) for b in bench_paths for c in capacitors]
+
+    def key(bench_path: Path, cap: CapacitorConfig | None) -> str:
+        return bench_path.stem if cap is None else f"{bench_path.stem}_{cap.label}"
+
+    if saved_build is not None and saved_build.save:
+        for bench_path, cap in items:
+            logger.info("Compiling %s ...", key(bench_path, cap))
+            try:
+                compile_or_load(
+                    saved_build,
+                    key(bench_path, cap),
+                    lambda: compile_fn(bench_path, cap),  # noqa: B023
+                )
+            except SAVED_ERRORS as exc:
+                logger.error("  FAILED (compilation): %s", exc)
+        return
+
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(output_csv, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(csv_header)
-
-        items: list[tuple[Path, CapacitorConfig | None]]
-        if capacitors is None:
-            items = [(b, None) for b in bench_paths]
-        else:
-            items = [(b, c) for b in bench_paths for c in capacitors]
 
         total = len(items)
         for i, (bench_path, cap) in enumerate(items, 1):
@@ -581,9 +622,11 @@ def run_timing_matrix(
                 write_csv_row(writer, row, csv_header)
 
             try:
-                t0 = time.monotonic()
-                elf = compile_fn(bench_path, cap)
-                compilation_time_ms = int((time.monotonic() - t0) * 1000)
+                elf, compilation_time_ms = compile_or_load(
+                    saved_build,
+                    key(bench_path, cap),
+                    lambda: compile_fn(bench_path, cap),  # noqa: B023
+                )
             except CkptError as exc:
                 logger.error("  FAILED (compilation): %s", exc)
                 emit("failed", {})

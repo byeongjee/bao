@@ -17,7 +17,7 @@ from ..output_parser import (
     NvmCounters,
     PassStatistics,
 )
-from ..tempdir import compilation_workdir
+from ..saved_build import SavedBuild, build_workdir
 from ..toolchain import Toolchain
 from .config import (
     CapacitorConfig,
@@ -135,6 +135,7 @@ def run_milp_benchmarks(
     pass_log_level: str,
     accumulate_keys_file: Path | None,
     extra_defines: list[str],
+    saved_build: SavedBuild | None,
 ) -> None:
     """Run MILP checkpoint insertion across all benchmarks and capacitor sizes.
 
@@ -179,7 +180,7 @@ def run_milp_benchmarks(
     # Shared workdir for all compilations (cleaned up on exit)
     with (
         optional_saleae(MATRIX_COMPILE_ONLY_WARNING) as (saleae_manager, otii),
-        compilation_workdir(prefix="milp_bench_") as workdir,
+        build_workdir(saved_build, prefix="milp_bench_") as workdir,
     ):
 
         def compile_fn(bench_path: Path, cap: CapacitorConfig) -> CompileResult:
@@ -232,4 +233,5 @@ def run_milp_benchmarks(
             otii=otii,
             capture_timeout_seconds=capture_timeout_seconds,
             accumulate_keys_file=accumulate_keys_file,
+            saved_build=saved_build,
         )

@@ -7,6 +7,7 @@ from pathlib import Path
 from ..bench.rockclimb import NVM_SYMBOLS
 from ..compile.rockclimb import RockClimbCompileOptions, compile_rockclimb
 from ..env import ProjectEnv
+from ..saved_build import SavedBuild
 from ..toolchain import Toolchain
 from .common import (
     AlgorithmSpec,
@@ -83,6 +84,7 @@ def verify_rockclimb(
     cpu_freq: int,
     capture_timeout_seconds: float,
     pass_log_level: str,
+    saved_build: SavedBuild | None,
 ) -> list[BenchResult]:
     """Verify semantic correctness of RockClimb checkpoint insertion."""
     spec = rockclimb_spec(
@@ -99,4 +101,5 @@ def verify_rockclimb(
         halt_mode=halt_mode,
         cpu_freq=cpu_freq,
         capture_timeout_seconds=capture_timeout_seconds,
+        saved_build=saved_build,
     )[spec.name]
