@@ -38,7 +38,7 @@ FROM --platform=linux/amd64 ubuntu:24.04
 ARG GUROBI_VERSION=13.0.0
 ARG MSP430GCC_VERSION=9.3.1.11
 ARG MSP430GCC_SUPPORT_VERSION=1.212
-ARG TI_URL=https://dl.software.ti.com/msp430/msp430_public_sw/mcu/msp430/MSPGCC/9_3_1_2/export
+ARG TI_URL=https://software-dl.ti.com/msp430/msp430_public_sw/mcu/msp430/MSPGCC/9_3_1_2/export
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl bzip2 unzip git cmake ninja-build g++ make \
