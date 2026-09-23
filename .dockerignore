@@ -1,0 +1,9 @@
+.git
+.venv
+.claude
+passes/build
+results
+result
+tmp
+tests/dwarf-validation/output
+**/__pycache__
