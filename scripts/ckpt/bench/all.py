@@ -1,9 +1,10 @@
 """Sequential full benchmark matrix, followed by plotting.
 
 Runs each checkpointing algorithm twice (with and without device debug)
-plus the uninstrumented baseline, writing one CSV per step into a single
-result directory, then renders the plots with scripts/plot_results.R so
-raw data and figures live side by side.
+plus the uninstrumented baselines, writing one CSV per step into a single
+result directory, then computes the paper's numbers and tables from them
+(numbers.py) and renders the plots with scripts/plot_results.R so raw data
+and figures live side by side.
 """
 
 from __future__ import annotations
@@ -18,17 +19,33 @@ from ..env import ProjectEnv
 from ..errors import CkptError
 from ..saved_build import SavedBuild
 from ..toolchain import Toolchain
+from .numbers import write_numbers
 
 logger = logging.getLogger(__name__)
 
 # Algorithms whose runtime counters need a device-debug build: each runs twice.
 DEBUG_VARIANT_ALGORITHMS = ("milp", "schematic", "rockclimb", "schematicO3")
 # Steps with no device-debug counters to collect: each runs once.
-SINGLE_RUN_ALGORITHMS = ("uninstrumented", "uninstrumentedO0", "chunked")
+SINGLE_RUN_ALGORITHMS = (
+    "uninstrumented",
+    "uninstrumentedO0",
+    "chunked",
+    "rockclimb_crc_unroll64",
+)
 ALL_ALGORITHMS = DEBUG_VARIANT_ALGORITHMS + SINGLE_RUN_ALGORITHMS
 # uninstrumented is included because it is the normalization reference in
-# scripts/plot_config.json.
-DEFAULT_ALGORITHMS = DEBUG_VARIANT_ALGORITHMS + ("uninstrumented",)
+# scripts/plot_config.json; uninstrumentedO0 and rockclimb_crc_unroll64
+# because the paper's numbers (numbers.py) use them.
+DEFAULT_ALGORITHMS = DEBUG_VARIANT_ALGORITHMS + (
+    "uninstrumented",
+    "uninstrumentedO0",
+    "rockclimb_crc_unroll64",
+)
+
+# RockClimb with a larger unroll factor on one small loop-heavy benchmark.
+_UNROLL_BENCHMARK = "crc"
+_UNROLL_CAP = "10uF"
+_UNROLL_FACTOR = 64
 
 STATUS_OK = "ok"
 STATUS_SKIPPED = "skipped"
@@ -50,6 +67,7 @@ class BenchAllOptions:
     max_unroll: int
     capture_timeout_seconds: float
     pass_log_level: str
+    extra_defines: list[str]
 
 
 @dataclass(frozen=True)
@@ -109,7 +127,7 @@ def plan_steps(algorithms: list[str]) -> list[BenchStep]:
     return steps
 
 
-def _run_step(
+def run_step(
     env: ProjectEnv,
     tc: Toolchain,
     opts: BenchAllOptions,
@@ -139,7 +157,7 @@ def _run_step(
             milp_gap=opts.milp_gap,
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
-            extra_defines=[],
+            extra_defines=opts.extra_defines,
             saved_build=saved_build,
         )
     elif step.algorithm == "rockclimb":
@@ -159,7 +177,28 @@ def _run_step(
             max_unroll=opts.max_unroll,
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
-            extra_defines=[],
+            extra_defines=opts.extra_defines,
+            saved_build=saved_build,
+        )
+    elif step.algorithm == "rockclimb_crc_unroll64":
+        from .rockclimb import run_rockclimb_benchmarks
+
+        run_rockclimb_benchmarks(
+            env,
+            tc,
+            benchmarks=[_UNROLL_BENCHMARK],
+            caps=[_UNROLL_CAP],
+            output_csv=output_csv,
+            # Device debug on, as in the paper's run.
+            device_debug=True,
+            capture_timeout_seconds=opts.capture_timeout_seconds,
+            halt_mode=opts.halt_mode,
+            energy_config=opts.energy_config,
+            cpu_freq=opts.cpu_freq,
+            max_unroll=_UNROLL_FACTOR,
+            pass_log_level=opts.pass_log_level,
+            accumulate_keys_file=None,
+            extra_defines=opts.extra_defines,
             saved_build=saved_build,
         )
     elif step.algorithm in ("schematic", "schematicO3"):
@@ -183,7 +222,7 @@ def _run_step(
             pass_log_level=opts.pass_log_level,
             algorithm_label=step.algorithm,
             accumulate_keys_file=None,
-            extra_defines=[],
+            extra_defines=opts.extra_defines,
             saved_build=saved_build,
         )
     elif step.algorithm in ("uninstrumented", "uninstrumentedO0"):
@@ -201,7 +240,7 @@ def _run_step(
             algorithm_label=step.algorithm,
             clang_opt_level=clang_opt_level,
             opt_level=opt_level,
-            extra_defines=[],
+            extra_defines=opts.extra_defines,
             saved_build=saved_build,
         )
     elif step.algorithm == "chunked":
@@ -312,6 +351,7 @@ def run_bench_all(
         max_unroll=max_unroll,
         capture_timeout_seconds=capture_timeout_seconds,
         pass_log_level=pass_log_level,
+        extra_defines=[],
     )
 
     steps = plan_steps(algorithms)
@@ -333,7 +373,7 @@ def run_bench_all(
 
         logger.info("[%d/%d] === %s -> %s ===", index, len(steps), step.label, csv_path)
         try:
-            _run_step(
+            run_step(
                 env,
                 tc,
                 opts,
@@ -349,6 +389,8 @@ def run_bench_all(
             continue
         outcomes.append(StepOutcome(step.label, csv_path, STATUS_OK, ""))
 
+    if not saving:
+        write_numbers(result_dir)
     if plot and not saving:
         outcomes.append(run_plot(env, result_dir=result_dir, plot_config=plot_config))
 

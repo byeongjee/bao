@@ -11,7 +11,6 @@ import logging
 import signal
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 import click
@@ -1374,26 +1373,23 @@ def _algorithms_callback(
     return algorithms
 
 
-def _default_result_dir() -> str:
-    return str(Path("result") / time.strftime("%Y%m%d-%H%M%S"))
-
-
 @bench.command("all")
 @click.argument("benchmarks", nargs=-1)
 @_cap_multi_option
 @click.option(
     "-d",
     "--result-dir",
-    type=click.Path(),
-    default=None,
-    help="Directory for raw CSVs and plots/ (default: result/<timestamp>).",
+    type=click.Path(file_okay=False),
+    default="result/all",
+    show_default=True,
+    help="Directory for raw CSVs, numbers.txt, and plots/.",
 )
 @click.option(
     "--algorithms",
     callback=_algorithms_callback,
     default=",".join(DEFAULT_ALGORITHMS),
     show_default=True,
-    help="Comma-separated steps to run; also accepts uninstrumentedO0 and chunked.",
+    help="Comma-separated steps to run; also accepts chunked.",
 )
 @_bench_halt_mode_option
 @_estimator_mode_option
@@ -1422,7 +1418,7 @@ def bench_all_cmd(
     ctx: click.Context,
     benchmarks: tuple[str, ...],
     cap: tuple[str, ...],
-    result_dir: str | None,
+    result_dir: str,
     algorithms: list[str],
     halt_mode: str,
     estimator_mode: str,
@@ -1436,10 +1432,11 @@ def bench_all_cmd(
     plot_config: str | None,
     timeout: float,
 ) -> None:
-    """Run every algorithm with and without device-debug, then plot."""
+    """Run every algorithm with and without device-debug, compute the
+    paper's numbers and tables (numbers.txt, *.tex), then plot."""
     from .bench.all import all_ok, format_summary, run_bench_all
 
-    out_dir = Path(result_dir) if result_dir else Path(_default_result_dir())
+    out_dir = Path(result_dir)
 
     outcomes = run_bench_all(
         ctx.obj["env"],
@@ -1468,6 +1465,115 @@ def bench_all_cmd(
     click.echo(format_summary(outcomes, out_dir))
     if not all_ok(outcomes):
         raise SystemExit(1)
+
+
+def _experiment_command(name: str, runner: str, help_text: str) -> None:
+    """Add ``bench NAME``: run one experiment of bench/experiments.py into
+    RESULT_DIR (default result/NAME), ending with its numbers.txt."""
+
+    @bench.command(name, help=help_text)
+    @click.argument("benchmarks", nargs=-1)
+    @click.option(
+        "-d",
+        "--result-dir",
+        type=click.Path(file_okay=False),
+        default=f"result/{name}",
+        show_default=True,
+        help="Directory for the raw CSVs and numbers.txt.",
+    )
+    @click.option(
+        "--skip-existing",
+        is_flag=True,
+        help="Skip steps whose output already exists (resume an interrupted run).",
+    )
+    @_saleae_timeout_option
+    @_saved_build_options
+    @click.pass_context
+    def command(
+        ctx: click.Context,
+        benchmarks: tuple[str, ...],
+        result_dir: str,
+        skip_existing: bool,
+        timeout: float,
+    ) -> None:
+        from .bench import experiments
+
+        getattr(experiments, runner)(
+            ctx.obj["env"],
+            ctx.obj["tc"],
+            benchmarks=_list_or_none(benchmarks),
+            result_dir=Path(result_dir),
+            capture_timeout_seconds=timeout,
+            pass_log_level=ctx.obj["pass_log_level"],
+            skip_existing=skip_existing,
+            saved_build=ctx.obj["saved_build"],
+        )
+
+
+_experiment_command(
+    "chunking-overhead",
+    "run_chunking_overhead",
+    "Chunk-only and Bao execution time over uninstrumented at 10uF (§6.4).",
+)
+_experiment_command(
+    "trip-count",
+    "run_trip_count",
+    "Bao at 10uF with and without trip-count annotations, and verification "
+    "without them (§6.5).",
+)
+_experiment_command(
+    "milp-coarse",
+    "run_milp_coarse",
+    "Bao at 5/10/50uF with per-region and constant allocation (§6.6.2).",
+)
+
+
+@bench.command("decomposition")
+@click.argument("benchmarks", nargs=-1)
+@click.option(
+    "-d",
+    "--result-dir",
+    type=click.Path(file_okay=False),
+    default="result/intermittent",
+    show_default=True,
+    help="Result directory of `ckpt intermittent all`; the CSVs go to its continuous/.",
+)
+@_max_unroll_option
+@click.option(
+    "--skip-existing",
+    is_flag=True,
+    help="Skip steps whose CSV already exists (resume an interrupted run).",
+)
+@_saleae_timeout_option
+@_saved_build_options
+@click.pass_context
+def bench_decomposition_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    result_dir: str,
+    max_unroll: int,
+    skip_existing: bool,
+    timeout: float,
+) -> None:
+    """Execution time of the intermittent builds for the decomposition (§6.3).
+
+    Runs the builds of `ckpt intermittent all` without power failures and
+    writes RESULT_DIR/continuous/, from which `ckpt intermittent all`
+    computes its decomposition tables.
+    """
+    from .intermittent.all import BENCHMARKS, run_decomposition
+
+    run_decomposition(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=list(benchmarks) or BENCHMARKS,
+        result_dir=Path(result_dir),
+        max_unroll=max_unroll,
+        capture_timeout_seconds=timeout,
+        pass_log_level=ctx.obj["pass_log_level"],
+        skip_existing=skip_existing,
+        saved_build=ctx.obj["saved_build"],
+    )
 
 
 # =========================================================================
@@ -1671,6 +1777,69 @@ def intermittent_schematic_o3_cmd(
         cpu_freq=cpu_freq,
         output=output,
         max_unroll=None,
+    )
+
+
+_intermittent_result_dir_option = click.option(
+    "-d",
+    "--result-dir",
+    type=click.Path(file_okay=False),
+    default="result/intermittent",
+    show_default=True,
+    help="Directory for the raw CSVs, summary, tables, and plot.",
+)
+_intermittent_skip_existing_flag = click.option(
+    "--skip-existing",
+    is_flag=True,
+    help="Skip steps whose CSV already exists (resume an interrupted run).",
+)
+
+
+@intermittent.command("all")
+@click.argument("benchmarks", nargs=-1)
+@click.option(
+    "--trace",
+    multiple=True,
+    callback=_trace_callback,
+    help="Power traces to replay (default: 1-10 in benchmarks/traces/).",
+)
+@_intermittent_result_dir_option
+@_max_unroll_option
+@_intermittent_skip_existing_flag
+@click.option("--plot/--no-plot", default=True, help="Plot the results (default: on).")
+@_saleae_timeout_option
+@_saved_build_options
+@click.pass_context
+def intermittent_all_cmd(
+    ctx: click.Context,
+    benchmarks: tuple[str, ...],
+    trace: tuple[str, ...],
+    result_dir: str,
+    max_unroll: int,
+    skip_existing: bool,
+    plot: bool,
+    timeout: float,
+) -> None:
+    """Run every algorithm on every trace, then summarize and plot.
+
+    First measures each benchmark's expected result under continuous power.
+    The decomposition tables are written when RESULT_DIR/continuous/ holds
+    the output of `ckpt bench decomposition`.
+    """
+    from .intermittent.all import BENCHMARKS, TRACES, run_intermittent_all
+
+    run_intermittent_all(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        benchmarks=list(benchmarks) or BENCHMARKS,
+        trace_specs=list(trace) or TRACES,
+        result_dir=Path(result_dir),
+        max_unroll=max_unroll,
+        capture_timeout_seconds=timeout,
+        pass_log_level=ctx.obj["pass_log_level"],
+        skip_existing=skip_existing,
+        plot=plot,
+        saved_build=ctx.obj["saved_build"],
     )
 
 
@@ -1897,6 +2066,31 @@ def verify_all_cmd(
 @main.group()
 def analyze() -> None:
     """Analysis commands."""
+
+
+@analyze.command("inlining")
+@click.option(
+    "-d",
+    "--result-dir",
+    type=click.Path(file_okay=False),
+    default="result/inlining",
+    show_default=True,
+    help="Directory for inlining.csv and numbers.txt.",
+)
+@click.pass_context
+def analyze_inlining_cmd(ctx: click.Context, result_dir: str) -> None:
+    """Measure the code-size cost of forcing every function inline."""
+    # Compile-only, so on the host it runs in Docker as a whole.
+    if not IN_DOCKER:
+        _docker_or_exit(sys.argv[1:], [])
+        return
+    from .analysis.inlining import measure_inlining
+    from .tempdir import compilation_workdir
+
+    with compilation_workdir(prefix="inlining_") as workdir:
+        measure_inlining(
+            ctx.obj["env"], ctx.obj["tc"], result_dir=Path(result_dir), workdir=workdir
+        )
 
 
 @analyze.command("strip-mining")
