@@ -236,7 +236,7 @@ _milp_gap_option = click.option(
 _max_unroll_option = click.option(
     "--max-unroll",
     type=click.IntRange(min=1),
-    default=4,
+    default=9,
     show_default=True,
     help="Maximum RockClimb partial unroll factor for the preprocess pass.",
 )
