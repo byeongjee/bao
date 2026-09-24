@@ -42,10 +42,11 @@ uv sync --extra saleae --extra otii
 
 ### Evaluation Scripts
 
-Each experiment in the paper is one command. The results go to `result/<name>/`
-(use `-d DIR` to choose another directory), together with a `numbers.txt` that
-lists every number quoted in the paper. `--skip-existing` resumes an
-interrupted run. To also plot the results, install R and drop `--no-plot`.
+Each experiment in the paper is one command. The results go to `results/`,
+overwriting the results used in the paper (use `-d DIR` to write elsewhere),
+together with a `numbers.txt` that lists every number quoted in the paper.
+`--skip-existing` resumes an interrupted run. To also plot the results,
+install R and drop `--no-plot`.
 
 Every experiment runs with the board, the Otii Ace Pro, the Switchboard and
 the Saleae connected as in docs/intermittent.md. The Otii main output is
@@ -69,7 +70,7 @@ wired in one of two ways:
 |---|---|
 | Execution under intermittent power (§6.3) | `uv run ckpt intermittent all --no-plot` |
 
-`ckpt bench decomposition` writes to `result/intermittent`, where
+`ckpt bench decomposition` writes to `results/intermittent`, where
 `ckpt intermittent all` reads it for its decomposition tables.
 
 ### Testing without Hardware
