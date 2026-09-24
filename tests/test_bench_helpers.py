@@ -114,9 +114,9 @@ class TestPlanSteps:
 
     def test_default_matrix_order(self):
         steps = plan_steps(list(DEFAULT_ALGORITHMS))
-        assert len(steps) == 9
+        assert len(steps) == 11
         assert steps[0].algorithm == "milp"
-        assert steps[-1].csv_name == "uninstrumented.csv"
+        assert steps[-1].csv_name == "rockclimb_crc_unroll64.csv"
 
     def test_every_csv_name_is_unique(self):
         names = [s.csv_name for s in plan_steps(list(ALL_ALGORITHMS))]

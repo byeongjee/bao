@@ -147,6 +147,18 @@ ckpt intermittent milp      [BENCHMARKS...] --trace 1,2 [--cap board] [--device-
 ckpt intermittent rockclimb [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--max-unroll N] [--cpu-freq] [--csv CSV]
 ckpt intermittent schematic [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
 ckpt intermittent schematicO3 [BENCHMARKS...] --trace 1,2 [--cap board] [--device-debug] [--estimator-mode] [--cpu-freq] [--csv CSV]
+# intermittent all: the full experiment. Measures each benchmark's expected result, runs the 4 algorithms
+# on traces 1-10 into RESULT_DIR/<bench>/<algo>.csv, then writes summary.csv (+ decomposition tables when
+# RESULT_DIR/continuous/ exists, written by `bench decomposition`) and plots.
+ckpt intermittent all  [BENCHMARKS...] [--trace 1,2] [-d RESULT_DIR] [--max-unroll N] [--skip-existing] [--no-plot]
+
+# One command per remaining paper experiment; each writes its CSVs and numbers.txt to RESULT_DIR.
+# bench decomposition runs the intermittent builds without power failures into RESULT_DIR/continuous/.
+ckpt bench decomposition     [BENCHMARKS...] [-d RESULT_DIR] [--max-unroll N] [--skip-existing]
+ckpt bench chunking-overhead [BENCHMARKS...] [-d RESULT_DIR] [--skip-existing]
+ckpt bench trip-count        [BENCHMARKS...] [-d RESULT_DIR] [--skip-existing]
+ckpt bench milp-coarse       [BENCHMARKS...] [-d RESULT_DIR] [--skip-existing]
+ckpt analyze inlining        [-d RESULT_DIR]
 
 # Analysis
 ckpt analyze strip-mining LOG_FILE [-o CSV]
@@ -158,7 +170,7 @@ ckpt device read-serial [--timeout N] [--end-marker M]
 
 Additional variants: `compile|bench|verify schematicO3`, `compile|bench chunked`, and `bench uninstrumentedO0`.
 
-`bench all` runs each algorithm with and without `--device-debug`, plus `uninstrumented`, writing `<algo>_debug.csv` / `<algo>.csv` into `RESULT_DIR` (default `result/<timestamp>`) and then plotting into `RESULT_DIR/plots/`. `--algorithms` trims the list or adds `uninstrumentedO0` / `chunked`; a failed step is reported and skipped rather than aborting; `--skip-existing` resumes an interrupted run.
+`bench all` runs each algorithm with and without `--device-debug`, plus `uninstrumented`, writing `<algo>_debug.csv` / `<algo>.csv` into `RESULT_DIR` (default `result/all`) and then plotting into `RESULT_DIR/plots/`. `--algorithms` trims the list or adds `uninstrumentedO0` / `chunked`; a failed step is reported and skipped rather than aborting; `--skip-existing` resumes an interrupted run.
 
 `--accumulate-keys FILE` writes required energy keys (identifiers the energy estimator uses to look up instruction costs) to a file as a sorted comma-separated list. The file is read-merge-written on each invocation, so keys accumulate across multiple runs. Not available on `uninstrumented` commands (no energy pass).
 
