@@ -1,6 +1,6 @@
 # Include paths and -std come from passes/build/compile_commands.json, which
 # CMake generates from the LLVM_DIR and GUROBI_HOME used for the actual build.
-# Configure passes/build once (see AGENTS.md) and clangd picks it up from there.
+# Configure passes/build once and clangd picks it up from there.
 CompileFlags:
   Remove:
     # Remove flags that clangd doesn't understand
