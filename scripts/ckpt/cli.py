@@ -1380,7 +1380,7 @@ def _algorithms_callback(
     "-d",
     "--result-dir",
     type=click.Path(file_okay=False),
-    default="result/all",
+    default="results",
     show_default=True,
     help="Directory for raw CSVs, numbers.txt, and plots/.",
 )
@@ -1472,7 +1472,7 @@ def bench_all_cmd(
     "-d",
     "--result-dir",
     type=click.Path(file_okay=False),
-    default="result/all",
+    default="results",
     show_default=True,
     help="Result directory of `ckpt bench all`; its numbers.txt is rewritten.",
 )
@@ -1497,7 +1497,7 @@ def bench_rockclimb_unroll64_cmd(
 
 def _experiment_command(name: str, runner: str, help_text: str) -> None:
     """Add ``bench NAME``: run one experiment of bench/experiments.py into
-    RESULT_DIR (default result/NAME), ending with its numbers.txt."""
+    RESULT_DIR (default results/NAME with - as _), ending with its numbers.txt."""
 
     @bench.command(name, help=help_text)
     @click.argument("benchmarks", nargs=-1)
@@ -1505,7 +1505,7 @@ def _experiment_command(name: str, runner: str, help_text: str) -> None:
         "-d",
         "--result-dir",
         type=click.Path(file_okay=False),
-        default=f"result/{name}",
+        default=f"results/{name.replace('-', '_')}",
         show_default=True,
         help="Directory for the raw CSVs and numbers.txt.",
     )
@@ -1562,7 +1562,7 @@ _experiment_command(
     "-d",
     "--result-dir",
     type=click.Path(file_okay=False),
-    default="result/intermittent",
+    default="results/intermittent",
     show_default=True,
     help="Result directory of `ckpt intermittent all`; the CSVs go to its continuous/.",
 )
@@ -1812,7 +1812,7 @@ _intermittent_result_dir_option = click.option(
     "-d",
     "--result-dir",
     type=click.Path(file_okay=False),
-    default="result/intermittent",
+    default="results/intermittent",
     show_default=True,
     help="Directory for the raw CSVs, summary, tables, and plot.",
 )
@@ -2101,7 +2101,7 @@ def analyze() -> None:
     "-d",
     "--result-dir",
     type=click.Path(file_okay=False),
-    default="result/inlining",
+    default="results/inlining",
     show_default=True,
     help="Directory for inlining.csv and numbers.txt.",
 )
