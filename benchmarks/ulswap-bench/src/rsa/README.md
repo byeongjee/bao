@@ -1,1 +1,0 @@
-Source : https://github.com/kokke/tiny-bignum-c/blob/master/tests/rsa.c
