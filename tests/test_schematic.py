@@ -6,6 +6,7 @@ Source files live in tests/scenarios/ and configs in tests/scenarios/configs/.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from typing import NamedTuple
@@ -288,6 +289,10 @@ def test_schematic_o3_nested_loop_energy(run_schematic_o3, tmp_path_factory):
     assert "loop-mandatory-backedge[" in result.stderr
 
 
+@pytest.mark.skipif(
+    not os.environ.get("GRB_LICENSE_FILE"),
+    reason="ckpt compile runs in Docker, which needs a Gurobi license",
+)
 def test_schematic_o3_dijkstra_loop_budget_uses_rare_inner_branch(
     tmp_path_factory,
 ):
