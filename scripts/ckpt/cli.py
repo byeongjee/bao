@@ -1467,6 +1467,34 @@ def bench_all_cmd(
         raise SystemExit(1)
 
 
+@bench.command("rockclimb-unroll64")
+@click.option(
+    "-d",
+    "--result-dir",
+    type=click.Path(file_okay=False),
+    default="result/all",
+    show_default=True,
+    help="Result directory of `ckpt bench all`; its numbers.txt is rewritten.",
+)
+@_saleae_timeout_option
+@_saved_build_options
+@click.pass_context
+def bench_rockclimb_unroll64_cmd(
+    ctx: click.Context, result_dir: str, timeout: float
+) -> None:
+    """RockClimb on crc at 10uF with unroll factor 64 (§6.2)."""
+    from .bench.all import run_rockclimb_unroll64
+
+    run_rockclimb_unroll64(
+        ctx.obj["env"],
+        ctx.obj["tc"],
+        result_dir=Path(result_dir),
+        capture_timeout_seconds=timeout,
+        pass_log_level=ctx.obj["pass_log_level"],
+        saved_build=ctx.obj["saved_build"],
+    )
+
+
 def _experiment_command(name: str, runner: str, help_text: str) -> None:
     """Add ``bench NAME``: run one experiment of bench/experiments.py into
     RESULT_DIR (default result/NAME), ending with its numbers.txt."""

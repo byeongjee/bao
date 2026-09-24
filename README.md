@@ -56,6 +56,7 @@ wired in one of two ways:
 | Experiment (paper section) | Command |
 |---|---|
 | Execution time and boundary hits (§6.2, §6.6) | `uv run ckpt bench all --cap 5,10,50 --no-plot` |
+| RockClimb with unroll factor 64 on crc (§6.2) | `uv run ckpt bench rockclimb-unroll64` |
 | Execution time for the intermittent-power decomposition (§6.3) | `uv run ckpt bench decomposition` |
 | Loop chunking overhead (§6.4) | `uv run ckpt bench chunking-overhead` |
 | Trip-count annotations (§6.5) | `uv run ckpt bench trip-count` |

@@ -26,26 +26,12 @@ logger = logging.getLogger(__name__)
 # Algorithms whose runtime counters need a device-debug build: each runs twice.
 DEBUG_VARIANT_ALGORITHMS = ("milp", "schematic", "rockclimb", "schematicO3")
 # Steps with no device-debug counters to collect: each runs once.
-SINGLE_RUN_ALGORITHMS = (
-    "uninstrumented",
-    "uninstrumentedO0",
-    "chunked",
-    "rockclimb_crc_unroll64",
-)
+SINGLE_RUN_ALGORITHMS = ("uninstrumented", "uninstrumentedO0", "chunked")
 ALL_ALGORITHMS = DEBUG_VARIANT_ALGORITHMS + SINGLE_RUN_ALGORITHMS
 # uninstrumented is included because it is the normalization reference in
-# scripts/plot_config.json; uninstrumentedO0 and rockclimb_crc_unroll64
-# because the paper's numbers (numbers.py) use them.
-DEFAULT_ALGORITHMS = DEBUG_VARIANT_ALGORITHMS + (
-    "uninstrumented",
-    "uninstrumentedO0",
-    "rockclimb_crc_unroll64",
-)
-
-# RockClimb with a larger unroll factor on one small loop-heavy benchmark.
-_UNROLL_BENCHMARK = "crc"
-_UNROLL_CAP = "10uF"
-_UNROLL_FACTOR = 64
+# scripts/plot_config.json; uninstrumentedO0 because the paper's numbers
+# (numbers.py) use it.
+DEFAULT_ALGORITHMS = DEBUG_VARIANT_ALGORITHMS + ("uninstrumented", "uninstrumentedO0")
 
 STATUS_OK = "ok"
 STATUS_SKIPPED = "skipped"
@@ -175,27 +161,6 @@ def run_step(
             energy_config=opts.energy_config,
             cpu_freq=opts.cpu_freq,
             max_unroll=opts.max_unroll,
-            pass_log_level=opts.pass_log_level,
-            accumulate_keys_file=None,
-            extra_defines=opts.extra_defines,
-            saved_build=saved_build,
-        )
-    elif step.algorithm == "rockclimb_crc_unroll64":
-        from .rockclimb import run_rockclimb_benchmarks
-
-        run_rockclimb_benchmarks(
-            env,
-            tc,
-            benchmarks=[_UNROLL_BENCHMARK],
-            caps=[_UNROLL_CAP],
-            output_csv=output_csv,
-            # Device debug on, as in the paper's run.
-            device_debug=True,
-            capture_timeout_seconds=opts.capture_timeout_seconds,
-            halt_mode=opts.halt_mode,
-            energy_config=opts.energy_config,
-            cpu_freq=opts.cpu_freq,
-            max_unroll=_UNROLL_FACTOR,
             pass_log_level=opts.pass_log_level,
             accumulate_keys_file=None,
             extra_defines=opts.extra_defines,
@@ -395,6 +360,41 @@ def run_bench_all(
         outcomes.append(run_plot(env, result_dir=result_dir, plot_config=plot_config))
 
     return outcomes
+
+
+def run_rockclimb_unroll64(
+    env: ProjectEnv,
+    tc: Toolchain,
+    *,
+    result_dir: Path,
+    capture_timeout_seconds: float,
+    pass_log_level: str,
+    saved_build: SavedBuild | None,
+) -> None:
+    """RockClimb on crc at 10uF with unroll factor 64, written to
+    ``rockclimb_crc_unroll64.csv`` in the result directory of bench all,
+    whose numbers.txt is then rewritten to include it."""
+    from .rockclimb import run_rockclimb_benchmarks
+
+    run_rockclimb_benchmarks(
+        env,
+        tc,
+        benchmarks=["crc"],
+        caps=["10uF"],
+        output_csv=result_dir / "rockclimb_crc_unroll64.csv",
+        device_debug=False,
+        capture_timeout_seconds=capture_timeout_seconds,
+        halt_mode="swbor",
+        energy_config=None,
+        cpu_freq=16_000_000,
+        max_unroll=64,
+        pass_log_level=pass_log_level,
+        accumulate_keys_file=None,
+        extra_defines=[],
+        saved_build=saved_build,
+    )
+    if saved_build is None or not saved_build.save:
+        write_numbers(result_dir)
 
 
 def format_summary(outcomes: list[StepOutcome], result_dir: Path) -> str:
