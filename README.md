@@ -89,12 +89,6 @@ uv run ckpt bench all --cap 5,10,50 --save-build build
 tests/run_tests.sh
 ```
 
-### More Documentation
-
-Architecture, the MILP formulation, configuration reference, the full CLI,
-and contributor setup (git hooks, clang-tidy) are documented in
-[`AGENTS.md`](AGENTS.md).
-
 ### License
 
 MIT License
