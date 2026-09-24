@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Visualize benchmark results from result/ directory using ggplot2.
+# Visualize benchmark results from results/ directory using ggplot2.
 #
 # Reads *_debug.csv for runtime region boundary metrics and
 # *.csv (non-debug) for execution/profiling/compilation times.
