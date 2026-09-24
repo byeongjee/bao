@@ -1,7 +1,7 @@
 benchmark,status,compilation_time_ms,execution_time_us,run_attempts
 aes,ok,781,101393.22,1
 crc,ok,520,29595.65,1
-rsa,ok,365,43693.48,1
+rsa,ok,3692,43713.33,1
 dijkstra,ok,303,25736.26,1
 qsort,ok,654,28484.89,1
 activity_recognition,ok,389,33577.58,1

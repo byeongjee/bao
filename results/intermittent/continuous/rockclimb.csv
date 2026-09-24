@@ -1,7 +1,7 @@
 benchmark,capacitor,status,basic_blocks,edges,region_boundaries,compilation_time_ms,peak_rss_kb,profiling_time_ms,execution_time_us,runtime_region_boundary_calls,result,run_attempts
 aes-board,board,ok,373,552,15,6,32832,0,550975.62,3626,107,1
 crc-board,board,ok,225,309,8,2,24192,0,216194.95,1593,20431,1
-rsa-board,board,ok,206,293,32,2,25040,0,1447878.49,11649,32,1
+rsa-board,board,ok,206,293,32,61,60928,0,1445220.87,11649,32,1
 dijkstra-board,board,ok,17,24,4,1,22720,0,1804548.29,14855,3788,1
 qsort-board,board,ok,27,36,5,0,23328,0,358764.96,2747,9987,1
 activity_recognition-board,board,ok,1466,2021,8,19,33744,0,161195.62,1049,64,1
