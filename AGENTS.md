@@ -155,6 +155,7 @@ ckpt intermittent all  [BENCHMARKS...] [--trace 1,2] [-d RESULT_DIR] [--max-unro
 # One command per remaining paper experiment; each writes its CSVs and numbers.txt to RESULT_DIR.
 # bench decomposition runs the intermittent builds without power failures into RESULT_DIR/continuous/.
 ckpt bench decomposition     [BENCHMARKS...] [-d RESULT_DIR] [--max-unroll N] [--skip-existing]
+ckpt bench rockclimb-unroll64 [-d RESULT_DIR]   # crc 10uF, unroll 64, into bench all's RESULT_DIR
 ckpt bench chunking-overhead [BENCHMARKS...] [-d RESULT_DIR] [--skip-existing]
 ckpt bench trip-count        [BENCHMARKS...] [-d RESULT_DIR] [--skip-existing]
 ckpt bench milp-coarse       [BENCHMARKS...] [-d RESULT_DIR] [--skip-existing]
