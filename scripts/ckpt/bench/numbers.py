@@ -45,15 +45,19 @@ def _gmean(xs: list[float]) -> float:
     return math.exp(sum(math.log(x) for x in xs) / len(xs))
 
 
-def _ratio_gmean(num: Rows, den: Rows, cap: str, column: str) -> float:
-    """Geomean over benchmarks of num/den at *cap*."""
-    return _gmean(
-        [
-            float(num[k][column]) / float(den[k][column])
-            for k in den
-            if k[1] == cap and k in num
-        ]
-    )
+def _ratio_gmean(
+    num: Rows | None, den: Rows | None, cap: str, column: str
+) -> float | None:
+    """Geomean over benchmarks of num/den at *cap*; None if no benchmark has
+    both."""
+    if num is None or den is None:
+        return None
+    ratios = [
+        float(num[k][column]) / float(den[k][column])
+        for k in den
+        if k[1] == cap and k in num
+    ]
+    return _gmean(ratios) if ratios else None
 
 
 def _value(rows: Rows, bench: str, cap: str, column: str) -> float:
@@ -68,19 +72,17 @@ def _times(result_dir: Path) -> list[str]:
     timing = {a: _load(result_dir / f"{a}.csv") for a in BASELINES}
     debug = {a: _load(result_dir / f"{a}_debug.csv") for a in BASELINES}
 
-    if milp is not None:
-        for cap in CAPS:
-            for a in BASELINES:
-                rows = timing[a]
-                if rows is not None:
-                    r = _ratio_gmean(rows, milp, cap, _TIME)
-                    lines.append(
-                        f"§6.2: {a} execution time relative to Bao, "
-                        f"geomean, {cap} = {r:.2f}x"
-                    )
+    for cap in CAPS:
+        for a in BASELINES:
+            r = _ratio_gmean(timing[a], milp, cap, _TIME)
+            if r is not None:
+                lines.append(
+                    f"§6.2: {a} execution time relative to Bao, "
+                    f"geomean, {cap} = {r:.2f}x"
+                )
 
-    if milp_debug is not None and debug["schematic"] is not None:
-        r = _ratio_gmean(debug["schematic"], milp_debug, "10uF", _HITS)
+    r = _ratio_gmean(debug["schematic"], milp_debug, "10uF", _HITS)
+    if r is not None:
         lines.append(
             "§6.2: schematic region boundary hits relative to Bao, "
             f"geomean, 10uF = {r:.2f}x"
@@ -88,24 +90,22 @@ def _times(result_dir: Path) -> list[str]:
 
     o3 = _load(result_dir / "uninstrumented.csv")
     o0 = _load(result_dir / "uninstrumentedO0.csv")
-    if o3 is not None and o0 is not None:
-        r = _ratio_gmean(o0, o3, "", _TIME)
+    r = _ratio_gmean(o0, o3, "", _TIME)
+    if r is not None:
         lines.append(
             f"§6.2: uninstrumented O0 execution time relative to O3, geomean = {r:.2f}x"
         )
 
     # "Bao reduces X by N%" is 1 - 1/(geomean of baseline/Bao).
     for a, where in [("rockclimb", "§6.2"), ("schematicO3", "§6.2, abstract, §1")]:
-        rows = timing[a]
-        if milp is not None and rows is not None:
-            r = _ratio_gmean(rows, milp, "10uF", _TIME)
+        r = _ratio_gmean(timing[a], milp, "10uF", _TIME)
+        if r is not None:
             lines.append(
                 f"{where}: Bao execution time reduction vs {a}, 10uF "
                 f"= {100 * (1 - 1 / r):.1f}%"
             )
-        rows = debug[a]
-        if milp_debug is not None and rows is not None:
-            r = _ratio_gmean(rows, milp_debug, "10uF", _HITS)
+        r = _ratio_gmean(debug[a], milp_debug, "10uF", _HITS)
+        if r is not None:
             lines.append(
                 f"{where}: Bao region boundary hit reduction vs {a}, 10uF "
                 f"= {100 * (1 - 1 / r):.1f}%"
@@ -183,7 +183,7 @@ def _solve_times(milp: Rows) -> list[str]:
         return max(ms), sum(ms) / len(ms)
 
     for cap, exclude in [("10uF", None), ("50uF", None), ("5uF", "sensor_fusion")]:
-        if not any(c == cap for _, c in milp):
+        if not any(c == cap and b != exclude for b, c in milp):
             continue
         worst, mean = stats(cap, exclude)
         but = f" excluding {exclude}" if exclude else ""
