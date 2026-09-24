@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+type: software
+title: "Artifact for Bao: Automatic Region Placement and Memory Allocation for Intermittent Computing"
+authors:
+  - given-names: Byeongjee
+    family-names: Kang
+    affiliation: Carnegie Mellon University
+    email: byeongjee@cmu.edu
+  - given-names: Jan
+    family-names: Hoffmann
+    affiliation: Carnegie Mellon University
+    email: jhoffmann@cmu.edu
+  - given-names: Limin
+    family-names: Jia
+    affiliation: Carnegie Mellon University
+    email: liminjia@andrew.cmu.edu
+  - given-names: Brandon
+    family-names: Lucia
+    affiliation: Carnegie Mellon University & Efficient Computer
+    email: blucia@andrew.cmu.edu
+  - given-names: Feras
+    family-names: Saad
+    affiliation: Carnegie Mellon University
+    email: fsaad@cmu.edu
+repository-code: "https://github.com/byeongjee/bao"
+license: MIT
